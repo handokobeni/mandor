@@ -462,7 +462,13 @@ impl<D: Deps> RunService<D> {
                 batch.push(r.clone());
             }
         }
-        self.start_fix_turn(run, &task, &repo, batch, Some(instruction))
+        // Instruksi opsional bila ada komentar yang dikirim; tanpa keduanya tidak ada
+        // yang bisa dikerjakan agent.
+        let instruction = Some(instruction.trim()).filter(|i| !i.is_empty());
+        if instruction.is_none() && batch.is_empty() {
+            return Err(RunError::InvalidState("no instruction or comment to send"));
+        }
+        self.start_fix_turn(run, &task, &repo, batch, instruction)
             .await
     }
 

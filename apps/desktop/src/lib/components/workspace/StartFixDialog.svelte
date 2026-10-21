@@ -3,7 +3,7 @@
   import ShieldCheck from '@lucide/svelte/icons/shield-check';
   import ShieldQuestionMark from '@lucide/svelte/icons/shield-question-mark';
   import Wrench from '@lucide/svelte/icons/wrench';
-  import { startFixParams } from '#lib/chat.ts';
+  import { startFixNeedsInstruction, startFixParams } from '#lib/chat.ts';
   import { Button } from '#lib/components/ui/button/index.ts';
   import { Checkbox } from '#lib/components/ui/checkbox/index.ts';
   import * as Dialog from '#lib/components/ui/dialog/index.ts';
@@ -25,11 +25,12 @@
   let selected = $state<Record<string, boolean>>({});
   let tried = $state(false);
 
-  const missing = $derived(tried && !instruction.trim());
+  const needsInstruction = $derived(startFixNeedsInstruction(instruction, comments, selected));
+  const missing = $derived(tried && needsInstruction);
 
   function submit(): void {
     tried = true;
-    if (!instruction.trim()) return;
+    if (needsInstruction) return;
     onsubmit(startFixParams(recordId, instruction, selected));
   }
 </script>
@@ -45,7 +46,11 @@
       </Dialog.Description>
     </Dialog.Header>
     <div class="grid gap-1.5">
-      <Label for="fx-instr">Instruction <span class="muted font-normal">(required)</span></Label>
+      <Label for="fx-instr"
+        >Instruction <span class="muted font-normal"
+          >({comments.some((c) => c.trusted && !c.sent) ? 'optional, trusted comments are sent' : 'required'})</span
+        ></Label
+      >
       <Textarea
         id="fx-instr"
         rows={4}
@@ -56,7 +61,7 @@
       />
       {#if missing}
         <p class="field-error" id="fx-err">
-          <CircleAlert class="icon-sm" aria-hidden="true" />Write an instruction for the agent before starting the fix.
+          <CircleAlert class="icon-sm" aria-hidden="true" />Write an instruction or select a comment before starting the fix.
         </p>
       {/if}
     </div>

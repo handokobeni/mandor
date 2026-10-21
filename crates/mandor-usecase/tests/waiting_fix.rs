@@ -388,6 +388,35 @@ async fn mulai_perbaikan_dengan_instruksi_dev_tanpa_komentar_tepercaya() {
 }
 
 #[tokio::test]
+async fn mulai_perbaikan_tanpa_instruksi_cukup_dengan_komentar_tepercaya() {
+    let (lark, _clock, st) = setup(true).await;
+    // Komentar tepercaya baru, masih dalam jeda tenang.
+    *lark.replies.lock().unwrap() = vec![reply("r1", "ou_qa", NOW - 10, "Tambah kalimat")];
+    tick(&st).await;
+    st.svc.start_fix("rec1", "   ", &[]).await.unwrap();
+    let msg = st.agent.last().req.message;
+    assert!(msg.contains("Tambah kalimat"), "{msg}");
+    assert!(
+        msg.contains("INSTRUKSI:-"),
+        "instruksi kosong tidak dikirim: {msg}"
+    );
+}
+
+#[tokio::test]
+async fn mulai_perbaikan_tanpa_instruksi_dan_tanpa_komentar_ditolak() {
+    let (lark, _clock, st) = setup(true).await;
+    *lark.replies.lock().unwrap() = vec![reply("rx", "ou_asing", NOW - 600, "Saran dari luar")];
+    tick(&st).await;
+    let before = st.agent.count();
+    let err = st.svc.start_fix("rec1", "", &[]).await.unwrap_err();
+    assert!(
+        matches!(err, mandor_usecase::RunError::InvalidState(_)),
+        "{err:?}"
+    );
+    assert_eq!(st.agent.count(), before, "agent tidak dimulai");
+}
+
+#[tokio::test]
 async fn status_in_review_saat_perbaikan_membatalkan_waiting_review_dan_menandai() {
     let (lark, _clock, st) = setup(true).await;
     *lark.replies.lock().unwrap() = vec![reply("r1", "ou_qa", NOW - 600, "Fix")];

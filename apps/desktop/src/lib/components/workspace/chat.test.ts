@@ -103,6 +103,27 @@ describe('chat workspace', () => {
       reply_ids: ['r1', 'r3']
     });
   });
+
+  it('instruksi Start fix wajib hanya bila tidak ada komentar yang akan dikirim', async () => {
+    const { startFixNeedsInstruction } = await import('#lib/chat.ts');
+    const c = (reply_id: string, trusted: boolean, sent = false) => ({
+      reply_id,
+      author: 'ou_x',
+      create_time: 1,
+      text: 't',
+      trusted,
+      sent
+    });
+    // Komentar tepercaya yang belum terkirim cukup sebagai isi perbaikan.
+    expect(startFixNeedsInstruction('', [c('r1', true)], {})).toBe(false);
+    // Komentar tidak tepercaya yang dicentang dev juga cukup.
+    expect(startFixNeedsInstruction('  ', [c('r2', false)], { r2: true })).toBe(false);
+    // Tanpa komentar yang akan dikirim, instruksi wajib.
+    expect(startFixNeedsInstruction('', [c('r2', false)], {})).toBe(true);
+    expect(startFixNeedsInstruction('', [c('r1', true, true)], {})).toBe(true);
+    expect(startFixNeedsInstruction('', [], {})).toBe(true);
+    expect(startFixNeedsInstruction('Perbaiki form', [], {})).toBe(false);
+  });
 });
 
 describe('ringkasan tool call', () => {

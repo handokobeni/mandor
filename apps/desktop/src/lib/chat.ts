@@ -1,5 +1,6 @@
 // Pengelompokan pesan chat run untuk tampilan.
 
+import type { CommentView } from '#lib/protocol/CommentView.ts';
 import type { MessageView } from '#lib/protocol/MessageView.ts';
 
 export interface ToolCall {
@@ -110,6 +111,19 @@ export function startFixParams(
       .filter(([, on]) => on)
       .map(([id]) => id)
   };
+}
+
+/**
+ * Instruksi "Mulai perbaikan" wajib hanya bila tidak ada komentar yang akan dikirim:
+ * komentar tepercaya yang belum terkirim, atau komentar yang dicentang dev.
+ */
+export function startFixNeedsInstruction(
+  instruction: string,
+  comments: CommentView[],
+  selected: Record<string, boolean>
+): boolean {
+  if (instruction.trim()) return false;
+  return !comments.some((c) => (c.trusted && !c.sent) || selected[c.reply_id]);
 }
 
 /** Nama tool untuk ditampilkan: `mcp__graft__graft_find_code` menjadi `graft · find_code`. */

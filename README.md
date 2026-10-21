@@ -81,9 +81,9 @@ Agent yang sedang berjalan ikut berhenti saat daemon di-restart. Run-nya ditanda
 | `~/.mandor/lark.json` | Pengaturan Lark (0600) |
 | `~/.mandor/secrets/lark-token.json` | Token user Lark (0600) |
 | `~/.mandor/daemon.json` | Port, token, dan pid daemon yang berjalan (0600) |
-| `~/.mandor/workspaces/` | Worktree per task |
+| `~/.local/share/mandor/workspaces/` | Worktree per task, di luar `~/.mandor` karena agent dilarang membaca folder itu (tempat token) |
 
-`MANDOR_HOME` mengganti lokasi `~/.mandor`, berguna untuk mencoba dengan data terpisah.
+`MANDOR_HOME` mengganti lokasi `~/.mandor`, berguna untuk mencoba dengan data terpisah; worktree lalu ada di `$MANDOR_HOME/workspaces/`.
 
 ## Variabel environment
 
@@ -102,6 +102,14 @@ make red-check    # bukti lapisan crate ditegakkan
 cd apps/desktop && bun run check && bun run test
 cd apps/desktop/src-tauri && cargo clippy --all-targets -- -D warnings && cargo test
 ```
+
+Git hook (fmt + clippy sebelum commit, `make check` sebelum push) aktif setelah sekali menjalankan:
+
+```bash
+git config core.hooksPath .githooks
+```
+
+CI di `.github/workflows/ci.yml` menjalankan gerbang yang sama di Linux untuk setiap push ke `main` dan setiap pull request, serta pengecekan advisory harian. Linux, macOS, dan Windows berjalan seminggu sekali dan bisa dipicu manual dari tab Actions (**Run workflow**), karena menit macOS dan Windows di repo private memakan kuota lebih banyak.
 
 Smoke test terhadap Lark, GitHub, dan Claude sungguhan: lihat `crates/mandor-e2e/README.md`.
 

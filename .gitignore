@@ -1,0 +1,19 @@
+# Build Rust dan Tauri
+/target/
+**/target/
+
+# Frontend
+node_modules/
+apps/desktop/build/
+apps/desktop/.svelte-kit/
+
+# Data lokal dan rahasia
+*.db
+*.db-shm
+*.db-wal
+.env
+
+# Cakupan test
+coverage/
+lcov.info
+*.profraw

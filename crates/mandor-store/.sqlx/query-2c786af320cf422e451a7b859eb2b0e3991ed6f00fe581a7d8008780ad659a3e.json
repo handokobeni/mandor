@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "UPDATE runs SET state = ?, state_json = ?, generation = ?, branch = ?,\n                    worktree_path = ?, session_id = ?, pid = ?, pr_url = ?, updated_at_ms = ?\n             WHERE id = ? AND generation = ? AND closed = 0",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 11
+    },
+    "nullable": []
+  },
+  "hash": "2c786af320cf422e451a7b859eb2b0e3991ed6f00fe581a7d8008780ad659a3e"
+}

@@ -1,0 +1,314 @@
+//! Giliran agent: spawn, driver event, antrean pesan, kirim sekarang, stop.
+//!
+//! Setiap spawn menaikkan `generation`. Driver hanya boleh mengubah run bila
+//! generasinya masih yang tersimpan, sehingga event giliran lama tidak menimpa
+//! giliran baru (perbaikan bug race stop→send).
+
+use std::future::Future;
+use std::pin::Pin;
+use std::sync::Arc;
+
+use mandor_domain::{AgentEvent, RunState};
+
+use super::members::session_of;
+use super::{RunError, RunService};
+use crate::notify::notice;
+use crate::ports::Deps;
+use crate::run_ports::{
+    AgentPort, AgentRequest, AgentRunHandle, ChatItem, NoticeKind, Notifier, Prompts, RunPhase,
+    RunRecord, RunStore, Spawner, Stopper,
+};
+
+/// Hasil akhir satu giliran.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum TurnEnd {
+    /// Selesai normal dengan pesan akhir agent.
+    Ok(String),
+    Error(String),
+}
+
+/// Hasil pengiriman pesan dev.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SendOutcome {
+    Sent,
+    Queued,
+}
+
+impl<D: Deps> RunService<D> {
+    /// Menjalankan satu giliran agent untuk `run` dan menyerahkan event-nya ke
+    /// driver latar. `run` diperbarui (generasi, pid, state) dan disimpan.
+    pub(crate) async fn spawn_turn(
+        self: &Arc<Self>,
+        run: &mut RunRecord,
+        req: AgentRequest,
+        dev_message: Option<String>,
+    ) -> Result<(), RunError> {
+        let expected = run.generation;
+        let handle = self.agent.spawn(&req).await?;
+        run.generation += 1;
+        run.state = if run.automatic {
+            RunState::WfRunning
+        } else {
+            RunState::Running
+        };
+        run.session_started = true;
+        run.last_error = None;
+        run.pid = handle.pid().map(i64::from);
+        if let Err(e) = self.runs.save(run, expected, self.now()).await {
+            handle.stopper().stop().await;
+            return Err(e.into());
+        }
+        if let Some(m) = dev_message {
+            self.runs
+                .append(&run.id, &ChatItem::Dev(m), self.now())
+                .await?;
+        }
+        self.set_stopper(&run.id, run.generation, handle.stopper());
+        let this = Arc::clone(self);
+        let run_id = run.id.clone();
+        let generation = run.generation;
+        self.spawner
+            .spawn(async move { this.drive(run_id, generation, handle).await });
+        Ok(())
+    }
+
+    /// Versi ter-box dari [`Self::spawn_turn`] untuk memutus siklus tipe async
+    /// (driver → akhir giliran → giliran berikutnya).
+    fn spawn_turn_boxed(
+        self: &Arc<Self>,
+        mut run: RunRecord,
+        req: AgentRequest,
+        message: String,
+    ) -> Pin<Box<dyn Future<Output = Result<(), RunError>> + Send + '_>> {
+        Box::pin(async move { self.spawn_turn(&mut run, req, Some(message)).await })
+    }
+
+    async fn drive(
+        self: Arc<Self>,
+        run_id: String,
+        generation: i64,
+        mut handle: <D::Agent as AgentPort>::Run,
+    ) {
+        let mut end = TurnEnd::Error("agent stopped without a result".to_owned());
+        while let Some(event) = handle.next_event().await {
+            match &event {
+                AgentEvent::Done {
+                    is_error: false,
+                    result,
+                    ..
+                } => end = TurnEnd::Ok(result.clone()),
+                AgentEvent::Done {
+                    is_error: true,
+                    result,
+                    ..
+                } => end = TurnEnd::Error(result.clone()),
+                AgentEvent::Failed { message } => end = TurnEnd::Error(message.clone()),
+                _ => {}
+            }
+            if !self.is_current(&run_id, generation).await {
+                continue;
+            }
+            if let Err(e) = self
+                .runs
+                .append(&run_id, &ChatItem::Agent(event), self.now())
+                .await
+            {
+                tracing::warn!(run_id, error = %e, "gagal menyimpan event agent");
+            }
+        }
+        if let Err(e) = self.finish_turn(&run_id, generation, end).await {
+            tracing::warn!(run_id, error = %e, "gagal menyelesaikan giliran agent");
+        }
+    }
+
+    async fn is_current(&self, run_id: &str, generation: i64) -> bool {
+        matches!(self.runs.get(run_id).await, Ok(Some(r)) if r.generation == generation)
+    }
+
+    async fn finish_turn(
+        self: &Arc<Self>,
+        run_id: &str,
+        generation: i64,
+        end: TurnEnd,
+    ) -> Result<(), RunError> {
+        self.clear_stopper(run_id, generation);
+        let mut run = self.load(run_id).await?;
+        if run.generation != generation {
+            return Ok(());
+        }
+        run.pid = None;
+        if run.state == RunState::WfRunning {
+            return self.finish_fix_turn(run, end).await;
+        }
+        match end {
+            TurnEnd::Ok(result) => {
+                if run.phase == RunPhase::Plan && !result.trim().is_empty() {
+                    run.plan = Some(result);
+                }
+                if !run.queue.is_empty() {
+                    let next = run.queue.remove(0);
+                    let req = self.resume_request(&mut run, next.clone()).await?;
+                    return self.spawn_turn_boxed(run, req, next).await;
+                }
+                run.state = RunState::AwaitingDev;
+                self.runs.save(&run, generation, self.now()).await?;
+                let body = match run.phase {
+                    RunPhase::Plan => "Plan ready: approve it to start coding, or reply to revise",
+                    RunPhase::Brainstorm => {
+                        "The agent has a question or a summary: answer in chat, or continue to plan"
+                    }
+                    RunPhase::Implement => "Agent finished and is waiting for you",
+                };
+                self.notifier
+                    .notify(notice(self, NoticeKind::AwaitingAnswer, &run, body).await)
+                    .await;
+            }
+            TurnEnd::Error(msg) => {
+                run.state = RunState::Failed;
+                run.last_error = Some(msg.clone());
+                self.runs.save(&run, generation, self.now()).await?;
+                self.notifier
+                    .notify(notice(self, NoticeKind::Failed, &run, &msg).await)
+                    .await;
+            }
+        }
+        Ok(())
+    }
+
+    /// Permintaan giliran lanjutan pada sesi yang sama; worktree yang hilang
+    /// dibuat ulang dan disimpan di `run`. Pesan `/skill argumen` menjadi
+    /// instruksi menjalankan skill itu.
+    pub(crate) async fn resume_request(
+        &self,
+        run: &mut RunRecord,
+        message: String,
+    ) -> Result<AgentRequest, RunError> {
+        let message = match mandor_domain::run::slash_command(&message) {
+            Some((name, args)) => self.prompts.command_message(name, args),
+            None => message,
+        };
+        self.agent_request(run, session_of(run), message).await
+    }
+
+    /// "Approve plan & implement": agent mengerjakan plan terakhir di sesi yang sama.
+    ///
+    /// # Errors
+    /// Run tidak ada, agent masih bekerja, belum ada plan, atau agent gagal.
+    pub async fn approve_plan(self: &Arc<Self>, run_id: &str) -> Result<(), RunError> {
+        let mut run = self.load(run_id).await?;
+        if run.state != RunState::AwaitingDev {
+            return Err(RunError::InvalidState(run.state.as_str()));
+        }
+        if run.phase != RunPhase::Plan || run.plan.is_none() {
+            return Err(RunError::InvalidState("no plan to approve"));
+        }
+        run.phase = RunPhase::Implement;
+        let message = self.prompts.approve_message();
+        let req = self.resume_request(&mut run, message).await?;
+        self.spawn_turn(
+            &mut run,
+            req,
+            Some("Plan approved; implement it".to_owned()),
+        )
+        .await
+    }
+
+    /// "Continue to plan": dari brainstorm ke plan di sesi yang sama, memakai
+    /// skill plan yang dipilih saat Start.
+    ///
+    /// # Errors
+    /// Run tidak ada, agent masih bekerja, bukan fase brainstorm, atau agent gagal.
+    pub async fn continue_to_plan(self: &Arc<Self>, run_id: &str) -> Result<(), RunError> {
+        let mut run = self.load(run_id).await?;
+        if run.state != RunState::AwaitingDev {
+            return Err(RunError::InvalidState(run.state.as_str()));
+        }
+        if run.phase != RunPhase::Brainstorm {
+            return Err(RunError::InvalidState("not brainstorming"));
+        }
+        run.phase = RunPhase::Plan;
+        let message = self
+            .prompts
+            .continue_plan_message(run.plan_skill.as_deref());
+        let req = self.resume_request(&mut run, message).await?;
+        self.spawn_turn(&mut run, req, Some("Continue to plan".to_owned()))
+            .await
+    }
+
+    /// Pesan dev: diantrekan bila agent sibuk, selain itu dikirim sebagai giliran baru.
+    ///
+    /// # Errors
+    /// Run tidak ada, atau agent/penyimpanan gagal.
+    pub async fn send_message(
+        self: &Arc<Self>,
+        run_id: &str,
+        text: &str,
+    ) -> Result<SendOutcome, RunError> {
+        let mut run = self.load(run_id).await?;
+        if run.state.is_busy() {
+            run.queue.push(text.to_owned());
+            self.runs.save(&run, run.generation, self.now()).await?;
+            return Ok(SendOutcome::Queued);
+        }
+        if run.state.is_parked() || matches!(run.state, RunState::Preparing | RunState::Publishing)
+        {
+            return Err(RunError::InvalidState(run.state.as_str()));
+        }
+        let req = self.resume_request(&mut run, text.to_owned()).await?;
+        self.spawn_turn(&mut run, req, Some(text.to_owned()))
+            .await?;
+        Ok(SendOutcome::Sent)
+    }
+
+    /// "Kirim sekarang": menghentikan giliran berjalan secara aman lalu mengirim.
+    ///
+    /// # Errors
+    /// Run tidak ada, atau agent/penyimpanan gagal.
+    pub async fn send_now(
+        self: &Arc<Self>,
+        run_id: &str,
+        text: &str,
+    ) -> Result<SendOutcome, RunError> {
+        self.interrupt(run_id).await?;
+        self.send_message(run_id, text).await
+    }
+
+    /// Menghentikan giliran berjalan; run menunggu dev.
+    ///
+    /// # Errors
+    /// Run tidak ada atau penyimpanan gagal.
+    pub async fn stop(self: &Arc<Self>, run_id: &str) -> Result<(), RunError> {
+        if self.interrupt(run_id).await? {
+            self.runs
+                .append(
+                    run_id,
+                    &ChatItem::System("Turn stopped by the developer".to_owned()),
+                    self.now(),
+                )
+                .await?;
+        }
+        Ok(())
+    }
+
+    /// Menaikkan generasi lebih dulu (event giliran lama jadi basi), lalu
+    /// menghentikan prosesnya. Mengembalikan `true` bila ada giliran yang dihentikan.
+    async fn interrupt(&self, run_id: &str) -> Result<bool, RunError> {
+        let mut run = self.load(run_id).await?;
+        if !run.state.is_busy() {
+            return Ok(false);
+        }
+        let expected = run.generation;
+        run.generation += 1;
+        run.state = if run.automatic {
+            RunState::InReviewLoop
+        } else {
+            RunState::AwaitingDev
+        };
+        run.pid = None;
+        self.runs.save(&run, expected, self.now()).await?;
+        if let Some(stopper) = self.take_stopper(run_id) {
+            stopper.stop().await;
+        }
+        Ok(true)
+    }
+}

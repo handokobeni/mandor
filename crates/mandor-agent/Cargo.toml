@@ -1,0 +1,28 @@
+[package]
+name = "mandor-agent"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+license.workspace = true
+description = "Adapter agent mandor: menjalankan `claude -p` dengan pagar izin di luar prompt."
+
+[dependencies]
+mandor-domain.workspace = true
+mandor-usecase.workspace = true
+mandor-proc.workspace = true
+tokio = { workspace = true, features = ["io-util", "sync", "time", "fs"] }
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+uuid.workspace = true
+rand = { workspace = true, features = ["std", "thread_rng"] }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["rt-multi-thread", "macros", "process", "io-util", "time", "fs"] }
+tempfile.workspace = true
+pretty_assertions.workspace = true
+
+[lints]
+workspace = true

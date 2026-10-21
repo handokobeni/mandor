@@ -1,0 +1,18 @@
+{"record_id":"recFull","last_modified_time":1760000000000,"last_modified_by":{"id":"ou_pm"},
+ "fields":{
+  "Task name":[{"text":"Profile Data: ","type":"text"},{"text":"Tab Data","type":"text"}],
+  "ID":{"type":1,"value":[{"text":"PGS-1388","type":"text"}]},
+  "Description":[{"text":"Deskripsi","type":"text"}],
+  "Task Status":"Waiting Fix",
+  "Development Readiness":"Ready To Dev",
+  "Assignee (PIC)":[{"id":"ou_dev","name":"Dev","email":"d@x"}],
+  "Reporter/Request":[{"id":"ou_pm","name":"PM"}],
+  "Acceptance Criteria":{"link_record_ids":["ac1","ac2"]},
+  "Sprint":{"link_record_ids":["spr9"]},
+  "kanban_column":"review",
+  "mandor_branch":[{"text":"mandor/pgs-1388","type":"text"}],
+  "mandor_pr":{"text":"https://github.com/o/r/pull/7","link":"https://github.com/o/r/pull/7"},
+  "mandor_owner":[{"text":"ou_dev|1760000000000|abc","type":"text"}],
+  "mandor_comment_cursor":"1760000100:r1",
+  "Fix Notes":[{"text":"Perbaiki validasi","type":"text"}]
+ }}

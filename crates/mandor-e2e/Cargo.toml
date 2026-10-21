@@ -1,0 +1,16 @@
+[package]
+name = "mandor-e2e"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+license.workspace = true
+description = "Smoke test end-to-end Rilis 1 terhadap Base dan repo uji (manual, MANDOR_E2E=1)."
+
+[dependencies]
+
+[dev-dependencies]
+serde_json.workspace = true
+
+[lints]
+workspace = true

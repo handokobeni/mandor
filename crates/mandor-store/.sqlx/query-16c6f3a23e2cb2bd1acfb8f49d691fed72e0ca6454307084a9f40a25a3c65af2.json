@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO runs (id, repo_id, record_id, state, state_json, generation, branch,\n                               worktree_path, session_id, pid, pr_url, created_at_ms, updated_at_ms)\n             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 13
+    },
+    "nullable": []
+  },
+  "hash": "16c6f3a23e2cb2bd1acfb8f49d691fed72e0ca6454307084a9f40a25a3c65af2"
+}

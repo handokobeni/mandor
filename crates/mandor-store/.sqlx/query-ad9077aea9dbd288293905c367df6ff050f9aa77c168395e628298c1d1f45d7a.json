@@ -1,0 +1,26 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT reply_id FROM comment_journal\n             WHERE record_id = ? AND status = 'delivered' ORDER BY created_at_ms, reply_id",
+  "describe": {
+    "columns": [
+      {
+        "name": "reply_id",
+        "ordinal": 0,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "comment_journal",
+            "name": "reply_id"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "ad9077aea9dbd288293905c367df6ff050f9aa77c168395e628298c1d1f45d7a"
+}

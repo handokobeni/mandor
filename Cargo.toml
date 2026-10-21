@@ -1,0 +1,71 @@
+[workspace]
+resolver = "3"
+members = ["crates/*"]
+exclude = ["apps/desktop/src-tauri"]
+
+[workspace.package]
+edition = "2024"
+rust-version = "1.85"
+publish = false
+license = "MIT"
+
+[workspace.dependencies]
+# Lapisan internal
+mandor-domain = { path = "crates/mandor-domain" }
+mandor-usecase = { path = "crates/mandor-usecase" }
+mandor-proc = { path = "crates/mandor-proc" }
+mandor-store = { path = "crates/mandor-store" }
+mandor-protocol = { path = "crates/mandor-protocol" }
+mandor-api = { path = "crates/mandor-api" }
+mandor-git = { path = "crates/mandor-git" }
+mandor-lark = { path = "crates/mandor-lark" }
+mandor-agent = { path = "crates/mandor-agent" }
+
+# Allow list rust-engineering
+tokio = { version = "1.53", default-features = false }
+tokio-util = { version = "0.7", default-features = false }
+axum = { version = "0.8", default-features = false }
+tower = { version = "0.5", default-features = false }
+tower-http = { version = "0.7", default-features = false }
+reqwest = { version = "0.13", default-features = false }
+sqlx = { version = "0.9", default-features = false }
+serde = { version = "1", default-features = false, features = ["std", "derive"] }
+serde_json = { version = "1", default-features = false, features = ["std"] }
+thiserror = { version = "2", default-features = false }
+anyhow = { version = "1", default-features = false, features = ["std"] }
+tracing = { version = "0.1", default-features = false, features = ["std", "attributes"] }
+tracing-subscriber = { version = "0.3", default-features = false }
+uuid = { version = "1", default-features = false, features = ["std", "v4"] }
+time = { version = "0.3", default-features = false, features = ["std", "formatting", "parsing", "macros", "serde"] }
+secrecy = { version = "0.10", default-features = false, features = ["serde"] }
+rand = { version = "0.10", default-features = false }
+futures = { version = "0.3", default-features = false, features = ["std"] }
+pretty_assertions = "1"
+
+# Di luar allow list — justifikasi di CLAUDE.md
+process-wrap = { version = "10", default-features = false }
+ts-rs = { version = "12", default-features = false }
+fd-lock = { version = "4", default-features = false }
+subtle = { version = "2", default-features = false, features = ["std"] }
+tokio-tungstenite = { version = "0.30", default-features = false, features = ["connect"] }
+tempfile = "3"
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+missing_debug_implementations = "warn"
+
+[workspace.lints.clippy]
+pedantic = { level = "warn", priority = -1 }
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
+todo = "deny"
+unimplemented = "deny"
+dbg_macro = "deny"
+print_stdout = "deny"
+print_stderr = "deny"
+await_holding_lock = "deny"
+large_futures = "warn"
+cognitive_complexity = "warn"
+too_many_lines = "warn"
+module_name_repetitions = "allow"

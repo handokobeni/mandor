@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO outbox (queue, record_id, payload_json, next_attempt_ms, created_at_ms)\n             VALUES (?, ?, ?, ?, ?)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 5
+    },
+    "nullable": []
+  },
+  "hash": "63c3f21bc03398618ce56f50ca7d5f87e045d18a705255bd860718bdee53ab63"
+}

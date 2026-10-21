@@ -1,0 +1,4 @@
+[env]
+# Query sqlx memakai cache offline `crates/mandor-store/.sqlx`; `make sqlx-check`
+# memverifikasi cache terhadap database hasil migrasi.
+SQLX_OFFLINE = "true"

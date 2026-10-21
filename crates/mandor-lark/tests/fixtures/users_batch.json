@@ -1,0 +1,10 @@
+{
+  "code": 0,
+  "msg": "success",
+  "data": {
+    "items": [
+      { "open_id": "ou_a", "union_id": "on_a", "name": "Beni Handoko", "en_name": "Beni" },
+      { "open_id": "ou_b", "union_id": "on_b", "name": "", "en_name": "Rizky Pratama" }
+    ]
+  }
+}

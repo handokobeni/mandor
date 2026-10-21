@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "UPDATE comment_journal SET status = 'delivered' WHERE record_id = ? AND reply_id = ?",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": []
+  },
+  "hash": "73cd3067223ee0d493cbf38db86cd2a795c25a7a0fb3851eb62dc6f7ba86e8e4"
+}

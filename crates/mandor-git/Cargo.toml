@@ -1,0 +1,27 @@
+[package]
+name = "mandor-git"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+license.workspace = true
+description = "Adapter git/gh mandor: worktree, diff, commit, push, PR. Hanya daemon yang memegang kredensial."
+
+[dependencies]
+mandor-domain.workspace = true
+mandor-usecase.workspace = true
+mandor-proc.workspace = true
+tokio = { workspace = true, features = ["fs", "time"] }
+serde.workspace = true
+serde_json.workspace = true
+secrecy.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["rt-multi-thread", "macros", "fs", "time"] }
+tempfile.workspace = true
+pretty_assertions.workspace = true
+
+[lints]
+workspace = true

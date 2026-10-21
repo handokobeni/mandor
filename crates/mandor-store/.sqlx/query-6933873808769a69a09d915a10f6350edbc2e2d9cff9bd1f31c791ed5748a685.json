@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "UPDATE tasks SET flag_kind = ?, flag_detail = ? WHERE scope = ? AND record_id = ?",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 4
+    },
+    "nullable": []
+  },
+  "hash": "6933873808769a69a09d915a10f6350edbc2e2d9cff9bd1f31c791ed5748a685"
+}

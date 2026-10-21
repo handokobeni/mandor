@@ -1,0 +1,26 @@
+[package]
+name = "mandor-store"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+license.workspace = true
+description = "Adapter penyimpanan mandor (sqlx SQLite). Satu-satunya pengguna sqlx."
+
+[dependencies]
+mandor-domain.workspace = true
+mandor-usecase.workspace = true
+sqlx = { workspace = true, features = ["sqlite", "runtime-tokio", "migrate", "macros"] }
+tokio = { workspace = true, features = ["time"] }
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["rt-multi-thread", "macros", "time"] }
+tempfile.workspace = true
+pretty_assertions.workspace = true
+
+[lints]
+workspace = true

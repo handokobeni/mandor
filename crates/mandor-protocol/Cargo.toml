@@ -1,0 +1,19 @@
+[package]
+name = "mandor-protocol"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+license.workspace = true
+description = "DTO protokol JSON-RPC 2.0 antara mandord dan client; tipe TS dihasilkan dengan ts-rs."
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+ts-rs = { workspace = true, features = ["serde-compat", "serde-json-impl"] }
+
+[dev-dependencies]
+pretty_assertions.workspace = true
+
+[lints]
+workspace = true

@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO comment_journal (record_id, reply_id, run_id, status, created_at_ms)\n             VALUES (?, ?, ?, 'pending', ?) ON CONFLICT DO NOTHING",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 4
+    },
+    "nullable": []
+  },
+  "hash": "32db6c4c7b0aeca6c2a6f703bd41fef9c19d1589125fe4b3c4e56be62093d095"
+}

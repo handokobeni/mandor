@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "UPDATE outbox SET status = ?, last_error = COALESCE(?, last_error) WHERE id = ?",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 3
+    },
+    "nullable": []
+  },
+  "hash": "3504b61bd589787b86988910399657c433289657d3c6c8778110fc98a09a023f"
+}

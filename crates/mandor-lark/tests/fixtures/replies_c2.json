@@ -1,0 +1,4 @@
+{"code":0,"msg":"success","data":{"has_more":false,"items":[
+ {"reply_id":"r5","user_id":"ou_qa","create_time":1760000300,
+  "content":{"elements":[{"type":"text_run","text_run":{"text":"AC 3 belum"}}]},
+  "extra":{"notify_extra":{"record":"recA"}}}]}}

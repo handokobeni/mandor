@@ -1,0 +1,50 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT data_json, flag_kind, flag_detail FROM tasks\n             WHERE scope = ? AND record_id = ?",
+  "describe": {
+    "columns": [
+      {
+        "name": "data_json",
+        "ordinal": 0,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "tasks",
+            "name": "data_json"
+          }
+        }
+      },
+      {
+        "name": "flag_kind",
+        "ordinal": 1,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "tasks",
+            "name": "flag_kind"
+          }
+        }
+      },
+      {
+        "name": "flag_detail",
+        "ordinal": 2,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "tasks",
+            "name": "flag_detail"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": [
+      false,
+      true,
+      true
+    ]
+  },
+  "hash": "08c5daf33acd8a39fe470cda9066381f03632cd07e8a2f3a8a0b06325a69259d"
+}

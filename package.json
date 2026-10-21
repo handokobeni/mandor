@@ -1,0 +1,5 @@
+{
+  "name": "mandor",
+  "private": true,
+  "workspaces": ["apps/*"]
+}

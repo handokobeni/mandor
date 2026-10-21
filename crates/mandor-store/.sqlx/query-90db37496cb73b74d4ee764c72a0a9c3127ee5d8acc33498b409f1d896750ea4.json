@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO repos (id, path, gh_profile, default_branch, created_at_ms) VALUES (?, ?, ?, ?, ?)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 5
+    },
+    "nullable": []
+  },
+  "hash": "90db37496cb73b74d4ee764c72a0a9c3127ee5d8acc33498b409f1d896750ea4"
+}

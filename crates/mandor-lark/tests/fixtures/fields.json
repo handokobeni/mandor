@@ -1,0 +1,9 @@
+{"code":0,"msg":"success","data":{"has_more":false,"items":[
+ {"field_id":"fldpGahx9E","field_name":"Task name","type":1,"ui_type":"Text"},
+ {"field_id":"fldPwBVEFo","field_name":"Task Status","type":3,"ui_type":"SingleSelect","property":{"options":[
+  {"id":"opt9seA86m","name":"To Do"},{"id":"optbMnmKZv","name":"In Progress"},{"id":"optINPL2Ww","name":"Waiting Review"},
+  {"id":"optOymDdkx","name":"In Review"},{"id":"optjZREK8R","name":"Waiting Fix"},{"id":"optsmbWFwL","name":"Waiting Deploy"},{"id":"optaXYz8H6","name":"Delivered"}]}},
+ {"field_id":"fldBHAdXta","field_name":"Development Readiness","type":3,"ui_type":"SingleSelect","property":{"options":[
+  {"name":"Create AC"},{"name":"Need Design (Opsional)"},{"name":"Review AC By PM"},{"name":"Review AC By QA"},{"name":"Review AC By DM"},{"name":"Ready To Dev"},{"name":"Commit To Sprint"}]}},
+ {"field_id":"fld8jELLCx","field_name":"kanban_column","type":3,"ui_type":"SingleSelect","property":{"options":[
+  {"name":"todo"},{"name":"in_progress"},{"name":"review"},{"name":"done"}]}}]}}

@@ -1,0 +1,26 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT repo_id FROM workspace_repos WHERE workspace_id = ? ORDER BY position",
+  "describe": {
+    "columns": [
+      {
+        "name": "repo_id",
+        "ordinal": 0,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "workspace_repos",
+            "name": "repo_id"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "c3c4c0f2670bb9758ea99d406d422b60cc3b86ea940aa46c8273cbb5ee21a308"
+}

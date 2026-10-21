@@ -1,0 +1,22 @@
+[package]
+name = "mandor-proc"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+license.workspace = true
+description = "Runner proses eksternal: timeout, process group, redaksi token, environment shell."
+
+[dependencies]
+tokio = { workspace = true, features = ["process", "io-util", "time", "rt", "macros"] }
+process-wrap = { workspace = true, features = ["tokio1", "process-group", "job-object", "kill-on-drop"] }
+thiserror.workspace = true
+tracing.workspace = true
+secrecy.workspace = true
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["process", "io-util", "time", "rt-multi-thread", "macros"] }
+pretty_assertions.workspace = true
+
+[lints]
+workspace = true

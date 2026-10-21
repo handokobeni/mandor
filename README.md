@@ -1,0 +1,115 @@
+# Mandor
+
+Mandor adalah papan kerja untuk agent Claude Code yang tersinkron dua arah dengan Lark Base Sprint Tasks. Isinya:
+
+- `mandord`: daemon Rust yang memegang semua logika (sinkron Lark, git, agent, SQLite).
+- `apps/desktop`: client Tauri v2 + Svelte 5 yang hanya berisi UI.
+
+Semua perintah di dokumen ini dijalankan dari folder `mandor/`.
+
+## Prasyarat
+
+| Alat | Versi | Catatan |
+|---|---|---|
+| Rust | 1.95 (`rust-toolchain.toml`) | `rustup` memasang otomatis |
+| Bun | 1.3+ | untuk frontend |
+| Dependensi Tauri (Linux/WSL) | | `sudo apt-get install -y libwebkit2gtk-4.1-dev librsvg2-dev libayatana-appindicator3-dev` |
+| `gh` | | login: `gh auth login` |
+| Claude Code (`claude`) | | login dengan langganan, bukan API key |
+| Git | | repo yang dikerjakan harus punya `origin/HEAD` (`git remote set-head origin --auto`) |
+
+Di WSL, jendela app tampil lewat WSLg (bawaan Windows 11), jadi tidak perlu build Windows untuk mencoba.
+
+## Menjalankan app (mode pengembangan)
+
+1. Pasang dependensi frontend (sekali):
+   ```bash
+   bun install
+   ```
+2. Build daemon:
+   ```bash
+   cargo build --bin mandord
+   ```
+3. Jalankan app dan arahkan ke daemon hasil build:
+   ```bash
+   cd apps/desktop
+   MANDOR_LINK=local:$PWD/../../target/debug/mandord bun run tauri dev
+   ```
+   App menyalakan daemon sendiri di latar bila belum berjalan.
+
+Alternatif tanpa `MANDOR_LINK`: pasang daemon ke PATH, lalu jalankan `bun run tauri dev` saja.
+```bash
+cargo build --release --bin mandord
+install -m 0755 target/release/mandord ~/.local/bin/mandord
+```
+
+### Meninjau tampilan tanpa daemon
+
+```bash
+cd apps/desktop && bun run dev
+```
+
+Buka `http://localhost:1420/?mock` di browser. Data contoh mencakup semua state run dan flag kartu, tanpa daemon dan tanpa Lark. Mode ini hanya ada di mode dev.
+
+## Pertama kali membuka app
+
+1. **Settings → Lark**: isi App ID, App Secret, `app_token` Base, ID tabel Sprint Tasks, dan ID tabel Acceptance Criteria, lalu **Save**. Cara membuat Lark Custom App ada di `../docs/runbook/setup-lark-app.md`.
+2. Klik **Log in with Lark** lalu setujui akses di browser.
+3. **Settings → Repo → Add**: path repo yang akan dikerjakan agent (di mesin daemon).
+4. Di papan, pilih task berstatus To Do dengan Development Readiness "Ready To Dev", lalu klik **Start**.
+
+Gunakan salinan uji Base saat mencoba, agar data tim tidak berubah.
+
+## Saat kode berubah
+
+| Yang berubah | Yang perlu dilakukan |
+|---|---|
+| UI (`apps/desktop/src`) | Tidak ada; `tauri dev` me-reload otomatis |
+| Native Tauri (`apps/desktop/src-tauri`) | Tidak ada; `tauri dev` build ulang dan membuka ulang app |
+| Daemon (`crates/`) | `cargo build --bin mandord`, lalu `pkill -TERM -x mandord`; app tersambung ulang dan menyalakan daemon baru |
+| Protokol (`crates/mandor-protocol`) | `MANDOR_REGEN_TS=1 cargo test -p mandor-protocol` untuk memperbarui tipe TypeScript |
+| Query SQL (`crates/mandor-store`) | `make sqlx-prepare` |
+
+Agent yang sedang berjalan ikut berhenti saat daemon di-restart. Run-nya ditandai "failed" dan bisa dilanjutkan dengan tombol **Resume** (sesi Claude yang sama).
+
+## Lokasi data dan log
+
+| Path | Isi |
+|---|---|
+| `~/.mandor/mandor.db` | SQLite: cache task, run, chat, outbox |
+| `~/.mandor/mandord.log` | Log daemon (JSON); level lewat `MANDOR_LOG`, mis. `MANDOR_LOG=debug` |
+| `~/.mandor/lark.json` | Pengaturan Lark (0600) |
+| `~/.mandor/secrets/lark-token.json` | Token user Lark (0600) |
+| `~/.mandor/daemon.json` | Port, token, dan pid daemon yang berjalan (0600) |
+| `~/.mandor/workspaces/` | Worktree per task |
+
+`MANDOR_HOME` mengganti lokasi `~/.mandor`, berguna untuk mencoba dengan data terpisah.
+
+## Variabel environment
+
+| Variabel | Default | Fungsi |
+|---|---|---|
+| `MANDOR_LINK` | `local` (PATH) di Linux/macOS, `wsl` di Windows | Cara UI menjangkau daemon: `local:/path/mandord` atau `wsl:<distro>` |
+| `MANDOR_HOME` | `~/.mandor` | Direktori data daemon |
+| `MANDOR_LOG` | `info` | Filter log daemon |
+| `MANDOR_CLAUDE_BIN` | `claude` | Biner Claude Code yang dipakai agent |
+
+## Test dan gerbang
+
+```bash
+make check        # fmt, clippy pedantic, cargo deny, cek sqlx offline, test + coverage
+make red-check    # bukti lapisan crate ditegakkan
+cd apps/desktop && bun run check && bun run test
+cd apps/desktop/src-tauri && cargo clippy --all-targets -- -D warnings && cargo test
+```
+
+Smoke test terhadap Lark, GitHub, dan Claude sungguhan: lihat `crates/mandor-e2e/README.md`.
+
+## Build rilis
+
+```bash
+cargo build --release --bin mandord          # daemon
+cd apps/desktop && bun run tauri build       # installer app desktop
+```
+
+Untuk Windows dengan daemon di WSL, ikuti `../docs/runbook/setup-wsl.md`.

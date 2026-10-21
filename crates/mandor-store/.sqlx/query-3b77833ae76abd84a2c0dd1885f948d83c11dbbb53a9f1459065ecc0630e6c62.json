@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "UPDATE tasks SET data_json = '{rusak' WHERE scope = ? AND record_id = ?",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": []
+  },
+  "hash": "3b77833ae76abd84a2c0dd1885f948d83c11dbbb53a9f1459065ecc0630e6c62"
+}

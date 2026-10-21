@@ -1,0 +1,51 @@
+# Cermin mesin dari daftar terlarang rust-engineering (libraries.md) + aturan lapisan mandor.
+[graph]
+all-features = false
+
+[advisories]
+version = 2
+yanked = "deny"
+
+[licenses]
+version = 2
+private = { ignore = true }
+allow = ["MIT", "Apache-2.0", "Apache-2.0 WITH LLVM-exception", "BSD-2-Clause", "BSD-3-Clause",
+         "ISC", "Unicode-3.0", "Zlib", "CDLA-Permissive-2.0"]
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+
+[bans]
+multiple-versions = "allow"
+wildcards = "deny"
+allow-wildcard-paths = true
+deny = [
+  { crate = "actix-web", reason = "use axum + tower" },
+  { crate = "rocket", reason = "use axum + tower" },
+  { crate = "poem", reason = "use axum + tower" },
+  { crate = "warp", reason = "use axum + tower" },
+  { crate = "salvo", reason = "use axum + tower" },
+  { crate = "async-std", reason = "tokio is the only runtime" },
+  { crate = "smol", reason = "tokio is the only runtime" },
+  { crate = "diesel", reason = "use sqlx raw SQL" },
+  { crate = "sea-orm", reason = "use sqlx raw SQL" },
+  { crate = "rusqlite", reason = "use sqlx (KTD-3)" },
+  { crate = "config", reason = "use std::env + Config::from_env" },
+  { crate = "figment", reason = "use std::env + Config::from_env" },
+  { crate = "env_logger", reason = "use tracing" },
+  { crate = "log4rs", reason = "use tracing" },
+  { crate = "simplelog", reason = "use tracing" },
+  { crate = "slog", reason = "use tracing" },
+  { crate = "shaku", reason = "wire by hand in main.rs" },
+  { crate = "openssl", reason = "use rustls" },
+  { crate = "native-tls", reason = "use rustls" },
+  { crate = "failure", reason = "use thiserror / anyhow" },
+  { crate = "error-chain", reason = "use thiserror / anyhow" },
+
+  # Lapisan (CLAUDE.md): crate infrastruktur hanya boleh dipakai adapternya.
+  { crate = "sqlx", wrappers = ["mandor-store", "mandord"], reason = "only the store adapter may use sqlx" },
+  { crate = "axum", wrappers = ["mandor-api", "mandord"], reason = "only the api adapter may use axum" },
+  { crate = "reqwest", wrappers = ["mandor-lark", "mandord"], reason = "only the lark adapter may call HTTP" },
+  { crate = "anyhow", wrappers = ["mandord"], reason = "library crates return typed thiserror enums" },
+]

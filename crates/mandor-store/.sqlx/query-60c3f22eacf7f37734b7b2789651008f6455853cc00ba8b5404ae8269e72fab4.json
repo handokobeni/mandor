@@ -1,0 +1,26 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT reply_id FROM comment_journal\n             WHERE record_id = ? AND status = 'pending' ORDER BY created_at_ms, reply_id",
+  "describe": {
+    "columns": [
+      {
+        "name": "reply_id",
+        "ordinal": 0,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "comment_journal",
+            "name": "reply_id"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "60c3f22eacf7f37734b7b2789651008f6455853cc00ba8b5404ae8269e72fab4"
+}

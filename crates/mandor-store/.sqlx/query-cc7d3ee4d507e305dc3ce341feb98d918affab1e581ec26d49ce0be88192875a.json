@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO tasks (scope, record_id, data_json, last_modified_ms)\n             VALUES (?, ?, ?, ?)\n             ON CONFLICT (scope, record_id) DO UPDATE SET\n               data_json = excluded.data_json,\n               last_modified_ms = excluded.last_modified_ms",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 4
+    },
+    "nullable": []
+  },
+  "hash": "cc7d3ee4d507e305dc3ce341feb98d918affab1e581ec26d49ce0be88192875a"
+}

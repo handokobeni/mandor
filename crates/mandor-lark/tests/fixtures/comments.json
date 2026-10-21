@@ -1,0 +1,12 @@
+{"code":0,"msg":"success","data":{"has_more":false,"items":[
+ {"comment_id":"c1","create_time":1760000100,"update_time":1760000100,"has_more":false,
+  "reply_list":{"replies":[
+   {"reply_id":"r1","user_id":"ou_qa","create_time":1760000100,
+    "content":{"elements":[{"type":"text_run","text_run":{"text":"Tombol simpan error "}},{"type":"person","person":{"user_id":"ou_dev"}}]},
+    "extra":{"notify_extra":"{\"record\":\"recB\",\"table\":\"tbl1\"}"}},
+   {"reply_id":"r2","user_id":"ou_dev","create_time":1760000200,
+    "content":{"elements":[{"type":"text_run","text_run":{"text":"Siap"}}]}}]}},
+ {"comment_id":"c2","create_time":1760000300,"has_more":true,
+  "reply_list":{"replies":[]}},
+ {"comment_id":"c3","create_time":1760000400,"has_more":false,
+  "reply_list":{"replies":[{"reply_id":"r9","user_id":"ou_x","create_time":1760000400,"content":{"elements":[]}}]}}]}}

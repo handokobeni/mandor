@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO workspaces (id, name, root_path, mcp_servers_json, created_at_ms) VALUES (?, ?, ?, ?, ?)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 5
+    },
+    "nullable": []
+  },
+  "hash": "1e353a482f19383b65bf1300f4471d9251f20ede0a9a38b48ae9331666eadf5f"
+}

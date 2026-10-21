@@ -154,22 +154,19 @@ impl LarkTasks for FakeLark {
         let t = recs
             .get_mut(record_id)
             .ok_or(PortError::Rejected("RecordIdNotFound".into()))?;
-        if let Some(s) = status {
-            t.status = s.clone();
-        }
-        for f in fields {
-            match f {
-                AppField::Branch(b) => t.branch = Some(b.clone()),
-                AppField::PrUrl(u) => t.pr_url = Some(u.clone()),
-                AppField::Claim(c) => t.claim.clone_from(c),
-                AppField::CommentCursor(c) => t.comment_cursor = Some(c.clone()),
-                AppField::KanbanMirror(m) => t.kanban_mirror = Some(m.clone()),
-                AppField::RepoId(r) => t.repo_id = Some(r.clone()),
-            }
-        }
+        t.apply_write(status, fields);
         t.last_modified_ms =
             self.clock.load(Ordering::SeqCst) + self.seq.fetch_add(1, Ordering::SeqCst);
-        Ok(t.clone())
+        // Seperti Bitable: respons update hanya memuat field yang ditulis.
+        let mut partial = Task::new(
+            record_id,
+            status
+                .cloned()
+                .unwrap_or(TaskStatus::Unknown(String::new())),
+        );
+        partial.apply_write(None, fields);
+        partial.last_modified_ms = t.last_modified_ms;
+        Ok(partial)
     }
 }
 

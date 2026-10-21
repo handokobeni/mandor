@@ -91,6 +91,31 @@ async fn outbox_membatalkan_in_progress_bila_status_sudah_bukan_to_do() {
 }
 
 #[tokio::test]
+async fn cache_mempertahankan_key_judul_dan_assignee_setelah_outbox_menulis() {
+    // Respons update Bitable hanya memuat field yang ditulis (lihat FakeLark).
+    let (lark, clock) = setup();
+    let a = laptop(&lark, &clock, "ou_a");
+    let mut t = now_task("rec1", &["ou_a"], &clock);
+    t.key = Some("PGS-1510".to_owned());
+    t.title = "TEST Mandor".to_owned();
+    t.claim = Some(claim_of("ou_a", 10 * DAY, "n"));
+    lark.put(t);
+    a.svc.poll(true, &[]).await.unwrap();
+    a.svc.request_write("rec1", &start_op()).await.unwrap();
+
+    let report = a.svc.drain_outbox(10).await.unwrap();
+    // Poll juga mengantrekan cermin kanban, jadi rec1 bisa ditulis lebih dari sekali.
+    assert!(report.written.iter().all(|r| r == "rec1"), "{report:?}");
+    assert!(!report.written.is_empty());
+    let cached = a.svc.cached("rec1").await.unwrap().unwrap().task;
+    assert_eq!(cached.key.as_deref(), Some("PGS-1510"));
+    assert_eq!(cached.title, "TEST Mandor");
+    assert_eq!(cached.assignees, ["ou_a"]);
+    assert_eq!(cached.status, TaskStatus::InProgress);
+    assert_eq!(cached.branch.as_deref(), Some("mandor/pgs-1"));
+}
+
+#[tokio::test]
 async fn outbox_menulis_transisi_dan_field_dengan_jeda_antar_tulis() {
     let (lark, clock) = setup();
     let a = laptop(&lark, &clock, "ou_a");

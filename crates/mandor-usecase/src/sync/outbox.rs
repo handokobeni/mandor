@@ -109,7 +109,17 @@ impl<D: Deps> SyncService<D> {
             WriteOp::Fields(fields) => (None, fields.as_slice()),
         };
         let written = self.lark.write(record_id, status, fields).await?;
-        self.cache.upsert(&written).await?;
+        // Respons update hanya memuat field yang ditulis; field lain (key, judul,
+        // assignee) diambil dari baca segar sebelum tulis.
+        let merged = match fresh {
+            Some(mut task) => {
+                task.apply_write(status, fields);
+                task.last_modified_ms = task.last_modified_ms.max(written.last_modified_ms);
+                task
+            }
+            None => written,
+        };
+        self.cache.upsert(&merged).await?;
         Ok(())
     }
 }

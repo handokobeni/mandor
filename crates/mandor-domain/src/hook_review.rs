@@ -164,15 +164,37 @@ fn runs_preprocessor(cmd: &str) -> bool {
     })
 }
 
-/// Awal perintah yang mengubah environment (`NAME=value cmd`, `env`, `export`
-/// …): bisa mengarahkan program ke config atau biner lain
-/// (`RIPGREP_CONFIG_PATH`, `PATH`).
+/// Program yang mengubah environment perintah lain; ditolak di posisi mana
+/// pun karena bisa berada di belakang pembungkus (`timeout 5 env …`).
+const ENV_CHANGERS: &[&str] = &[
+    "env", "export", "declare", "typeset", "set", "unset", "alias", "source",
+];
+
+/// Kata perintah mentah (kutip dipertahankan), dipisah di spasi dan pemisah
+/// shell; dipakai untuk mengenali assignment `NAME=value` yang bukan kutipan.
+fn raw_words(cmd: &str) -> impl Iterator<Item = &str> {
+    cmd.split([' ', '\t', ';', '&', '|', '(', ')', '<', '>'])
+        .filter(|w| !w.is_empty())
+}
+
+/// Perubahan environment perintah (`NAME=value`, `env`, `export`, `. file`)
+/// di posisi mana pun: bisa mengarahkan program ke config atau biner lain
+/// (`RIPGREP_CONFIG_PATH`, `PATH`), juga sesudah `time`, `!`, atau pembungkus.
+/// Kata berkutip atau opsi (`--grep=fix`) bukan assignment.
 fn changes_env(cmd: &str) -> Option<String> {
+    if let Some(assign) = raw_words(cmd).find(|w| assigns_env(w)) {
+        return Some(assign.to_owned());
+    }
+    if let Some(prog) = shell_words(cmd)
+        .into_iter()
+        .find(|w| ENV_CHANGERS.contains(&crate::hook::program_name(w)))
+    {
+        return Some(prog);
+    }
+    // `. file` hanya di awal perintah; `.` di tempat lain adalah path.
     cmd.split([';', '&', '|', '(', ')'])
         .filter_map(|segment| shell_words(segment).into_iter().next())
-        .find(|first| {
-            assigns_env(first) || GIT_PRECEDERS.contains(&crate::hook::program_name(first))
-        })
+        .find(|first| first == ".")
 }
 
 fn deny(reason: &str) -> Verdict {
@@ -799,6 +821,10 @@ mod tests {
             "cargo test; FOO=1 cargo test",
             "env -i cargo test",
             "export PATH=/tmp; cargo test",
+            "time FOO=1 rg x",
+            "! FOO=1 rg x",
+            "timeout 5 env X=1 rg x",
+            "nice -n 1 rg --no-config x; declare -x A=1",
             "g$()it stash",
             "g`true`it stash",
             "g${X}it stash",
@@ -834,6 +860,9 @@ mod tests {
             "cargo test --features a#b",
             "rg -n 'a=b' src",
             "git log --grep=fix",
+            "rg foo .",
+            "ls .",
+            "rg -n \"key=value\" src",
         ] {
             let call = ToolCall {
                 tool_name: "Bash".to_owned(),

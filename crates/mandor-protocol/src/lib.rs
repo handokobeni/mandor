@@ -24,6 +24,8 @@ pub mod method {
     pub const LARK_SETTINGS_SET: &str = "lark.settings.set";
     /// Mengubah jeda tenang Waiting Fix tanpa menyentuh pengaturan Lark lain.
     pub const WAITING_FIX_QUIET_SET: &str = "waiting_fix.quiet.set";
+    /// Buku AC run (`RunRef` → `AcLedgerView`), di-refresh dari tracker dulu.
+    pub const LEDGER_GET: &str = "ledger.get";
     pub const LARK_LOGIN_BEGIN: &str = "lark.login.begin";
     pub const LARK_LOGIN_COMPLETE: &str = "lark.login.complete";
     pub const LARK_LOGOUT: &str = "lark.logout";
@@ -76,6 +78,8 @@ pub mod event {
     pub const BOARD_UPDATED: &str = "board.updated";
     /// State run berubah (`RunEventView`).
     pub const RUN_UPDATED: &str = "run.updated";
+    /// Buku AC run berubah (`RunEventView`).
+    pub const LEDGER_UPDATED: &str = "ledger.updated";
     /// Pesan chat baru di run (`RunEventView`).
     pub const RUN_MESSAGE: &str = "run.message";
     /// Langkah Start yang sedang berjalan (`StartProgressView`).
@@ -117,6 +121,8 @@ pub fn ts_bindings() -> Result<Vec<(&'static str, String)>, String> {
             LarkSettingsInput::export_to_string(&cfg),
         )?,
         one("QuietPeriodSet.ts", QuietPeriodSet::export_to_string(&cfg))?,
+        one("AcRowView.ts", AcRowView::export_to_string(&cfg))?,
+        one("AcLedgerView.ts", AcLedgerView::export_to_string(&cfg))?,
         one("LoginBegin.ts", LoginBegin::export_to_string(&cfg))?,
         one("LoginComplete.ts", LoginComplete::export_to_string(&cfg))?,
         one("FlagView.ts", FlagView::export_to_string(&cfg))?,

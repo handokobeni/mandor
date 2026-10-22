@@ -25,6 +25,8 @@ pub struct FakeLark {
     pub write_errors: Arc<Mutex<Vec<PortError>>>,
     pub clock: Arc<AtomicI64>,
     pub acs: Arc<Mutex<HashMap<String, AcItem>>>,
+    /// `true`: tabel AC tidak bisa dibaca.
+    pub acs_fail: Arc<Mutex<bool>>,
     pub replies: Arc<Mutex<Vec<mandor_domain::Reply>>>,
     /// `true`: API komentar gagal (fallback Fix Notes).
     pub replies_fail: Arc<Mutex<bool>>,
@@ -92,6 +94,9 @@ impl LarkTasks for FakeLark {
         Ok(self.replies.lock().unwrap().clone())
     }
     async fn acceptance_criteria(&self, ids: &[String]) -> Result<Vec<AcItem>, PortError> {
+        if *self.acs_fail.lock().unwrap() {
+            return Err(PortError::Transient("AC table timeout".to_owned()));
+        }
         let acs = self.acs.lock().unwrap();
         Ok(ids.iter().filter_map(|i| acs.get(i).cloned()).collect())
     }
@@ -378,6 +383,7 @@ impl Deps for FakeDeps {
     type Spawner = run_fakes::TokioSpawner;
     type Repos = run_fakes::FakeRepos;
     type Prompts = PlainMessage;
+    type Reviews = run_fakes::FakeReviews;
 }
 
 pub mod run_fakes;
@@ -423,6 +429,7 @@ pub struct Station {
     pub runs: run_fakes::FakeRuns,
     pub notifier: run_fakes::FakeNotifier,
     pub repos: run_fakes::FakeRepos,
+    pub reviews: run_fakes::FakeReviews,
 }
 
 pub fn station(lark: &FakeLark, clock: &FakeClock, me: &str) -> Station {
@@ -432,6 +439,7 @@ pub fn station(lark: &FakeLark, clock: &FakeClock, me: &str) -> Station {
     let runs = run_fakes::FakeRuns::default();
     let notifier = run_fakes::FakeNotifier::default();
     let repos = run_fakes::FakeRepos::default();
+    let reviews = run_fakes::FakeReviews::default();
     let ports = mandor_usecase::RunPorts::<FakeDeps> {
         git: git.clone(),
         agent: agent.clone(),
@@ -440,6 +448,7 @@ pub fn station(lark: &FakeLark, clock: &FakeClock, me: &str) -> Station {
         spawner: run_fakes::TokioSpawner::default(),
         repos: repos.clone(),
         prompts: PlainMessage,
+        reviews: reviews.clone(),
     };
     let svc = Arc::new(mandor_usecase::RunService::new(Arc::new(svc), ports));
     Station {
@@ -451,6 +460,7 @@ pub fn station(lark: &FakeLark, clock: &FakeClock, me: &str) -> Station {
         runs,
         notifier,
         repos,
+        reviews,
     }
 }
 

@@ -532,3 +532,40 @@ pub struct StartProgressView {
 pub struct RunEventView {
     pub run_id: String,
 }
+
+/// Satu baris buku AC (Rilis 2).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+pub struct AcRowView {
+    pub ac_id: String,
+    pub label: Option<String>,
+    pub text: String,
+    /// `not_checked`, `in_design`, `partly`, `missing`, `conflicts`, `follow_design`.
+    pub design: String,
+    pub design_note: Option<String>,
+    /// `not_reviewed`, `pass`, `fail`, `cant_verify`, `checked_manually`, `skipped`,
+    /// `fix_in_progress`.
+    pub verdict: String,
+    /// Bukti reviewer sebagai teks biasa.
+    pub evidence: Option<String>,
+    pub stale: bool,
+    /// `active`, `new`, `changed`, `removed`.
+    pub status: String,
+    pub reason: Option<String>,
+    pub decided_by: Option<String>,
+    /// Ikut gerbang dan review (bukan Removed, bukan Follow design).
+    pub in_gate: bool,
+    /// Boleh dipilih untuk Send to agent.
+    pub selectable: bool,
+}
+
+/// Hasil `ledger.get`: buku AC run setelah refresh dari tracker.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+pub struct AcLedgerView {
+    pub run_id: String,
+    pub rows: Vec<AcRowView>,
+    /// Waktu sinkron AC terakhir yang berhasil (ms epoch).
+    #[ts(type = "number | null")]
+    pub synced_at_ms: Option<i64>,
+    /// Alasan refresh dari tracker gagal; `rows` adalah data terakhir.
+    pub sync_error: Option<String>,
+}

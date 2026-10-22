@@ -607,3 +607,39 @@ pub async fn eventually(mut cond: impl FnMut() -> bool) {
     }
     assert!(cond(), "kondisi tidak terpenuhi");
 }
+
+/// Penyimpanan Rilis 2 di memori.
+#[derive(Clone, Default)]
+pub struct FakeReviews {
+    pub ledgers: Arc<Mutex<HashMap<String, Vec<mandor_domain::AcRow>>>>,
+}
+
+impl FakeReviews {
+    /// Menghapus buku AC run (meniru run lama sebelum Rilis 2).
+    pub fn clear(&self, run_id: &str) {
+        self.ledgers.lock().unwrap().remove(run_id);
+    }
+}
+
+impl mandor_usecase::run_ports::LedgerStore for FakeReviews {
+    async fn ac_rows(&self, run_id: &str) -> Result<Vec<mandor_domain::AcRow>, PortError> {
+        Ok(self
+            .ledgers
+            .lock()
+            .unwrap()
+            .get(run_id)
+            .cloned()
+            .unwrap_or_default())
+    }
+    async fn save_ac_rows(
+        &self,
+        run_id: &str,
+        rows: &[mandor_domain::AcRow],
+    ) -> Result<(), PortError> {
+        self.ledgers
+            .lock()
+            .unwrap()
+            .insert(run_id.to_owned(), rows.to_vec());
+        Ok(())
+    }
+}

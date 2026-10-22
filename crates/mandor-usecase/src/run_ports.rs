@@ -4,7 +4,7 @@ use std::collections::BTreeMap;
 use std::future::Future;
 use std::path::{Path, PathBuf};
 
-use mandor_domain::{AgentEvent, Reply, RunState, Task};
+use mandor_domain::{AcRow, AgentEvent, Reply, RunState, Task};
 
 use crate::ports::PortError;
 
@@ -70,6 +70,16 @@ impl WorkChanges {
 pub struct PrRef {
     pub url: String,
     pub open: bool,
+}
+
+/// Buku AC per run (KTD-25).
+pub trait LedgerStore: Send + Sync {
+    fn ac_rows(&self, run_id: &str) -> impl Future<Output = Result<Vec<AcRow>, PortError>> + Send;
+    fn save_ac_rows(
+        &self,
+        run_id: &str,
+        rows: &[AcRow],
+    ) -> impl Future<Output = Result<(), PortError>> + Send;
 }
 
 /// Operasi git dan gh milik daemon (KTD-11).

@@ -196,16 +196,13 @@ impl<D: Deps> RunService<D> {
         progress: &(impl Fn(StartStep) + Send + Sync),
     ) -> Result<RunRecord, RunError> {
         let task = self.task_of(record_id).await?;
-        let acs: Vec<String> = self
-            .sync
-            .lark
-            .acceptance_criteria(&task.ac_ids)
-            .await?
-            .into_iter()
+        let ac_items = self.sync.lark.acceptance_criteria(&task.ac_ids).await?;
+        let acs: Vec<String> = ac_items
+            .iter()
             .filter(|ac| !ac.dropped)
-            .map(|ac| match ac.label {
+            .map(|ac| match &ac.label {
                 Some(l) => format!("{l}: {}", ac.text),
-                None => ac.text,
+                None => ac.text.clone(),
             })
             .collect();
         let branch = branch_name(task.key.as_deref(), &task.record_id, &task.title);
@@ -247,6 +244,7 @@ impl<D: Deps> RunService<D> {
                 .await;
             return Err(e.into());
         }
+        self.init_ledger(&run.id, &ac_items).await;
 
         let message = match planning {
             Planning::Skip => self.prompts.task_message(&task, &acs, dev_note),

@@ -11,7 +11,7 @@ use mandor_agent::{ClaudeAgent, ClaudeConfig, ClaudePrompts};
 use mandor_git::{Git, GitAdapter, GitConfig};
 use mandor_lark::{FileTokenStore, LarkClient, LarkConfig, LarkGateway, TableRef};
 use mandor_protocol::{Notification, SyncStatusView, event};
-use mandor_store::{ReposStore, RunsStore, Store, TaskStore};
+use mandor_store::{ReposStore, ReviewsStore, RunsStore, Store, TaskStore};
 use mandor_usecase::{PortError, RunPorts, RunService, SyncError, SyncService};
 use tokio::sync::{Notify, broadcast};
 use tokio_util::sync::CancellationToken;
@@ -19,7 +19,8 @@ use tokio_util::task::TaskTracker;
 
 use crate::config::Config;
 use crate::prod::{
-    BroadcastRuns, BroadcastTasks, DaemonNotifier, Prod, SystemClock, TrackerSpawner, UuidIds,
+    BroadcastReviews, BroadcastRuns, BroadcastTasks, DaemonNotifier, Prod, SystemClock,
+    TrackerSpawner, UuidIds,
 };
 use crate::settings::LarkSettings;
 use crate::sync_status::SyncStatus;
@@ -129,6 +130,10 @@ pub async fn start(
             spawner: TrackerSpawner::new(env.tracker.clone()),
             repos: ReposStore::new(env.store.clone()),
             prompts: ClaudePrompts,
+            reviews: BroadcastReviews::new(
+                ReviewsStore::new(env.store.clone()),
+                env.events.clone(),
+            ),
         },
     ));
     if let Some(marked) = warn_err(runs.reconcile().await, "rekonsiliasi run gagal") {
@@ -241,6 +246,10 @@ impl Schedule {
         if poked || self.poll.take(now) {
             let is_full = self.full.take(now);
             comments_needed = poll_once(s, is_full).await;
+            if is_full {
+                // AC di tabel tertaut tidak mengubah waktu ubah task (KTD-27).
+                s.runs.refresh_active_ledgers().await;
+            }
         }
         if comments_needed && self.comments.take(now) {
             let report = warn_err(

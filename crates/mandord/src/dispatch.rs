@@ -28,6 +28,7 @@ use crate::views::{
     card_view, notice_view, run_view, sprint_view, task_details_view, team_card_view,
 };
 
+mod review;
 mod workspaces;
 
 /// Method yang membutuhkan sesi Lark dan mengubah run atau kartu.
@@ -599,6 +600,7 @@ impl AppDispatch {
                 ok(&skills)
             }
             other if Self::is_workspaces_method(other) => self.workspaces_call(other, v).await,
+            other if Self::is_review_method(other) => self.review_call(other, v).await,
             other => self.run_action(other, v).await,
         }
     }

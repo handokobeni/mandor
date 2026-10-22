@@ -47,3 +47,8 @@ Branch `feat/rilis2-ac-review`. Satu commit per unit setelah `make check` hijau.
 |---|---|---|---|
 | U1 Model buku AC dan gerbang | selesai | `6bcc8a0` | `ac_ledger.rs`, `push_gate.rs`; teks AC disimpan utuh (bukan hash) untuk deteksi Changed |
 | U2 Store | selesai | `3abbeeb` | Migrasi 0005 diuji pada salinan database Rilis 1 asli; trait port ditambahkan bersama unit pemakainya (U3, U6, U9) |
+| U3 Sinkron buku AC | selesai | (lihat log) | `refresh_ledger` membaca ulang task lalu AC; `ledger.get` + event `ledger.updated`; refresh berkala di rekonsiliasi penuh. Waktu sinkron disimpan di memori daemon (dibangun ulang pada refresh berikutnya). |
+
+### A2: edit AC tidak mengubah waktu ubah task (2026-10-22, terbukti)
+
+Deskripsi AC `reczz28Q6yNmRQKM` milik PGS-1510 diubah lewat `lark-cli`; `mandor_modified` task tetap `2026-10-22T10:11:04+07:00` setelah 5 detik. Refresh buku AC terpisah dari poll task (KTD-27) memang diperlukan.

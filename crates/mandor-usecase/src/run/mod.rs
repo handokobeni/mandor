@@ -53,6 +53,10 @@ pub struct RunService<D: Deps> {
     pub(crate) spawner: D::Spawner,
     pub(crate) repos: D::Repos,
     pub(crate) prompts: D::Prompts,
+    pub(crate) reviews: D::Reviews,
+    /// Waktu sinkron AC terakhir yang berhasil per run (dibangun ulang saat
+    /// refresh berikutnya setelah restart).
+    pub(crate) ledger_synced: Mutex<HashMap<String, i64>>,
     /// Balasan komentar terakhir yang diambil (dibangun ulang tiap poll).
     pub(crate) replies: Mutex<Vec<mandor_domain::Reply>>,
     /// Kursor yang terakhir diantrekan per record, agar tidak diantrekan berulang.
@@ -76,6 +80,7 @@ pub struct RunPorts<D: Deps> {
     pub spawner: D::Spawner,
     pub repos: D::Repos,
     pub prompts: D::Prompts,
+    pub reviews: D::Reviews,
 }
 
 impl<D: Deps> std::fmt::Debug for RunPorts<D> {
@@ -96,6 +101,8 @@ impl<D: Deps> RunService<D> {
             spawner: ports.spawner,
             repos: ports.repos,
             prompts: ports.prompts,
+            reviews: ports.reviews,
+            ledger_synced: Mutex::new(HashMap::new()),
             replies: Mutex::new(Vec::new()),
             cursor_sent: Mutex::new(HashMap::new()),
             stoppers: Mutex::new(HashMap::new()),

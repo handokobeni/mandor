@@ -173,7 +173,7 @@ fn check_path(tool: &str, path: &str) -> Option<String> {
 }
 
 /// Memecah perintah menjadi token kata; tanda kutip dan pemisah shell menjadi spasi.
-fn words(cmd: &str) -> Vec<String> {
+pub(crate) fn words(cmd: &str) -> Vec<String> {
     cmd.chars()
         .map(|c| match c {
             '\'' | '"' | '`' | ';' | '&' | '|' | '(' | ')' | '{' | '}' | '<' | '>' | '\n'
@@ -187,7 +187,7 @@ fn words(cmd: &str) -> Vec<String> {
         .collect()
 }
 
-fn program_name(word: &str) -> &str {
+pub(crate) fn program_name(word: &str) -> &str {
     word.rsplit('/').next().unwrap_or(word)
 }
 

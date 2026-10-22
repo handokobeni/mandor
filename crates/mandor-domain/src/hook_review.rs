@@ -138,6 +138,11 @@ pub fn classify_review(call: &ToolCall, state: &ReviewState, allowed_mcp: &[Stri
         return browser_verdict(call, kind, state);
     }
     if let Some(cmd) = &call.command {
+        if let Some(what) = expands_words(cmd) {
+            return deny(&format!(
+                "{what} can build a command the review cannot check; the review is read-only"
+            ));
+        }
         if let Some(prog) = runs_interpreter(cmd) {
             return deny(&format!(
                 "`{prog}` runs commands the review cannot check; the review is read-only"
@@ -314,6 +319,30 @@ fn shell_words(cmd: &str) -> Vec<String> {
         .filter(|w| !w.is_empty())
         .map(str::to_owned)
         .collect()
+}
+
+/// Ekspansi shell yang bisa menyusun kata perintah (`g$()it`, `{g,}it`,
+/// `gi?`): `$` dan backtick di luar kutip tunggal, kurung kurawal dan glob di
+/// luar kutip. Kutip tunggal membuat semuanya literal; kutip ganda hanya
+/// membiarkan `$` dan backtick aktif.
+fn expands_words(cmd: &str) -> Option<&'static str> {
+    let (mut single, mut double, mut escaped) = (false, false, false);
+    for c in cmd.chars() {
+        if escaped {
+            escaped = false;
+            continue;
+        }
+        match c {
+            '\\' if !single => escaped = true,
+            '\'' if !double => single = !single,
+            '"' if !single => double = !double,
+            '$' | '`' if !single => return Some("Shell expansion (`$` or a backtick)"),
+            '{' | '}' if !single && !double => return Some("Brace expansion"),
+            '*' | '?' | '[' if !single && !double => return Some("An unquoted glob"),
+            _ => {}
+        }
+    }
+    None
 }
 
 /// Interpreter atau pembungkus pertama di perintah, bila ada.
@@ -712,6 +741,12 @@ mod tests {
             "cargo test; bash run.sh",
             "eval \"$CMD\"",
             "ls | xargs cat",
+            "g$()it stash",
+            "g`true`it stash",
+            "g${X}it stash",
+            "{g,}it stash",
+            "/usr/bin/gi? stash",
+            "cargo test \"$(rm -rf src)\"",
         ] {
             let call = ToolCall {
                 tool_name: "Bash".to_owned(),
@@ -801,6 +836,8 @@ mod tests {
             "cargo test >/dev/null;echo ok",
             "find . -name '*.rs'",
             "sed -n 1,5p a.rs",
+            "sed -n '1,$p' a.rs",
+            "grep -rn 'fn {' src",
         ] {
             assert_eq!(
                 classify_review(&bash(cmd), &s, &[]),

@@ -1,0 +1,125 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Workspace · Mandor</title>
+  <link rel="stylesheet" href="vendor/fonts/fonts.css">
+  <link rel="stylesheet" href="css/mandor.css">
+</head>
+<body data-page="workspace">
+  <div class="app">
+    <header class="titlebar" id="titlebar"></header>
+    <div class="body">
+      <aside class="sidebar" id="sidebar" aria-label="Active agents"></aside>
+
+      <main class="main" id="main" data-od-id="workspace">
+        <div class="ws-header" id="ws-header" data-ui="Workspace / Header"></div>
+        <div class="actionbar" id="ws-actions" data-ui="Workspace / ActionBar"></div>
+        <div class="callout-wrap" id="ws-callout"></div>
+
+        <div class="tabs-list" role="tablist" aria-label="Workspace" data-ui="Tabs">
+          <button class="tabs-trigger" role="tab" id="tab-chat" aria-controls="p-chat" aria-selected="true" data-tab="chat"><i data-lucide="messages-square" aria-hidden="true"></i>Chat</button>
+          <button class="tabs-trigger" role="tab" id="tab-plan" aria-controls="p-plan" aria-selected="false" data-tab="plan" hidden><i data-lucide="notebook-pen" aria-hidden="true"></i>Plan <span class="count" id="cnt-plan"></span></button>
+          <button class="tabs-trigger" role="tab" id="tab-changes" aria-controls="p-changes" aria-selected="false" data-tab="changes"><i data-lucide="file-diff" aria-hidden="true"></i>Changes <span class="count" id="cnt-changes"></span></button>
+          <button class="tabs-trigger" role="tab" id="tab-task" aria-controls="p-task" aria-selected="false" data-tab="task"><i data-lucide="list-checks" aria-hidden="true"></i>Task</button>
+          <button class="tabs-trigger" role="tab" id="tab-comments" aria-controls="p-comments" aria-selected="false" data-tab="comments"><i data-lucide="message-square-text" aria-hidden="true"></i>Review comments <span class="count" id="cnt-comments"></span></button>
+          <button class="tabs-trigger" role="tab" id="tab-ac" aria-controls="p-ac" aria-selected="false" data-tab="ac" hidden data-ui="Tabs / trigger=AC review"><i data-lucide="clipboard-check" aria-hidden="true"></i>AC review <span class="count" id="cnt-ac"></span></button>
+        </div>
+
+        <div class="ws-body">
+          <div class="ws-main">
+            <!-- Chat -->
+            <section class="tabs-content" id="p-chat" role="tabpanel" aria-labelledby="tab-chat" style="display:flex;flex-direction:column;flex:1;min-height:0">
+              <div class="chat scroll-area" id="chat" data-ui="ScrollArea / ChatStream" aria-live="polite"><div class="chat-inner" id="chat-inner"></div></div>
+              <div class="composer-wrap">
+                <div class="composer" data-ui="Composer">
+                  <div class="queued" id="queued" aria-label="Queued messages"></div>
+                  <div class="composer-box">
+                    <label class="sr-only" for="composer-input">Message the agent</label>
+                    <textarea id="composer-input" rows="2" placeholder="Reply to the agent. Drafts are kept per task."></textarea>
+                    <div class="composer-bar">
+                      <span class="hint"><span class="kbd" id="send-kbd">Ctrl ↵</span> send</span>
+                      <span class="right" id="composer-actions"></span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </section>
+
+            <!-- Plan (Before coding) -->
+            <section class="tabs-content scroll-area" id="p-plan" role="tabpanel" aria-labelledby="tab-plan" hidden style="flex:1;min-height:0"></section>
+
+            <!-- Changes -->
+            <section class="tabs-content" id="p-changes" role="tabpanel" aria-labelledby="tab-changes" hidden style="flex:1;min-height:0;display:flex">
+              <div class="changes" id="changes" data-ui="DiffViewer" style="flex:1"></div>
+            </section>
+
+            <!-- Task -->
+            <section class="tabs-content scroll-area" id="p-task" role="tabpanel" aria-labelledby="tab-task" hidden style="flex:1;min-height:0"></section>
+
+            <!-- Review comments -->
+            <section class="tabs-content scroll-area" id="p-comments" role="tabpanel" aria-labelledby="tab-comments" hidden style="flex:1;min-height:0"></section>
+
+            <!-- AC review (Release 2) -->
+            <section class="tabs-content scroll-area" id="p-ac" role="tabpanel" aria-labelledby="tab-ac" hidden style="flex:1;min-height:0" data-ui="Workspace / ACReviewTab"></section>
+          </div>
+
+          <aside class="ws-panel scroll-area" id="ws-panel" hidden aria-label="Task details" data-ui="Resizable / panel=details (Sheet in compact)"></aside>
+        </div>
+      </main>
+    </div>
+  </div>
+
+  <!-- Dialog: Start fix -->
+  <dialog class="dialog" id="dlg-fix" aria-labelledby="fx-title" style="width:600px" data-ui="Dialog / StartFix">
+    <div class="dialog-header">
+      <span class="mono muted" id="fx-key"></span>
+      <h2 class="dialog-title" id="fx-title" style="margin-top:6px">Start fix</h2>
+      <p class="dialog-description">The agent gets your instruction plus the comments below. Lark status moves from Waiting Fix to In Progress, and back to Waiting Review after the push.</p>
+    </div>
+    <div class="dialog-body">
+      <div class="field">
+        <label class="label" for="fx-instr">Instruction <span class="muted" style="font-weight:400">(required)</span></label>
+        <textarea class="textarea" id="fx-instr" placeholder="What should the agent fix? e.g. Show the policy limit in the error message, keep the current validation." aria-describedby="fx-err"></textarea>
+        <p class="field-error" id="fx-err" hidden><i data-lucide="circle-alert" class="icon-sm" aria-hidden="true"></i>Write an instruction for the agent before starting the fix.</p>
+      </div>
+      <div class="field">
+        <span class="label">Comments from Lark</span>
+        <div id="fx-comments" style="display:grid;gap:6px"></div>
+      </div>
+    </div>
+    <div class="dialog-footer">
+      <span class="left">Only trusted comments are sent by default.</span>
+      <button class="btn btn-ghost" data-close>Cancel</button>
+      <button class="btn btn-default" id="fx-go"><i data-lucide="wrench" aria-hidden="true"></i>Start fix</button>
+    </div>
+  </dialog>
+
+  <!-- Alert Dialog: generic confirm -->
+  <dialog class="dialog" id="dlg-confirm" role="alertdialog" aria-labelledby="cf-title" style="width:460px" data-ui="AlertDialog">
+    <div class="dialog-header">
+      <h2 class="dialog-title" id="cf-title"></h2>
+      <p class="dialog-description" id="cf-desc"></p>
+    </div>
+    <div class="dialog-body" id="cf-body"></div>
+    <div class="dialog-footer">
+      <button class="btn btn-ghost" data-close>Cancel</button>
+      <button class="btn" id="cf-go"></button>
+    </div>
+  </dialog>
+
+  <div class="popover" id="more-menu" role="menu" hidden data-ui="DropdownMenu"></div>
+
+  <script src="vendor/lucide.min.js"></script>
+  <script src="js/data.js"></script>
+  <script src="js/shell.js"></script>
+  <script src="js/components.js"></script>
+  <script src="js/workspace-content.js"></script>
+  <script src="js/ac-data.js"></script>
+  <script src="js/ac.js"></script>
+  <script src="js/runapp.js"></script>
+  <script src="js/plan.js"></script>
+  <script src="js/workspace.js"></script>
+</body>
+</html>

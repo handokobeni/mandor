@@ -1,0 +1,89 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Notifications · Mandor</title>
+  <link rel="stylesheet" href="vendor/fonts/fonts.css">
+  <link rel="stylesheet" href="css/mandor.css">
+  <style>
+    .spec-page { max-width: 1120px; margin: 0 auto; padding: 32px 32px 64px; }
+    .spec-page > header h1 { font-size: var(--text-xl); font-weight: 600; letter-spacing: -0.015em; }
+    .spec-page > header p { color: var(--muted-foreground); margin-top: 6px; max-width: 72ch; }
+    .spec-page section { margin-top: 32px; }
+    .spec-page h2 { font-size: var(--text-lg); font-weight: 600; letter-spacing: -0.01em; }
+    .spec-page h2 + p { color: var(--muted-foreground); margin-top: 4px; max-width: 72ch; }
+    .os-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(360px, 1fr)); gap: 16px; margin-top: 14px; }
+    /* Native notification mock: the OS draws the real one; Mandor supplies icon, title, body. */
+    .os-toast { display: grid; grid-template-columns: 36px 1fr; gap: 12px; padding: 12px 14px; border-radius: 12px; background: var(--popover); box-shadow: var(--shadow-pop); }
+    .os-toast .app { width: 36px; height: 36px; border-radius: 8px; background: var(--sidebar); display: grid; place-items: center; }
+    .os-toast .brand-mark { width: 20px; height: 20px; }
+    .os-toast .top { display: flex; gap: 6px; font-size: var(--text-xs); color: var(--muted-foreground); }
+    .os-toast .top .when { margin-left: auto; }
+    .os-toast .ttl { font-weight: 600; margin-top: 2px; }
+    .os-toast .bd { color: var(--muted-foreground); font-size: var(--text-sm); line-height: 1.45; margin-top: 2px; }
+    .os-cap { font: 11px var(--font-mono); color: var(--muted-foreground); margin-top: 6px; }
+    .rules { margin-top: 12px; display: grid; gap: 8px; padding-left: 18px; max-width: 80ch; }
+    .rules li { line-height: 1.55; }
+    .center-wrap { margin-top: 14px; display: flex; gap: 24px; align-items: flex-start; flex-wrap: wrap; }
+    .center-wrap .popover { position: static; display: block; }
+  </style>
+</head>
+<body class="page-scroll" data-page="notifications">
+  <main class="spec-page" data-od-id="notifications">
+    <header>
+      <a class="btn btn-ghost btn-sm" href="index.html" style="margin-bottom:12px"><i data-lucide="arrow-left" aria-hidden="true"></i>All screens</a>
+      <h1>Notifications</h1>
+      <p>One event list feeds both the desktop notifications and the in-app notification center (bell in the title bar). Copy below is final; the operating system draws the desktop notification, Mandor only supplies the icon, title, and body.</p>
+    </header>
+
+    <section>
+      <h2>Desktop notifications</h2>
+      <p>Click opens Mandor on the task's workspace. No action buttons: notification actions behave differently on Windows, macOS, and Linux, so every action stays in the app.</p>
+      <div class="os-grid" id="os-grid"></div>
+    </section>
+
+    <section>
+      <h2>When Mandor notifies</h2>
+      <ul class="rules">
+        <li><b>One notification per event</b>, never per tool call or per streamed message.</li>
+        <li><b>Not when you are already looking.</b> If the Mandor window is focused on that task's workspace, the event only goes to the notification center.</li>
+        <li><b>Grouped bursts.</b> Three or more "waiting for you" events within 10 seconds become one notification: "3 agents are waiting for you", which opens the board.</li>
+        <li><b>Waiting Fix respects the quiet period.</b> "Reviewer requested fixes" fires once when the task enters Waiting Fix, not for every comment.</li>
+        <li><b>Each kind can be switched off</b> in Settings › General. Defaults: everything on except PR created.</li>
+        <li><b>Tray close notice.</b> The first time the window closes while agents run: "Mandor is still running in the tray. Agents keep working." Shown once.</li>
+      </ul>
+    </section>
+
+    <section>
+      <h2>Notification center</h2>
+      <p>Bell in the title bar with an unread count. Newest first, unread rows tinted and dotted, click opens the task and marks it read. Try it live from the title bar of any screen.</p>
+      <div class="center-wrap">
+        <div class="popover notif" data-ui="Popover / NotificationCenter" id="center-unread"></div>
+        <div class="popover notif" data-ui="Popover / NotificationCenter / empty" id="center-empty"></div>
+      </div>
+    </section>
+  </main>
+
+  <script src="vendor/lucide.min.js"></script>
+  <script src="js/data.js"></script>
+  <script src="js/shell.js"></script>
+  <script>
+  (function () {
+    var M = window.MANDOR, U = window.UI, esc = U.esc;
+    var KIND = { waiting: 'Agent waiting for you', attention: 'Needs attention', fix: 'Reviewer requested fixes', failed: 'Run failed', pr: 'PR created', review: 'AC review finished' };
+    var extra = [{ kind: 'waiting', ago: 'now', title: '3 agents are waiting for you', body: 'PGS-1391, PGS-1388, and PGS-1402 finished their turns.', cap: 'Grouped burst · opens the board' },
+                 { kind: 'tray', ago: 'now', title: 'Mandor is still running in the tray', body: 'Agents keep working. Open Mandor from the tray icon.', cap: 'Shown once, on first close' }];
+    var items = M.notificationsRaw.map(function (n) { return Object.assign({ cap: 'kind=' + n.kind + ' · ' + KIND[n.kind] + ' · opens ' + n.task }, n); }).concat(extra);
+    document.getElementById('os-grid').innerHTML = items.map(function (n) {
+      return '<div><div class="os-toast" data-ui="DesktopNotification / kind=' + n.kind + '"><span class="app"><span class="brand-mark" aria-hidden="true"><i></i><i></i><i></i></span></span>' +
+        '<div><div class="top"><span>Mandor</span><span class="when">' + esc(n.ago) + '</span></div><div class="ttl">' + esc(n.title) + '</div><div class="bd">' + esc(n.body) + '</div></div></div>' +
+        '<div class="os-cap">' + esc(n.cap) + '</div></div>';
+    }).join('');
+    document.getElementById('center-unread').innerHTML = U.notifCenterHtml(M.notificationsRaw.map(function (n, i) { return Object.assign({ read: i > 3 }, n); }));
+    document.getElementById('center-empty').innerHTML = U.notifCenterHtml([]);
+    U.icons();
+  })();
+  </script>
+</body>
+</html>

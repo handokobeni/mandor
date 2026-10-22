@@ -1,0 +1,214 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Mandor · Phase 1 screens</title>
+  <link rel="stylesheet" href="vendor/fonts/fonts.css">
+  <link rel="stylesheet" href="css/mandor.css">
+  <style>
+    .launch { max-width: 1120px; margin: 0 auto; padding: 40px 32px 64px; }
+    .launch header { display: flex; align-items: flex-end; gap: 16px; margin-bottom: 28px; }
+    .launch h1 { font-size: 28px; font-weight: 600; letter-spacing: -0.02em; line-height: 1.15; }
+    .launch header p { color: var(--muted-foreground); margin-top: 6px; max-width: 62ch; }
+    .launch header .right { margin-left: auto; display: flex; gap: 8px; }
+    .grp { margin-top: 28px; }
+    .grp h2 { display: flex; align-items: center; gap: 8px; font-size: 15px; font-weight: 600; margin-bottom: 10px; }
+    .grp h2 .mono { color: var(--muted-foreground); font-size: 12px; font-weight: 400; }
+    .rows { display: grid; grid-template-columns: repeat(auto-fill, minmax(330px, 1fr)); gap: 8px; }
+    .rowlink { display: grid; grid-template-columns: auto 1fr auto; gap: 4px 10px; align-items: center; padding: 10px 12px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--card); text-decoration: none; }
+    .rowlink:hover { border-color: color-mix(in oklab, var(--border), var(--foreground) 25%); }
+    .rowlink .t { font-weight: 500; }
+    .rowlink .d { grid-column: 2 / 4; color: var(--muted-foreground); font-size: 12px; }
+    .rowlink > [data-lucide]:first-child { color: var(--muted-foreground); }
+  </style>
+</head>
+<body class="page-scroll">
+  <main class="launch" data-od-id="index">
+    <header>
+      <div>
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px"><span class="brand-mark" aria-hidden="true" style="width:22px;height:22px"><i></i><i></i><i></i></span><span class="mono muted">mandor · phase 1</span></div>
+        <h1>Mandor screens</h1>
+        <p>Every link opens the real screen in a desktop window layout. State changes (Start, Push &amp; create PR, Start fix) carry across screens, so you can walk the core loop end to end.</p>
+      </div>
+      <div class="right">
+        <a class="btn btn-outline btn-sm" href="?" id="reset"><i data-lucide="rotate-ccw" aria-hidden="true"></i>Reset prototype state</a>
+      </div>
+    </header>
+
+    <section class="grp">
+      <h2>Core loop <span class="mono">board → Start → chat → Push &amp; create PR → Review → Waiting Fix → quiet period → fixing → Review</span></h2>
+      <div class="rows">
+        <a class="rowlink" href="board.html?start=PGS-1402&amp;lark=ok"><i data-lucide="play" aria-hidden="true"></i><span class="t">1. Start PGS-1402</span><span class="mono muted">board</span><span class="d">Start dialog with StepProgress, then Open workspace. The agent replies after a few seconds.</span></a>
+        <a class="rowlink" href="workspace.html?task=PGS-1391"><i data-lucide="hand" aria-hidden="true"></i><span class="t">2. Waiting for you · PGS-1391</span><span class="mono muted">workspace</span><span class="d">Reply, queue while working, Send now, Stop. Push &amp; create PR holds the CI file for confirmation.</span></a>
+        <a class="rowlink" href="workspace.html?task=PGS-1371&amp;tab=comments"><i data-lucide="timer" aria-hidden="true"></i><span class="t">3. Quiet period · PGS-1371</span><span class="mono muted">workspace</span><span class="d">Countdown, then trusted comments are forwarded, the agent fixes, pushes, and Lark goes back to Waiting Review.</span></a>
+        <a class="rowlink" href="workspace.html?task=PGS-1366"><i data-lucide="wrench" aria-hidden="true"></i><span class="t">4. Start fix · PGS-1366</span><span class="mono muted">dialog</span><span class="d">Required instruction, trusted comments locked in, untrusted ones opt-in.</span></a>
+      </div>
+    </section>
+
+    <section class="grp">
+      <h2>Release 2 · loop <span class="mono">board → Start (design source) → plan with gaps → Follow design → approve → Run app → review → Send to agent → review → confirm → PRs</span></h2>
+      <div class="rows">
+        <a class="rowlink" href="board.html?start=PGS-1426"><i data-lucide="play" aria-hidden="true"></i><span class="t">Start the Release 2 loop · PGS-1426</span><span class="mono muted">board</span><span class="d">Start dialog with Workspace kelola-v2, Before coding, Reviewer, Design sources. Then follow the workspace: answer or Continue to plan, mark AC-5 Follow design, approve, Run app, Push. Use Reset prototype state above to run it again.</span></a>
+      </div>
+    </section>
+
+    <section class="grp">
+      <h2>Release 2 · AC review tab <span class="mono">workspace.html?task=PGS-1426&amp;tab=ac&amp;ac=…</span></h2>
+      <div class="rows">
+        <a class="rowlink" href="workspace.html?task=PGS-1426&amp;tab=ac&amp;ac=plan"><i data-lucide="frame" aria-hidden="true"></i><span class="t">Plan with design gaps</span><span class="mono muted">ac=plan</span><span class="d">AC-5 Conflicts with design; Missing and Partly rows.</span></a>
+        <a class="rowlink" href="workspace.html?task=PGS-1426&amp;tab=ac&amp;ac=noac"><i data-lucide="list-x" aria-hidden="true"></i><span class="t">No AC</span><span class="mono muted">ac=noac</span><span class="d">Empty state; push not gated.</span></a>
+        <a class="rowlink" href="workspace.html?task=PGS-1426&amp;tab=ac&amp;ac=nodesign"><i data-lucide="frame" aria-hidden="true"></i><span class="t">No design source</span><span class="mono muted">ac=nodesign</span><span class="d">"No design source" once, in the header and the summary strip.</span></a>
+        <a class="rowlink" href="workspace.html?task=PGS-1426&amp;tab=ac&amp;ac=design"><i data-lucide="circle-dashed" aria-hidden="true"></i><span class="t">Design only</span><span class="mono muted">ac=design</span><span class="d">Planning filled Design; no review yet.</span></a>
+        <a class="rowlink" href="workspace.html?task=PGS-1426&amp;tab=ac&amp;ac=notchecked"><i data-lucide="circle-dashed" aria-hidden="true"></i><span class="t">Design not checked yet</span><span class="mono muted">ac=notchecked</span><span class="d">Source chosen, planning has not reported.</span></a>
+        <a class="rowlink" href="workspace.html?task=PGS-1426&amp;tab=ac&amp;ac=reviewing"><i data-lucide="loader-circle" aria-hidden="true"></i><span class="t">Reviewing</span><span class="mono muted">ac=reviewing</span><span class="d">Rows fill in as the reviewer finishes.</span></a>
+        <a class="rowlink" href="workspace.html?task=PGS-1426&amp;tab=ac&amp;ac=reviewfailed"><i data-lucide="circle-x" aria-hidden="true"></i><span class="t">Review failed</span><span class="mono muted">ac=reviewfailed</span><span class="d">Time limit; unreported rows stay Not reviewed; Retry.</span></a>
+        <a class="rowlink" href="workspace.html?task=PGS-1426&amp;tab=ac&amp;ac=current&amp;expand=AC-3"><i data-lucide="lock" aria-hidden="true"></i><span class="t">Results current · blocked</span><span class="mono muted">ac=current</span><span class="d">AC-3 Fail, AC-4 Can't verify, AC-8 Removed in Lark.</span></a>
+        <a class="rowlink" href="workspace.html?task=PGS-1426&amp;tab=ac&amp;ac=stale"><i data-lucide="history" aria-hidden="true"></i><span class="t">Stale</span><span class="mono muted">ac=stale</span><span class="d">Code changed after the review.</span></a>
+        <a class="rowlink" href="workspace.html?task=PGS-1426&amp;tab=ac&amp;ac=changed"><i data-lucide="sparkles" aria-hidden="true"></i><span class="t">New and changed AC</span><span class="mono muted">ac=changed</span><span class="d">AC-3 changed, AC-9 new.</span></a>
+        <a class="rowlink" href="workspace.html?task=PGS-1426&amp;tab=ac&amp;ac=allpass"><i data-lucide="circle-check" aria-hidden="true"></i><span class="t">All passing</span><span class="mono muted">ac=allpass</span><span class="d">Ready to push.</span></a>
+        <a class="rowlink" href="workspace.html?task=PGS-1426&amp;tab=ac&amp;ac=warn"><i data-lucide="triangle-alert" aria-hidden="true"></i><span class="t">Warn mode</span><span class="mono muted">ac=warn</span><span class="d">"Push with 2 warnings".</span></a>
+        <a class="rowlink" href="workspace.html?task=PGS-1426&amp;tab=ac&amp;ac=selected"><i data-lucide="send-horizontal" aria-hidden="true"></i><span class="t">Selected for Send to agent</span><span class="mono muted">ac=selected</span><span class="d">Selection bar; Fix in progress after sending.</span></a>
+        <a class="rowlink" href="workspace.html?task=PGS-1426&amp;tab=ac&amp;ac=fixing"><i data-lucide="wrench" aria-hidden="true"></i><span class="t">Fix in progress</span><span class="mono muted">ac=fixing</span><span class="d">Row marked until the next review.</span></a>
+        <a class="rowlink" href="workspace.html?task=PGS-1426&amp;tab=ac&amp;ac=current&amp;history=open"><i data-lucide="history" aria-hidden="true"></i><span class="t">History · read-only view</span><span class="mono muted">history=open</span><span class="d">Select a review to view it.</span></a>
+      </div>
+    </section>
+
+    <section class="grp">
+      <h2>Release 2 · gate dialogs <span class="mono">§4.3</span></h2>
+      <div class="rows">
+        <a class="rowlink" href="workspace.html?task=PGS-1426&amp;tab=ac&amp;ac=current&amp;gate=blocked"><i data-lucide="lock" aria-hidden="true"></i><span class="t">Push blocked popover</span><span class="mono muted">gate=blocked</span><span class="d">Failing AC with Send to agent and Push anyway.</span></a>
+        <a class="rowlink" href="workspace.html?task=PGS-1426&amp;tab=ac&amp;ac=current&amp;gate=readiness&amp;app=older"><i data-lucide="clipboard-check" aria-hidden="true"></i><span class="t">Readiness before a review</span><span class="mono muted">gate=readiness</span><span class="d">Database, app, login, extension, browser testing.</span></a>
+        <a class="rowlink" href="workspace.html?task=PGS-1426&amp;tab=ac&amp;ac=needsconfirm&amp;gate=manual"><i data-lucide="circle-help" aria-hidden="true"></i><span class="t">Confirm manual check</span><span class="mono muted">gate=manual</span><span class="d">"I checked this myself" per row; PR preview.</span></a>
+        <a class="rowlink" href="workspace.html?task=PGS-1426&amp;tab=ac&amp;ac=current&amp;gate=anyway&amp;acsync=failed"><i data-lucide="forward" aria-hidden="true"></i><span class="t">Push anyway + AC sync warning</span><span class="mono muted">gate=anyway</span><span class="d">Required reason, Can't verify rows in the same dialog.</span></a>
+        <a class="rowlink" href="workspace.html?task=PGS-1426&amp;tab=ac&amp;ac=warn&amp;gate=warn"><i data-lucide="triangle-alert" aria-hidden="true"></i><span class="t">Warn confirm</span><span class="mono muted">gate=warn</span><span class="d">No reason needed.</span></a>
+      </div>
+    </section>
+
+    <section class="grp">
+      <h2>Release 2 · plan and Run app <span class="mono">§4.2 · §4.4</span></h2>
+      <div class="rows">
+        <a class="rowlink" href="workspace.html?task=PGS-1426&amp;phase=brainstorming&amp;tab=plan"><i data-lucide="lightbulb" aria-hidden="true"></i><span class="t">Brainstorming</span><span class="mono muted">phase=brainstorming</span><span class="d">Plan tab empty state; Run app hidden until there is code.</span></a>
+        <a class="rowlink" href="workspace.html?task=PGS-1426&amp;phase=question"><i data-lucide="message-circle-question" aria-hidden="true"></i><span class="t">Question for you</span><span class="mono muted">phase=question</span><span class="d">Continue to plan, or answer in Chat.</span></a>
+        <a class="rowlink" href="workspace.html?task=PGS-1426&amp;phase=plan&amp;tab=plan"><i data-lucide="file-check" aria-hidden="true"></i><span class="t">Plan ready with gaps</span><span class="mono muted">phase=plan</span><span class="d">Follow design with Undo; Approve plan & implement.</span></a>
+        <a class="rowlink" href="workspace.html?task=PGS-1426&amp;phase=implementing&amp;tab=task"><i data-lucide="notebook-pen" aria-hidden="true"></i><span class="t">Plan approved + gaps in Task</span><span class="mono muted">phase=implementing</span><span class="d">Gaps read-only; Task tab shows the field written to Lark.</span></a>
+        <a class="rowlink" href="workspace.html?task=PGS-1426&amp;app=off&amp;open=runapp"><i data-lucide="play" aria-hidden="true"></i><span class="t">Run app confirmation</span><span class="mono muted">open=runapp</span><span class="d">Changed files per repo, flagged manifests, .env keys (names only).</span></a>
+        <a class="rowlink" href="workspace.html?task=PGS-1426&amp;app=starting&amp;logs=open"><i data-lucide="loader-circle" aria-hidden="true"></i><span class="t">App starting</span><span class="mono muted">app=starting</span><span class="d">Per repo progress; logs drawer.</span></a>
+        <a class="rowlink" href="workspace.html?task=PGS-1426&amp;app=running"><i data-lucide="app-window" aria-hidden="true"></i><span class="t">App running</span><span class="mono muted">app=running</span><span class="d">URL shown; owner in the title bar.</span></a>
+        <a class="rowlink" href="workspace.html?task=PGS-1426&amp;app=older"><i data-lucide="history" aria-hidden="true"></i><span class="t">Running older code</span><span class="mono muted">app=older</span><span class="d">Restart before a browser review.</span></a>
+        <a class="rowlink" href="workspace.html?task=PGS-1426&amp;app=failed&amp;logs=open"><i data-lucide="circle-x" aria-hidden="true"></i><span class="t">Failed to start</span><span class="mono muted">app=failed</span><span class="d">Logs drawer opens on the failing repo.</span></a>
+        <a class="rowlink" href="workspace.html?task=PGS-1426&amp;app=other"><i data-lucide="arrow-left-right" aria-hidden="true"></i><span class="t">Another run owns the app</span><span class="mono muted">app=other</span><span class="d">Run app asks to stop PGS-1391's app first.</span></a>
+        <a class="rowlink" href="workspace.html?task=PGS-1426&amp;app=stopped"><i data-lucide="circle-pause" aria-hidden="true"></i><span class="t">Stopped by another run</span><span class="mono muted">app=stopped</span><span class="d">Names the run that took over.</span></a>
+      </div>
+    </section>
+
+    <section class="grp">
+      <h2>Release 2 · Start, Settings, board <span class="mono">§4.5 · §4.6 · §4.7</span></h2>
+      <div class="rows">
+        <a class="rowlink" href="board.html?start=PGS-1426"><i data-lucide="play" aria-hidden="true"></i><span class="t">Start dialog: workspace + design sources</span><span class="mono muted">board</span><span class="d">Missing source warning, 2.1 link field marked.</span></a>
+        <a class="rowlink" href="board.html?start=PGS-1402&amp;sources=empty"><i data-lucide="frame" aria-hidden="true"></i><span class="t">Start dialog: no design sources</span><span class="mono muted">sources=empty</span><span class="d">Empty state with a link to Settings.</span></a>
+        <a class="rowlink" href="settings.html#design"><i data-lucide="frame" aria-hidden="true"></i><span class="t">Settings › Design sources</span><span class="mono muted">settings</span><span class="d">Kinds, Test, errors; 2.1 kinds dashed.</span></a>
+        <a class="rowlink" href="settings.html#workspaces"><i data-lucide="folders" aria-hidden="true"></i><span class="t">Settings › Workspaces</span><span class="mono muted">settings</span><span class="d">Browser testing notice, gate, precedence.</span></a>
+        <a class="rowlink" href="settings.html#repos"><i data-lucide="folder-git-2" aria-hidden="true"></i><span class="t">Settings › Repos</span><span class="mono muted">settings</span><span class="d">Test mode, start command, app URL, .env keys, gate override (select kelola-web).</span></a>
+        <a class="rowlink" href="settings.html#general"><i data-lucide="sliders-horizontal" aria-hidden="true"></i><span class="t">Settings › General</span><span class="mono muted">settings</span><span class="d">Reviewer model, cost and time limits.</span></a>
+        <a class="rowlink" href="settings.html#about"><i data-lucide="info" aria-hidden="true"></i><span class="t">Settings › About</span><span class="mono muted">settings</span><span class="d">System check with the Chrome extension.</span></a>
+        <a class="rowlink" href="board.html"><i data-lucide="square-kanban" aria-hidden="true"></i><span class="t">Board with AC chips</span><span class="mono muted">board</span><span class="d">PGS-1429 failed + gaps, PGS-1431 Push held, PGS-1433 Needs your check.</span></a>
+        <a class="rowlink" href="workspace.html?task=PGS-1431"><i data-lucide="shield-alert" aria-hidden="true"></i><span class="t">Automatic fix push held</span><span class="mono muted">workspace</span><span class="d">PGS-1431: confirm the AC, then push.</span></a>
+        <a class="rowlink" href="notifications.html"><i data-lucide="bell" aria-hidden="true"></i><span class="t">Notifications</span><span class="mono muted">notifications.html</span><span class="d">Review finished, push held, app failed to start.</span></a>
+      </div>
+    </section>
+
+    <section class="grp">
+      <h2>Marketing <span class="mono">landing.html</span></h2>
+      <div class="rows">
+        <a class="rowlink" href="landing.html"><i data-lucide="megaphone" aria-hidden="true"></i><span class="t">Landing page</span><span class="mono muted">early access</span><span class="d">Public waitlist page with a playable demo of the core loop, Lark sync, review loop, safety, roadmap, pricing, and FAQ.</span></a>
+      </div>
+    </section>
+
+    <section class="grp">
+      <h2>Handoff <span class="mono">components.html</span></h2>
+      <div class="rows">
+        <a class="rowlink" href="components.html"><i data-lucide="component" aria-hidden="true"></i><span class="t">Component sheet</span><span class="mono muted">dark · light · side by side</span><span class="d">Theme tokens, every shadcn component in use, and every Mandor component with its variants. Layer names under each specimen.</span></a>
+        <a class="rowlink" href="frames.html"><i data-lucide="layout-grid" aria-hidden="true"></i><span class="t">Frames</span><span class="mono muted">28 states · 1440 / 960</span><span class="d">Every screen and state as a real window, dark and light, side by side for review.</span></a>
+        <a class="rowlink" href="design-notes.md"><i data-lucide="ruler" aria-hidden="true"></i><span class="t">Design notes</span><span class="mono muted">spacing · motion · a11y</span><span class="d">Spacing scale, control sizes, layout regions, motion timings, contrast, keyboard map, semantics.</span></a>
+        <a class="rowlink" href="brand-spec.md"><i data-lucide="palette" aria-hidden="true"></i><span class="t">Brand spec</span><span class="mono muted">tokens</span><span class="d">Token values for dark and light, contrast notes, type and posture rules.</span></a>
+      </div>
+    </section>
+
+    <section class="grp">
+      <h2>Phase 2 <span class="mono">onboarding · notifications · tray · OAuth callback</span></h2>
+      <div class="rows">
+        <a class="rowlink" href="onboarding.html"><i data-lucide="list-ordered" aria-hidden="true"></i><span class="t">Onboarding wizard</span><span class="mono muted">6 steps</span><span class="d">Welcome, prerequisites, Lark app with validation, Log in with Lark, first repo, done.</span></a>
+        <a class="rowlink" href="onboarding.html?step=4&amp;login=port"><i data-lucide="circle-x" aria-hidden="true"></i><span class="t">Login: port in use</span><span class="mono muted">error</span><span class="d">Also <span class="mono">login=state</span>, <span class="mono">denied</span>, <span class="mono">timeout</span>, <span class="mono">waiting</span>.</span></a>
+        <a class="rowlink" href="board.html?notif=open&amp;lark=ok"><i data-lucide="bell" aria-hidden="true"></i><span class="t">Notification center</span><span class="mono muted">bell</span><span class="d">Unread count in the title bar; list opens the task and marks it read.</span></a>
+        <a class="rowlink" href="notifications.html"><i data-lucide="message-square-dot" aria-hidden="true"></i><span class="t">Desktop notifications</span><span class="mono muted">copy + rules</span><span class="d">Every notification with final copy, click target, and when Mandor stays quiet.</span></a>
+        <a class="rowlink" href="tray.html"><i data-lucide="panel-bottom" aria-hidden="true"></i><span class="t">System tray</span><span class="mono muted">menu + icon</span><span class="d">Tray menu with waiting runs, idle state, icon variants, close and quit behaviour.</span></a>
+        <a class="rowlink" href="oauth-callback.html?status=ok"><i data-lucide="globe" aria-hidden="true"></i><span class="t">OAuth callback: success</span><span class="mono muted">browser</span><span class="d">Standalone page, no external assets, follows the OS light or dark setting.</span></a>
+        <a class="rowlink" href="oauth-callback.html?status=error&amp;reason=denied"><i data-lucide="globe" aria-hidden="true"></i><span class="t">OAuth callback: failed</span><span class="mono muted">browser</span><span class="d">Reasons: denied, state mismatch, expired, code exchange.</span></a>
+      </div>
+    </section>
+
+    <section class="grp">
+      <h2>Board <span class="mono">board.html</span></h2>
+      <div class="rows">
+        <a class="rowlink" href="board.html?lark=ok&amp;theme=dark"><i data-lucide="square-kanban" aria-hidden="true"></i><span class="t">Board, dark</span><span class="mono muted">default</span><span class="d">All 18 card variants across Todo, In Progress, Review, Done (collapsed), and Unknown.</span></a>
+        <a class="rowlink" href="board.html?lark=ok&amp;theme=light"><i data-lucide="sun" aria-hidden="true"></i><span class="t">Board, light</span><span class="mono muted">theme</span><span class="d">Sets the theme to light. Switch back in Settings › General.</span></a>
+        <a class="rowlink" href="frame.html?src=board.html&amp;w=960&amp;h=900"><i data-lucide="panel-left-close" aria-hidden="true"></i><span class="t">Board at 960 wide</span><span class="mono muted">compact</span><span class="d">Half of a 1920 screen: sidebar collapses to icons, columns scroll sideways.</span></a>
+        <a class="rowlink" href="board.html?start=PGS-1409&amp;lark=ok"><i data-lucide="circle-x" aria-hidden="true"></i><span class="t">Start: lost the claim</span><span class="mono muted">error</span><span class="d">Another developer started PGS-1409 at the same time.</span></a>
+        <a class="rowlink" href="board.html?takeover=PGS-1390&amp;lark=ok"><i data-lucide="arrow-left-right" aria-hidden="true"></i><span class="t">Take over dialog</span><span class="mono muted">dialog</span><span class="d">Dimas's claim is inactive for 47 min; repo picker and the warning that local work is not visible.</span></a>
+        <a class="rowlink" href="board.html?lark=expired"><i data-lucide="triangle-alert" aria-hidden="true"></i><span class="t">Lark session expired</span><span class="mono muted">banner</span><span class="d">Global banner with Log in again, and the warning in the title bar.</span></a>
+        <a class="rowlink" href="board.html?lark=loggedout"><i data-lucide="log-in" aria-hidden="true"></i><span class="t">Not logged in to Lark</span><span class="mono muted">empty</span><span class="d">Board empty state. Use Sprint 43 or a search for the other two empty states.</span></a>
+        <a class="rowlink" href="board.html?lark=ok&amp;sync=error"><i data-lucide="refresh-cw-off" aria-hidden="true"></i><span class="t">Sync failed</span><span class="mono muted">error</span><span class="d">Sync error indicator in the board header. Refresh clears it.</span></a>
+      </div>
+    </section>
+
+    <section class="grp">
+      <h2>Task workspace <span class="mono">workspace.html</span></h2>
+      <div class="rows">
+        <a class="rowlink" href="workspace.html?task=PGS-1388"><i data-lucide="loader-circle" aria-hidden="true"></i><span class="t">Working · PGS-1388</span><span class="mono muted">running</span><span class="d">Errored tool call, Queue and Send now, turn finishes on its own.</span></a>
+        <a class="rowlink" href="workspace.html?task=PGS-1391&amp;tab=changes"><i data-lucide="file-diff" aria-hidden="true"></i><span class="t">Changes · PGS-1391</span><span class="mono muted">diff</span><span class="d">File list with A/M status and +/− counts, unified diff, sensitive file marker.</span></a>
+        <a class="rowlink" href="workspace.html?task=PGS-1391&amp;tab=task"><i data-lucide="list-checks" aria-hidden="true"></i><span class="t">Task · PGS-1391</span><span class="mono muted">read-only</span><span class="d">Description, acceptance criteria with a dropped AC, Lark fields.</span></a>
+        <a class="rowlink" href="workspace.html?task=PGS-1362"><i data-lucide="wrench" aria-hidden="true"></i><span class="t">Fixing · PGS-1362</span><span class="mono muted">wf_running</span><span class="d">Forwarded reviewer comment, live tool calls, fix pushed automatically.</span></a>
+        <a class="rowlink" href="workspace.html?task=PGS-1379"><i data-lucide="circle-x" aria-hidden="true"></i><span class="t">Failed · PGS-1379</span><span class="mono muted">resume</span><span class="d">Interrupted by a daemon restart. Resume continues the session.</span></a>
+        <a class="rowlink" href="workspace.html?task=PGS-1376"><i data-lucide="square-parking" aria-hidden="true"></i><span class="t">Parked: claim lost · PGS-1376</span><span class="mono muted">orphaned</span><span class="d">Another developer claimed the task. Close run.</span></a>
+        <a class="rowlink" href="workspace.html?task=PGS-1384"><i data-lucide="git-pull-request-arrow" aria-hidden="true"></i><span class="t">Creating PR · PGS-1384</span><span class="mono muted">publishing</span><span class="d">Composer disabled with the reason; nothing else to do.</span></a>
+        <a class="rowlink" href="workspace.html?task=PGS-1380&amp;tab=changes"><i data-lucide="git-compare" aria-hidden="true"></i><span class="t">In review · PGS-1380</span><span class="mono muted">empty diff</span><span class="d">Waiting for review with PR #412; Changes empty state.</span></a>
+        <a class="rowlink" href="workspace.html?task=PGS-1393"><i data-lucide="refresh-cw-off" aria-hidden="true"></i><span class="t">Sync failed · PGS-1393</span><span class="mono muted">flag</span><span class="d">Callout with Retry; card moves to Review after it succeeds.</span></a>
+        <a class="rowlink" href="workspace.html?task=PGS-1391&amp;loading=hold"><i data-lucide="loader" aria-hidden="true"></i><span class="t">Loading · workspace</span><span class="mono muted">skeleton</span><span class="d">Held on the skeleton so you can inspect it. Normally shows for under half a second.</span></a>
+        <a class="rowlink" href="workspace.html?task=PGS-9999"><i data-lucide="bot-off" aria-hidden="true"></i><span class="t">Unknown task</span><span class="mono muted">error</span><span class="d">Workspace for a key that does not exist.</span></a>
+      </div>
+    </section>
+
+    <section class="grp">
+      <h2>Settings <span class="mono">settings.html</span></h2>
+      <div class="rows">
+        <a class="rowlink" href="settings.html#lark"><i data-lucide="link-2" aria-hidden="true"></i><span class="t">Lark</span><span class="mono muted">form</span><span class="d">Login status, Custom App and Base fields with inline validation. The secret is never shown.</span></a>
+        <a class="rowlink" href="settings.html#repos"><i data-lucide="folder-git-2" aria-hidden="true"></i><span class="t">Repos</span><span class="mono muted">list + detail</span><span class="d">Companion paths, trusted reviewers, allowlist, Remove repo. Add repo detects the default branch.</span></a>
+        <a class="rowlink" href="settings.html?loading=hold#lark"><i data-lucide="loader" aria-hidden="true"></i><span class="t">Loading · settings</span><span class="mono muted">skeleton</span><span class="d">Held on the skeleton while settings load from the daemon.</span></a>
+        <a class="rowlink" href="settings.html?settings=error#lark"><i data-lucide="server-crash" aria-hidden="true"></i><span class="t">Error · settings</span><span class="mono muted">error</span><span class="d">The daemon did not return settings. Try again loads them.</span></a>
+        <a class="rowlink" href="settings.html#general"><i data-lucide="sliders-horizontal" aria-hidden="true"></i><span class="t">General</span><span class="mono muted">theme</span><span class="d">System, dark, or light theme; notifications; quiet period; tray.</span></a>
+      </div>
+    </section>
+
+    <section class="grp">
+      <h2>Daemon connection <span class="mono">connection.html</span></h2>
+      <div class="rows">
+        <a class="rowlink" href="connection.html"><i data-lucide="loader-circle" aria-hidden="true"></i><span class="t">Connecting</span><span class="mono muted">first launch</span><span class="d">Goes to the board when the daemon answers.</span></a>
+        <a class="rowlink" href="connection.html?state=unreachable"><i data-lucide="unplug" aria-hidden="true"></i><span class="t">Unreachable</span><span class="mono muted">auto-retry</span><span class="d">Backoff countdown, Retry now, and what to check in WSL.</span></a>
+        <a class="rowlink" href="connection.html?state=mismatch"><i data-lucide="octagon-x" aria-hidden="true"></i><span class="t">Version mismatch</span><span class="mono muted">fatal</span><span class="d">App and daemon versions with the update steps.</span></a>
+        <a class="rowlink" href="board.html?daemon=reconnecting&amp;lark=ok"><i data-lucide="wifi-off" aria-hidden="true"></i><span class="t">Reconnecting</span><span class="mono muted">title bar</span><span class="d">In-app indicator while the window stays usable.</span></a>
+      </div>
+    </section>
+  </main>
+  <script src="vendor/lucide.min.js"></script>
+  <script>
+    document.documentElement.setAttribute('data-theme', localStorage.getItem('mandor:theme') === 'light' ? 'light' : 'dark');
+    document.getElementById('reset').onclick = function (e) {
+      e.preventDefault();
+      Object.keys(localStorage).filter(function (k) { return k.indexOf('mandor:') === 0; }).forEach(function (k) { localStorage.removeItem(k); });
+      location.reload();
+    };
+    if (window.lucide) lucide.createIcons();
+  </script>
+</body>
+</html>

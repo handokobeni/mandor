@@ -1,0 +1,180 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Frames · Mandor</title>
+  <link rel="stylesheet" href="vendor/fonts/fonts.css">
+  <link rel="stylesheet" href="css/mandor.css">
+  <style>
+    /* Review gallery: every screen and state as a real window, scaled to fit. */
+    .fr-top { position: sticky; top: 0; z-index: 10; display: flex; align-items: center; gap: 12px; padding: 10px 20px; border-bottom: 1px solid var(--border); background: var(--background); flex-wrap: wrap; }
+    .fr-top h1 { font-size: var(--text-md); font-weight: 600; }
+    .fr-top .muted { font-size: var(--text-sm); }
+    .fr-body { padding: 8px 20px 64px; }
+    .fr-group { padding-top: 24px; }
+    .fr-group h2 { font-size: var(--text-lg); font-weight: 600; letter-spacing: -0.01em; }
+    .fr-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(var(--col, 420px), 1fr)); gap: 16px; margin-top: 12px; }
+    .fr { display: grid; gap: 6px; min-width: 0; }
+    .fr-head { display: flex; align-items: center; gap: 8px; font-size: var(--text-sm); min-width: 0; }
+    .fr-head b { font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .fr-head .mono { color: var(--muted-foreground); font-size: var(--text-xs); white-space: nowrap; }
+    .fr-head a { margin-left: auto; }
+    .fr-view { position: relative; width: 100%; overflow: hidden; border: 1px solid var(--border); border-radius: var(--radius); background: var(--muted); }
+    .fr-view iframe { position: absolute; top: 0; left: 0; border: 0; transform-origin: top left; background: var(--background); }
+    .fr-view .ph { position: absolute; inset: 0; display: grid; place-items: center; color: var(--muted-foreground); font-size: var(--text-sm); }
+  </style>
+</head>
+<body class="page-scroll">
+  <header class="fr-top" data-od-id="frames-top">
+    <span class="brand-mark" aria-hidden="true"><i></i><i></i><i></i></span>
+    <h1>Mandor frames</h1>
+    <span class="muted" id="fr-count"></span>
+    <span style="flex:1"></span>
+    <div class="toggle-group" role="group" aria-label="Theme">
+      <button type="button" data-th="dark" aria-pressed="true">Dark</button>
+      <button type="button" data-th="light" aria-pressed="false">Light</button>
+      <button type="button" data-th="both" aria-pressed="false">Both</button>
+    </div>
+    <div class="toggle-group" role="group" aria-label="Window width">
+      <button type="button" data-w="1440" aria-pressed="true">1440 × 900</button>
+      <button type="button" data-w="960" aria-pressed="false">960 × 900</button>
+      <button type="button" data-w="both" aria-pressed="false">Both</button>
+    </div>
+    <a class="btn btn-ghost btn-sm" href="index.html">All screens</a>
+  </header>
+  <main class="fr-body" id="fr-body" data-od-id="frames"></main>
+
+  <script>
+  (function () {
+    /* [group, label, url]. Each frame loads with frame=1 so it uses base data in memory. */
+    var FRAMES = [
+      ['Plan (R2)', 'Brainstorming', 'workspace.html?task=PGS-1426&phase=brainstorming&tab=plan'],
+      ['Plan (R2)', 'Plan ready with gaps', 'workspace.html?task=PGS-1426&phase=plan&tab=plan'],
+      ['Plan (R2)', 'Approved, gaps in Task', 'workspace.html?task=PGS-1426&phase=implementing&tab=task'],
+      ['Run app (R2)', 'Confirmation', 'workspace.html?task=PGS-1426&app=off&open=runapp'],
+      ['Run app (R2)', 'Starting + logs', 'workspace.html?task=PGS-1426&app=starting&logs=open'],
+      ['Run app (R2)', 'Running', 'workspace.html?task=PGS-1426&app=running'],
+      ['Run app (R2)', 'Older code', 'workspace.html?task=PGS-1426&app=older'],
+      ['Run app (R2)', 'Failed + logs', 'workspace.html?task=PGS-1426&app=failed&logs=open'],
+      ['Run app (R2)', 'Another run owns it', 'workspace.html?task=PGS-1426&app=other'],
+      ['Start + Settings (R2)', 'Start dialog', 'board.html?start=PGS-1426'],
+      ['Start + Settings (R2)', 'Start: no sources', 'board.html?start=PGS-1402&sources=empty'],
+      ['Start + Settings (R2)', 'Design sources', 'settings.html#design'],
+      ['Start + Settings (R2)', 'Workspaces', 'settings.html#workspaces'],
+      ['Start + Settings (R2)', 'General', 'settings.html#general'],
+      ['Start + Settings (R2)', 'About', 'settings.html#about'],
+      ['Board (R2)', 'Board with AC chips', 'board.html'],
+      ['Board (R2)', 'Push held', 'workspace.html?task=PGS-1431'],
+      ['AC review (R2)', 'No AC', 'workspace.html?task=PGS-1426&tab=ac&ac=noac'],
+      ['AC review (R2)', 'Plan: design gaps', 'workspace.html?task=PGS-1426&tab=ac&ac=plan'],
+      ['AC review (R2)', 'No design source', 'workspace.html?task=PGS-1426&tab=ac&ac=nodesign'],
+      ['AC review (R2)', 'Design only', 'workspace.html?task=PGS-1426&tab=ac&ac=design'],
+      ['AC review (R2)', 'Reviewing', 'workspace.html?task=PGS-1426&tab=ac&ac=reviewing'],
+      ['AC review (R2)', 'Review failed', 'workspace.html?task=PGS-1426&tab=ac&ac=reviewfailed'],
+      ['AC review (R2)', 'Current · blocked', 'workspace.html?task=PGS-1426&tab=ac&ac=current&expand=AC-3'],
+      ['AC review (R2)', 'Stale', 'workspace.html?task=PGS-1426&tab=ac&ac=stale'],
+      ['AC review (R2)', 'New / changed AC', 'workspace.html?task=PGS-1426&tab=ac&ac=changed'],
+      ['AC review (R2)', 'All passing', 'workspace.html?task=PGS-1426&tab=ac&ac=allpass'],
+      ['AC review (R2)', 'Warn mode', 'workspace.html?task=PGS-1426&tab=ac&ac=warn'],
+      ['AC review (R2)', 'Selected for Send to agent', 'workspace.html?task=PGS-1426&tab=ac&ac=selected'],
+      ['AC review (R2)', 'History open', 'workspace.html?task=PGS-1426&tab=ac&ac=current&history=open'],
+      ['Gate (R2)', 'Blocked popover', 'workspace.html?task=PGS-1426&tab=ac&ac=current&gate=blocked'],
+      ['Gate (R2)', 'Readiness', 'workspace.html?task=PGS-1426&tab=ac&ac=current&gate=readiness&app=older'],
+      ['Gate (R2)', 'Confirm manual check', 'workspace.html?task=PGS-1426&tab=ac&ac=needsconfirm&gate=manual'],
+      ['Gate (R2)', 'Push anyway + AC sync warning', 'workspace.html?task=PGS-1426&tab=ac&ac=current&gate=anyway&acsync=failed'],
+      ['Gate (R2)', 'Warn confirm', 'workspace.html?task=PGS-1426&tab=ac&ac=warn&gate=warn'],
+      ['Onboarding', '1 · Welcome', 'onboarding.html?step=1'],
+      ['Onboarding', '2 · Prerequisites', 'onboarding.html?step=2'],
+      ['Onboarding', '3 · Connect Lark app', 'onboarding.html?step=3'],
+      ['Onboarding', '4 · Log in: waiting', 'onboarding.html?step=4&login=waiting'],
+      ['Onboarding', '4 · Log in: port in use', 'onboarding.html?step=4&login=port'],
+      ['Onboarding', '4 · Log in: denied', 'onboarding.html?step=4&login=denied'],
+      ['Onboarding', '4 · Log in: timed out', 'onboarding.html?step=4&login=timeout'],
+      ['Onboarding', '4 · Logged in', 'onboarding.html?step=4&login=ok'],
+      ['Onboarding', '5 · Add a repo', 'onboarding.html?step=5'],
+      ['Onboarding', '6 · Done', 'onboarding.html?step=6'],
+      ['Notifications', 'Notification center', 'board.html?notif=open'],
+      ['Notifications', 'Desktop notifications', 'notifications.html'],
+      ['Notifications', 'System tray', 'tray.html'],
+      ['Notifications', 'OAuth callback: success', 'oauth-callback.html?status=ok'],
+      ['Notifications', 'OAuth callback: failed', 'oauth-callback.html?status=error&reason=denied'],
+      ['Daemon connection', 'Connecting', 'connection.html?state=connecting-hold'],
+      ['Daemon connection', 'Unreachable, auto-retry', 'connection.html?state=unreachable'],
+      ['Daemon connection', 'Version mismatch', 'connection.html?state=mismatch'],
+      ['Board', 'Board', 'board.html'],
+      ['Board', 'Lark session expired', 'board.html?lark=expired'],
+      ['Board', 'Not logged in to Lark', 'board.html?lark=loggedout'],
+      ['Board', 'Sync failed', 'board.html?sync=error'],
+      ['Board', 'Daemon reconnecting', 'board.html?daemon=reconnecting'],
+      ['Board', 'Start dialog', 'board.html?start=PGS-1402'],
+      ['Board', 'Start: lost the claim', 'board.html?start=PGS-1409'],
+      ['Board', 'Take over dialog', 'board.html?takeover=PGS-1390'],
+      ['Workspace', 'Loading', 'workspace.html?task=PGS-1391&loading=hold'],
+      ['Workspace', 'Chat · waiting for you', 'workspace.html?task=PGS-1391'],
+      ['Workspace', 'Push held: sensitive files', 'workspace.html?task=PGS-1391&open=push'],
+      ['Workspace', 'Changes', 'workspace.html?task=PGS-1391&tab=changes'],
+      ['Workspace', 'Task', 'workspace.html?task=PGS-1391&tab=task'],
+      ['Workspace', 'Working · errored tool call', 'workspace.html?task=PGS-1388'],
+      ['Workspace', 'Review comments · quiet period', 'workspace.html?task=PGS-1371&tab=comments'],
+      ['Workspace', 'Start fix dialog', 'workspace.html?task=PGS-1366&open=fix'],
+      ['Workspace', 'Failed', 'workspace.html?task=PGS-1379'],
+      ['Workspace', 'Parked: claim lost', 'workspace.html?task=PGS-1376'],
+      ['Workspace', 'Changes · empty', 'workspace.html?task=PGS-1380&tab=changes'],
+      ['Workspace', 'Task not found', 'workspace.html?task=PGS-9999'],
+      ['Settings', 'Loading', 'settings.html?loading=hold#lark'],
+      ['Settings', 'Error', 'settings.html?settings=error#lark'],
+      ['Settings', 'Lark', 'settings.html#lark'],
+      ['Settings', 'Lark · session expired', 'settings.html?lark=expired#lark'],
+      ['Settings', 'Repos', 'settings.html#repos'],
+      ['Settings', 'General', 'settings.html#general']
+    ];
+    var th = 'dark', w = '1440';
+    var body = document.getElementById('fr-body');
+
+    function withParams(url, theme) {
+      var hash = '', i = url.indexOf('#');
+      if (i > -1) { hash = url.slice(i); url = url.slice(0, i); }
+      return url + (url.indexOf('?') > -1 ? '&' : '?') + 'frame=1&theme=' + theme + hash;
+    }
+    function esc(s) { return String(s).replace(/[&<>"]/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]; }); }
+
+    function render() {
+      document.documentElement.setAttribute('data-theme', th === 'light' ? 'light' : 'dark');
+      document.querySelectorAll('[data-th]').forEach(function (b) { b.setAttribute('aria-pressed', String(b.dataset.th === th)); });
+      document.querySelectorAll('[data-w]').forEach(function (b) { b.setAttribute('aria-pressed', String(b.dataset.w === w)); });
+      var themes = th === 'both' ? ['dark', 'light'] : [th];
+      var widths = w === 'both' ? [1440, 960] : [+w];
+      document.documentElement.style.setProperty('--col', widths.length > 1 || themes.length > 1 ? '420px' : '520px');
+      var groups = [], n = 0;
+      FRAMES.forEach(function (f) { if (groups.indexOf(f[0]) === -1) groups.push(f[0]); });
+      body.innerHTML = groups.map(function (g) {
+        var items = '';
+        FRAMES.filter(function (f) { return f[0] === g; }).forEach(function (f) {
+          themes.forEach(function (t) { widths.forEach(function (px) {
+            n++;
+            var src = withParams(f[2], t);
+            items += '<figure class="fr" style="margin:0"><figcaption class="fr-head"><b>' + esc(f[1]) + '</b><span class="mono">' + t + ' · ' + px + '×900</span>' +
+              '<a class="btn btn-ghost btn-xs" href="' + esc(f[2]) + '" target="_blank" rel="noopener">Open</a></figcaption>' +
+              '<div class="fr-view" data-w="' + px + '" style="aspect-ratio:' + px + '/900"><span class="ph">Loading ' + esc(f[2].split('?')[0]) + '…</span>' +
+              '<iframe loading="lazy" title="' + esc(f[1] + ', ' + t + ', ' + px) + '" width="' + px + '" height="900" src="' + esc(src) + '" tabindex="-1"></iframe></div></figure>';
+          }); });
+        });
+        return '<section class="fr-group"><h2>' + esc(g) + '</h2><div class="fr-grid">' + items + '</div></section>';
+      }).join('');
+      document.getElementById('fr-count').textContent = n + ' frames';
+      fit();
+    }
+    function fit() {
+      document.querySelectorAll('.fr-view').forEach(function (v) {
+        var f = v.querySelector('iframe'); f.style.transform = 'scale(' + (v.clientWidth / +v.dataset.w) + ')';
+      });
+    }
+    window.addEventListener('resize', fit);
+    document.querySelectorAll('[data-th]').forEach(function (b) { b.onclick = function () { th = b.dataset.th; render(); }; });
+    document.querySelectorAll('[data-w]').forEach(function (b) { b.onclick = function () { w = b.dataset.w; render(); }; });
+    render();
+  })();
+  </script>
+</body>
+</html>

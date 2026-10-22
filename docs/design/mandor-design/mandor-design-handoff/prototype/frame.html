@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Window preview · Mandor</title>
+  <link rel="stylesheet" href="css/mandor.css">
+  <style>
+    body { overflow: auto; min-width: 0; display: grid; place-items: start center; padding: 24px; gap: 10px; }
+    .cap { font-size: 12px; color: var(--muted-foreground); font-family: var(--font-mono); }
+    iframe { border: 1px solid var(--border); border-radius: 8px; background: var(--background); }
+  </style>
+</head>
+<body class="page-scroll">
+  <div class="cap" id="cap"></div>
+  <iframe id="win" title="Mandor window"></iframe>
+  <script>
+    var p = new URLSearchParams(location.search);
+    var w = +(p.get('w') || 960), h = +(p.get('h') || 900), src = p.get('src') || 'board.html';
+    var f = document.getElementById('win');
+    f.width = w; f.height = h; f.src = src;
+    document.getElementById('cap').textContent = src + ' · window ' + w + ' × ' + h;
+    document.documentElement.setAttribute('data-theme', localStorage.getItem('mandor:theme') === 'light' ? 'light' : 'dark');
+  </script>
+</body>
+</html>

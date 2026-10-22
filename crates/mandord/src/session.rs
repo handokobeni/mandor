@@ -69,6 +69,8 @@ pub struct SessionEnv<'a> {
     pub parent: &'a CancellationToken,
     /// Port WebSocket daemon untuk server MCP ledger (`mandord mcp`).
     pub rpc_port: u16,
+    /// Proses run app milik daemon.
+    pub apps: &'a Arc<crate::apps::ProcApps>,
 }
 
 /// Klien Lark dari pengaturan.
@@ -136,8 +138,14 @@ pub async fn start(
                 ReviewsStore::new(env.store.clone()),
                 env.events.clone(),
             ),
+            apps: crate::apps::BroadcastApps::new(
+                Arc::clone(env.apps),
+                mandor_store::AppStateStore::new(env.store.clone()),
+                env.events.clone(),
+            ),
         },
     ));
+    warn_err(runs.reap_apps().await, "pembersihan app yatim gagal");
     if let Some(marked) = warn_err(runs.reconcile().await, "rekonsiliasi run gagal") {
         if !marked.is_empty() {
             tracing::info!(?marked, "run terputus ditandai gagal");

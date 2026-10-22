@@ -374,6 +374,22 @@ pub struct RepoView {
     pub companions: Vec<String>,
     pub trusted_reviewers: Vec<String>,
     pub extra_allowed: Vec<String>,
+    /// Run app dan cara uji reviewer (KTD-37).
+    pub app: RepoAppView,
+}
+
+/// Pengaturan run app per repo.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+pub struct RepoAppView {
+    /// `web` atau `no_app`.
+    pub test_mode: String,
+    pub setup_command: Option<String>,
+    pub start_command: Option<String>,
+    pub port: Option<u16>,
+    pub app_url: Option<String>,
+    /// Kunci `.env` yang diteruskan ke app (nilai tidak pernah dikirim).
+    pub env_keys: Vec<String>,
+    pub browser_tests: bool,
 }
 
 /// Parameter `repos.add`.
@@ -391,6 +407,70 @@ pub struct RepoUpdate {
     pub companions: Vec<String>,
     pub trusted_reviewers: Vec<String>,
     pub extra_allowed: Vec<String>,
+    /// Pengaturan run app; tidak diisi = tidak berubah.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub app: Option<RepoAppView>,
+}
+
+/// State app satu repo anggota run.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+pub struct AppMemberView {
+    pub repo_id: String,
+    /// URL app kanonik: alamat login dev dan origin reviewer.
+    pub url: Option<String>,
+    pub state: String,
+}
+
+/// State app milik run.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+pub struct AppRunView {
+    pub run_id: String,
+    /// `off`, `setting_up`, `starting`, `waiting_for_port`, `running`,
+    /// `failed`, atau `stopped_by_other_run`.
+    pub state: String,
+    pub members: Vec<AppMemberView>,
+    pub database_confirmed: bool,
+    pub login_confirmed: bool,
+    pub error: Option<String>,
+}
+
+/// Berkas berubah di satu repo untuk konfirmasi sebelum app dijalankan.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+pub struct AppChangesView {
+    pub repo_id: String,
+    /// Dikirim balik di `AppRunParams.snapshots`.
+    pub snapshot: String,
+    pub files: Vec<String>,
+    /// Manifest paket, lockfile, skrip, dan berkas perintah start.
+    pub flagged: Vec<String>,
+}
+
+/// Parameter `app.run`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+pub struct AppRunParams {
+    pub run_id: String,
+    /// Snapshot per repo yang ditampilkan ke dev (`AppChangesView.snapshot`).
+    pub snapshots: std::collections::BTreeMap<String, String>,
+}
+
+/// Parameter `app.confirm`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+pub struct AppConfirm {
+    pub run_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub database: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub login: Option<bool>,
+}
+
+/// Log app satu repo.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+pub struct AppLogView {
+    pub repo_id: String,
+    pub text: String,
 }
 
 /// Workspace multi-repo: folder induk dan repo terdaftar di dalamnya.

@@ -29,6 +29,7 @@ impl Deps for Prod {
     type Git = GitAdapter;
     type Agent = ClaudeAgent;
     type Reviews = BroadcastReviews;
+    type Apps = crate::apps::BroadcastApps;
     type Runs = BroadcastRuns;
     type Notifier = DaemonNotifier;
     type Spawner = TrackerSpawner;

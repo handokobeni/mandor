@@ -1151,6 +1151,7 @@ dependencies = [
  "pretty_assertions",
  "process-wrap",
  "secrecy",
+ "tempfile",
  "thiserror",
  "tokio",
  "tracing",

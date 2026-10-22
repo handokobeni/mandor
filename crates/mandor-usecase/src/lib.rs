@@ -1,6 +1,7 @@
 //! Orkestrasi mandor. Mendefinisikan trait port yang dibutuhkan use case;
 //! adapter mengimplementasikannya. Lihat `CLAUDE.md`.
 
+pub mod app_run;
 mod hash;
 mod notify;
 pub mod ports;

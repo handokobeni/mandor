@@ -28,6 +28,7 @@ use crate::views::{
     card_view, notice_view, run_view, sprint_view, task_details_view, team_card_view,
 };
 
+mod app_run;
 mod design;
 mod review;
 mod workspaces;
@@ -430,10 +431,16 @@ impl AppDispatch {
     }
 
     async fn repos_update(&self, p: RepoUpdate) -> Result<Value, RpcError> {
+        let current = self.app.store.get_repo(&p.id).await.map_err(store_error)?;
+        let app = match &p.app {
+            Some(view) => app_run::app_settings_from(view)?,
+            None => mandor_store::app_settings_of(&current.settings),
+        };
         let settings = json!({
             "companions": p.companions,
             "trusted_reviewers": p.trusted_reviewers,
             "extra_allowed": p.extra_allowed,
+            "app": mandor_store::app_settings_json(&app),
         });
         self.app
             .store
@@ -606,6 +613,7 @@ impl AppDispatch {
             }
             other if Self::is_workspaces_method(other) => self.workspaces_call(other, v).await,
             other if Self::is_design_method(other) => self.design_call(other, v).await,
+            other if Self::is_app_method(other) => self.app_call(other, v).await,
             other if Self::is_review_method(other) => self.review_call(other, v).await,
             other => self.run_action(other, v).await,
         }
@@ -736,6 +744,7 @@ fn repo_settings(repo: Option<&mandor_store::Repo>) -> (Vec<String>, Vec<String>
 
 fn repo_view(r: mandor_store::Repo) -> RepoView {
     let (companions, trusted_reviewers, extra_allowed) = repo_settings(Some(&r));
+    let app = mandor_store::app_settings_of(&r.settings);
     RepoView {
         id: r.id,
         path: r.path,
@@ -744,6 +753,7 @@ fn repo_view(r: mandor_store::Repo) -> RepoView {
         companions,
         trusted_reviewers,
         extra_allowed,
+        app: app_run::repo_app_view(&app),
     }
 }
 

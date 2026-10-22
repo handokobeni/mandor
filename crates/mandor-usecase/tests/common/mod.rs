@@ -384,6 +384,7 @@ impl Deps for FakeDeps {
     type Repos = run_fakes::FakeRepos;
     type Prompts = PlainMessage;
     type Reviews = run_fakes::FakeReviews;
+    type Apps = run_fakes::FakeApps;
 }
 
 pub mod run_fakes;
@@ -430,6 +431,7 @@ pub struct Station {
     pub notifier: run_fakes::FakeNotifier,
     pub repos: run_fakes::FakeRepos,
     pub reviews: run_fakes::FakeReviews,
+    pub apps: run_fakes::FakeApps,
 }
 
 pub fn station(lark: &FakeLark, clock: &FakeClock, me: &str) -> Station {
@@ -440,6 +442,7 @@ pub fn station(lark: &FakeLark, clock: &FakeClock, me: &str) -> Station {
     let notifier = run_fakes::FakeNotifier::default();
     let repos = run_fakes::FakeRepos::default();
     let reviews = run_fakes::FakeReviews::default();
+    let apps = run_fakes::FakeApps::default();
     let ports = mandor_usecase::RunPorts::<FakeDeps> {
         git: git.clone(),
         agent: agent.clone(),
@@ -449,6 +452,7 @@ pub fn station(lark: &FakeLark, clock: &FakeClock, me: &str) -> Station {
         repos: repos.clone(),
         prompts: PlainMessage,
         reviews: reviews.clone(),
+        apps: apps.clone(),
     };
     let svc = Arc::new(mandor_usecase::RunService::new(Arc::new(svc), ports));
     Station {
@@ -461,6 +465,7 @@ pub fn station(lark: &FakeLark, clock: &FakeClock, me: &str) -> Station {
         notifier,
         repos,
         reviews,
+        apps,
     }
 }
 

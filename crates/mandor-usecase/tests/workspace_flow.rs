@@ -38,6 +38,7 @@ fn repo(id: &str, allowed: &str) -> RepoInfo {
         companions: vec![],
         trusted_reviewers: vec![],
         extra_allowed: vec![allowed.to_owned()],
+        app: mandor_domain::app_run::AppSettings::default(),
     }
 }
 

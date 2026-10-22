@@ -202,15 +202,22 @@ pub async fn prepare_agent_home(base: &Path) -> Result<AgentHome, AgentError> {
     Ok(AgentHome { gitconfig, gh_dir })
 }
 
+/// Env login shell tanpa secret: token, kunci API, SSH agent, dan variabel
+/// Lark/Mandor dibuang. Basis env agent dan proses app (KTD-36).
+#[must_use]
+pub fn clean_env(login_env: &BTreeMap<String, String>) -> Vec<(String, String)> {
+    login_env
+        .iter()
+        .filter(|(k, _)| !is_secret_var(k))
+        .map(|(k, v)| (k.clone(), v.clone()))
+        .collect()
+}
+
 /// Environment agent: env login shell tanpa secret, ditambah config git/gh
 /// terisolasi sehingga credential helper global dan kunci SSH tidak terpakai.
 #[must_use]
 pub fn agent_env(login_env: &BTreeMap<String, String>, home: &AgentHome) -> Vec<(String, String)> {
-    let mut env: Vec<(String, String)> = login_env
-        .iter()
-        .filter(|(k, _)| !is_secret_var(k))
-        .map(|(k, v)| (k.clone(), v.clone()))
-        .collect();
+    let mut env = clean_env(login_env);
     let set = [
         ("GIT_CONFIG_NOSYSTEM", "1".to_owned()),
         ("GIT_CONFIG_GLOBAL", home.gitconfig.display().to_string()),

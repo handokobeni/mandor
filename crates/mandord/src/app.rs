@@ -33,6 +33,8 @@ pub struct App {
     pub started: Instant,
     /// Port WebSocket daemon; dipakai server MCP ledger milik agent.
     pub rpc_port: u16,
+    /// Proses run app; hidup sepanjang daemon, bukan sesi Lark.
+    pub apps: Arc<crate::apps::ProcApps>,
     settings: RwLock<Option<LarkSettings>>,
     session: RwLock<Option<Arc<LarkSession>>>,
     /// Nama akun Lark yang login (token lama tidak menyimpannya).
@@ -55,7 +57,12 @@ impl App {
         shutdown: CancellationToken,
         rpc_port: u16,
     ) -> Self {
+        let apps = Arc::new(crate::apps::ProcApps::new(
+            cfg.shell.clone(),
+            cfg.base_env.clone(),
+        ));
         Self {
+            apps,
             cfg,
             store,
             events,
@@ -122,6 +129,7 @@ impl App {
             tracker: &self.tracker,
             parent: &self.shutdown,
             rpc_port: self.rpc_port,
+            apps: &self.apps,
         };
         let s = session::start(&env, settings, me).await?;
         *self.session.write().await = Some(s);

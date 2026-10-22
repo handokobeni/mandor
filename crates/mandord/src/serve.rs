@@ -93,6 +93,7 @@ async fn stop_all(app: &App, shutdown: &CancellationToken, tracker: &TaskTracker
     if let Some(session) = app.session().await {
         session.runs.shutdown_agents().await;
     }
+    app.apps.stop_all().await;
     if tokio::time::timeout(SHUTDOWN_GRACE, tracker.wait())
         .await
         .is_err()

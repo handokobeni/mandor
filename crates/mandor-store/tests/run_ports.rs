@@ -140,3 +140,59 @@ async fn repo_dengan_pengaturan_pendamping_dan_reviewer() {
     assert_eq!(r.trusted_reviewers, ["ou_qa"]);
     assert!(repos.repo("lain").await.unwrap().is_none());
 }
+
+#[tokio::test]
+async fn pengaturan_app_repo_dan_state_app_per_run() {
+    use mandor_domain::app_run::{AppRunState, AppSettings, TestMode};
+    use mandor_store::{AppStateStore, app_settings_json};
+    use mandor_usecase::run_ports::{AppMemberRecord, AppRecord, AppRecords};
+
+    let (s, _d) = open().await;
+    let repos = ReposStore::new(s.clone());
+    // Bawaan: No app, uji browser aktif.
+    let app = repos.repo("repo1").await.unwrap().unwrap().app;
+    assert_eq!(app.test_mode, TestMode::NoApp);
+    assert!(app.browser_tests);
+
+    let wanted = AppSettings {
+        test_mode: TestMode::Web,
+        setup_command: Some("bun install".to_owned()),
+        start_command: Some("bun run dev".to_owned()),
+        port: Some(5173),
+        app_url: None,
+        env_keys: vec!["API_URL".to_owned()],
+        browser_tests: false,
+    };
+    s.set_repo_settings(
+        "repo1",
+        &json!({"companions": [], "app": app_settings_json(&wanted)}),
+    )
+    .await
+    .unwrap();
+    assert_eq!(repos.repo("repo1").await.unwrap().unwrap().app, wanted);
+
+    let apps = AppStateStore::new(s);
+    assert_eq!(apps.app_record("r1").await.unwrap(), None);
+    assert_eq!(apps.app_owner().await.unwrap(), None);
+    let rec = AppRecord {
+        run_id: "r1".to_owned(),
+        state: AppRunState::Running,
+        members: vec![AppMemberRecord {
+            repo_id: "repo1".to_owned(),
+            url: Some("http://localhost:5173".to_owned()),
+            pgid: Some(4242),
+            state: AppRunState::Running,
+        }],
+        snapshot: [("repo1".to_owned(), "t1".to_owned())].into(),
+        setup_hashes: [("repo1".to_owned(), "h1".to_owned())].into(),
+        database_confirmed: true,
+        login_confirmed: false,
+        error: None,
+    };
+    apps.save_app_record(&rec).await.unwrap();
+    apps.set_app_owner(Some("r1")).await.unwrap();
+    assert_eq!(apps.app_record("r1").await.unwrap(), Some(rec));
+    assert_eq!(apps.app_owner().await.unwrap().as_deref(), Some("r1"));
+    apps.set_app_owner(None).await.unwrap();
+    assert_eq!(apps.app_owner().await.unwrap(), None);
+}

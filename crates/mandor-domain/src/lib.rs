@@ -5,6 +5,7 @@
 
 pub mod ac_ledger;
 pub mod agent;
+pub mod app_run;
 pub mod claim;
 pub mod cursor;
 pub mod gate;

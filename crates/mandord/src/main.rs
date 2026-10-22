@@ -9,6 +9,7 @@
 //! - `hook`: hook `PreToolUse` Claude Code untuk agent; fail-closed (exit 2).
 
 mod app;
+mod apps;
 mod config;
 mod connect;
 mod discovery;

@@ -4,6 +4,7 @@
 //! [`StoreError`] sebelum keluar dari crate.
 
 mod ac_ledger;
+mod app_port;
 mod codec;
 mod design_sources;
 mod error;
@@ -26,6 +27,7 @@ use std::time::Duration;
 
 use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePool, SqlitePoolOptions};
 
+pub use app_port::AppStateStore;
 pub use design_sources::DesignSourceRow;
 pub use error::StoreError;
 pub use messages::Message;
@@ -34,7 +36,7 @@ pub use outbox::{OutboxItem, OutboxStatus};
 pub use repos::{NewRepo, Repo};
 pub use review_port::ReviewsStore;
 pub use reviews::{StoredReview, StoredVerdict};
-pub use run_port::{ReposStore, RunsStore};
+pub use run_port::{ReposStore, RunsStore, app_settings_json, app_settings_of};
 pub use tasks::TaskStore;
 pub use workspaces::{NewWorkspace, Workspace};
 

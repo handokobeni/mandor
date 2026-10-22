@@ -198,4 +198,5 @@ pub trait Deps: Send + Sync + 'static {
     /// Penyimpanan Rilis 2: buku AC (dan, di unit berikutnya, review, sumber
     /// desain, setelan).
     type Reviews: crate::run_ports::LedgerStore + 'static;
+    type Apps: crate::run_ports::AppProcesses + crate::run_ports::AppRecords + 'static;
 }

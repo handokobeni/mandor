@@ -34,6 +34,18 @@ pub mod method {
     pub const LEDGER_TOOL_SET_DESIGN: &str = "ledger.tool.set_design";
     /// Koneksi kapabilitas, peran verdict: `LedgerToolSetVerdict`.
     pub const LEDGER_TOOL_SET_VERDICT: &str = "ledger.tool.set_verdict";
+    /// State app run (`RunRef` → `AppRunView`).
+    pub const APP_STATUS: &str = "app.status";
+    /// Berkas berubah per repo untuk konfirmasi (`RunRef` → `Vec<AppChangesView>`).
+    pub const APP_CHANGES: &str = "app.changes";
+    /// Menyalakan app (`AppRunParams` → `AppRunView`).
+    pub const APP_RUN: &str = "app.run";
+    /// Menghentikan app (`RunRef` → `AppRunView`).
+    pub const APP_STOP: &str = "app.stop";
+    /// Konfirmasi database dan login (`AppConfirm` → `AppRunView`).
+    pub const APP_CONFIRM: &str = "app.confirm";
+    /// Log app per repo (`RunRef` → `Vec<AppLogView>`).
+    pub const APP_LOGS: &str = "app.logs";
     /// Sumber desain terdaftar (`Vec<DesignSourceView>`).
     pub const DESIGN_SOURCES_LIST: &str = "design_sources.list";
     /// `DesignSourceAdd` → `DesignSourceView`.
@@ -99,6 +111,8 @@ pub mod event {
     pub const RUN_UPDATED: &str = "run.updated";
     /// Buku AC run berubah (`RunEventView`).
     pub const LEDGER_UPDATED: &str = "ledger.updated";
+    /// State run app berubah (`RunEventView`); client memuat ulang `app.status`.
+    pub const APP_UPDATED: &str = "app.updated";
     /// Pesan chat baru di run (`RunEventView`).
     pub const RUN_MESSAGE: &str = "run.message";
     /// Langkah Start yang sedang berjalan (`StartProgressView`).
@@ -232,6 +246,13 @@ fn review_bindings() -> Result<Vec<(&'static str, String)>, String> {
             "DesignSourceAdd.ts",
             DesignSourceAdd::export_to_string(&cfg),
         )?,
+        one("AppRunView.ts", AppRunView::export_to_string(&cfg))?,
+        one("AppMemberView.ts", AppMemberView::export_to_string(&cfg))?,
+        one("AppChangesView.ts", AppChangesView::export_to_string(&cfg))?,
+        one("AppRunParams.ts", AppRunParams::export_to_string(&cfg))?,
+        one("AppConfirm.ts", AppConfirm::export_to_string(&cfg))?,
+        one("AppLogView.ts", AppLogView::export_to_string(&cfg))?,
+        one("RepoAppView.ts", RepoAppView::export_to_string(&cfg))?,
         one(
             "DesignSourceUpdate.ts",
             DesignSourceUpdate::export_to_string(&cfg),

@@ -8,7 +8,7 @@ license.workspace = true
 description = "Runner proses eksternal: timeout, process group, redaksi token, environment shell."
 
 [dependencies]
-tokio = { workspace = true, features = ["process", "io-util", "time", "rt", "macros"] }
+tokio = { workspace = true, features = ["process", "io-util", "time", "rt", "macros", "net"] }
 process-wrap = { workspace = true, features = ["tokio1", "process-group", "job-object", "kill-on-drop"] }
 thiserror.workspace = true
 tracing.workspace = true
@@ -17,6 +17,7 @@ secrecy.workspace = true
 [dev-dependencies]
 tokio = { workspace = true, features = ["process", "io-util", "time", "rt-multi-thread", "macros"] }
 pretty_assertions.workspace = true
+tempfile.workspace = true
 
 [lints]
 workspace = true

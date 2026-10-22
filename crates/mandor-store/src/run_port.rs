@@ -3,6 +3,7 @@
 use std::path::PathBuf;
 
 use mandor_domain::RunState;
+use mandor_domain::app_run::{AppSettings, TestMode};
 use mandor_usecase::PortError;
 use mandor_usecase::review::DesignRoot;
 use mandor_usecase::run_ports::{
@@ -84,6 +85,83 @@ struct RepoSettings {
     trusted_reviewers: Vec<String>,
     #[serde(default)]
     extra_allowed: Vec<String>,
+    #[serde(default)]
+    app: StoredApp,
+}
+
+/// Bentuk simpan [`AppSettings`] di `settings_json.app` (KTD-37).
+#[derive(Serialize, Deserialize)]
+struct StoredApp {
+    #[serde(default)]
+    test_mode: Option<String>,
+    #[serde(default)]
+    setup_command: Option<String>,
+    #[serde(default)]
+    start_command: Option<String>,
+    #[serde(default)]
+    port: Option<u16>,
+    #[serde(default)]
+    app_url: Option<String>,
+    #[serde(default)]
+    env_keys: Vec<String>,
+    #[serde(default = "browser_tests_default")]
+    browser_tests: bool,
+}
+
+fn browser_tests_default() -> bool {
+    true
+}
+
+impl Default for StoredApp {
+    fn default() -> Self {
+        Self {
+            test_mode: None,
+            setup_command: None,
+            start_command: None,
+            port: None,
+            app_url: None,
+            env_keys: Vec::new(),
+            browser_tests: true,
+        }
+    }
+}
+
+/// Pengaturan app dari `settings_json` repo; bawaan: No app, uji browser aktif.
+#[must_use]
+pub fn app_settings_of(settings: &serde_json::Value) -> AppSettings {
+    let stored: StoredApp = settings
+        .get("app")
+        .cloned()
+        .and_then(|v| serde_json::from_value(v).ok())
+        .unwrap_or_default();
+    AppSettings {
+        test_mode: stored
+            .test_mode
+            .as_deref()
+            .and_then(TestMode::parse)
+            .unwrap_or_default(),
+        setup_command: stored.setup_command.filter(|c| !c.trim().is_empty()),
+        start_command: stored.start_command.filter(|c| !c.trim().is_empty()),
+        port: stored.port,
+        app_url: stored.app_url.filter(|u| !u.trim().is_empty()),
+        env_keys: stored.env_keys,
+        browser_tests: stored.browser_tests,
+    }
+}
+
+/// `settings_json.app` untuk disimpan.
+#[must_use]
+pub fn app_settings_json(app: &AppSettings) -> serde_json::Value {
+    serde_json::to_value(StoredApp {
+        test_mode: Some(app.test_mode.as_str().to_owned()),
+        setup_command: app.setup_command.clone(),
+        start_command: app.start_command.clone(),
+        port: app.port,
+        app_url: app.app_url.clone(),
+        env_keys: app.env_keys.clone(),
+        browser_tests: app.browser_tests,
+    })
+    .unwrap_or(serde_json::Value::Null)
 }
 
 fn extra_of(r: &RunRecord) -> Result<String, StoreError> {
@@ -393,6 +471,7 @@ impl Repos for ReposStore {
             Err(StoreError::NotFound) => return Ok(None),
             Err(e) => return Err(e.into()),
         };
+        let app = app_settings_of(&repo.settings);
         let settings: RepoSettings = serde_json::from_value(repo.settings).unwrap_or_default();
         Ok(Some(RepoInfo {
             id: repo.id,
@@ -402,6 +481,7 @@ impl Repos for ReposStore {
             companions: settings.companions,
             trusted_reviewers: settings.trusted_reviewers,
             extra_allowed: settings.extra_allowed,
+            app,
         }))
     }
 }

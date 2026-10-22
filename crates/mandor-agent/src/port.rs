@@ -500,6 +500,7 @@ mod tests {
                 companions: vec!["/specs".into()],
                 trusted_reviewers: vec![],
                 extra_allowed: vec!["Bash(just *)".to_owned()],
+                app: mandor_domain::app_run::AppSettings::default(),
             },
             worktree: "/wt/x".into(),
             branch: "mandor/x".to_owned(),
@@ -549,6 +550,7 @@ mod tests {
             companions: companion.map(PathBuf::from).into_iter().collect(),
             trusted_reviewers: vec![],
             extra_allowed: vec![allowed.to_owned()],
+            app: mandor_domain::app_run::AppSettings::default(),
         }
     }
 

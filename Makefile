@@ -31,8 +31,11 @@ test:
 	cargo test --workspace --locked
 
 # mandord (wiring) dikecualikan dari floor, seperti crates/app di skill.
+# Artefak workspace dan .profraw lama dibersihkan dulu, dan incremental dimatikan,
+# agar target/llvm-cov-target tidak terus membesar di setiap run.
 cover-check:
-	cargo llvm-cov --workspace --locked --summary-only \
+	cargo llvm-cov clean --workspace
+	CARGO_INCREMENTAL=0 cargo llvm-cov --workspace --locked --summary-only \
 		--ignore-filename-regex 'crates/mandord/' \
 		--fail-under-lines $(COVER_MIN)
 

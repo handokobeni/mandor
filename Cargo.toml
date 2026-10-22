@@ -69,3 +69,12 @@ large_futures = "warn"
 cognitive_complexity = "warn"
 too_many_lines = "warn"
 module_name_repetitions = "allow"
+
+# Ukuran target/: debug info penuh untuk semua dependensi membuat build dev dan
+# coverage membengkak puluhan GB. Baris saja cukup untuk backtrace kode kita;
+# coverage memakai instrumentasi, bukan debug info.
+[profile.dev]
+debug = "line-tables-only"
+
+[profile.dev.package."*"]
+debug = false

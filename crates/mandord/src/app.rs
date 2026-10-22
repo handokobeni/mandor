@@ -159,6 +159,27 @@ impl App {
         self.settings.read().await.as_ref().map(LarkSettings::view)
     }
 
+    /// Mengubah jeda tenang Waiting Fix; sesi yang berjalan langsung memakainya.
+    ///
+    /// # Errors
+    /// Lark belum diatur, nilai di luar batas, atau berkas tidak bisa ditulis.
+    pub async fn set_quiet_secs(
+        &self,
+        secs: i64,
+    ) -> anyhow::Result<mandor_protocol::LarkSettingsView> {
+        let mut guard = self.settings.write().await;
+        let mut next = guard.clone().context("Set up the Lark app first")?;
+        next.set_quiet_secs(secs)?;
+        settings::save(&self.cfg.lark_settings_path(), &next).await?;
+        let view = next.view();
+        *guard = Some(next);
+        drop(guard);
+        if let Some(s) = self.session().await {
+            s.quiet_secs.store(secs, Ordering::Relaxed);
+        }
+        Ok(view)
+    }
+
     /// Menyimpan pengaturan; sesi dimulai ulang bila sudah login.
     ///
     /// # Errors

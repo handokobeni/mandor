@@ -40,6 +40,7 @@ fn setup() -> (FakeLark, FakeClock) {
                 label: Some(format!("AC-{id}")),
                 text: text.to_owned(),
                 dropped,
+                ..Default::default()
             },
         );
     }
@@ -169,6 +170,13 @@ async fn publish_commit_push_pr_lalu_waiting_review_dengan_link() {
     assert_eq!(st.git.st().commits[0].1, "feat: implementasi task");
     assert_eq!(st.git.st().pushes, ["mandor/pgs-7-tab-data"]);
     assert_eq!(st.git.st().created_prs[0].1, "PGS-7: Tab Data");
+    // Deskripsi PR ditulis model dari diff branch, task, AC, dan plan.
+    let body = st.git.st().pr_bodies[0].clone();
+    assert!(body.contains("## Summary"), "{body}");
+    assert!(body.contains("Lark task: PGS-7"), "{body}");
+    let ctx = st.agent.pr_contexts.lock().unwrap()[0].clone();
+    assert_eq!(ctx.title, "PGS-7: Tab Data");
+    assert!(ctx.diff.contains("+diff pr"), "{}", ctx.diff);
 
     st.svc.sync().drain_outbox(10).await.unwrap();
     let rec = lark.get("rec1").unwrap();
@@ -361,4 +369,30 @@ async fn start_melaporkan_setiap_langkah_berurutan() {
             StartStep::MovingStatus
         ]
     );
+}
+
+#[tokio::test]
+async fn deskripsi_pr_gagal_dibuat_tetap_membuat_pr_dengan_template() {
+    let (lark, clock) = setup();
+    let st = started(&lark, &clock).await;
+    st.svc.sync().drain_outbox(10).await.unwrap();
+    st.agent.last().done();
+    eventually(|| st.runs.only().state == RunState::AwaitingDev).await;
+    let wt = st.runs.only().worktree.unwrap();
+    st.git.set_changes(
+        &wt,
+        WorkChanges {
+            dirty: true,
+            unpushed: 0,
+            files: vec!["src/a.rs".to_owned()],
+            diff: "+fn a(){}".to_owned(),
+        },
+    );
+    *st.agent.fail_pr_description.lock().unwrap() = true;
+
+    st.svc.publish(&st.runs.only().id).await.unwrap();
+    let body = st.git.st().pr_bodies[0].clone();
+    assert!(body.contains("Lark task: PGS-7"), "{body}");
+    assert!(body.contains("Created by Mandor"), "{body}");
+    assert!(!body.contains("## Summary"), "{body}");
 }

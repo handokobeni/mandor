@@ -9,13 +9,44 @@ use std::sync::Arc;
 
 use super::{RunError, RunService};
 use crate::ports::Deps;
+use mandor_domain::Task;
+
+use crate::hash::fnv1a_hex;
+
 use crate::run_ports::{
-    AgentPort, AgentRequest, AgentWorkspace, ChatItem, GitPort, RepoInfo, Repos, RunPhase,
-    RunRecord, RunStore, SessionRef, WorkChanges,
+    AgentPort, AgentRequest, AgentWorkspace, ChatItem, GitPort, PrContext, RepoInfo, Repos,
+    RunPhase, RunRecord, RunStore, SessionRef, WorkChanges,
 };
 
 /// Batas diff untuk pembuat pesan commit.
 const COMMIT_DIFF_MAX: usize = 50_000;
+/// Judul PR: `KEY: judul task`.
+fn pr_title(task: &Task) -> String {
+    match &task.key {
+        Some(k) => format!("{k}: {}", task.title),
+        None => task.title.clone(),
+    }
+}
+
+/// GitHub dapat mengembalikan badan dengan `\r\n`; bandingkan setelah dirapikan.
+fn normalize_body(body: &str) -> String {
+    body.replace("\r\n", "\n").trim().to_owned()
+}
+
+/// Badan template sebelum deskripsi otomatis ada: `Lark task: KEY`, baris kosong,
+/// lalu penanda Mandor.
+fn is_legacy_body(body: &str) -> bool {
+    let lines: Vec<&str> = body.lines().collect();
+    matches!(
+        lines.as_slice(),
+        [task, "", "Created by mandor." | "Created by Mandor."] if task.starts_with("Lark task: ")
+    )
+}
+
+/// Batas diff branch yang dikirim ke pembuat deskripsi PR.
+const PR_DIFF_MAX: usize = 60_000;
+/// Batas deskripsi buatan model; GitHub menolak badan PR di atas 65.536 karakter.
+const PR_BODY_MAX: usize = 20_000;
 
 /// Satu repo dalam run beserta worktree dan link PR-nya.
 #[derive(Debug, Clone)]
@@ -201,10 +232,15 @@ impl<D: Deps> RunService<D> {
                 self.commit_and_push(&run.id, m, changes, &branch).await?;
                 progressed = true;
             }
-            let url = if let Some(u) = &m.pr_url {
-                Some(u.clone())
-            } else if let Some(pr) = self.git.find_pr(&m.repo, &branch).await? {
-                Some(pr.url)
+            let existing = match &m.pr_url {
+                Some(u) => Some(u.clone()),
+                None => self.git.find_pr(&m.repo, &branch).await?.map(|pr| pr.url),
+            };
+            let url = if let Some(u) = existing {
+                if !changes.is_empty() && self.refresh_pr_body(run, m, &u).await {
+                    self.runs.save(run, run.generation, self.now()).await?;
+                }
+                Some(u)
             } else if !multi || !changes.is_empty() || self.has_commits(m).await? {
                 Some(self.create_pr(run, m, &branch).await?)
             } else {
@@ -259,23 +295,103 @@ impl<D: Deps> RunService<D> {
 
     async fn create_pr(
         &self,
-        run: &RunRecord,
+        run: &mut RunRecord,
         m: &Member,
         branch: &str,
     ) -> Result<String, RunError> {
         let task = self.task_of(&run.record_id).await?;
-        let title = match &task.key {
-            Some(k) => format!("{k}: {}", task.title),
-            None => task.title.clone(),
-        };
-        let body = format!(
-            "Lark task: {}\n\nCreated by mandor.",
-            task.key.as_deref().unwrap_or(&task.record_id)
-        );
-        Ok(self
+        let title = pr_title(&task);
+        let body = self.pr_body(run, m, &task, &title).await;
+        let url = self
             .git
             .create_pr(&m.repo, &m.worktree, branch, &title, &body)
-            .await?)
+            .await?;
+        run.pr_body_hashes
+            .insert(url.clone(), fnv1a_hex(&normalize_body(&body)));
+        Ok(url)
+    }
+
+    /// Menulis ulang badan PR dari diff terbaru setelah push perbaikan, hanya bila
+    /// badan saat ini masih tulisan Mandor. Kegagalan hanya dicatat; push dan
+    /// status tidak bergantung padanya. `true` bila badan diperbarui (hash baru
+    /// perlu disimpan).
+    async fn refresh_pr_body(&self, run: &mut RunRecord, m: &Member, url: &str) -> bool {
+        if !self.pr_body_owned(run, m, url).await {
+            return false;
+        }
+        let task = match self.task_of(&run.record_id).await {
+            Ok(t) => t,
+            Err(e) => {
+                tracing::warn!(url, error = %e, "task tidak terbaca; badan PR tidak diperbarui");
+                return false;
+            }
+        };
+        let body = self.pr_body(run, m, &task, &pr_title(&task)).await;
+        if let Err(e) = self.git.set_pr_body(&m.repo, &m.worktree, url, &body).await {
+            tracing::warn!(url, error = %e, "badan PR gagal diperbarui");
+            return false;
+        }
+        run.pr_body_hashes
+            .insert(url.to_owned(), fnv1a_hex(&normalize_body(&body)));
+        true
+    }
+
+    /// Badan PR masih tulisan Mandor: hash sama dengan yang terakhir ditulis,
+    /// atau masih badan template lama. Badan yang tidak terbaca dianggap bukan.
+    async fn pr_body_owned(&self, run: &RunRecord, m: &Member, url: &str) -> bool {
+        let current = match self.git.pr_body(&m.repo, url).await {
+            Ok(Some(b)) => normalize_body(&b),
+            Ok(None) => return false,
+            Err(e) => {
+                tracing::warn!(url, error = %e, "badan PR tidak terbaca; tidak diperbarui");
+                return false;
+            }
+        };
+        let owned =
+            run.pr_body_hashes.get(url) == Some(&fnv1a_hex(&current)) || is_legacy_body(&current);
+        if !owned {
+            tracing::info!(url, "badan PR sudah disunting; tidak ditimpa");
+        }
+        owned
+    }
+
+    /// Badan PR: deskripsi buatan model dari diff branch dan konteks task, diapit
+    /// tautan task dan penanda Mandor. Bila model atau bahan gagal, PR tetap
+    /// dibuat dengan badan minimal.
+    async fn pr_body(&self, run: &RunRecord, m: &Member, task: &Task, title: &str) -> String {
+        let key = task.key.as_deref().unwrap_or(&task.record_id);
+        let header = format!("Lark task: {key}");
+        let footer = "Created by Mandor.";
+        let generated = async {
+            let diff: String = self
+                .git
+                .branch_diff(&m.repo, &m.worktree)
+                .await?
+                .chars()
+                .take(PR_DIFF_MAX)
+                .collect();
+            let acs = self.ac_texts(task).await.unwrap_or_default();
+            let ctx = PrContext {
+                title,
+                description: &task.description,
+                acs: &acs,
+                plan: run.plan.as_deref(),
+                diff: &diff,
+            };
+            self.agent.pr_description(&m.worktree, &ctx).await
+        }
+        .await;
+        match generated {
+            Ok(text) if !text.trim().is_empty() => {
+                let text: String = text.trim().chars().take(PR_BODY_MAX).collect();
+                format!("{header}\n\n{text}\n\n---\n{footer}")
+            }
+            Ok(_) => format!("{header}\n\n{footer}"),
+            Err(e) => {
+                tracing::warn!(error = %e, "deskripsi PR otomatis gagal; memakai badan minimal");
+                format!("{header}\n\n{footer}")
+            }
+        }
     }
 
     /// Menghapus worktree anggota (rollback Start atau tutup run), lalu folder

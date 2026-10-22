@@ -12,6 +12,7 @@ use mandor_domain::run::touches_sensitive_path;
 use mandor_domain::trust::is_trusted;
 use mandor_domain::{AppField, Cursor, Reply, RunState, Task, TaskStatus, WriteOp};
 
+use super::feedback_qa::feedback_qa_replies;
 use crate::notify::notice;
 use crate::ports::{Clock, Deps, LarkTasks, TaskCache};
 use crate::run::{RunError, RunService, TurnEnd};
@@ -62,7 +63,7 @@ impl<D: Deps> RunService<D> {
             .filter_map(|t| t.comment_cursor.as_deref().and_then(Cursor::parse))
             .map(|c| c.create_time)
             .min();
-        let replies = match self.sync.lark.record_replies(oldest).await {
+        let mut replies = match self.sync.lark.record_replies(oldest).await {
             Ok(r) => r,
             Err(e) => {
                 tracing::warn!(error = %e, "komentar Lark tidak terbaca; memakai Fix Notes");
@@ -70,6 +71,7 @@ impl<D: Deps> RunService<D> {
                 Vec::new()
             }
         };
+        replies.extend(self.feedback_qa_of(&candidates).await);
         self.replies
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
@@ -90,6 +92,41 @@ impl<D: Deps> RunService<D> {
             }
         }
         Ok(report)
+    }
+
+    /// Feedback QA dari AC setiap kandidat sebagai balasan sintetis (R11f). AC
+    /// yang gagal dibaca hanya dicatat; komentar tetap diproses.
+    async fn feedback_qa_of(&self, candidates: &[Task]) -> Vec<Reply> {
+        let mut out = Vec::new();
+        for task in candidates.iter().filter(|t| !t.ac_ids.is_empty()) {
+            let requester = match self.fix_requester(task).await {
+                Ok(r) => r,
+                Err(e) => {
+                    tracing::warn!(record_id = %task.record_id, error = %e, "run tidak terbaca; Feedback QA dilewati");
+                    continue;
+                }
+            };
+            match self.sync.lark.acceptance_criteria(&task.ac_ids).await {
+                Ok(acs) => out.extend(feedback_qa_replies(task, &acs, requester.as_deref())),
+                Err(e) => tracing::warn!(
+                    record_id = %task.record_id,
+                    error = %e,
+                    "Feedback QA tidak terbaca; komentar tetap diproses"
+                ),
+            }
+        }
+        out
+    }
+
+    /// Orang yang memindahkan task ke Waiting Fix pada siklus ini: yang dicatat
+    /// run bila loop perbaikan sudah berjalan, atau pengubah terakhir task bila
+    /// loop baru akan dimulai pada putaran ini.
+    async fn fix_requester(&self, task: &Task) -> Result<Option<String>, RunError> {
+        let run = self.runs.active_for(&task.record_id).await?;
+        Ok(match run {
+            Some(r) if r.state.in_fix_loop() => r.fix_requested_by,
+            _ => task.last_modified_by.clone(),
+        })
     }
 
     /// Record milik pengguna (pemilik klaim) yang berstatus Waiting Fix atau
@@ -234,6 +271,7 @@ impl<D: Deps> RunService<D> {
         run.state = RunState::WfAwaitingComment;
         run.automatic = true;
         run.note = None;
+        run.fix_requested_by.clone_from(&task.last_modified_by);
         self.runs.save(&run, run.generation, self.now()).await?;
         self.notifier
             .notify(
@@ -407,7 +445,7 @@ impl<D: Deps> RunService<D> {
         Ok(())
     }
 
-    async fn ac_texts(&self, task: &Task) -> Result<Vec<String>, RunError> {
+    pub(crate) async fn ac_texts(&self, task: &Task) -> Result<Vec<String>, RunError> {
         Ok(self
             .sync
             .lark

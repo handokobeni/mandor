@@ -2,7 +2,7 @@
 
 use std::collections::BTreeMap;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
 use std::time::{Duration, Instant};
 
 use anyhow::Context;
@@ -41,7 +41,8 @@ pub struct LarkSession {
     pub sync: Arc<SyncService<Prod>>,
     pub runs: Arc<RunService<Prod>>,
     pub git: Git,
-    pub settings: LarkSettings,
+    /// Jeda tenang Waiting Fix (detik); bisa diubah tanpa memulai ulang sesi.
+    pub quiet_secs: AtomicI64,
     pub reauth: AtomicBool,
     pub sync_status: SyncStatus,
     /// Event ke client (status sinkron).
@@ -140,7 +141,7 @@ pub async fn start(
         sync,
         runs,
         git,
-        settings,
+        quiet_secs: AtomicI64::new(settings.quiet_secs),
         reauth: AtomicBool::new(false),
         sync_status: SyncStatus::default(),
         events: env.events.clone(),
@@ -243,7 +244,9 @@ impl Schedule {
         }
         if comments_needed && self.comments.take(now) {
             let report = warn_err(
-                s.runs.tick_waiting_fix(s.settings.quiet_secs).await,
+                s.runs
+                    .tick_waiting_fix(s.quiet_secs.load(Ordering::Relaxed))
+                    .await,
                 "mesin Waiting Fix gagal",
             );
             if let Some(r) = report.filter(|r| !r.started.is_empty()) {

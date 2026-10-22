@@ -7,7 +7,7 @@ use mandor_api::Dispatch;
 use mandor_protocol::{
     BoardView, CommentView, DirEntryView, DirListingView, DirQuery, ErrorCode, FileChangeView,
     FileDiffParams, LarkSettingsInput, LoginComplete, MessageView, MessagesQuery, NoticeView,
-    NotificationsRead, PeopleQuery, PersonView, PublishResult, RecordRef, RepoAdd,
+    NotificationsRead, PeopleQuery, PersonView, PublishResult, QuietPeriodSet, RecordRef, RepoAdd,
     RepoCandidateView, RepoRef, RepoUpdate, RepoView, RpcError, RunRef, SendParams, SendResult,
     SkillView, StartFixParams, StartParams, StartPlanning, StartProgressView, StatusResult,
     TakeoverParams, event, method,
@@ -740,16 +740,31 @@ fn repo_view(r: mandor_store::Repo) -> RepoView {
     }
 }
 
-impl Dispatch for AppDispatch {
-    async fn call(&self, name: &str, v: Value) -> Result<Value, RpcError> {
+impl AppDispatch {
+    /// Pengaturan Lark dan jeda tenang Waiting Fix (tanpa sesi Lark).
+    async fn settings_call(&self, name: &str, v: Value) -> Result<Value, RpcError> {
         match name {
-            method::STATUS => self.status().await,
-            method::LARK_SETTINGS_GET => ok(&self.app.settings_view().await),
             method::LARK_SETTINGS_SET => {
                 let input: LarkSettingsInput = params(v)?;
                 self.app.set_settings(input).await.map_err(rejected)?;
                 ok(&self.app.lark_status().await)
             }
+            method::WAITING_FIX_QUIET_SET => {
+                let p: QuietPeriodSet = params(v)?;
+                ok(&self.app.set_quiet_secs(p.secs).await.map_err(rejected)?)
+            }
+            _ => ok(&self.app.settings_view().await),
+        }
+    }
+}
+
+impl Dispatch for AppDispatch {
+    async fn call(&self, name: &str, v: Value) -> Result<Value, RpcError> {
+        match name {
+            method::STATUS => self.status().await,
+            method::LARK_SETTINGS_GET
+            | method::LARK_SETTINGS_SET
+            | method::WAITING_FIX_QUIET_SET => self.settings_call(name, v).await,
             method::LARK_LOGIN_BEGIN => ok(&self.app.login_begin().await.map_err(rejected)?),
             method::LARK_LOGIN_COMPLETE => {
                 let p: LoginComplete = params(v)?;

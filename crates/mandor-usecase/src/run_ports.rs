@@ -1,5 +1,6 @@
 //! Port untuk orkestrasi task run: git, agent, penyimpanan run, notifikasi.
 
+use std::collections::BTreeMap;
 use std::future::Future;
 use std::path::{Path, PathBuf};
 
@@ -142,6 +143,20 @@ pub trait GitPort: Send + Sync {
         title: &str,
         body: &str,
     ) -> impl Future<Output = Result<String, PortError>> + Send;
+    /// Badan PR saat ini; `None` bila PR tidak ditemukan.
+    fn pr_body(
+        &self,
+        repo: &RepoInfo,
+        url: &str,
+    ) -> impl Future<Output = Result<Option<String>, PortError>> + Send;
+    /// Mengganti badan PR (`gh pr edit --body-file -`).
+    fn set_pr_body(
+        &self,
+        repo: &RepoInfo,
+        worktree: &Path,
+        url: &str,
+        body: &str,
+    ) -> impl Future<Output = Result<(), PortError>> + Send;
 }
 
 /// Sesi agent baru dengan ID pilihan daemon, atau lanjutan.
@@ -204,8 +219,30 @@ pub trait AgentPort: Send + Sync {
         worktree: &Path,
         diff: &str,
     ) -> impl Future<Output = Result<String, PortError>> + Send;
+    /// Deskripsi PR (Markdown) dari diff branch dan konteks task, dijalankan tanpa
+    /// tool dan tanpa token seperti pesan commit (KTD-11).
+    fn pr_description(
+        &self,
+        worktree: &Path,
+        ctx: &PrContext<'_>,
+    ) -> impl Future<Output = Result<String, PortError>> + Send;
     /// Menghentikan process group yatim dari daemon sebelumnya (KTD-13).
     fn reap(&self, pid: u32) -> impl Future<Output = ()> + Send;
+}
+
+/// Bahan deskripsi PR. Semua teks berasal dari Lark atau diff dan diperlakukan
+/// sebagai data tidak tepercaya oleh adapter agent.
+#[derive(Debug, Clone, Copy)]
+pub struct PrContext<'a> {
+    /// Judul PR, mis. `PGS-7: Tab Data`.
+    pub title: &'a str,
+    pub description: &'a str,
+    /// AC aktif sebagai `label: teks`.
+    pub acs: &'a [String],
+    /// Plan yang disetujui dev, bila run melewati fase plan.
+    pub plan: Option<&'a str>,
+    /// Diff branch terhadap base, sudah dipotong.
+    pub diff: &'a str,
 }
 
 /// Run untuk satu record di laptop pemilik.
@@ -243,6 +280,13 @@ pub struct RunRecord {
     pub plan_skill: Option<String>,
     /// Akhir jeda tenang (ms epoch); hanya bermakna saat state `WfQuiet`.
     pub quiet_until_ms: Option<i64>,
+    /// `open_id` yang memindahkan task ke Waiting Fix pada siklus ini (pengubah
+    /// terakhir record task saat loop perbaikan dimulai). Dasar kepercayaan
+    /// Feedback QA (KTD-41).
+    pub fix_requested_by: Option<String>,
+    /// Hash badan PR yang terakhir ditulis Mandor, per URL PR. Badan yang hash-nya
+    /// berbeda sudah disunting manusia dan tidak ditimpa.
+    pub pr_body_hashes: BTreeMap<String, String>,
     /// Diisi store saat membaca; diabaikan saat menyimpan.
     pub created_at_ms: i64,
     /// Diisi store saat membaca; diabaikan saat menyimpan.
@@ -274,6 +318,8 @@ impl RunRecord {
             plan: None,
             plan_skill: None,
             quiet_until_ms: None,
+            fix_requested_by: None,
+            pr_body_hashes: BTreeMap::new(),
             created_at_ms: 0,
             updated_at_ms: 0,
         }

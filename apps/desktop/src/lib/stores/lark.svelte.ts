@@ -70,6 +70,12 @@ export class LarkStore {
     await this.refresh();
   }
 
+  /** Jeda tenang Waiting Fix; daemon menolak nilai di luar 30–900 detik. */
+  async setQuiet(secs: number): Promise<void> {
+    if (!this.rpc) return;
+    this.settings = await this.rpc.request<LarkSettingsView>('waiting_fix.quiet.set', { secs });
+  }
+
   /** Login: URL dari daemon, kode ditangkap native, ditukar oleh daemon. */
   async login(catcher: OAuthCatcher): Promise<void> {
     if (!this.rpc) return;

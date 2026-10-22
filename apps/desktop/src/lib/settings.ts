@@ -109,3 +109,17 @@ export function pathCrumbs(path: string): { name: string; path: string }[] {
     ...parts.map((name, i) => ({ name, path: `/${parts.slice(0, i + 1).join('/')}` }))
   ];
 }
+
+/** Batas jeda tenang Waiting Fix yang diterima daemon (detik). */
+export const QUIET_MIN = 30;
+export const QUIET_MAX = 900;
+
+/** Pesan salah untuk input jeda tenang, atau `null` bila valid. */
+export function validateQuiet(raw: string): string | null {
+  const v = raw.trim();
+  if (!v) return 'Type a number of seconds.';
+  if (!/^\d+$/.test(v)) return 'Use whole seconds.';
+  const n = Number(v);
+  if (n < QUIET_MIN || n > QUIET_MAX) return `Use ${QUIET_MIN} to ${QUIET_MAX} seconds.`;
+  return null;
+}

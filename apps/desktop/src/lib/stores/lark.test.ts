@@ -33,3 +33,22 @@ describe('status Lark', () => {
     expect(store.status?.logged_in).toBe(true);
   });
 });
+
+describe('jeda tenang', () => {
+  it('disimpan lewat waiting_fix.quiet.set dan nilai baru tampil', async () => {
+    const calls: [string, unknown][] = [];
+    const rpc: Rpc = {
+      async request<T>(method: string, params?: unknown): Promise<T> {
+        calls.push([method, params]);
+        if (method === 'waiting_fix.quiet.set') return { quiet_secs: 300 } as T;
+        return null as T;
+      },
+      on: () => () => undefined
+    };
+    const store = new LarkStore();
+    store.attach(rpc, () => undefined);
+    await store.setQuiet(300);
+    expect(calls.some(([m, p]) => m === 'waiting_fix.quiet.set' && (p as { secs: number }).secs === 300)).toBe(true);
+    expect(store.settings?.quiet_secs).toBe(300);
+  });
+});

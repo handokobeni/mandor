@@ -89,7 +89,7 @@ pub struct SprintItem {
 }
 
 /// Satu Acceptance Criteria.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct AcItem {
     pub record_id: String,
     /// `AC-xxx`.
@@ -97,6 +97,12 @@ pub struct AcItem {
     pub text: String,
     /// AC Type "Droped": tidak dikirim ke agent.
     pub dropped: bool,
+    /// Isi field Feedback QA (R11f).
+    pub feedback_qa: Option<String>,
+    /// Waktu ubah terakhir record AC (ms epoch).
+    pub last_modified_ms: i64,
+    /// `open_id` pengubah terakhir record AC, bila Lark mengembalikannya.
+    pub last_modified_by: Option<String>,
 }
 
 /// Record di cache lokal beserta penanda kartunya.

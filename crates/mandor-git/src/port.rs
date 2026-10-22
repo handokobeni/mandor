@@ -192,6 +192,25 @@ impl GitPort for GitAdapter {
         }))
     }
 
+    async fn pr_body(&self, repo: &RepoInfo, url: &str) -> Result<Option<String>, PortError> {
+        let token = self.token(repo).await?;
+        Ok(self.git.pr_body(&repo.path, url, token.as_ref()).await?)
+    }
+
+    async fn set_pr_body(
+        &self,
+        repo: &RepoInfo,
+        worktree: &Path,
+        url: &str,
+        body: &str,
+    ) -> Result<(), PortError> {
+        let token = self.token(repo).await?;
+        Ok(self
+            .git
+            .set_pr_body(worktree, url, body, token.as_ref())
+            .await?)
+    }
+
     async fn create_pr(
         &self,
         repo: &RepoInfo,

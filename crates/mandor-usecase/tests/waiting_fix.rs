@@ -313,6 +313,7 @@ async fn app_mati_saat_waiting_fix_membuat_ulang_worktree_dan_sesi_baru_dengan_k
             label: Some("AC-1".to_owned()),
             text: "Nama tampil".to_owned(),
             dropped: false,
+            ..Default::default()
         },
     );
     st.svc.sync().poll(true, &[]).await.unwrap();
@@ -459,4 +460,231 @@ async fn fallback_fix_notes_dari_penulis_tidak_tepercaya_meminta_konfirmasi() {
     st.svc.sync().poll(true, &[]).await.unwrap();
     assert_eq!(tick(&st).await.started, ["rec1"]);
     assert!(st.agent.last().req.message.contains("Ganti warna"));
+}
+
+/// AC `ac1` (AC-1) pada rec1 dengan Feedback QA dari `by`, diubah `secs` detik epoch.
+async fn with_feedback_qa(
+    lark: &FakeLark,
+    st: &Station,
+    feedback: &str,
+    by: Option<&str>,
+    secs: i64,
+) {
+    // Orang yang sama mengisi Feedback QA lalu memindahkan task ke Waiting Fix.
+    let mover = by.map(str::to_owned);
+    lark.edit("rec1", |t| {
+        t.ac_ids = vec!["ac1".to_owned()];
+        t.last_modified_by.clone_from(&mover);
+    });
+    lark.acs.lock().unwrap().insert(
+        "ac1".to_owned(),
+        mandor_usecase::AcItem {
+            record_id: "ac1".to_owned(),
+            label: Some("AC-1".to_owned()),
+            text: "README memuat bagian Smoke test".to_owned(),
+            feedback_qa: Some(feedback.to_owned()),
+            last_modified_ms: secs * 1000,
+            last_modified_by: by.map(str::to_owned),
+            ..Default::default()
+        },
+    );
+    st.svc.sync().poll(true, &[]).await.unwrap();
+}
+
+#[tokio::test]
+async fn feedback_qa_tepercaya_memulai_perbaikan_dengan_label_ac() {
+    let (lark, _clock, st) = setup(true).await;
+    with_feedback_qa(
+        &lark,
+        &st,
+        "Kalimatnya kurang jelas",
+        Some("ou_qa"),
+        NOW - 600,
+    )
+    .await;
+    assert_eq!(tick(&st).await.started, ["rec1"]);
+    let msg = st.agent.last().req.message;
+    assert!(msg.contains("Feedback QA"), "{msg}");
+    assert!(msg.contains("AC-1"), "{msg}");
+    assert!(msg.contains("Kalimatnya kurang jelas"), "{msg}");
+}
+
+#[tokio::test]
+async fn feedback_qa_baru_menunggu_jeda_tenang() {
+    let (lark, _clock, st) = setup(true).await;
+    with_feedback_qa(&lark, &st, "Tambah contoh", Some("ou_qa"), NOW - 10).await;
+    assert!(tick(&st).await.started.is_empty());
+    assert_eq!(st.runs.only().state, RunState::WfQuiet);
+}
+
+#[tokio::test]
+async fn feedback_qa_yang_sama_tidak_dikirim_ulang_dan_yang_berubah_dikirim() {
+    let (lark, _clock, st) = setup(true).await;
+    with_feedback_qa(
+        &lark,
+        &st,
+        "Kalimatnya kurang jelas",
+        Some("ou_qa"),
+        NOW - 600,
+    )
+    .await;
+    tick(&st).await;
+    drain(&st).await;
+    st.agent.last().done();
+    eventually(|| st.runs.only().state == RunState::InReviewLoop).await;
+    drain(&st).await;
+    let first = st.agent.count();
+
+    // QA mengembalikan ke Waiting Fix tanpa mengubah Feedback QA, tetapi field AC
+    // lain ikut berubah sehingga waktu ubah record AC lebih baru.
+    lark.edit("rec1", |t| t.status = TaskStatus::WaitingFix);
+    with_feedback_qa(
+        &lark,
+        &st,
+        "Kalimatnya kurang jelas",
+        Some("ou_qa"),
+        NOW - 300,
+    )
+    .await;
+    assert!(
+        tick(&st).await.started.is_empty(),
+        "isi sama tidak dikirim ulang"
+    );
+    assert_eq!(st.agent.count(), first);
+
+    with_feedback_qa(
+        &lark,
+        &st,
+        "Masih kurang jelas, pakai contoh",
+        Some("ou_qa"),
+        NOW - 200,
+    )
+    .await;
+    assert_eq!(tick(&st).await.started, ["rec1"]);
+    assert!(st.agent.last().req.message.contains("pakai contoh"));
+}
+
+#[tokio::test]
+async fn feedback_qa_dari_penulis_tidak_tepercaya_atau_tidak_diketahui_menunggu_dev() {
+    for by in [Some("ou_asing"), None] {
+        let (lark, _clock, st) = setup(true).await;
+        with_feedback_qa(&lark, &st, "Ubah semua", by, NOW - 600).await;
+        assert!(tick(&st).await.started.is_empty(), "{by:?}");
+        let task = lark.get("rec1").unwrap();
+        let comments = st
+            .svc
+            .record_comments(&task, &["ou_qa".to_owned()])
+            .await
+            .unwrap();
+        let fqa = comments
+            .iter()
+            .find(|c| c.reply.text.contains("Ubah semua"))
+            .expect("Feedback QA tampil di kartu");
+        assert!(!fqa.trusted, "{by:?}");
+    }
+}
+
+#[tokio::test]
+async fn ac_dropped_atau_feedback_kosong_diabaikan() {
+    let (lark, _clock, st) = setup(true).await;
+    with_feedback_qa(&lark, &st, "   ", Some("ou_qa"), NOW - 600).await;
+    assert!(tick(&st).await.started.is_empty());
+    lark.acs.lock().unwrap().get_mut("ac1").unwrap().dropped = true;
+    with_feedback_qa(&lark, &st, "Isi", Some("ou_qa"), NOW - 600).await;
+    lark.acs.lock().unwrap().get_mut("ac1").unwrap().dropped = true;
+    assert!(tick(&st).await.started.is_empty());
+}
+
+#[tokio::test]
+async fn feedback_qa_hanya_dipercaya_bila_penulisnya_yang_memindahkan_ke_waiting_fix() {
+    // Penulis AC tepercaya (ou_qa), tetapi yang memindahkan task ke Waiting Fix
+    // orang lain (ou_asing): isi Feedback QA tidak dikirim otomatis.
+    let (lark, _clock, st) = setup(true).await;
+    with_feedback_qa(&lark, &st, "Ganti judul", Some("ou_qa"), NOW - 600).await;
+    lark.edit("rec1", |t| t.last_modified_by = Some("ou_asing".to_owned()));
+    st.svc.sync().poll(true, &[]).await.unwrap();
+    assert!(tick(&st).await.started.is_empty());
+
+    // Pemindah tepercaya tetapi berbeda dari penulis AC: tetap menunggu dev.
+    let (lark, _clock, st) = setup(true).await;
+    with_feedback_qa(&lark, &st, "Ganti judul", Some("ou_qa"), NOW - 600).await;
+    lark.edit("rec1", |t| t.last_modified_by = Some("ou_pm".to_owned()));
+    st.svc.sync().poll(true, &[]).await.unwrap();
+    assert!(tick(&st).await.started.is_empty());
+}
+
+const PR1: &str = "https://github.com/o/r/pull/1";
+
+/// Satu putaran perbaikan dari komentar tepercaya sampai push selesai.
+async fn fix_round_pushed(lark: &FakeLark, st: &Station) {
+    *lark.replies.lock().unwrap() = vec![reply("r1", "ou_qa", NOW - 600, "Tombol simpan error")];
+    assert_eq!(tick(st).await.started, ["rec1"]);
+    drain(st).await;
+    st.git.set_changes(
+        &wt(),
+        WorkChanges {
+            dirty: true,
+            unpushed: 0,
+            files: vec!["src/form.rs".to_owned()],
+            diff: "+fix".to_owned(),
+        },
+    );
+    st.agent.last().done();
+    eventually(|| st.runs.only().state == RunState::InReviewLoop).await;
+}
+
+#[tokio::test]
+async fn push_perbaikan_memperbarui_badan_pr_template_lama() {
+    let (lark, _clock, st) = setup(true).await;
+    st.git.st().bodies.insert(
+        PR1.to_owned(),
+        "Lark task: PGS-7\n\nCreated by mandor.".to_owned(),
+    );
+    fix_round_pushed(&lark, &st).await;
+    let body = st.git.st().bodies[PR1].clone();
+    assert!(body.contains("## Summary"), "{body}");
+    assert!(body.contains("Lark task: PGS-7"), "{body}");
+}
+
+#[tokio::test]
+async fn push_perbaikan_memperbarui_lagi_badan_yang_ditulis_mandor() {
+    let (lark, _clock, st) = setup(true).await;
+    st.git.st().bodies.insert(
+        PR1.to_owned(),
+        "Lark task: PGS-7\n\nCreated by mandor.".to_owned(),
+    );
+    fix_round_pushed(&lark, &st).await;
+    let first_edits = st.git.st().body_edits;
+    // Putaran kedua: badan masih tulisan Mandor (GitHub boleh mengubah \n jadi \r\n).
+    let crlf = st.git.st().bodies[PR1].replace('\n', "\r\n");
+    st.git.st().bodies.insert(PR1.to_owned(), crlf);
+    lark.edit("rec1", |t| t.status = TaskStatus::WaitingFix);
+    st.svc.sync().poll(true, &[]).await.unwrap();
+    *lark.replies.lock().unwrap() = vec![
+        reply("r1", "ou_qa", NOW - 600, "Tombol simpan error"),
+        reply("r2", "ou_qa", NOW - 500, "Masih error"),
+    ];
+    assert_eq!(tick(&st).await.started, ["rec1"]);
+    drain(&st).await;
+    st.git.set_changes(
+        &wt(),
+        WorkChanges {
+            dirty: true,
+            unpushed: 0,
+            files: vec!["src/form.rs".to_owned()],
+            diff: "+fix lagi".to_owned(),
+        },
+    );
+    st.agent.last().done();
+    eventually(|| st.git.st().body_edits > first_edits).await;
+}
+
+#[tokio::test]
+async fn push_perbaikan_tidak_menimpa_badan_pr_yang_disunting_manusia() {
+    let (lark, _clock, st) = setup(true).await;
+    let edited = "Reviewer notes: keep this.".to_owned();
+    st.git.st().bodies.insert(PR1.to_owned(), edited.clone());
+    fix_round_pushed(&lark, &st).await;
+    assert_eq!(st.git.st().bodies[PR1], edited);
+    assert_eq!(st.git.st().body_edits, 0);
 }

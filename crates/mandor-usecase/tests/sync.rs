@@ -443,6 +443,7 @@ async fn detail_task_dari_cache_dengan_ac_termasuk_yang_di_drop() {
                     label: Some(format!("AC-{id}")),
                     text: format!("teks {id}"),
                     dropped,
+                    ..Default::default()
                 },
             );
         }

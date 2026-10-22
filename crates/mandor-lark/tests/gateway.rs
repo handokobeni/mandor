@@ -403,6 +403,35 @@ async fn ac_dibaca_dari_tabel_tertaut_berurutan_dan_droped_ditandai() {
 }
 
 #[tokio::test]
+async fn feedback_qa_dan_pengubah_terakhir_ac_ikut_dibaca() {
+    let mock = Mock::start(Arc::new(|_: &Req| {
+        (
+            200,
+            json!({"code":0,"data":{"records":[
+                {"record_id":"ac1",
+                 "fields":{"Acceptance Criteria":[{"text":"Nama tampil","type":"text"}],
+                           "Feedback QA":[{"text":"Masih huruf kecil","type":"text"}]},
+                 "last_modified_time":1_792_598_000_000_i64,
+                 "last_modified_by":{"id":"ou_qa","name":"QA"}},
+                {"record_id":"ac2","fields":{"Acceptance Criteria":[{"text":"Email","type":"text"}]}}
+            ]}})
+            .to_string(),
+        )
+    }))
+    .await;
+    let (gw, _s, _d) = gateway(&mock, Some(tokens(now_ms() + 3_600_000))).await;
+    let acs = gw
+        .acceptance_criteria(&["ac1".to_owned(), "ac2".to_owned()])
+        .await
+        .unwrap();
+    assert_eq!(acs[0].feedback_qa.as_deref(), Some("Masih huruf kecil"));
+    assert_eq!(acs[0].last_modified_ms, 1_792_598_000_000);
+    assert_eq!(acs[0].last_modified_by.as_deref(), Some("ou_qa"));
+    assert_eq!(acs[1].feedback_qa, None);
+    assert_eq!(acs[1].last_modified_by, None);
+}
+
+#[tokio::test]
 async fn sprint_dibaca_dari_tabel_tertaut_field_sprint() {
     let mock = Mock::start(Arc::new(|r: &Req| {
         if r.path().ends_with("/tables/tbl1/fields") {

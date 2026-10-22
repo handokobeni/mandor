@@ -43,6 +43,8 @@ pub mod field {
     pub const AC_TYPE: &str = "AC Type";
     /// Nilai AC Type untuk AC yang dibatalkan (ejaan sesuai Base).
     pub const AC_DROPPED: &str = "Droped";
+    /// Catatan QA per AC; sumber Waiting Fix selain komentar (R11f).
+    pub const AC_FEEDBACK_QA: &str = "Feedback QA";
     /// Field di tabel sprint tertaut.
     pub const SPRINT_NAME: &str = "Sprint";
     pub const SPRINT_STATUS: &str = "Sprint Status";
@@ -137,6 +139,9 @@ pub fn to_ac(r: &RawRecord) -> AcItem {
         label: text_of(f(field::AC_ID)),
         text,
         dropped: select_text(f(field::AC_TYPE)).as_deref() == Some(field::AC_DROPPED),
+        feedback_qa: text_of(f(field::AC_FEEDBACK_QA)).filter(|t| !t.trim().is_empty()),
+        last_modified_ms: r.last_modified_ms,
+        last_modified_by: r.last_modified_by.clone(),
     }
 }
 

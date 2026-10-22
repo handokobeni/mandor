@@ -40,6 +40,7 @@ fn setup() -> (FakeLark, FakeClock) {
                 label: Some(format!("AC-{id}")),
                 text: text.to_owned(),
                 dropped,
+                ..Default::default()
             },
         );
     }

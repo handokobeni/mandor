@@ -243,6 +243,10 @@ pub struct RunRecord {
     pub plan_skill: Option<String>,
     /// Akhir jeda tenang (ms epoch); hanya bermakna saat state `WfQuiet`.
     pub quiet_until_ms: Option<i64>,
+    /// `open_id` yang memindahkan task ke Waiting Fix pada siklus ini (pengubah
+    /// terakhir record task saat loop perbaikan dimulai). Dasar kepercayaan
+    /// Feedback QA (KTD-41).
+    pub fix_requested_by: Option<String>,
     /// Diisi store saat membaca; diabaikan saat menyimpan.
     pub created_at_ms: i64,
     /// Diisi store saat membaca; diabaikan saat menyimpan.
@@ -274,6 +278,7 @@ impl RunRecord {
             plan: None,
             plan_skill: None,
             quiet_until_ms: None,
+            fix_requested_by: None,
             created_at_ms: 0,
             updated_at_ms: 0,
         }

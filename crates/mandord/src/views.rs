@@ -293,6 +293,7 @@ mod tests {
                 label: Some("AC-1".to_owned()),
                 text: "Nama tampil".to_owned(),
                 dropped: true,
+                ..Default::default()
             }],
         });
         assert_eq!(v.key.as_deref(), Some("PGS-1"));

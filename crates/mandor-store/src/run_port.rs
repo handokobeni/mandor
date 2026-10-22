@@ -33,6 +33,8 @@ struct RunExtra {
     #[serde(default)]
     pr_body_hashes: std::collections::BTreeMap<String, String>,
     #[serde(default)]
+    review_snapshot: std::collections::BTreeMap<String, String>,
+    #[serde(default)]
     workspace: Option<StoredWorkspace>,
     #[serde(default)]
     extra: Vec<StoredMember>,
@@ -84,6 +86,7 @@ fn extra_of(r: &RunRecord) -> Result<String, StoreError> {
         quiet_until_ms: r.quiet_until_ms,
         fix_requested_by: r.fix_requested_by.clone(),
         pr_body_hashes: r.pr_body_hashes.clone(),
+        review_snapshot: r.review_snapshot.clone(),
         workspace: r.workspace.as_ref().map(|w| StoredWorkspace {
             id: w.id.clone(),
             root: w.root.clone(),
@@ -156,6 +159,7 @@ fn to_record(row: Row) -> Result<RunRecord, StoreError> {
         quiet_until_ms: extra.quiet_until_ms,
         fix_requested_by: extra.fix_requested_by,
         pr_body_hashes: extra.pr_body_hashes,
+        review_snapshot: extra.review_snapshot,
         workspace: extra.workspace.map(|w| RunWorkspace {
             id: w.id,
             root: w.root,

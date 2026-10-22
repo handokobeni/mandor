@@ -153,6 +153,15 @@ pub trait GitPort: Send + Sync {
         title: &str,
         body: &str,
     ) -> impl Future<Output = Result<String, PortError>> + Send;
+    /// Tree id isi worktree saat ini (KTD-28), tanpa mengubah index.
+    fn snapshot(&self, worktree: &Path) -> impl Future<Output = Result<String, PortError>> + Send;
+    /// Berkas yang berbeda antara dua tree.
+    fn changed_between(
+        &self,
+        worktree: &Path,
+        from: &str,
+        to: &str,
+    ) -> impl Future<Output = Result<Vec<String>, PortError>> + Send;
     /// Badan PR saat ini; `None` bila PR tidak ditemukan.
     fn pr_body(
         &self,
@@ -297,6 +306,9 @@ pub struct RunRecord {
     /// Hash badan PR yang terakhir ditulis Mandor, per URL PR. Badan yang hash-nya
     /// berbeda sudah disunting manusia dan tidak ditimpa.
     pub pr_body_hashes: BTreeMap<String, String>,
+    /// Snapshot kode (repo → tree id) saat review terakhir dimulai; kosong bila
+    /// belum pernah direview (KTD-28).
+    pub review_snapshot: BTreeMap<String, String>,
     /// Diisi store saat membaca; diabaikan saat menyimpan.
     pub created_at_ms: i64,
     /// Diisi store saat membaca; diabaikan saat menyimpan.
@@ -330,6 +342,7 @@ impl RunRecord {
             quiet_until_ms: None,
             fix_requested_by: None,
             pr_body_hashes: BTreeMap::new(),
+            review_snapshot: BTreeMap::new(),
             created_at_ms: 0,
             updated_at_ms: 0,
         }

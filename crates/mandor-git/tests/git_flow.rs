@@ -497,3 +497,40 @@ async fn worktree_workspace_dikumpulkan_di_folder_run_dan_folder_dihapus_saat_tu
     port.remove_run_root(&root).await;
     assert!(!root.exists());
 }
+
+#[tokio::test]
+async fn snapshot_tree_stabil_berubah_karena_berkas_baru_dan_tidak_mengubah_index() {
+    let f = fixture();
+    let a = f.git.snapshot_tree(&f.repo).await.unwrap();
+    let b = f.git.snapshot_tree(&f.repo).await.unwrap();
+    assert_eq!(a, b, "worktree yang sama, tree yang sama");
+    assert_eq!(a.len(), 40);
+
+    let status_before = sh(&f.repo, &["status", "--porcelain"]);
+    std::fs::write(f.repo.join("baru.txt"), "isi baru\n").unwrap();
+    let c = f.git.snapshot_tree(&f.repo).await.unwrap();
+    assert_ne!(a, c, "berkas untracked mengubah tree");
+    assert_eq!(
+        sh(&f.repo, &["status", "--porcelain"]),
+        format!("{status_before}?? baru.txt\n"),
+        "index asli tidak disentuh: berkas tetap untracked"
+    );
+    assert_eq!(
+        f.git.changed_between(&f.repo, &a, &c).await.unwrap(),
+        ["baru.txt"]
+    );
+
+    // Berkas yang diabaikan .gitignore tidak memengaruhi tree.
+    std::fs::write(f.repo.join(".git/info/exclude"), "node_modules/\n").unwrap();
+    std::fs::create_dir_all(f.repo.join("node_modules")).unwrap();
+    std::fs::write(f.repo.join("node_modules/x.js"), "x").unwrap();
+    assert_eq!(f.git.snapshot_tree(&f.repo).await.unwrap(), c);
+    assert!(
+        std::fs::read_dir(f.repo.join(".git")).unwrap().all(|e| !e
+            .unwrap()
+            .file_name()
+            .to_string_lossy()
+            .starts_with("mandor-snapshot")),
+        "index sementara dibersihkan"
+    );
+}

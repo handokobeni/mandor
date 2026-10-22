@@ -11,6 +11,7 @@ mod gh;
 mod port;
 mod publish;
 mod repo;
+mod snapshot;
 mod worktree;
 
 use std::path::{Path, PathBuf};

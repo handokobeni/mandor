@@ -41,6 +41,9 @@ pub struct GitState {
     pub bodies: HashMap<String, String>,
     /// Jumlah `gh pr edit --body` yang dijalankan.
     pub body_edits: usize,
+    /// Tree id snapshot per worktree; default `tree0`.
+    pub trees: HashMap<PathBuf, String>,
+    pub snapshot_fails: bool,
 }
 
 /// Kunci PR palsu: repo dan branch (run workspace memakai branch yang sama).
@@ -199,6 +202,29 @@ impl GitPort for FakeGit {
         st.prs.insert(pr_key(r, branch), url.clone());
         st.bodies.insert(url.clone(), body.to_owned());
         Ok(url)
+    }
+    async fn snapshot(&self, wt: &Path) -> Result<String, PortError> {
+        let st = self.state.lock().unwrap();
+        if st.snapshot_fails {
+            return Err(PortError::Transient("git write-tree".to_owned()));
+        }
+        Ok(st
+            .trees
+            .get(wt)
+            .cloned()
+            .unwrap_or_else(|| "tree0".to_owned()))
+    }
+    async fn changed_between(
+        &self,
+        _wt: &Path,
+        a: &str,
+        b: &str,
+    ) -> Result<Vec<String>, PortError> {
+        Ok(if a == b {
+            vec![]
+        } else {
+            vec!["src/changed.rs".to_owned()]
+        })
     }
     async fn pr_body(&self, _r: &RepoInfo, url: &str) -> Result<Option<String>, PortError> {
         Ok(self.state.lock().unwrap().bodies.get(url).cloned())

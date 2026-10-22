@@ -137,6 +137,7 @@ impl<D: Deps> RunService<D> {
             return Ok(());
         }
         run.pid = None;
+        self.mark_stale_if_changed(&run).await;
         if run.state == RunState::WfRunning {
             return self.finish_fix_turn(run, end).await;
         }

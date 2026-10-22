@@ -134,3 +134,66 @@ async fn refresh_semua_run_aktif_melewati_run_yang_ditutup() {
     st.svc.close_run(&run).await.unwrap();
     assert_eq!(st.svc.refresh_active_ledgers().await, 0);
 }
+
+mod usang {
+    use std::collections::BTreeMap;
+
+    use super::*;
+    use common::run_fakes::eventually;
+    use mandor_domain::RunState;
+
+    /// Run selesai giliran pertama, buku AC sudah direview (semua Pass) pada tree `t1`.
+    async fn reviewed(lark: &FakeLark, clock: &FakeClock) -> (Station, String) {
+        let (st, run) = started(lark, clock).await;
+        st.git
+            .st()
+            .trees
+            .insert(st.runs.only().worktree.unwrap(), "t1".to_owned());
+        let mut rows = st.svc.ledger(&run).await.unwrap();
+        for r in &mut rows {
+            r.verdict = Verdict::Pass;
+        }
+        st.reviews.ledgers.lock().unwrap().insert(run.clone(), rows);
+        let mut r = st.runs.only();
+        r.review_snapshot = BTreeMap::from([("repo1".to_owned(), "t1".to_owned())]);
+        st.runs.insert(r);
+        (st, run)
+    }
+
+    #[tokio::test]
+    async fn ae4_giliran_yang_mengubah_kode_menandai_verdict_usang() {
+        let (lark, clock) = setup();
+        let (st, run) = reviewed(&lark, &clock).await;
+        st.git
+            .st()
+            .trees
+            .insert(st.runs.only().worktree.unwrap(), "t2".to_owned());
+        st.agent.last().done();
+        eventually(|| st.runs.only().state == RunState::AwaitingDev).await;
+        let rows = st.svc.ledger(&run).await.unwrap();
+        assert!(rows.iter().all(|r| r.stale), "{rows:?}");
+        assert!(
+            rows.iter().all(|r| r.verdict == Verdict::Pass),
+            "verdict tetap"
+        );
+    }
+
+    #[tokio::test]
+    async fn giliran_tanpa_perubahan_kode_tidak_menandai_usang() {
+        let (lark, clock) = setup();
+        let (st, run) = reviewed(&lark, &clock).await;
+        st.agent.last().done();
+        eventually(|| st.runs.only().state == RunState::AwaitingDev).await;
+        assert!(st.svc.ledger(&run).await.unwrap().iter().all(|r| !r.stale));
+    }
+
+    #[tokio::test]
+    async fn snapshot_gagal_dianggap_usang() {
+        let (lark, clock) = setup();
+        let (st, run) = reviewed(&lark, &clock).await;
+        st.git.st().snapshot_fails = true;
+        st.agent.last().done();
+        eventually(|| st.runs.only().state == RunState::AwaitingDev).await;
+        assert!(st.svc.ledger(&run).await.unwrap().iter().all(|r| r.stale));
+    }
+}

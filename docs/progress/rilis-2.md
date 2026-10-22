@@ -52,3 +52,4 @@ Branch `feat/rilis2-ac-review`. Satu commit per unit setelah `make check` hijau.
 ### A2: edit AC tidak mengubah waktu ubah task (2026-10-22, terbukti)
 
 Deskripsi AC `reczz28Q6yNmRQKM` milik PGS-1510 diubah lewat `lark-cli`; `mandor_modified` task tetap `2026-10-22T10:11:04+07:00` setelah 5 detik. Refresh buku AC terpisah dari poll task (KTD-27) memang diperlukan.
+| U4 Snapshot dan penanda usang | selesai | (lihat log) | `snapshot_tree` memakai salinan index di direktori git worktree; verdict ditandai usang setelah giliran yang mengubah kode; snapshot gagal = usang |

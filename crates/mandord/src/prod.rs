@@ -290,8 +290,9 @@ impl LedgerStore for BroadcastReviews {
         rows: &[mandor_domain::AcRow],
     ) -> Result<(), PortError> {
         self.inner.save_ac_rows(run_id, rows).await?;
-        let view = RunEventView {
+        let view = mandor_protocol::LedgerRowsEvent {
             run_id: run_id.to_owned(),
+            rows: rows.iter().map(crate::views::ac_row_view).collect(),
         };
         emit(
             &self.events,

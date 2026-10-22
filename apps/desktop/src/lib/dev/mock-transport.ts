@@ -5,6 +5,16 @@ import type { CardView } from '#lib/protocol/CardView.ts';
 import type { MessageView } from '#lib/protocol/MessageView.ts';
 import type { RunView } from '#lib/protocol/RunView.ts';
 import type { Transport } from '#lib/api/client.ts';
+import type { AcRowView } from '#lib/protocol/AcRowView.ts';
+import { activeRows, gate } from '#lib/ac-review.ts';
+import { history, ledger, scenarioFor, scenarioRows } from './mock-ac.ts';
+
+/** Buku AC tiruan per run; berubah saat review atau Push & PR. */
+const AC = new Map<string, AcRowView[]>();
+function acRows(runId: string): AcRowView[] {
+  if (!AC.has(runId)) AC.set(runId, scenarioRows(scenarioFor(runId)));
+  return AC.get(runId) ?? [];
+}
 
 function run(id: string, key: string, title: string, state: string, extra: Partial<RunView> = {}): RunView {
   return {
@@ -332,6 +342,7 @@ function handle(method: string, params: Record<string, unknown>): unknown {
         sync_error: null
       };
     case 'runs.list':
+      if (scenarioFor('1') === 'reviewing') RUNS[0].state = 'reviewing';
       return RUNS;
     case 'runs.messages': {
       const all = MESSAGES[String(params.run_id)] ?? [];
@@ -460,6 +471,38 @@ function handle(method: string, params: Record<string, unknown>): unknown {
     case 'runs.start':
     case 'runs.takeover':
       return RUNS[0];
+    case 'ledger.get': {
+      const id = String(params.run_id);
+      return ledger(id, acRows(id), scenarioFor(id));
+    }
+    case 'review.history':
+      return history(String(params.run_id), scenarioFor(String(params.run_id)));
+    case 'review.start':
+    case 'review.cancel':
+    case 'review.send_findings':
+      return {};
+    case 'runs.publish': {
+      const id = String(params.run_id);
+      const rows = activeRows(acRows(id));
+      const reason = typeof params.push_anyway_reason === 'string' ? params.push_anyway_reason : null;
+      const confirmed = Array.isArray(params.confirmed) ? (params.confirmed as string[]) : [];
+      const g = gate(
+        rows.map((r) =>
+          r.verdict === 'fail' && reason
+            ? { ...r, verdict: 'skipped' }
+            : r.verdict === 'cant_verify' && confirmed.includes(r.ac_id)
+              ? { ...r, verdict: 'checked_manually' }
+              : r
+        ),
+        scenarioFor(id) === 'warn' ? 'warn' : 'block',
+        false
+      );
+      const base = { pr_url: null, failed: [], unverified: [], warnings: [], sync_warning: null, review_id: null };
+      if (g.state === 'review_needed') return { ...base, outcome: 'review_started', review_id: 'rv-mock' };
+      if (g.state === 'blocked') return { ...base, outcome: 'blocked', failed: ['AC-3'] };
+      if (g.state === 'needs_confirmation') return { ...base, outcome: 'needs_confirmation', unverified: ['AC-4'] };
+      return { ...base, outcome: 'published', pr_url: 'https://github.com/pegasus/pegasus-web/pull/490' };
+    }
     default:
       return null;
   }
@@ -467,6 +510,35 @@ function handle(method: string, params: Record<string, unknown>): unknown {
 
 export class MockTransport implements Transport {
   private onLine: ((line: string) => void) | null = null;
+
+  private emit(method: string, params: unknown): void {
+    this.onLine?.(JSON.stringify({ jsonrpc: '2.0', method, params }));
+  }
+
+  /** Review tiruan: run menjadi Reviewing, baris terisi satu per satu, lalu kembali ke dev. */
+  private playReview(runId: string): void {
+    const r = RUNS.find((x) => x.id === runId);
+    if (!r) return;
+    const done = scenarioRows('current');
+    let rows = acRows(runId).map((x) => (x.in_gate ? { ...x, verdict: 'not_reviewed', evidence: null, stale: false } : x));
+    AC.set(runId, rows);
+    r.state = 'reviewing';
+    this.emit('run.updated', { run_id: runId });
+    this.emit('ledger.updated', { run_id: runId, rows });
+    rows.forEach((row, i) =>
+      setTimeout(() => {
+        const result = done.find((d) => d.ac_id === row.ac_id) ?? { ...row, verdict: 'pass' };
+        rows = rows.map((x) => (x.ac_id === row.ac_id && x.in_gate ? { ...result, status: x.status } : x));
+        AC.set(runId, rows);
+        this.emit('ledger.updated', { run_id: runId, rows });
+        if (i === rows.length - 1) {
+          r.state = 'awaiting_dev';
+          this.emit('run.updated', { run_id: runId });
+          this.emit('review.progress', { run_id: runId });
+        }
+      }, 700 * (i + 1))
+    );
+  }
 
   async token(): Promise<{ token: string; protocol: string }> {
     return { token: 'mock', protocol: '1.0' };
@@ -505,6 +577,7 @@ export class MockTransport implements Transport {
       if (req.method === 'runs.send') {
         this.onLine?.(JSON.stringify({ jsonrpc: '2.0', method: 'run.message', params: { run_id: req.params?.run_id } }));
       }
+      if (req.method === 'review.start') this.playReview(String(req.params?.run_id));
     }, delay);
   }
 }

@@ -153,6 +153,25 @@ pub fn task_details_view(d: &TaskDetails) -> TaskDetailsView {
     }
 }
 
+/// Baris buku AC untuk UI.
+pub fn ac_row_view(r: &mandor_domain::AcRow) -> mandor_protocol::AcRowView {
+    mandor_protocol::AcRowView {
+        ac_id: r.ac_id.clone(),
+        label: r.label.clone(),
+        text: r.text.clone(),
+        design: r.design.as_str().to_owned(),
+        design_note: r.design_note.clone(),
+        verdict: r.verdict.as_str().to_owned(),
+        evidence: r.evidence.clone(),
+        stale: r.stale,
+        status: r.status.as_str().to_owned(),
+        reason: r.reason.clone(),
+        decided_by: r.decided_by.clone(),
+        in_gate: r.in_gate(),
+        selectable: r.selectable(),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

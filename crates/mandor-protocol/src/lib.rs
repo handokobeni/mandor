@@ -122,7 +122,7 @@ pub mod event {
     pub const BOARD_UPDATED: &str = "board.updated";
     /// State run berubah (`RunEventView`).
     pub const RUN_UPDATED: &str = "run.updated";
-    /// Buku AC run berubah (`RunEventView`).
+    /// Buku AC run berubah (`LedgerRowsEvent`, baris terbaru).
     pub const LEDGER_UPDATED: &str = "ledger.updated";
     /// Review run berubah (`RunEventView`); client memuat ulang `review.history`.
     pub const REVIEW_PROGRESS: &str = "review.progress";
@@ -264,6 +264,10 @@ fn review_bindings() -> Result<Vec<(&'static str, String)>, String> {
         )?,
         one("AppRunView.ts", AppRunView::export_to_string(&cfg))?,
         one("ReviewView.ts", ReviewView::export_to_string(&cfg))?,
+        one(
+            "LedgerRowsEvent.ts",
+            LedgerRowsEvent::export_to_string(&cfg),
+        )?,
         one(
             "ReviewVerdictView.ts",
             ReviewVerdictView::export_to_string(&cfg),

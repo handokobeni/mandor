@@ -108,6 +108,15 @@ impl<D: Deps> RunService<D> {
         })
     }
 
+    /// Mode gerbang run untuk tampilan.
+    ///
+    /// # Errors
+    /// Run tidak ada atau repo/workspace tidak terbaca.
+    pub async fn gate_mode_for(&self, run_id: &str) -> Result<GateMode, RunError> {
+        let run = self.load(run_id).await?;
+        self.gate_mode(&run).await
+    }
+
     /// Mode gerbang run (KTD-37).
     pub(crate) async fn gate_mode(&self, run: &RunRecord) -> Result<GateMode, RunError> {
         let overrides: Vec<_> = self

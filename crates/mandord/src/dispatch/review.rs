@@ -1,8 +1,8 @@
 //! Method Rilis 2: buku AC (`ledger.*`).
 
-use mandor_domain::{AcRow, Design, Verdict};
+use mandor_domain::{Design, Verdict};
 use mandor_protocol::{
-    AcLedgerView, AcRowView, ErrorCode, LedgerToolInfo, LedgerToolSetDesign, LedgerToolSetVerdict,
+    AcLedgerView, ErrorCode, LedgerToolInfo, LedgerToolSetDesign, LedgerToolSetVerdict,
     ReviewFindings, ReviewStart, ReviewVerdictView, ReviewView, ReviewerSettingsView, RpcError,
     RunRef, method,
 };
@@ -11,6 +11,7 @@ use mandor_usecase::run_ports::{ReviewRecord, ReviewTrigger, ReviewerSettings};
 use serde_json::Value;
 
 use super::{AppDispatch, ok, params, run_error};
+use crate::views::ac_row_view;
 
 /// Satu panggilan tool ledger yang sudah diurai dari koneksi kapabilitas.
 #[derive(Debug, PartialEq)]
@@ -159,24 +160,6 @@ fn reviewer_settings(v: &ReviewerSettingsView) -> Result<ReviewerSettings, RpcEr
     })
 }
 
-pub(super) fn ac_row_view(r: &AcRow) -> AcRowView {
-    AcRowView {
-        ac_id: r.ac_id.clone(),
-        label: r.label.clone(),
-        text: r.text.clone(),
-        design: r.design.as_str().to_owned(),
-        design_note: r.design_note.clone(),
-        verdict: r.verdict.as_str().to_owned(),
-        evidence: r.evidence.clone(),
-        stale: r.stale,
-        status: r.status.as_str().to_owned(),
-        reason: r.reason.clone(),
-        decided_by: r.decided_by.clone(),
-        in_gate: r.in_gate(),
-        selectable: r.selectable(),
-    }
-}
-
 impl AppDispatch {
     pub(super) async fn capability(&self, token: &str) -> Option<mandor_api::CapabilityScope> {
         let s = self.app.session().await?;
@@ -251,12 +234,14 @@ impl AppDispatch {
             method::LEDGER_GET => {
                 let p: RunRef = params(v)?;
                 let r = s.runs.refresh_ledger(&p.run_id).await.map_err(run_error)?;
+                let mode = s.runs.gate_mode_for(&p.run_id).await.map_err(run_error)?;
                 ok(&AcLedgerView {
                     run_id: p.run_id,
                     rows: r.rows.iter().map(ac_row_view).collect(),
                     synced_at_ms: r.synced_at_ms,
                     sync_error: r.error,
                     design_sources: r.design_sources,
+                    gate_mode: mode.as_str().to_owned(),
                 })
             }
             method::REVIEW_START => {
@@ -330,7 +315,7 @@ impl AppDispatch {
 
 #[cfg(test)]
 mod tests {
-    use mandor_domain::{Design, RowStatus, Verdict};
+    use mandor_domain::{AcRow, Design, RowStatus, Verdict};
 
     use super::*;
 

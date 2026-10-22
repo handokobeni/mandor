@@ -16,4 +16,8 @@ sync_error: string | null,
 /**
  * Nama sumber desain run; kosong = "No design source".
  */
-design_sources: Array<string>, };
+design_sources: Array<string>, 
+/**
+ * Mode gerbang run: `block` atau `warn`.
+ */
+gate_mode: string, };

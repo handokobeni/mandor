@@ -698,6 +698,15 @@ pub struct AcLedgerView {
     pub sync_error: Option<String>,
     /// Nama sumber desain run; kosong = "No design source".
     pub design_sources: Vec<String>,
+    /// Mode gerbang run: `block` atau `warn`.
+    pub gate_mode: String,
+}
+
+/// Event `ledger.updated`: baris buku AC terbaru (progres review per baris).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+pub struct LedgerRowsEvent {
+    pub run_id: String,
+    pub rows: Vec<AcRowView>,
 }
 
 /// Verdict satu AC dalam riwayat review.

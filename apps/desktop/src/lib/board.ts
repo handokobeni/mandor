@@ -34,6 +34,7 @@ const RUN_STATES: Record<string, StateMeta> = {
   wf_awaiting_comment: { label: 'Waiting for reviewer comments', tone: 'waiting', spin: false },
   wf_quiet: { label: 'Quiet period', tone: 'waiting', spin: false },
   wf_running: { label: 'Fixing', tone: 'working', spin: false },
+  reviewing: { label: 'Reviewing AC', tone: 'working', spin: true },
   failed: { label: 'Failed', tone: 'failed', spin: false },
   orphaned: { label: 'Parked: claim lost', tone: 'warning', spin: false },
   stopped: { label: 'Stopped', tone: 'muted', spin: false }
@@ -78,7 +79,7 @@ export function flagMeta(kind: string): FlagMeta {
 }
 
 /** State saat agent sedang bekerja; pesan dev diantrekan. */
-export const WORKING_STATES = ['running', 'preparing', 'wf_running'];
+export const WORKING_STATES = ['running', 'preparing', 'wf_running', 'reviewing'];
 
 export function isWorking(state: string): boolean {
   return WORKING_STATES.includes(state);

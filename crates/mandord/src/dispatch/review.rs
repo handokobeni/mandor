@@ -3,9 +3,11 @@
 use mandor_domain::{AcRow, Design, Verdict};
 use mandor_protocol::{
     AcLedgerView, AcRowView, ErrorCode, LedgerToolInfo, LedgerToolSetDesign, LedgerToolSetVerdict,
-    RpcError, RunRef, method,
+    ReviewFindings, ReviewStart, ReviewVerdictView, ReviewView, ReviewerSettingsView, RpcError,
+    RunRef, method,
 };
 use mandor_usecase::review::{CapabilityRole, CapabilityScope, LedgerToolError};
+use mandor_usecase::run_ports::{ReviewRecord, ReviewTrigger, ReviewerSettings};
 use serde_json::Value;
 
 use super::{AppDispatch, ok, params, run_error};
@@ -94,6 +96,69 @@ fn usecase_scope(s: &mandor_api::CapabilityScope) -> Option<CapabilityScope> {
     })
 }
 
+fn review_view(r: &ReviewRecord) -> ReviewView {
+    ReviewView {
+        id: r.id.clone(),
+        run_id: r.run_id.clone(),
+        trigger: r.trigger.as_str().to_owned(),
+        status: r.status.as_str().to_owned(),
+        browser_used: r.browser_used,
+        browser_reason: r.browser_reason.clone(),
+        error: r.error.clone(),
+        cost_usd: r.cost_usd,
+        input_tokens: r.usage.total_input(),
+        output_tokens: r.usage.output_tokens,
+        stale: r.stale,
+        skill: r.skill.clone(),
+        started_at_ms: r.started_at_ms,
+        finished_at_ms: r.finished_at_ms,
+        verdicts: r
+            .verdicts
+            .iter()
+            .map(|v| ReviewVerdictView {
+                ac_id: v.ac_id.clone(),
+                label: v.label.clone(),
+                verdict: v.verdict.as_str().to_owned(),
+                evidence: v.evidence.clone(),
+            })
+            .collect(),
+    }
+}
+
+fn settings_view(s: &ReviewerSettings) -> ReviewerSettingsView {
+    ReviewerSettingsView {
+        model: s.model.clone(),
+        budget_cents: s.budget_cents,
+        timeout_secs: s.timeout_secs,
+    }
+}
+
+/// Batas biaya 0,10–50 USD dan batas waktu 1–120 menit.
+fn reviewer_settings(v: &ReviewerSettingsView) -> Result<ReviewerSettings, RpcError> {
+    if !(10..=5_000).contains(&v.budget_cents) {
+        return Err(RpcError::new(
+            ErrorCode::InvalidParams,
+            "The cost limit must be between $0.10 and $50",
+        ));
+    }
+    if !(60..=7_200).contains(&v.timeout_secs) {
+        return Err(RpcError::new(
+            ErrorCode::InvalidParams,
+            "The time limit must be between 1 and 120 minutes",
+        ));
+    }
+    Ok(ReviewerSettings {
+        model: v
+            .model
+            .as_deref()
+            .map(str::trim)
+            .filter(|m| !m.is_empty())
+            .map(str::to_owned),
+        budget_cents: v.budget_cents,
+        timeout_secs: v.timeout_secs,
+    })
+}
+
 pub(super) fn ac_row_view(r: &AcRow) -> AcRowView {
     AcRowView {
         ac_id: r.ac_id.clone(),
@@ -159,8 +224,25 @@ impl AppDispatch {
         ok(&rows.iter().map(ac_row_view).collect::<Vec<_>>())
     }
 
+    /// Skill plugin atau user masih terpasang.
+    async fn skill_installed(&self, name: &str) -> bool {
+        mandor_agent::available_skills(&self.app.cfg.user_home.join(".claude"))
+            .await
+            .iter()
+            .any(|s| s.name == name)
+    }
+
     pub(super) fn is_review_method(name: &str) -> bool {
-        [method::LEDGER_GET].contains(&name)
+        [
+            method::LEDGER_GET,
+            method::REVIEW_START,
+            method::REVIEW_CANCEL,
+            method::REVIEW_HISTORY,
+            method::REVIEW_SEND_FINDINGS,
+            method::SETTINGS_REVIEWER_GET,
+            method::SETTINGS_REVIEWER_SET,
+        ]
+        .contains(&name)
     }
 
     pub(super) async fn review_call(&self, name: &str, v: Value) -> Result<Value, RpcError> {
@@ -176,6 +258,67 @@ impl AppDispatch {
                     sync_error: r.error,
                     design_sources: r.design_sources,
                 })
+            }
+            method::REVIEW_START => {
+                let p: ReviewStart = params(v)?;
+                let trigger = match p.trigger.as_deref() {
+                    None | Some("manual") => ReviewTrigger::Manual,
+                    Some("push_and_pr") => ReviewTrigger::PushAndPr,
+                    Some(other) => {
+                        return Err(RpcError::new(
+                            ErrorCode::InvalidParams,
+                            format!("unknown review trigger: {other}"),
+                        ));
+                    }
+                };
+                let wanted = p.skill.as_deref().filter(|s| !s.trim().is_empty());
+                let skill = match wanted {
+                    Some(name) if !self.skill_installed(name).await => None,
+                    other => other,
+                };
+                let rec = s
+                    .runs
+                    .start_review(&p.run_id, trigger, skill)
+                    .await
+                    .map_err(run_error)?;
+                if let (Some(name), None) = (wanted, skill) {
+                    let note = format!(
+                        "Reviewer skill {name} is not installed; using Mandor's built-in reviewer."
+                    );
+                    s.runs
+                        .system_note(&p.run_id, &note)
+                        .await
+                        .map_err(run_error)?;
+                }
+                ok(&review_view(&rec))
+            }
+            method::REVIEW_CANCEL => {
+                let p: RunRef = params(v)?;
+                s.runs.cancel_review(&p.run_id).await.map_err(run_error)?;
+                ok(&serde_json::json!({}))
+            }
+            method::REVIEW_HISTORY => {
+                let p: RunRef = params(v)?;
+                let all = s.runs.review_history(&p.run_id).await.map_err(run_error)?;
+                ok(&all.iter().map(review_view).collect::<Vec<_>>())
+            }
+            method::REVIEW_SEND_FINDINGS => {
+                let p: ReviewFindings = params(v)?;
+                s.runs
+                    .send_findings(&p.run_id, &p.ac_ids)
+                    .await
+                    .map_err(run_error)?;
+                ok(&serde_json::json!({}))
+            }
+            method::SETTINGS_REVIEWER_GET => ok(&settings_view(&s.runs.reviewer_settings().await)),
+            method::SETTINGS_REVIEWER_SET => {
+                let p: ReviewerSettingsView = params(v)?;
+                let settings = reviewer_settings(&p)?;
+                s.runs
+                    .set_reviewer_settings(&settings)
+                    .await
+                    .map_err(run_error)?;
+                ok(&settings_view(&settings))
             }
             _ => Err(RpcError::new(
                 mandor_protocol::ErrorCode::MethodNotFound,
@@ -253,6 +396,21 @@ mod tests {
             tool_error(&LedgerToolError::UnknownAc("x".to_owned())).code,
             ErrorCode::NotFound
         );
+    }
+
+    #[test]
+    fn setelan_reviewer_divalidasi() {
+        let mut v = ReviewerSettingsView {
+            model: Some(" ".to_owned()),
+            budget_cents: 200,
+            timeout_secs: 900,
+        };
+        assert_eq!(reviewer_settings(&v).unwrap().model, None);
+        v.budget_cents = 5;
+        assert!(reviewer_settings(&v).is_err());
+        v.budget_cents = 200;
+        v.timeout_secs = 10;
+        assert!(reviewer_settings(&v).is_err());
     }
 
     #[test]

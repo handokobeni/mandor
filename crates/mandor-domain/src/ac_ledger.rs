@@ -284,6 +284,78 @@ pub fn mark_stale(rows: &mut [AcRow]) {
     }
 }
 
+/// Alasan AC yang tidak dilaporkan reviewer (KTD-38).
+pub const NOT_REPORTED: &str = "reviewer did not report";
+
+/// Awal review: verdict baris di gerbang kembali Not reviewed. Baris Follow
+/// design dan Removed tidak disentuh.
+pub fn reset_for_review(rows: &mut [AcRow]) {
+    for r in rows.iter_mut().filter(|r| r.in_gate()) {
+        r.verdict = Verdict::NotReviewed;
+        r.evidence = None;
+        r.stale = false;
+        r.reason = None;
+        r.decided_by = None;
+    }
+}
+
+/// Review selesai normal: baris di gerbang yang tidak dilaporkan menjadi
+/// Can't verify dengan alasan [`NOT_REPORTED`].
+pub fn fill_unreported(rows: &mut [AcRow]) {
+    for r in rows
+        .iter_mut()
+        .filter(|r| r.in_gate() && r.verdict == Verdict::NotReviewed)
+    {
+        r.verdict = Verdict::CantVerify;
+        r.evidence = Some(NOT_REPORTED.to_owned());
+    }
+}
+
+/// Jumlah per status baris di gerbang.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct ReviewCounts {
+    pub pass: u32,
+    pub fail: u32,
+    pub cant_verify: u32,
+    pub not_reviewed: u32,
+}
+
+impl ReviewCounts {
+    #[must_use]
+    pub fn of(rows: &[AcRow]) -> Self {
+        let mut c = Self::default();
+        for r in rows.iter().filter(|r| r.in_gate()) {
+            match r.verdict {
+                Verdict::Pass | Verdict::CheckedManually => c.pass += 1,
+                Verdict::Fail | Verdict::FixInProgress => c.fail += 1,
+                Verdict::CantVerify => c.cant_verify += 1,
+                Verdict::NotReviewed | Verdict::Skipped => c.not_reviewed += 1,
+            }
+        }
+        c
+    }
+
+    /// Ringkasan untuk notifikasi, mis. "2 passed, 1 failed".
+    #[must_use]
+    pub fn summary(&self) -> String {
+        let parts: Vec<String> = [
+            (self.pass, "passed"),
+            (self.fail, "failed"),
+            (self.cant_verify, "can't verify"),
+            (self.not_reviewed, "not reviewed"),
+        ]
+        .into_iter()
+        .filter(|(n, _)| *n > 0)
+        .map(|(n, l)| format!("{n} {l}"))
+        .collect();
+        if parts.is_empty() {
+            "no acceptance criteria".to_owned()
+        } else {
+            parts.join(", ")
+        }
+    }
+}
+
 /// Teks selisih desain untuk field tracker `mandor_design_gaps` (KTD-34).
 /// Baris dipotong di batas baris; sisanya diringkas "+N more in Mandor".
 #[must_use]
@@ -328,6 +400,35 @@ pub fn design_gaps_text(rows: &[AcRow], limit: usize) -> String {
 #[cfg(test)]
 mod tests {
     use pretty_assertions::assert_eq;
+
+    #[test]
+    fn review_mereset_lalu_melengkapi_ac_yang_tidak_dilaporkan() {
+        let mut rows = vec![
+            AcRow::new("a1", Some("AC-1"), "x", RowStatus::Active),
+            AcRow::new("a2", Some("AC-2"), "y", RowStatus::Active),
+            AcRow::new("a3", Some("AC-3"), "z", RowStatus::Active),
+        ];
+        rows[0].verdict = Verdict::Fail;
+        rows[0].evidence = Some("lama".to_owned());
+        rows[2].design = Design::FollowDesign;
+        rows[2].verdict = Verdict::Pass;
+        reset_for_review(&mut rows);
+        assert_eq!(rows[0].verdict, Verdict::NotReviewed);
+        assert_eq!(rows[0].evidence, None);
+        assert_eq!(
+            rows[2].verdict,
+            Verdict::Pass,
+            "follow design tidak disentuh"
+        );
+        rows[0].verdict = Verdict::Pass;
+        fill_unreported(&mut rows);
+        assert_eq!(rows[1].verdict, Verdict::CantVerify);
+        assert_eq!(rows[1].evidence.as_deref(), Some(NOT_REPORTED));
+        let c = ReviewCounts::of(&rows);
+        assert_eq!((c.pass, c.cant_verify), (1, 1));
+        assert_eq!(c.summary(), "1 passed, 1 can't verify");
+        assert_eq!(ReviewCounts::default().summary(), "no acceptance criteria");
+    }
 
     use super::*;
 

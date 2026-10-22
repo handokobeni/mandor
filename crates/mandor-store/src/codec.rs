@@ -211,8 +211,11 @@ pub(crate) fn chat_to_json(
                     result,
                     num_turns,
                     denials,
+                    cost_usd,
+                    limit,
                 } => {
-                    json!({"type": "done", "is_error": is_error, "result": result, "num_turns": num_turns, "denials": denials})
+                    json!({"type": "done", "is_error": is_error, "result": result, "num_turns": num_turns,
+                           "denials": denials, "cost_usd": cost_usd, "limit": limit})
                 }
                 E::Failed { message } => json!({"type": "failed", "message": message}),
             },

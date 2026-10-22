@@ -270,6 +270,23 @@ impl RunCtl {
             let _ = tx.send(e);
         }
     }
+    /// Sesi berhenti karena batas biaya (event `result` A4).
+    pub fn budget_stop(&self) {
+        self.emit(AgentEvent::Usage(mandor_domain::Usage {
+            input_tokens: 10,
+            output_tokens: 5,
+            ..mandor_domain::Usage::default()
+        }));
+        self.emit(AgentEvent::Done {
+            is_error: true,
+            result: "Reached maximum budget ($2)".to_owned(),
+            num_turns: 3,
+            denials: 0,
+            cost_usd: Some(2.01),
+            limit: Some("budget".to_owned()),
+        });
+        self.tx.lock().unwrap().take();
+    }
     /// Giliran selesai normal dengan pesan akhir `result`.
     pub fn finish(&self, result: &str) {
         self.emit(AgentEvent::Done {
@@ -277,6 +294,8 @@ impl RunCtl {
             result: result.to_owned(),
             num_turns: 1,
             denials: 0,
+            cost_usd: None,
+            limit: None,
         });
         self.tx.lock().unwrap().take();
     }
@@ -287,6 +306,8 @@ impl RunCtl {
             result: "selesai".to_owned(),
             num_turns: 1,
             denials: 0,
+            cost_usd: None,
+            limit: None,
         });
         self.tx.lock().unwrap().take();
     }
@@ -345,6 +366,8 @@ pub struct FakeAgent {
     pub reaped: Arc<Mutex<Vec<u32>>>,
     pub pr_contexts: Arc<Mutex<Vec<OwnedPrContext>>>,
     pub fail_pr_description: Arc<Mutex<bool>>,
+    /// Review yang berkasnya dibersihkan (`end_review`).
+    pub ended_reviews: Arc<Mutex<Vec<String>>>,
 }
 
 /// Salinan [`PrContext`] yang diterima fake agent.
@@ -405,6 +428,12 @@ impl AgentPort for FakeAgent {
     }
     async fn reap(&self, pid: u32) {
         self.reaped.lock().unwrap().push(pid);
+    }
+    async fn end_review(&self, review_id: &str) {
+        self.ended_reviews
+            .lock()
+            .unwrap()
+            .push(review_id.to_owned());
     }
 }
 
@@ -650,6 +679,9 @@ pub async fn eventually(mut cond: impl FnMut() -> bool) {
 #[derive(Clone, Default)]
 pub struct FakeReviews {
     pub ledgers: Arc<Mutex<HashMap<String, Vec<mandor_domain::AcRow>>>>,
+    pub history: Arc<Mutex<Vec<mandor_usecase::run_ports::ReviewRecord>>>,
+    pub settings: Arc<Mutex<mandor_usecase::run_ports::ReviewerSettings>>,
+    pub chrome: Arc<Mutex<bool>>,
 }
 
 impl FakeReviews {
@@ -795,5 +827,45 @@ impl mandor_usecase::run_ports::AppRecords for FakeApps {
     async fn set_app_owner(&self, run_id: Option<&str>) -> Result<(), PortError> {
         self.st.lock().unwrap().owner = run_id.map(str::to_owned);
         Ok(())
+    }
+}
+
+impl mandor_usecase::run_ports::ReviewHistory for FakeReviews {
+    async fn save_review(
+        &self,
+        r: &mandor_usecase::run_ports::ReviewRecord,
+    ) -> Result<(), PortError> {
+        let mut h = self.history.lock().unwrap();
+        h.retain(|x| x.id != r.id);
+        h.push(r.clone());
+        Ok(())
+    }
+    async fn reviews(
+        &self,
+        run_id: &str,
+    ) -> Result<Vec<mandor_usecase::run_ports::ReviewRecord>, PortError> {
+        let mut out: Vec<_> = self
+            .history
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|r| r.run_id == run_id)
+            .cloned()
+            .collect();
+        out.sort_by_key(|r| std::cmp::Reverse(r.started_at_ms));
+        Ok(out)
+    }
+    async fn reviewer_settings(&self) -> mandor_usecase::run_ports::ReviewerSettings {
+        self.settings.lock().unwrap().clone()
+    }
+    async fn set_reviewer_settings(
+        &self,
+        s: &mandor_usecase::run_ports::ReviewerSettings,
+    ) -> Result<(), PortError> {
+        *self.settings.lock().unwrap() = s.clone();
+        Ok(())
+    }
+    async fn chrome_connected(&self) -> bool {
+        *self.chrome.lock().unwrap()
     }
 }

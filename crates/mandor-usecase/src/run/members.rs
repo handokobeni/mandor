@@ -198,6 +198,7 @@ impl<D: Deps> RunService<D> {
             plan_mode,
             ledger,
             design: run.design.clone(),
+            review: None,
         })
     }
 

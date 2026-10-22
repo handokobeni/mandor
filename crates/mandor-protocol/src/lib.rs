@@ -34,6 +34,18 @@ pub mod method {
     pub const LEDGER_TOOL_SET_DESIGN: &str = "ledger.tool.set_design";
     /// Koneksi kapabilitas, peran verdict: `LedgerToolSetVerdict`.
     pub const LEDGER_TOOL_SET_VERDICT: &str = "ledger.tool.set_verdict";
+    /// Memulai review AC (`ReviewStart` → `ReviewView`).
+    pub const REVIEW_START: &str = "review.start";
+    /// Membatalkan review yang berjalan (`RunRef` → `{}`).
+    pub const REVIEW_CANCEL: &str = "review.cancel";
+    /// Riwayat review run (`RunRef` → `Vec<ReviewView>`).
+    pub const REVIEW_HISTORY: &str = "review.history";
+    /// Mengirim baris Fail ke agent (`ReviewFindings` → `{}`).
+    pub const REVIEW_SEND_FINDINGS: &str = "review.send_findings";
+    /// Setelan reviewer (`ReviewerSettingsView`).
+    pub const SETTINGS_REVIEWER_GET: &str = "settings.reviewer.get";
+    /// Menyimpan setelan reviewer (`ReviewerSettingsView` → `ReviewerSettingsView`).
+    pub const SETTINGS_REVIEWER_SET: &str = "settings.reviewer.set";
     /// State app run (`RunRef` → `AppRunView`).
     pub const APP_STATUS: &str = "app.status";
     /// Berkas berubah per repo untuk konfirmasi (`RunRef` → `Vec<AppChangesView>`).
@@ -111,6 +123,8 @@ pub mod event {
     pub const RUN_UPDATED: &str = "run.updated";
     /// Buku AC run berubah (`RunEventView`).
     pub const LEDGER_UPDATED: &str = "ledger.updated";
+    /// Review run berubah (`RunEventView`); client memuat ulang `review.history`.
+    pub const REVIEW_PROGRESS: &str = "review.progress";
     /// State run app berubah (`RunEventView`); client memuat ulang `app.status`.
     pub const APP_UPDATED: &str = "app.updated";
     /// Pesan chat baru di run (`RunEventView`).
@@ -247,6 +261,17 @@ fn review_bindings() -> Result<Vec<(&'static str, String)>, String> {
             DesignSourceAdd::export_to_string(&cfg),
         )?,
         one("AppRunView.ts", AppRunView::export_to_string(&cfg))?,
+        one("ReviewView.ts", ReviewView::export_to_string(&cfg))?,
+        one(
+            "ReviewVerdictView.ts",
+            ReviewVerdictView::export_to_string(&cfg),
+        )?,
+        one("ReviewStart.ts", ReviewStart::export_to_string(&cfg))?,
+        one("ReviewFindings.ts", ReviewFindings::export_to_string(&cfg))?,
+        one(
+            "ReviewerSettingsView.ts",
+            ReviewerSettingsView::export_to_string(&cfg),
+        )?,
         one("AppMemberView.ts", AppMemberView::export_to_string(&cfg))?,
         one("AppChangesView.ts", AppChangesView::export_to_string(&cfg))?,
         one("AppRunParams.ts", AppRunParams::export_to_string(&cfg))?,

@@ -191,6 +191,7 @@ async fn build_agent(cfg: &Config, rpc_port: u16) -> anyhow::Result<ClaudeAgent>
         model: None,
         commit_model: "haiku".to_owned(),
         mcp_dir: cfg.home.join("agent").join("mcp"),
+        review_dir: cfg.home.join("agent").join("review"),
         ledger_server: Some(LedgerServer {
             command: cfg.exe.clone(),
             port: rpc_port,

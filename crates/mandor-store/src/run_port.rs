@@ -39,6 +39,8 @@ struct RunExtra {
     #[serde(default)]
     design: Vec<StoredDesign>,
     #[serde(default)]
+    review_id: Option<String>,
+    #[serde(default)]
     workspace: Option<StoredWorkspace>,
     #[serde(default)]
     extra: Vec<StoredMember>,
@@ -184,6 +186,7 @@ fn extra_of(r: &RunRecord) -> Result<String, StoreError> {
                 path: d.path.clone(),
             })
             .collect(),
+        review_id: r.review_id.clone(),
         workspace: r.workspace.as_ref().map(|w| StoredWorkspace {
             id: w.id.clone(),
             root: w.root.clone(),
@@ -266,6 +269,7 @@ fn to_record(row: Row) -> Result<RunRecord, StoreError> {
                 path: d.path,
             })
             .collect(),
+        review_id: extra.review_id,
         workspace: extra.workspace.map(|w| RunWorkspace {
             id: w.id,
             root: w.root,
@@ -453,13 +457,21 @@ impl ReposStore {
 impl Repos for ReposStore {
     async fn workspace(&self, id: &str) -> Result<Option<WorkspaceInfo>, PortError> {
         match self.store.get_workspace(id).await {
-            Ok(w) => Ok(Some(WorkspaceInfo {
-                id: w.id,
-                name: w.name,
-                root: PathBuf::from(w.root_path),
-                repo_ids: w.repo_ids,
-                mcp_servers: w.mcp_servers,
-            })),
+            Ok(w) => {
+                let settings = self.store.workspace_settings(&w.id).await?;
+                let browser_tests = serde_json::from_str::<serde_json::Value>(&settings)
+                    .ok()
+                    .and_then(|v| v.get("browser_tests").and_then(serde_json::Value::as_bool))
+                    .unwrap_or(true);
+                Ok(Some(WorkspaceInfo {
+                    id: w.id,
+                    name: w.name,
+                    root: PathBuf::from(w.root_path),
+                    repo_ids: w.repo_ids,
+                    mcp_servers: w.mcp_servers,
+                    browser_tests,
+                }))
+            }
             Err(StoreError::NotFound) => Ok(None),
             Err(e) => Err(e.into()),
         }

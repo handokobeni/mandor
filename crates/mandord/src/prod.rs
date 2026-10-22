@@ -301,3 +301,39 @@ impl LedgerStore for BroadcastReviews {
         Ok(())
     }
 }
+
+impl mandor_usecase::run_ports::ReviewHistory for BroadcastReviews {
+    async fn save_review(
+        &self,
+        r: &mandor_usecase::run_ports::ReviewRecord,
+    ) -> Result<(), PortError> {
+        self.inner.save_review(r).await?;
+        let view = RunEventView {
+            run_id: r.run_id.clone(),
+        };
+        emit(
+            &self.events,
+            event::REVIEW_PROGRESS,
+            serde_json::to_value(view).unwrap_or(Value::Null),
+        );
+        Ok(())
+    }
+    async fn reviews(
+        &self,
+        run_id: &str,
+    ) -> Result<Vec<mandor_usecase::run_ports::ReviewRecord>, PortError> {
+        self.inner.reviews(run_id).await
+    }
+    async fn reviewer_settings(&self) -> mandor_usecase::run_ports::ReviewerSettings {
+        self.inner.reviewer_settings().await
+    }
+    async fn set_reviewer_settings(
+        &self,
+        s: &mandor_usecase::run_ports::ReviewerSettings,
+    ) -> Result<(), PortError> {
+        self.inner.set_reviewer_settings(s).await
+    }
+    async fn chrome_connected(&self) -> bool {
+        self.inner.chrome_connected().await
+    }
+}

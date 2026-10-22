@@ -56,6 +56,7 @@ fn with_workspace(st: &Station) {
             "kelola-app".to_owned(),
         ],
         mcp_servers: vec!["graft".to_owned()],
+        browser_tests: true,
     });
 }
 

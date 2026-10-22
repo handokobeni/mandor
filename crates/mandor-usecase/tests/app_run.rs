@@ -201,6 +201,7 @@ async fn covers_r27_anggota_dinyalakan_berurutan_dan_berhenti_saat_gagal() {
         root: PathBuf::from("/src/kv2"),
         repo_ids: vec!["api".to_owned(), "web".to_owned()],
         mcp_servers: vec![],
+        browser_tests: true,
     });
     let target = StartTarget::Workspace {
         id: "kv2".to_owned(),

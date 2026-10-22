@@ -7,13 +7,17 @@ use mandor_domain::AgentEvent;
 use mandor_proc::{Cmd, EnvPolicy, reap_group, run};
 use mandor_usecase::PortError;
 use mandor_usecase::run_ports::{
-    AgentPort, AgentRequest, AgentRunHandle, PrContext, RepoInfo, SessionRef, Stopper,
+    AgentPort, AgentRequest, AgentRunHandle, PrContext, RepoInfo, ReviewRequest, SessionRef,
+    Stopper,
 };
 
 use crate::backend::{AgentRun, ClaudeBackend, RunStopper};
-use crate::claude::command::{Session, SessionSpec};
+use crate::claude::command::{ReviewFlags, Session, SessionSpec};
 use crate::claude::guardrails::{default_allowed, default_denied, settings_json};
-use crate::prompt::{OperatorContext, data_block, new_nonce, operator_prompt};
+use crate::claude::review_state;
+use crate::prompt::{
+    OperatorContext, data_block, new_nonce, operator_prompt, review_operator_prompt,
+};
 
 /// Tenggat setelah SIGINT/SIGTERM sebelum SIGKILL (KTD-17).
 const STOP_GRACE: Duration = Duration::from_secs(10);
@@ -51,6 +55,9 @@ pub struct ClaudeConfig {
     pub mcp_dir: PathBuf,
     /// Server MCP ledger milik daemon (`mandord mcp`); `None` di test lama.
     pub ledger_server: Option<LedgerServer>,
+    /// Folder berkas state pagar reviewer (`~/.mandor/agent/review`), ditolak
+    /// bagi agent.
+    pub review_dir: PathBuf,
 }
 
 /// Cara agent menjangkau server MCP ledger milik daemon (KTD-26).
@@ -81,6 +88,9 @@ impl ClaudeAgent {
     /// [`Self::prepare_workspace`].
     #[must_use]
     pub fn spec(&self, req: &AgentRequest, mcp_config: Option<PathBuf>) -> SessionSpec {
+        if let Some(review) = &req.review {
+            return self.review_spec(req, review, mcp_config);
+        }
         let wt = req.worktree.display().to_string();
         let repos: Vec<&RepoInfo> = match &req.workspace {
             Some(ws) => ws.repos.iter().map(|(r, _)| r).collect(),
@@ -164,6 +174,123 @@ impl ClaudeAgent {
             env: self.cfg.env.clone(),
             mcp_config,
             plan_mode: req.plan_mode,
+            review: None,
+        }
+    }
+
+    /// Berkas state pagar browser satu review.
+    #[must_use]
+    pub fn review_state_path(&self, review_id: &str) -> PathBuf {
+        self.cfg
+            .review_dir
+            .join(format!("{}.json", wt_key(Path::new(review_id))))
+    }
+
+    /// Spesifikasi sesi reviewer: sesi baru yang hanya membaca, hook mode
+    /// review dengan `PostToolUse`, ledger peran Verdict, dan browser hanya
+    /// bila siap (KTD-29–KTD-31).
+    fn review_spec(
+        &self,
+        req: &AgentRequest,
+        review: &ReviewRequest,
+        mcp_config: Option<PathBuf>,
+    ) -> SessionSpec {
+        let repos: Vec<&RepoInfo> = match &req.workspace {
+            Some(ws) => ws.repos.iter().map(|(r, _)| r).collect(),
+            None => vec![&req.repo],
+        };
+        let mut allowed: Vec<String> = default_allowed()
+            .into_iter()
+            .filter(|t| !REVIEW_WRITE_TOOLS.contains(&t.as_str()))
+            .collect();
+        for a in repos.iter().flat_map(|r| r.extra_allowed.iter()) {
+            if !allowed.contains(a) {
+                allowed.push(a.clone());
+            }
+        }
+        let mut companions: Vec<PathBuf> = Vec::new();
+        for c in repos
+            .iter()
+            .flat_map(|r| r.companions.iter())
+            .chain(req.design.iter().map(|d| &d.path))
+        {
+            if !companions.contains(c) {
+                companions.push(c.clone());
+            }
+        }
+        let mut denied = default_denied(&companions);
+        denied.extend(REVIEW_WRITE_TOOLS.iter().map(|t| (*t).to_owned()));
+        denied.push("ExitPlanMode".to_owned());
+        let state = shell_quote(
+            &self
+                .review_state_path(&review.review_id)
+                .display()
+                .to_string(),
+        );
+        let mut hook_command = self.cfg.hook_command.clone();
+        if self.ledger_enabled(req) {
+            allowed.push(format!("mcp__{LEDGER_SERVER_NAME}"));
+            hook_command.push_str(" --mcp ");
+            hook_command.push_str(LEDGER_SERVER_NAME);
+        }
+        if review.chrome {
+            allowed.push("mcp__claude-in-chrome".to_owned());
+        }
+        for d in &req.design {
+            hook_command.push_str(" --design ");
+            hook_command.push_str(&shell_quote(&d.path.display().to_string()));
+        }
+        hook_command.push_str(" --review ");
+        hook_command.push_str(&state);
+        let post_hook_command = format!("{} --review {state} --post", self.cfg.hook_command);
+        let wt = req.worktree.display().to_string();
+        let listing: Vec<(String, String)> = req.workspace.as_ref().map_or_else(Vec::new, |ws| {
+            ws.repos
+                .iter()
+                .map(|(r, path)| {
+                    let dir = path
+                        .file_name()
+                        .map_or_else(|| r.id.clone(), |n| n.to_string_lossy().into_owned());
+                    (dir, r.default_branch.clone())
+                })
+                .collect()
+        });
+        let design: Vec<(String, String)> = req
+            .design
+            .iter()
+            .map(|d| (d.name.clone(), d.path.display().to_string()))
+            .collect();
+        SessionSpec {
+            claude_bin: self.cfg.claude_bin.clone(),
+            worktree: req.worktree.clone(),
+            session: match &req.session {
+                SessionRef::New(id) => Session::New(id.clone()),
+                SessionRef::Resume(id) => Session::Resume(id.clone()),
+            },
+            operator_prompt: review_operator_prompt(&OperatorContext {
+                worktree: &wt,
+                branch: &req.branch,
+                base_branch: &req.repo.default_branch,
+                repos: &listing,
+                design: &design,
+            }),
+            model: review.model.clone().or_else(|| self.cfg.model.clone()),
+            allowed,
+            denied,
+            companions,
+            hook_command,
+            env: self.cfg.env.clone(),
+            mcp_config,
+            plan_mode: false,
+            review: Some(ReviewFlags {
+                post_hook_command,
+                chrome: review.chrome,
+                budget_usd: format!(
+                    "{}.{:02}",
+                    review.budget_cents / 100,
+                    review.budget_cents % 100
+                ),
+            }),
         }
     }
 
@@ -186,7 +313,8 @@ impl ClaudeAgent {
     ) -> Result<Option<PathBuf>, PortError> {
         let io = |e: std::io::Error| PortError::Storage(e.to_string());
         let mut picked = serde_json::Map::new();
-        if let Some(ws) = &req.workspace {
+        // Reviewer hanya memakai server ledger; server workspace bisa menulis.
+        if let Some(ws) = req.workspace.as_ref().filter(|_| req.review.is_none()) {
             let claude_md = ws.source.join("CLAUDE.md");
             let target = req.worktree.join("CLAUDE.md");
             if tokio::fs::try_exists(&claude_md).await.unwrap_or(false)
@@ -222,7 +350,10 @@ impl ClaudeAgent {
         tokio::fs::create_dir_all(&self.cfg.mcp_dir)
             .await
             .map_err(io)?;
-        let name: String = wt_key(&req.worktree);
+        let name: String = match &req.review {
+            Some(r) => format!("review-{}", wt_key(Path::new(&r.review_id))),
+            None => wt_key(&req.worktree),
+        };
         let path = self.cfg.mcp_dir.join(format!("{name}.json"));
         tokio::fs::write(&path, config).await.map_err(io)?;
         restrict(&path).await.map_err(io)?;
@@ -328,6 +459,9 @@ fn clean_message(raw: &str) -> String {
 #[derive(Debug)]
 pub struct ClaudeRun {
     run: AgentRun,
+    /// Batas waktu sesi reviewer (KTD-30).
+    deadline: Option<(tokio::time::Instant, Duration)>,
+    timed_out: bool,
 }
 
 /// Penghenti run untuk port.
@@ -345,7 +479,29 @@ impl AgentRunHandle for ClaudeRun {
     type Stopper = ClaudeStopper;
 
     async fn next_event(&mut self) -> Option<AgentEvent> {
-        self.run.next_event().await.map(|e| e.event)
+        if let (Some((at, limit)), false) = (self.deadline, self.timed_out) {
+            tokio::select! {
+                ev = self.run.next_event() => return ev.map(|e| e.event),
+                () = tokio::time::sleep_until(at) => {
+                    self.timed_out = true;
+                    self.run.stop(STOP_GRACE).await;
+                    return Some(AgentEvent::Failed {
+                        message: format!(
+                            "the review ran past its time limit ({} min)",
+                            limit.as_secs() / 60
+                        ),
+                    });
+                }
+            }
+        }
+        loop {
+            let ev = self.run.next_event().await?.event;
+            // Setelah batas waktu, alasan akhirnya tetap batas waktu.
+            if self.timed_out && matches!(ev, AgentEvent::Done { .. } | AgentEvent::Failed { .. }) {
+                continue;
+            }
+            return Some(ev);
+        }
     }
 
     fn pid(&self) -> Option<u32> {
@@ -362,10 +518,36 @@ impl AgentPort for ClaudeAgent {
 
     async fn spawn(&self, req: &AgentRequest) -> Result<ClaudeRun, PortError> {
         let mcp_config = self.prepare_workspace(req).await?;
+        if let Some(review) = &req.review {
+            self.write_review_state(review).await?;
+        }
         let run = AgentRun::start(&ClaudeBackend, &self.spec(req, mcp_config), &req.message, 0)
             .await
             .map_err(|e| PortError::Transient(e.to_string()))?;
-        Ok(ClaudeRun { run })
+        let deadline = req
+            .review
+            .as_ref()
+            .map(|r| (tokio::time::Instant::now() + r.timeout, r.timeout));
+        Ok(ClaudeRun {
+            run,
+            deadline,
+            timed_out: false,
+        })
+    }
+
+    async fn end_review(&self, review_id: &str) {
+        let state = self.review_state_path(review_id);
+        let mcp = self
+            .cfg
+            .mcp_dir
+            .join(format!("review-{}.json", wt_key(Path::new(review_id))));
+        let cleanup = tokio::task::spawn_blocking(move || {
+            review_state::remove(&state);
+            let _ = std::fs::remove_file(mcp);
+        });
+        if tokio::time::timeout(FILE_TIMEOUT, cleanup).await.is_err() {
+            tracing::warn!(review_id, "berkas review tidak terhapus tepat waktu");
+        }
     }
 
     async fn commit_message(&self, worktree: &Path, diff: &str) -> Result<String, PortError> {
@@ -483,6 +665,35 @@ fn shell_quote(path: &str) -> String {
     }
 }
 
+/// Tool penulis berkas yang tidak tersedia bagi reviewer.
+const REVIEW_WRITE_TOOLS: &[&str] = &["Edit", "Write", "MultiEdit", "NotebookEdit"];
+/// Batas waktu menulis atau menghapus berkas state review.
+const FILE_TIMEOUT: Duration = Duration::from_secs(5);
+
+impl ClaudeAgent {
+    /// Menulis state pagar awal review (0600): origin app, tanpa tab.
+    async fn write_review_state(&self, review: &ReviewRequest) -> Result<(), PortError> {
+        let path = self.review_state_path(&review.review_id);
+        let dir = self.cfg.review_dir.clone();
+        let state = mandor_domain::hook_review::ReviewState {
+            origins: review.origins.clone(),
+            ..Default::default()
+        };
+        let write = tokio::task::spawn_blocking(move || {
+            std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+            review_state::save(&path, &state)
+        });
+        match tokio::time::timeout(FILE_TIMEOUT, write).await {
+            Ok(Ok(Ok(()))) => Ok(()),
+            Ok(Ok(Err(e))) => Err(PortError::Storage(e)),
+            Ok(Err(e)) => Err(PortError::Storage(e.to_string())),
+            Err(_) => Err(PortError::Storage(
+                "writing the review state timed out".to_owned(),
+            )),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -510,6 +721,7 @@ mod tests {
             plan_mode: false,
             ledger: None,
             design: vec![],
+            review: None,
         };
         let spec = agent.spec(&req, None);
         assert_eq!(spec.mcp_config, None);
@@ -529,6 +741,7 @@ mod tests {
             env: vec![],
             model: None,
             commit_model: "haiku".to_owned(),
+            review_dir: mcp_dir.join("review"),
             mcp_dir,
             ledger_server: Some(LedgerServer {
                 command: "/opt/mandord".into(),
@@ -575,6 +788,7 @@ mod tests {
             plan_mode: false,
             ledger: None,
             design: vec![],
+            review: None,
         }
     }
 
@@ -683,6 +897,71 @@ mod tests {
         assert!(spec.allowed.contains(&"ToolSearch".to_owned()));
         let argv = format!("{:?}", spec.allowed);
         assert!(!argv.contains("tok-rahasia"));
+    }
+
+    #[tokio::test]
+    async fn sesi_reviewer_hanya_baca_dengan_hook_review_dan_berkas_state() {
+        use mandor_usecase::review::{CapabilityRole, CapabilityToken, LedgerAccess};
+        let dir = tempfile::tempdir().unwrap();
+        let agent = test_agent(dir.path().join("mcp"));
+        let mut req = workspace_req(dir.path().to_path_buf());
+        std::fs::write(
+            dir.path().join(".mcp.json"),
+            r#"{"mcpServers":{"graft":{"command":"node"}}}"#,
+        )
+        .unwrap();
+        req.ledger = Some(LedgerAccess {
+            role: CapabilityRole::Verdict,
+            token: CapabilityToken::for_test("tok-v"),
+        });
+        req.review = Some(ReviewRequest {
+            review_id: "rv1".to_owned(),
+            origins: vec!["http://localhost:5173".to_owned()],
+            chrome: true,
+            model: Some("haiku".to_owned()),
+            budget_cents: 250,
+            timeout: Duration::from_secs(900),
+        });
+        let path = agent.prepare_workspace(&req).await.unwrap().unwrap();
+        assert!(path.ends_with("review-rv1.json"));
+        let cfg: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+        assert!(
+            cfg["mcpServers"].get("graft").is_none(),
+            "server workspace tidak dipakai"
+        );
+        assert!(cfg["mcpServers"].get("mandor").is_some());
+
+        let spec = agent.spec(&req, Some(path));
+        let state = agent.review_state_path("rv1").display().to_string();
+        assert_eq!(
+            spec.hook_command,
+            format!("/opt/mandord hook --mcp mandor --review {state}")
+        );
+        let flags = spec.review.clone().unwrap();
+        assert_eq!(
+            flags.post_hook_command,
+            format!("/opt/mandord hook --review {state} --post")
+        );
+        assert!(flags.chrome);
+        assert_eq!(flags.budget_usd, "2.50");
+        assert_eq!(spec.model.as_deref(), Some("haiku"));
+        assert!(!spec.allowed.contains(&"Edit".to_owned()));
+        assert!(!spec.allowed.contains(&"Write".to_owned()));
+        assert!(spec.denied.contains(&"Write".to_owned()));
+        assert!(spec.allowed.contains(&"mcp__claude-in-chrome".to_owned()));
+        assert!(spec.allowed.contains(&"mcp__mandor".to_owned()));
+        assert!(!spec.allowed.contains(&"mcp__graft".to_owned()));
+        assert!(spec.operator_prompt.contains("REVIEWER"));
+
+        agent
+            .write_review_state(req.review.as_ref().unwrap())
+            .await
+            .unwrap();
+        let written = review_state::load(&agent.review_state_path("rv1")).unwrap();
+        assert_eq!(written.origins, ["http://localhost:5173"]);
+        agent.end_review("rv1").await;
+        assert!(!agent.review_state_path("rv1").exists());
     }
 
     #[tokio::test]

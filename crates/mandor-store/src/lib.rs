@@ -34,7 +34,7 @@ pub use messages::Message;
 pub use notifications::{NOTIFICATIONS_KEPT, Notification};
 pub use outbox::{OutboxItem, OutboxStatus};
 pub use repos::{NewRepo, Repo};
-pub use review_port::ReviewsStore;
+pub use review_port::{CHROME_KEY, ReviewsStore};
 pub use reviews::{StoredReview, StoredVerdict};
 pub use run_port::{ReposStore, RunsStore, app_settings_json, app_settings_of};
 pub use tasks::TaskStore;

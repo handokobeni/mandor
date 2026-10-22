@@ -529,6 +529,23 @@ impl mandor_usecase::run_ports::Prompts for PlainMessage {
         format!("CONTINUE SKILL:{}", skill.unwrap_or("-"))
     }
 
+    fn review_message(&self, b: &mandor_usecase::run_ports::ReviewBrief<'_>) -> String {
+        let acs: Vec<String> = b.rows.iter().map(|r| r.ac_id.clone()).collect();
+        format!(
+            "REVIEW {} AC:{} BROWSER:{} REASON:{} SKILL:{}",
+            b.task.title,
+            acs.join("|"),
+            b.facts.browser,
+            b.facts.reason.as_deref().unwrap_or("-"),
+            b.skill.unwrap_or("-")
+        )
+    }
+
+    fn findings_message(&self, rows: &[mandor_domain::AcRow]) -> String {
+        let ids: Vec<&str> = rows.iter().map(|r| r.ac_id.as_str()).collect();
+        format!("FINDINGS {}", ids.join("|"))
+    }
+
     fn design_message(&self, sources: &[mandor_usecase::review::DesignRoot]) -> String {
         let names: Vec<&str> = sources.iter().map(|s| s.name.as_str()).collect();
         format!("DESIGN {}", names.join(","))

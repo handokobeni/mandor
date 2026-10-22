@@ -4,7 +4,7 @@ use std::path::PathBuf;
 
 use mandor_proc::{Cmd, EnvPolicy};
 
-use super::guardrails::settings_json;
+use super::guardrails::{review_settings_json, settings_json};
 
 /// Sesi baru dengan ID pilihan daemon, atau lanjutan.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -34,6 +34,19 @@ pub struct SessionSpec {
     pub mcp_config: Option<PathBuf>,
     /// Giliran plan: mode izin `plan` (hanya baca) menggantikan `acceptEdits`.
     pub plan_mode: bool,
+    /// Sesi reviewer: hook `PostToolUse`, browser, dan batas biaya.
+    pub review: Option<ReviewFlags>,
+}
+
+/// Argumen tambahan sesi reviewer (KTD-29–KTD-31).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ReviewFlags {
+    /// Perintah hook `PostToolUse` (`mandord hook --review <state> --post`).
+    pub post_hook_command: String,
+    /// `--chrome` hanya bila semua syarat kesiapan terpenuhi.
+    pub chrome: bool,
+    /// Nilai `--max-budget-usd`, mis. `2.00`.
+    pub budget_usd: String,
 }
 
 /// Argumen `claude`. Pesan user dikirim lewat stdin, bukan argv.
@@ -64,7 +77,20 @@ pub fn args(spec: &SessionSpec) -> Vec<String> {
         a.push(path.display().to_string());
     }
     a.push("--settings".to_owned());
-    a.push(settings_json(&spec.hook_command));
+    match &spec.review {
+        Some(r) => {
+            a.push(review_settings_json(
+                &spec.hook_command,
+                &r.post_hook_command,
+            ));
+            if r.chrome {
+                a.push("--chrome".to_owned());
+            }
+            a.push("--max-budget-usd".to_owned());
+            a.push(r.budget_usd.clone());
+        }
+        None => a.push(settings_json(&spec.hook_command)),
+    }
     if !spec.allowed.is_empty() {
         a.push("--allowedTools".to_owned());
         a.push(spec.allowed.join(","));
@@ -123,7 +149,28 @@ mod tests {
             env: vec![],
             mcp_config: None,
             plan_mode: false,
+            review: None,
         }
+    }
+
+    #[test]
+    fn sesi_reviewer_memakai_post_hook_batas_biaya_dan_chrome_bila_siap() {
+        let mut s = spec(Session::New("r-1".to_owned()));
+        s.review = Some(ReviewFlags {
+            post_hook_command: "/opt/mandord hook --review /s.json --post".to_owned(),
+            chrome: true,
+            budget_usd: "2.00".to_owned(),
+        });
+        let a = args(&s);
+        assert!(a.contains(&"--chrome".to_owned()));
+        assert_eq!(after(&a, "--max-budget-usd"), Some("2.00"));
+        assert!(after(&a, "--settings").is_some_and(|x| x.contains("PostToolUse")));
+        s.review.as_mut().unwrap().chrome = false;
+        assert!(!args(&s).contains(&"--chrome".to_owned()));
+        // Sesi biasa tidak memakai browser maupun batas biaya.
+        let plain = args(&spec(Session::New("u-1".to_owned())));
+        assert!(!plain.contains(&"--chrome".to_owned()));
+        assert!(!plain.contains(&"--max-budget-usd".to_owned()));
     }
 
     #[test]

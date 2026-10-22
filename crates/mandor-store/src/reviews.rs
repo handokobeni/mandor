@@ -147,6 +147,39 @@ impl Store {
             .collect())
     }
 
+    /// Verdict semua review run dalam satu query: `(review_id, verdict)`.
+    ///
+    /// # Errors
+    /// [`StoreError::Internal`] bila pembacaan gagal.
+    pub async fn run_review_verdicts(
+        &self,
+        run_id: &str,
+    ) -> Result<Vec<(String, StoredVerdict)>, StoreError> {
+        let rows = sqlx::query!(
+            "SELECT v.review_id, v.ac_id, v.label, v.verdict, v.evidence
+             FROM review_verdicts v JOIN reviews r ON r.id = v.review_id
+             WHERE r.run_id = ? ORDER BY v.rowid",
+            run_id
+        )
+        .fetch_all(&self.pool)
+        .await
+        .map_err(StoreError::internal)?;
+        Ok(rows
+            .into_iter()
+            .map(|r| {
+                (
+                    r.review_id,
+                    StoredVerdict {
+                        ac_id: r.ac_id,
+                        label: r.label,
+                        verdict: r.verdict,
+                        evidence: r.evidence,
+                    },
+                )
+            })
+            .collect())
+    }
+
     /// Masa simpan riwayat review (R32): review dari run yang ditutup sebelum
     /// `closed_before_ms` dihapus, dan setiap run hanya menyimpan `keep_per_run`
     /// review terbaru. Mengembalikan jumlah review yang dihapus.

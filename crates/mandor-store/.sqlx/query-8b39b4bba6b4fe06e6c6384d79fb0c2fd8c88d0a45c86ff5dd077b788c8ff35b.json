@@ -1,0 +1,74 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT v.review_id, v.ac_id, v.label, v.verdict, v.evidence\n             FROM review_verdicts v JOIN reviews r ON r.id = v.review_id\n             WHERE r.run_id = ? ORDER BY v.rowid",
+  "describe": {
+    "columns": [
+      {
+        "name": "review_id",
+        "ordinal": 0,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "review_verdicts",
+            "name": "review_id"
+          }
+        }
+      },
+      {
+        "name": "ac_id",
+        "ordinal": 1,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "review_verdicts",
+            "name": "ac_id"
+          }
+        }
+      },
+      {
+        "name": "label",
+        "ordinal": 2,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "review_verdicts",
+            "name": "label"
+          }
+        }
+      },
+      {
+        "name": "verdict",
+        "ordinal": 3,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "review_verdicts",
+            "name": "verdict"
+          }
+        }
+      },
+      {
+        "name": "evidence",
+        "ordinal": 4,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "review_verdicts",
+            "name": "evidence"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false,
+      false,
+      true,
+      false,
+      true
+    ]
+  },
+  "hash": "8b39b4bba6b4fe06e6c6384d79fb0c2fd8c88d0a45c86ff5dd077b788c8ff35b"
+}

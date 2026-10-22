@@ -57,6 +57,10 @@ pub enum AgentEvent {
         result: String,
         num_turns: u32,
         denials: u32,
+        /// Biaya giliran menurut CLI (`total_cost_usd`).
+        cost_usd: Option<f64>,
+        /// Batas yang menghentikan giliran: `budget` atau `turns`.
+        limit: Option<String>,
     },
     /// Proses berakhir tanpa event `result`.
     Failed {

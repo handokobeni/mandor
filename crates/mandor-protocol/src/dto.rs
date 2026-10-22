@@ -656,6 +656,75 @@ pub struct AcLedgerView {
     pub design_sources: Vec<String>,
 }
 
+/// Verdict satu AC dalam riwayat review.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+pub struct ReviewVerdictView {
+    pub ac_id: String,
+    pub label: Option<String>,
+    pub verdict: String,
+    pub evidence: Option<String>,
+}
+
+/// Satu review AC (riwayat dan progres).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+pub struct ReviewView {
+    pub id: String,
+    pub run_id: String,
+    /// `manual`, `push_and_pr`, atau `automatic_fix`.
+    pub trigger: String,
+    /// `running`, `finished`, `failed`, atau `cancelled`.
+    pub status: String,
+    pub browser_used: bool,
+    /// Alasan tanpa browser, mis. "app running older code".
+    pub browser_reason: Option<String>,
+    pub error: Option<String>,
+    pub cost_usd: Option<f64>,
+    #[ts(type = "number")]
+    pub input_tokens: u64,
+    #[ts(type = "number")]
+    pub output_tokens: u64,
+    /// Kode berubah selama review.
+    pub stale: bool,
+    pub skill: Option<String>,
+    #[ts(type = "number")]
+    pub started_at_ms: i64,
+    #[ts(type = "number | null")]
+    pub finished_at_ms: Option<i64>,
+    pub verdicts: Vec<ReviewVerdictView>,
+}
+
+/// Parameter `review.start`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+pub struct ReviewStart {
+    pub run_id: String,
+    /// `manual` (bawaan) atau `push_and_pr`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub trigger: Option<String>,
+    /// Skill reviewer (`plugin:skill`); tidak diisi = prompt bawaan.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub skill: Option<String>,
+}
+
+/// Parameter `review.send_findings`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+pub struct ReviewFindings {
+    pub run_id: String,
+    pub ac_ids: Vec<String>,
+}
+
+/// Setelan reviewer (Settings › General, KTD-30).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+pub struct ReviewerSettingsView {
+    /// `None` = model agent pelaksana.
+    pub model: Option<String>,
+    /// Batas biaya per review dalam sen USD.
+    pub budget_cents: u32,
+    #[ts(type = "number")]
+    pub timeout_secs: u64,
+}
+
 /// Parameter `runs.approve_plan`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
 pub struct ApprovePlanParams {

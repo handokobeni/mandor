@@ -6,7 +6,7 @@ use mandor_domain::RunState;
 
 use super::{RunError, RunService};
 use crate::ports::Deps;
-use crate::run_ports::{AgentPort, ChatItem, RunStore};
+use crate::run_ports::{AgentPort, ChatItem, ReviewHistory, ReviewStatus, RunRecord, RunStore};
 
 impl<D: Deps> RunService<D> {
     /// Run yang sedang berjalan saat daemon mati menjadi "gagal" yang bisa
@@ -18,6 +18,11 @@ impl<D: Deps> RunService<D> {
     pub async fn reconcile(self: &Arc<Self>) -> Result<Vec<String>, RunError> {
         let mut marked = Vec::new();
         for mut run in self.runs.list_active().await? {
+            if run.state == RunState::Reviewing {
+                self.fail_interrupted_review(&mut run).await?;
+                marked.push(run.id);
+                continue;
+            }
             let interrupted = matches!(
                 run.state,
                 RunState::Running
@@ -50,6 +55,43 @@ impl<D: Deps> RunService<D> {
             marked.push(run.id);
         }
         Ok(marked)
+    }
+
+    /// Review yang terputus saat restart: proses reviewer dihentikan, review
+    /// Failed, dan run kembali menunggu dev (KTD-30). AC yang belum dilaporkan
+    /// tetap Not reviewed.
+    async fn fail_interrupted_review(&self, run: &mut RunRecord) -> Result<(), RunError> {
+        if let Some(pid) = run.pid.and_then(|p| u32::try_from(p).ok()) {
+            self.agent.reap(pid).await;
+        }
+        if let Some(id) = run.review_id.take() {
+            self.agent.end_review(&id).await;
+            if let Some(mut r) = self
+                .reviews
+                .reviews(&run.id)
+                .await?
+                .into_iter()
+                .find(|r| r.id == id)
+            {
+                r.status = ReviewStatus::Failed;
+                r.error = Some("the daemon restarted during the review".to_owned());
+                r.finished_at_ms = Some(self.now());
+                self.reviews.save_review(&r).await?;
+            }
+        }
+        let expected = run.generation;
+        run.generation += 1;
+        run.state = RunState::AwaitingDev;
+        run.pid = None;
+        self.runs.save(run, expected, self.now()).await?;
+        self.runs
+            .append(
+                &run.id,
+                &ChatItem::System("Review failed because the daemon restarted".to_owned()),
+                self.now(),
+            )
+            .await?;
+        Ok(())
     }
 
     /// "Lanjutkan" run gagal: giliran baru pada sesi yang sama.

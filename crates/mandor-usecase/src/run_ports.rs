@@ -45,6 +45,8 @@ pub struct WorkspaceInfo {
     pub repo_ids: Vec<String>,
     /// MCP server dari `.mcp.json` folder induk yang diizinkan dev.
     pub mcp_servers: Vec<String>,
+    /// Uji browser oleh reviewer untuk run workspace ini (KTD-37).
+    pub browser_tests: bool,
 }
 
 /// Perubahan di worktree terhadap branch remote.
@@ -205,6 +207,22 @@ pub struct AgentRequest {
     pub ledger: Option<crate::review::LedgerAccess>,
     /// Sumber desain hanya baca untuk agent (KTD-33).
     pub design: Vec<crate::review::DesignRoot>,
+    /// Sesi reviewer AC: hanya baca, hook mode review, batas biaya dan waktu.
+    pub review: Option<ReviewRequest>,
+}
+
+/// Bagian permintaan agent untuk sesi reviewer (KTD-29–KTD-31).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ReviewRequest {
+    pub review_id: String,
+    /// Origin app yang boleh dibuka browser reviewer.
+    pub origins: Vec<String>,
+    /// `--chrome` hanya bila semua syarat kesiapan terpenuhi.
+    pub chrome: bool,
+    pub model: Option<String>,
+    /// Batas biaya `--max-budget-usd`, dalam sen.
+    pub budget_cents: u32,
+    pub timeout: std::time::Duration,
 }
 
 /// Konteks agent untuk run workspace.
@@ -253,6 +271,8 @@ pub trait AgentPort: Send + Sync {
     ) -> impl Future<Output = Result<String, PortError>> + Send;
     /// Menghentikan process group yatim dari daemon sebelumnya (KTD-13).
     fn reap(&self, pid: u32) -> impl Future<Output = ()> + Send;
+    /// Membersihkan berkas milik sesi reviewer (state pagar browser).
+    fn end_review(&self, review_id: &str) -> impl Future<Output = ()> + Send;
 }
 
 /// Bahan deskripsi PR. Semua teks berasal dari Lark atau diff dan diperlakukan
@@ -318,6 +338,8 @@ pub struct RunRecord {
     /// Sumber desain yang dipilih saat Start; dipakai semua giliran dan
     /// reviewer (KTD-33). Kosong = run tanpa sumber desain.
     pub design: Vec<crate::review::DesignRoot>,
+    /// Review yang sedang berjalan (state `Reviewing`).
+    pub review_id: Option<String>,
     /// Diisi store saat membaca; diabaikan saat menyimpan.
     pub created_at_ms: i64,
     /// Diisi store saat membaca; diabaikan saat menyimpan.
@@ -353,6 +375,7 @@ impl RunRecord {
             pr_body_hashes: BTreeMap::new(),
             review_snapshot: BTreeMap::new(),
             design: Vec::new(),
+            review_id: None,
             created_at_ms: 0,
             updated_at_ms: 0,
         }
@@ -554,6 +577,11 @@ pub trait Prompts: Send + Sync {
     /// Tambahan pesan brainstorm/plan bila run punya sumber desain: baca
     /// sumber dan isi kolom Design per AC lewat tool ledger.
     fn design_message(&self, sources: &[crate::review::DesignRoot]) -> String;
+    /// Pesan pertama sesi reviewer: AC sebagai data, fakta kesiapan, dan
+    /// instruksi melapor lewat `ac_set_verdict` (KTD-38).
+    fn review_message(&self, brief: &ReviewBrief<'_>) -> String;
+    /// Pesan ke agent pelaksana berisi temuan reviewer sebagai data.
+    fn findings_message(&self, rows: &[AcRow]) -> String;
 }
 
 /// Repo anggota yang app-nya dinyalakan.
@@ -640,4 +668,148 @@ pub trait AppRecords: Send + Sync {
         &self,
         run_id: Option<&str>,
     ) -> impl Future<Output = Result<(), PortError>> + Send;
+}
+
+/// Fakta kesiapan uji browser untuk reviewer (R13, KTD-38).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ReviewFacts {
+    /// Reviewer boleh memakai browser.
+    pub browser: bool,
+    /// Alasan tanpa browser, mis. "app running older code".
+    pub reason: Option<String>,
+    /// URL app kanonik yang boleh dibuka.
+    pub app_urls: Vec<String>,
+}
+
+/// Bahan pesan pertama reviewer.
+#[derive(Debug, Clone, Copy)]
+pub struct ReviewBrief<'a> {
+    pub task: &'a Task,
+    /// Baris buku AC di gerbang yang dinilai.
+    pub rows: &'a [AcRow],
+    pub facts: &'a ReviewFacts,
+    /// Skill reviewer pilihan dev (`plugin:skill`).
+    pub skill: Option<&'a str>,
+    /// Run workspace: folder repo anggota.
+    pub repos: &'a [String],
+}
+
+/// Pemicu review.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ReviewTrigger {
+    Manual,
+    PushAndPr,
+    AutomaticFix,
+}
+
+impl ReviewTrigger {
+    #[must_use]
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Manual => "manual",
+            Self::PushAndPr => "push_and_pr",
+            Self::AutomaticFix => "automatic_fix",
+        }
+    }
+
+    #[must_use]
+    pub fn parse(s: &str) -> Option<Self> {
+        match s {
+            "manual" => Some(Self::Manual),
+            "push_and_pr" => Some(Self::PushAndPr),
+            "automatic_fix" => Some(Self::AutomaticFix),
+            _ => None,
+        }
+    }
+}
+
+/// Status satu review.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ReviewStatus {
+    Running,
+    Finished,
+    Failed,
+    Cancelled,
+}
+
+impl ReviewStatus {
+    #[must_use]
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Running => "running",
+            Self::Finished => "finished",
+            Self::Failed => "failed",
+            Self::Cancelled => "cancelled",
+        }
+    }
+
+    #[must_use]
+    pub fn parse(s: &str) -> Option<Self> {
+        match s {
+            "running" => Some(Self::Running),
+            "finished" => Some(Self::Finished),
+            "failed" => Some(Self::Failed),
+            "cancelled" => Some(Self::Cancelled),
+            _ => None,
+        }
+    }
+}
+
+/// Catatan satu review (riwayat).
+#[derive(Debug, Clone, PartialEq)]
+pub struct ReviewRecord {
+    pub id: String,
+    pub run_id: String,
+    pub trigger: ReviewTrigger,
+    pub status: ReviewStatus,
+    pub browser_used: bool,
+    /// Alasan reviewer tanpa browser.
+    pub browser_reason: Option<String>,
+    pub error: Option<String>,
+    pub cost_usd: Option<f64>,
+    pub usage: mandor_domain::Usage,
+    /// Kode berubah selama review (KTD-28).
+    pub stale: bool,
+    pub skill: Option<String>,
+    pub started_at_ms: i64,
+    pub finished_at_ms: Option<i64>,
+    /// Verdict per AC saat review berakhir.
+    pub verdicts: Vec<AcRow>,
+}
+
+/// Setelan reviewer global (KTD-30).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ReviewerSettings {
+    /// `None` = model agent pelaksana.
+    pub model: Option<String>,
+    /// Batas biaya per review, dalam sen USD (bawaan 2 USD).
+    pub budget_cents: u32,
+    pub timeout_secs: u64,
+}
+
+impl Default for ReviewerSettings {
+    fn default() -> Self {
+        Self {
+            model: None,
+            budget_cents: 200,
+            timeout_secs: 15 * 60,
+        }
+    }
+}
+
+/// Riwayat review dan setelan reviewer.
+pub trait ReviewHistory: Send + Sync {
+    fn save_review(&self, r: &ReviewRecord) -> impl Future<Output = Result<(), PortError>> + Send;
+    /// Review run, terbaru dulu.
+    fn reviews(
+        &self,
+        run_id: &str,
+    ) -> impl Future<Output = Result<Vec<ReviewRecord>, PortError>> + Send;
+    fn reviewer_settings(&self) -> impl Future<Output = ReviewerSettings> + Send;
+    fn set_reviewer_settings(
+        &self,
+        s: &ReviewerSettings,
+    ) -> impl Future<Output = Result<(), PortError>> + Send;
+    /// Ekstensi Claude in Chrome terakhir terdeteksi tersambung (U13).
+    fn chrome_connected(&self) -> impl Future<Output = bool> + Send;
 }

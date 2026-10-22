@@ -128,3 +128,36 @@ fn satu_pesan_bisa_menghasilkan_beberapa_event() {
     };
     assert_eq!(preview, "fn main");
 }
+
+/// A4: sesi yang dihentikan `--max-budget-usd` (Claude Code 2.1.307).
+#[test]
+fn hasil_batas_biaya_dikenali_dengan_biaya_dan_usage() {
+    let raw = std::fs::read_to_string(format!(
+        "{}/tests/stream_fixtures/budget_result.ndjson",
+        env!("CARGO_MANIFEST_DIR")
+    ))
+    .unwrap();
+    let events: Vec<AgentEvent> = raw.lines().flat_map(parse_line).collect();
+    let Some(AgentEvent::Done {
+        is_error,
+        result,
+        cost_usd,
+        limit,
+        ..
+    }) = events.last()
+    else {
+        panic!("{events:?}")
+    };
+    assert!(is_error);
+    assert_eq!(limit.as_deref(), Some("budget"));
+    assert!(result.contains("Reached maximum budget"), "{result}");
+    assert!(cost_usd.unwrap() > 0.0);
+    let usage = events
+        .iter()
+        .find_map(|e| match e {
+            AgentEvent::Usage(u) => Some(*u),
+            _ => None,
+        })
+        .unwrap();
+    assert!(usage.output_tokens > 0, "{usage:?}");
+}

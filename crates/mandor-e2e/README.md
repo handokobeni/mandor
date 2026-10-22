@@ -42,7 +42,8 @@ Persiapan tambahan (lihat `docs/runbook/ac-review.md`):
 - Kartu uji punya beberapa AC di tabel Acceptance Criteria, dan record uji kembali
   *To Do* / *Ready To Dev*.
 - Folder desain uji (mis. prototipe HTML) untuk `MANDOR_E2E_DESIGN`.
-- Untuk uji browser: repo uji bertest mode Web dengan start command dan port,
+- Untuk uji browser: repo uji bertest mode Web dengan start command dan port
+  (`handokobeni/mandor-smoke` punya `web/`: start `python3 -m http.server 5173 --directory web`, port `5173`),
   ekstensi Claude in Chrome tersambung, dan app dinyalakan dari tab run lalu
   login dikonfirmasi lewat UI.
 

@@ -241,10 +241,12 @@ fn redirects_to_file(cmd: &str) -> bool {
 /// Target redirection yang tidak menulis berkas: duplikasi fd (`&1`, `&-`)
 /// atau tepat `/dev/null`, diikuti batas kata.
 fn harmless_target(rest: &str) -> bool {
+    // Batas kata menurut shell: hanya spasi ASCII dan pemisah, bukan spasi
+    // Unicode seperti NBSP yang bagi shell adalah bagian nama berkas.
     let boundary = |s: &str| {
         s.chars()
             .next()
-            .is_none_or(|c| c.is_whitespace() || ";|&)".contains(c))
+            .is_none_or(|c| matches!(c, ' ' | '\t' | '\n' | ';' | '|' | '&' | ')' | '<' | '>'))
     };
     if let Some(fd) = rest.strip_prefix('&') {
         let digits = fd.chars().take_while(char::is_ascii_digit).count();
@@ -257,7 +259,7 @@ fn harmless_target(rest: &str) -> bool {
         };
         return boundary(after);
     }
-    rest.trim_start()
+    rest.trim_start_matches([' ', '\t'])
         .strip_prefix("/dev/null")
         .is_some_and(boundary)
 }
@@ -665,6 +667,8 @@ mod tests {
             "pnpm test >& 1x",
             "pnpm test >| out.txt",
             "pnpm test &> out.txt",
+            "pnpm test > /dev/null\u{a0}x",
+            "pnpm test >\u{a0}/dev/null",
         ] {
             assert!(
                 matches!(classify_review(&bash(cmd), &s, &[]), Verdict::Deny(_)),

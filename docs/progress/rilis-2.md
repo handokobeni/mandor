@@ -38,3 +38,12 @@ Persiapan (2026-10-21):
 1. **[Diperbaiki 2026-10-21]** **Judul run menjadi id record setelah transisi status.** Header workspace menampilkan `reczz28Q6yTH5xZK` tanpa judul. `runs.list` mengambil key dan judul dari cache task, dan cache saat dicek kemudian sudah benar (PGS-1510, judul lengkap). Dugaan kuat: `write_one` di `mandor-usecase/src/sync/outbox.rs` menulis ke cache record hasil `lark.write`. Respons update Bitable hanya memuat field yang ditulis, jadi `ID` (formula) dan `Task name` kosong sampai poll berikutnya menimpanya. Penyebab terkonfirmasi. Perbaikan: `Task::apply_write` di domain menerapkan tulisan ke record hasil baca segar sebelum tulis, dan hasil gabungan itulah yang disimpan ke cache. `FakeLark` di test kini meniru respons parsial Bitable, dan test `cache_mempertahankan_key_judul_dan_assignee_setelah_outbox_menulis` melindungi perilaku ini. Bug yang sama juga membuat assignee dan AC hilang sementara dari cache.
 2. **[Diperbaiki 2026-10-21]** **Dialog Start fix mewajibkan instruksi walau sudah ada komentar tepercaya.** Saat kartu dalam jeda tenang dan sudah ada komentar tepercaya yang tercentang, tombol Start fix tetap ditolak tanpa instruksi. Dev yang menutup dialog lalu melihat perbaikan tetap berjalan, karena jeda tenang habis dan jalur otomatis berjalan sesuai R11c. Perilakunya benar, tetapi membingungkan. Perbaikan: instruksi opsional bila ada komentar tepercaya yang belum terkirim atau komentar yang dicentang (`startFixNeedsInstruction` di `chat.ts`, label berubah menjadi "optional, trusted comments are sent"). Daemon memperlakukan instruksi kosong sebagai tidak ada instruksi dan menolak Start fix tanpa instruksi maupun komentar. Test: dua skenario baru di `tests/waiting_fix.rs` dan satu di `chat.test.ts`.
 3. **`git -C <worktree> diff` butuh izin.** Agent mencoba `git -C`, ditolak karena tidak ada di allowlist, lalu memakai `git diff` dari dalam worktree. Tidak memblokir. Bisa ditambah ke allowlist baca git bila `-C` menunjuk ke worktree run.
+
+## Implementasi Rilis 2.0
+
+Branch `feat/rilis2-ac-review`. Satu commit per unit setelah `make check` hijau.
+
+| Unit | Status | Commit | Catatan |
+|---|---|---|---|
+| U1 Model buku AC dan gerbang | selesai | `6bcc8a0` | `ac_ledger.rs`, `push_gate.rs`; teks AC disimpan utuh (bukan hash) untuk deteksi Changed |
+| U2 Store | selesai | `3abbeeb` | Migrasi 0005 diuji pada salinan database Rilis 1 asli; trait port ditambahkan bersama unit pemakainya (U3, U6, U9) |

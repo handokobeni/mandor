@@ -79,6 +79,24 @@ impl Task {
         let want = self.column().mirror()?;
         (self.kanban_mirror.as_deref() != Some(want)).then_some(want)
     }
+
+    /// Menerapkan tulisan app ke salinan record. Respons update Bitable hanya memuat
+    /// field yang ditulis, jadi field lain diambil dari record yang sudah ada.
+    pub fn apply_write(&mut self, status: Option<&TaskStatus>, fields: &[AppField]) {
+        if let Some(s) = status {
+            self.status = s.clone();
+        }
+        for f in fields {
+            match f {
+                AppField::Branch(b) => self.branch = Some(b.clone()),
+                AppField::PrUrl(u) => self.pr_url = Some(u.clone()),
+                AppField::Claim(c) => self.claim.clone_from(c),
+                AppField::CommentCursor(c) => self.comment_cursor = Some(c.clone()),
+                AppField::KanbanMirror(m) => self.kanban_mirror = Some(m.clone()),
+                AppField::RepoId(r) => self.repo_id = Some(r.clone()),
+            }
+        }
+    }
 }
 
 /// Satu field milik app yang ditulis ke Lark.
@@ -248,6 +266,48 @@ mod tests {
             nonce: "n".to_owned(),
         });
         t
+    }
+
+    #[test]
+    fn tulisan_app_menimpa_field_yang_ditulis_dan_mempertahankan_sisanya() {
+        let mut t = mine(TaskStatus::WaitingFix);
+        t.key = Some("PGS-1510".to_owned());
+        t.title = "TEST Mandor".to_owned();
+        t.ac_ids = vec!["ac1".to_owned()];
+        t.branch = Some("lama".to_owned());
+
+        t.apply_write(
+            Some(&TaskStatus::InProgress),
+            &[
+                AppField::Branch("mandor/pgs-1510".to_owned()),
+                AppField::PrUrl("https://github.com/o/r/pull/1".to_owned()),
+                AppField::Claim(None),
+                AppField::CommentCursor("1:2".to_owned()),
+                AppField::KanbanMirror("in_progress".to_owned()),
+                AppField::RepoId("mandor-smoke".to_owned()),
+            ],
+        );
+
+        assert_eq!(t.status, TaskStatus::InProgress);
+        assert_eq!(t.branch.as_deref(), Some("mandor/pgs-1510"));
+        assert_eq!(t.pr_url.as_deref(), Some("https://github.com/o/r/pull/1"));
+        assert_eq!(t.claim, None);
+        assert_eq!(t.comment_cursor.as_deref(), Some("1:2"));
+        assert_eq!(t.kanban_mirror.as_deref(), Some("in_progress"));
+        assert_eq!(t.repo_id.as_deref(), Some("mandor-smoke"));
+        // Field yang tidak ditulis tetap seperti semula.
+        assert_eq!(t.key.as_deref(), Some("PGS-1510"));
+        assert_eq!(t.title, "TEST Mandor");
+        assert_eq!(t.assignees, ["ou_me"]);
+        assert_eq!(t.ac_ids, ["ac1"]);
+    }
+
+    #[test]
+    fn tulisan_tanpa_status_tidak_mengubah_status() {
+        let mut t = mine(TaskStatus::WaitingReview);
+        t.apply_write(None, &[AppField::CommentCursor("9:9".to_owned())]);
+        assert_eq!(t.status, TaskStatus::WaitingReview);
+        assert_eq!(t.comment_cursor.as_deref(), Some("9:9"));
     }
 
     fn start_op() -> WriteOp {

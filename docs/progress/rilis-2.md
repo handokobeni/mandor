@@ -108,3 +108,9 @@ F3 percobaan pertama (2026-10-22): Waiting Fix + komentar → perbaikan → revi
 
 F3 setelah app dinyalakan lagi: Run review → review berbrowser lulus → Push & create PR memperbarui `mandor-smoke#2`; kartu kembali Waiting Review. Temuan: tab Review comments kosong setelah PR. Penyebab: tab membaca cache balasan di memori yang hanya diisi poll Waiting Fix dan diganti setiap putaran; setelah daemon restart (atau saat kartu lain masuk Waiting Fix) komentar kartu hilang dari tab. Perbaikan: cache digabung (bukan diganti), dan dibangun ulang dari Lark sekali sejak start (jendela 90 hari, paging berhenti di halaman lebih lama).
 
+Skenario Fail → Send to agent (lulus): komentar QA yang sengaja melanggar AC-2 (1 desimal) → perbaikan otomatis → review otomatis menilai AC-8808 Fail dari kode dan test (tanpa browser: "app running older code", karena app menyala dari snapshot sebelum perbaikan) → push diblokir. Send to agent → agent mengembalikan 2 desimal dan sendiri menandai konflik antara komentar QA dan AC ("Decision needed"). Review ulang tanpa browser → 5 Can't verify → dialog konfirmasi manual (versi baru) → push memperbarui `mandor-smoke#2`; kartu Waiting Review; banner Push held hilang. Deskripsi PR menulis AC-8811 "Follows the design by decision; the PM was asked to update this criterion" dan ringkasan AC "Checked manually by Beni Handoko". Catatan: agent masih menyebut AC-5 di "Notes for reviewers" (pengulangan, bukan pertentangan).
+
+Keputusan tertunda: restart app otomatis sebelum review berbrowser (review otomatis setelah perbaikan Waiting Fix praktis selalu tanpa browser karena app menjalankan kode lama). Opsi: setelan opt-in per repo, tombol satu klik di dialog kesiapan, atau keduanya; ditunda oleh pemilik produk 2026-10-22.
+
+Biaya review PGS-1511 (US$): push_and_pr 1,30 (browser); automatic_fix 0,42; manual 1,65 (browser); automatic_fix 0,47; review berikutnya tercatat di Review history.
+

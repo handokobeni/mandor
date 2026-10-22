@@ -138,10 +138,8 @@ pub fn classify_review(call: &ToolCall, state: &ReviewState, allowed_mcp: &[Stri
         return browser_verdict(call, kind, state);
     }
     if let Some(cmd) = &call.command {
-        if let Some(sub) = mutating_git(cmd) {
-            return deny(&format!(
-                "`git {sub}` changes the worktree; the review is read-only"
-            ));
+        if let Some(reason) = mutating_git(cmd) {
+            return deny(&format!("{reason}; the review is read-only"));
         }
         if let Some(what) = writes_files(cmd) {
             return deny(&format!("{what} writes files; the review is read-only"));
@@ -264,28 +262,62 @@ fn harmless_target(rest: &str) -> bool {
         .is_some_and(boundary)
 }
 
-/// Opsi git yang bisa menjalankan perintah lain atau menulis berkas.
-const GIT_DANGEROUS_OPTS: &[&str] = &[
-    "-c",
-    "--config-env",
-    "--output",
-    "--ext-diff",
-    "-o",
-    "-O",
-    "--open-files-in-pager",
-    "--exec-path",
-    "--upload-pack",
-    "--receive-pack",
-    "--textconv",
+/// Opsi panjang git yang bisa menjalankan perintah lain atau menulis berkas.
+/// Git menerima singkatan opsi panjang, jadi awalan dari opsi ini juga ditolak.
+const GIT_DANGEROUS_LONG: &[&str] = &[
+    "config-env",
+    "output",
+    "ext-diff",
+    "open-files-in-pager",
+    "exec-path",
+    "upload-pack",
+    "receive-pack",
+    "textconv",
 ];
 
-/// Alasan penolakan git di mode review: sub-perintah yang mengubah state, atau
-/// opsi yang menjalankan perintah lain atau menulis berkas.
+/// Opsi pendek git yang berbahaya (`-c k=v`, `-o`/`-O` berkas atau pager);
+/// juga ditolak saat digabung atau ditempeli nilai (`-cX`, `-nO`).
+const GIT_DANGEROUS_SHORT: &[char] = &['c', 'o', 'O'];
+
+/// Program yang mengubah environment perintah berikutnya.
+const ENV_CHANGERS: &[&str] = &[
+    "env", "export", "declare", "typeset", "set", "unset", "alias", "source", ".",
+];
+
+fn dangerous_git_opt(arg: &str) -> bool {
+    if let Some(long) = arg.strip_prefix("--") {
+        let name = long.split('=').next().unwrap_or(long);
+        return !name.is_empty() && GIT_DANGEROUS_LONG.iter().any(|o| o.starts_with(name));
+    }
+    arg.strip_prefix('-')
+        .is_some_and(|short| short.chars().any(|c| GIT_DANGEROUS_SHORT.contains(&c)))
+}
+
+/// `NAME=value` di posisi perintah: mengubah env (mis. `GIT_EXTERNAL_DIFF`, `HOME`).
+fn assigns_env(word: &str) -> bool {
+    word.split_once('=').is_some_and(|(name, _)| {
+        let mut chars = name.chars();
+        chars
+            .next()
+            .is_some_and(|c| c.is_ascii_alphabetic() || c == '_')
+            && chars.all(|c| c.is_ascii_alphanumeric() || c == '_')
+    })
+}
+
+/// Alasan penolakan git di mode review: sub-perintah yang mengubah state, opsi
+/// yang menjalankan perintah lain atau menulis berkas, atau env yang diubah
+/// sebelum git (git membaca `GIT_*`, `HOME`, dan `XDG_CONFIG_HOME`).
 fn mutating_git(cmd: &str) -> Option<String> {
     let words = crate::hook::words(cmd);
     words.iter().enumerate().find_map(|(i, w)| {
         if crate::hook::program_name(w).to_lowercase() != "git" {
             return None;
+        }
+        if let Some(env) = words[..i]
+            .iter()
+            .find(|w| assigns_env(w) || ENV_CHANGERS.contains(&crate::hook::program_name(w)))
+        {
+            return Some(format!("`{env}` before git changes how git runs"));
         }
         let rest = &words[i + 1..];
         let end = rest
@@ -293,12 +325,8 @@ fn mutating_git(cmd: &str) -> Option<String> {
             .position(|w| crate::hook::program_name(w) == "git")
             .unwrap_or(rest.len());
         let args = &rest[..end];
-        if let Some(opt) = args.iter().find(|a| {
-            GIT_DANGEROUS_OPTS
-                .iter()
-                .any(|o| a.as_str() == *o || a.starts_with(&format!("{o}=")))
-        }) {
-            return Some(format!("with {opt}"));
+        if let Some(opt) = args.iter().find(|a| dangerous_git_opt(a)) {
+            return Some(format!("`git {opt}` can run other programs or write files"));
         }
         let mut skip = false;
         let sub = args.iter().find(|a| {
@@ -306,7 +334,8 @@ fn mutating_git(cmd: &str) -> Option<String> {
             skip = matches!(a.as_str(), "-C" | "--git-dir" | "--work-tree");
             take
         })?;
-        (!GIT_READ_ONLY.contains(&sub.to_lowercase().as_str())).then(|| sub.clone())
+        (!GIT_READ_ONLY.contains(&sub.to_lowercase().as_str()))
+            .then(|| format!("`git {sub}` changes the worktree"))
     })
 }
 
@@ -647,6 +676,16 @@ mod tests {
             "git diff --ext-diff",
             "git grep -O foo",
             "git log && git stash",
+            "git -cdiff.external=/tmp/x diff",
+            "git log -O/tmp/order",
+            "git grep -nOvim foo",
+            "git diff --outp=/wt/x.patch",
+            "git diff --ext",
+            "git diff --config-e=X",
+            "GIT_EXTERNAL_DIFF=/tmp/x git diff",
+            "env GIT_PAGER=sh git log",
+            "XDG_CONFIG_HOME=/tmp git diff",
+            "export HOME=/tmp; git diff",
         ] {
             assert!(
                 matches!(classify_review(&bash(cmd), &s, &[]), Verdict::Deny(_)),

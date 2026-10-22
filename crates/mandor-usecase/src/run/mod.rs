@@ -61,8 +61,11 @@ pub struct RunService<D: Deps> {
     pub(crate) ledger_synced: Mutex<HashMap<String, i64>>,
     /// Token kapabilitas tool ledger yang berlaku (KTD-26).
     pub(crate) capabilities: Arc<Mutex<crate::review::capability::Issued>>,
-    /// Balasan komentar terakhir yang diambil (dibangun ulang tiap poll).
+    /// Balasan komentar yang dikenal (digabung tiap poll, tanpa duplikat).
     pub(crate) replies: Mutex<Vec<mandor_domain::Reply>>,
+    /// Semua komentar Base sudah dimuat sekali sejak start; cache di atas
+    /// dibangun ulang dari Lark setelah restart.
+    pub(crate) replies_loaded: std::sync::atomic::AtomicBool,
     /// Kursor yang terakhir diantrekan per record, agar tidak diantrekan berulang.
     pub(crate) cursor_sent: Mutex<HashMap<String, String>>,
     /// Penghenti run aktif per run ID beserta generasinya.
@@ -111,6 +114,7 @@ impl<D: Deps> RunService<D> {
             ledger_synced: Mutex::new(HashMap::new()),
             capabilities: crate::review::capability::empty(),
             replies: Mutex::new(Vec::new()),
+            replies_loaded: std::sync::atomic::AtomicBool::new(false),
             cursor_sent: Mutex::new(HashMap::new()),
             stoppers: Mutex::new(HashMap::new()),
         }

@@ -688,3 +688,35 @@ async fn push_perbaikan_tidak_menimpa_badan_pr_yang_disunting_manusia() {
     assert_eq!(st.git.st().bodies[PR1], edited);
     assert_eq!(st.git.st().body_edits, 0);
 }
+
+#[tokio::test]
+async fn komentar_kartu_tetap_tampil_setelah_daemon_start_dan_putaran_kartu_lain() {
+    // Daemon baru start: cache komentar kosong, kartu tidak lagi Waiting Fix.
+    let (lark, _clock, st) = setup(false).await;
+    lark.replies.lock().unwrap().push(reply(
+        "r1",
+        "ou_pm",
+        NOW - 600,
+        "Tombol Hitung tidak muncul",
+    ));
+    let mut rec = lark.get("rec1").unwrap();
+    rec.status = TaskStatus::WaitingReview;
+    let views = st.svc.record_comments(&rec, &[]).await.unwrap();
+    assert_eq!(
+        views
+            .iter()
+            .map(|v| v.reply.reply_id.as_str())
+            .collect::<Vec<_>>(),
+        ["r1"],
+        "dimuat dari Lark saat cache kosong"
+    );
+
+    // Putaran Waiting Fix untuk kartu lain mengambil balasan baru saja; balasan
+    // rec1 yang sudah dikenal tidak boleh hilang dari tampilan.
+    let mut other = reply("r9", "ou_pm", NOW - 60, "kartu lain");
+    other.record_id = "rec2".to_owned();
+    *lark.replies.lock().unwrap() = vec![other];
+    tick(&st).await;
+    let views = st.svc.record_comments(&rec, &[]).await.unwrap();
+    assert_eq!(views.len(), 1, "{views:?}");
+}

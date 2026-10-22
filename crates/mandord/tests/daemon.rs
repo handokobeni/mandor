@@ -297,6 +297,44 @@ fn rpc_pengaturan_login_dan_repo_tanpa_sesi_lark() {
 }
 
 #[test]
+fn jeda_tenang_diatur_terpisah_dan_tidak_direset_saat_simpan_pengaturan_lark() {
+    let home = tempfile::tempdir().unwrap();
+    let mut daemon = serve(home.path());
+    let token = wait_for_info(home.path())["token"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let settings = json!({
+        "app_id": "cli_uji", "app_secret": "rahasia-app", "app_token": "appX", "table_id": "tblX",
+        "ac_table_id": "tblAC", "redirect_port": 0, "open_base": null, "accounts_base": null, "quiet_secs": null
+    });
+    let replies = connect_roundtrip(
+        home.path(),
+        &[
+            hello(&token),
+            rpc(2, "waiting_fix.quiet.set", &json!({"secs": 300})),
+            rpc(3, "lark.settings.set", &settings),
+            rpc(4, "waiting_fix.quiet.set", &json!({"secs": 300})),
+            rpc(5, "lark.settings.get", &Value::Null),
+            rpc(6, "lark.settings.set", &settings),
+            rpc(7, "lark.settings.get", &Value::Null),
+            rpc(8, "waiting_fix.quiet.set", &json!({"secs": 10})),
+            rpc(9, "waiting_fix.quiet.set", &json!({"secs": 901})),
+        ],
+    );
+    // Sebelum Lark diatur tidak ada tempat menyimpan.
+    assert_eq!(replies[1]["error"]["code"], "rejected");
+    assert_eq!(replies[3]["result"]["quiet_secs"], 300);
+    assert_eq!(replies[4]["result"]["quiet_secs"], 300);
+    // Menyimpan pengaturan Lark tanpa nilai jeda mempertahankan jeda lama.
+    assert_eq!(replies[6]["result"]["quiet_secs"], 300);
+    assert_eq!(replies[7]["error"]["code"], "rejected");
+    assert_eq!(replies[8]["error"]["code"], "rejected");
+    stop(home.path());
+    let _ = daemon.wait();
+}
+
+#[test]
 fn saran_repo_dan_penjelajah_folder_di_home_pengguna() {
     let user_home = tempfile::tempdir().unwrap();
     let data = user_home.path().join(".mandor");

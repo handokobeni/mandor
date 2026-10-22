@@ -59,6 +59,13 @@ pub struct LarkSettingsInput {
     pub quiet_secs: Option<i64>,
 }
 
+/// Parameter `waiting_fix.quiet.set`: jeda tenang dalam detik (30–900).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+pub struct QuietPeriodSet {
+    #[ts(type = "number")]
+    pub secs: i64,
+}
+
 /// Hasil `lark.login.begin`: client membuka `url` dan menunggu callback di `port`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
 pub struct LoginBegin {

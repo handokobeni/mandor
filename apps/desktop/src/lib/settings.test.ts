@@ -91,3 +91,17 @@ describe('breadcrumb penjelajah folder', () => {
     expect(pathCrumbs('/')).toEqual([{ name: '/', path: '/' }]);
   });
 });
+
+describe('jeda tenang Waiting Fix', () => {
+  it('menerima 30–900 detik bilangan bulat dan menjelaskan nilai yang salah', async () => {
+    const { validateQuiet } = await import('#lib/settings.ts');
+    expect(validateQuiet('120')).toBeNull();
+    expect(validateQuiet(' 30 ')).toBeNull();
+    expect(validateQuiet('900')).toBeNull();
+    expect(validateQuiet('29')).toBe('Use 30 to 900 seconds.');
+    expect(validateQuiet('901')).toBe('Use 30 to 900 seconds.');
+    expect(validateQuiet('12.5')).toBe('Use whole seconds.');
+    expect(validateQuiet('')).toBe('Type a number of seconds.');
+    expect(validateQuiet('abc')).toBe('Use whole seconds.');
+  });
+});

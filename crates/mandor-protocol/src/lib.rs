@@ -22,6 +22,8 @@ pub mod method {
     pub const SYSTEM_CHECK: &str = "system.check";
     pub const LARK_SETTINGS_GET: &str = "lark.settings.get";
     pub const LARK_SETTINGS_SET: &str = "lark.settings.set";
+    /// Mengubah jeda tenang Waiting Fix tanpa menyentuh pengaturan Lark lain.
+    pub const WAITING_FIX_QUIET_SET: &str = "waiting_fix.quiet.set";
     pub const LARK_LOGIN_BEGIN: &str = "lark.login.begin";
     pub const LARK_LOGIN_COMPLETE: &str = "lark.login.complete";
     pub const LARK_LOGOUT: &str = "lark.logout";
@@ -114,6 +116,7 @@ pub fn ts_bindings() -> Result<Vec<(&'static str, String)>, String> {
             "LarkSettingsInput.ts",
             LarkSettingsInput::export_to_string(&cfg),
         )?,
+        one("QuietPeriodSet.ts", QuietPeriodSet::export_to_string(&cfg))?,
         one("LoginBegin.ts", LoginBegin::export_to_string(&cfg))?,
         one("LoginComplete.ts", LoginComplete::export_to_string(&cfg))?,
         one("FlagView.ts", FlagView::export_to_string(&cfg))?,

@@ -11,6 +11,9 @@ use serde::{Deserialize, Serialize};
 pub const DEFAULT_REDIRECT_PORT: u16 = 53_682;
 /// Jeda tenang Waiting Fix default (detik).
 pub const DEFAULT_QUIET_SECS: i64 = 120;
+/// Batas jeda tenang yang boleh diatur dev (detik).
+pub const MIN_QUIET_SECS: i64 = 30;
+pub const MAX_QUIET_SECS: i64 = 900;
 
 /// Pengaturan Custom App dan tabel Sprint Tasks.
 #[derive(Clone, Serialize, Deserialize)]
@@ -72,6 +75,19 @@ impl LarkSettings {
         }
     }
 
+    /// Mengubah jeda tenang Waiting Fix.
+    ///
+    /// # Errors
+    /// Nilai di luar `MIN_QUIET_SECS..=MAX_QUIET_SECS`.
+    pub fn set_quiet_secs(&mut self, secs: i64) -> anyhow::Result<()> {
+        anyhow::ensure!(
+            (MIN_QUIET_SECS..=MAX_QUIET_SECS).contains(&secs),
+            "Quiet period must be between {MIN_QUIET_SECS} and {MAX_QUIET_SECS} seconds"
+        );
+        self.quiet_secs = secs;
+        Ok(())
+    }
+
     /// Menggabungkan input UI dengan pengaturan lama; secret kosong mempertahankan yang lama.
     ///
     /// # Errors
@@ -110,7 +126,12 @@ impl LarkSettings {
                 .accounts_base
                 .filter(|s| !s.is_empty())
                 .unwrap_or_else(|| "https://accounts.larksuite.com".to_owned()),
-            quiet_secs: input.quiet_secs.unwrap_or(DEFAULT_QUIET_SECS).max(0),
+            // Form Lark tidak mengirim jeda; nilai lama dipertahankan.
+            quiet_secs: input
+                .quiet_secs
+                .or_else(|| old.map(|o| o.quiet_secs))
+                .unwrap_or(DEFAULT_QUIET_SECS)
+                .max(0),
         })
     }
 }
@@ -200,5 +221,21 @@ mod tests {
         assert!(merged.view().has_secret);
         assert!(!format!("{merged:?}").contains("rahasia"));
         assert!(LarkSettings::merge(None, input(None)).is_err());
+    }
+
+    #[test]
+    fn simpan_tanpa_jeda_mempertahankan_jeda_lama_dan_jeda_divalidasi() {
+        let mut s = LarkSettings::merge(None, input(Some("r"))).unwrap_or_else(|e| panic!("{e}"));
+        assert_eq!(s.quiet_secs, DEFAULT_QUIET_SECS);
+        s.set_quiet_secs(300).unwrap_or_else(|e| panic!("{e}"));
+        let merged = LarkSettings::merge(Some(&s), input(None)).unwrap_or_else(|e| panic!("{e}"));
+        assert_eq!(merged.quiet_secs, 300);
+        assert!(s.set_quiet_secs(MIN_QUIET_SECS - 1).is_err());
+        assert!(s.set_quiet_secs(MAX_QUIET_SECS + 1).is_err());
+        assert_eq!(s.quiet_secs, 300);
+        s.set_quiet_secs(MIN_QUIET_SECS)
+            .unwrap_or_else(|e| panic!("{e}"));
+        s.set_quiet_secs(MAX_QUIET_SECS)
+            .unwrap_or_else(|e| panic!("{e}"));
     }
 }

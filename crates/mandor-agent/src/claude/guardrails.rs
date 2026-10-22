@@ -54,6 +54,37 @@ pub fn review_allowed() -> Vec<String> {
     .collect()
 }
 
+/// Allowlist giliran plan: hanya membaca. Tanpa tool penulis berkas dan tanpa
+/// perintah build, install, atau test yang bisa menulis worktree; allowlist
+/// tambahan repo juga tidak dipakai. Hook `--plan` tetap menolak penulisan.
+#[must_use]
+pub fn plan_allowed() -> Vec<String> {
+    [
+        "Read",
+        "Glob",
+        "Grep",
+        "TodoWrite",
+        "Skill",
+        "ToolSearch",
+        "Bash(git status*)",
+        "Bash(git diff*)",
+        "Bash(git log*)",
+        "Bash(git show*)",
+        "Bash(git branch --show-current)",
+        "Bash(git rev-parse*)",
+        "Bash(ls*)",
+        "Bash(cat *)",
+        "Bash(head *)",
+        "Bash(tail *)",
+        "Bash(wc *)",
+        "Bash(grep *)",
+        "Bash(rg *)",
+    ]
+    .into_iter()
+    .map(str::to_owned)
+    .collect()
+}
+
 /// Allowlist default per repo: test, build, lint, dan git baca.
 #[must_use]
 pub fn default_allowed() -> Vec<String> {

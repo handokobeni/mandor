@@ -13,7 +13,9 @@ use mandor_usecase::run_ports::{
 
 use crate::backend::{AgentRun, ClaudeBackend, RunStopper};
 use crate::claude::command::{ReviewFlags, Session, SessionSpec};
-use crate::claude::guardrails::{default_allowed, default_denied, review_allowed, settings_json};
+use crate::claude::guardrails::{
+    default_allowed, default_denied, plan_allowed, review_allowed, settings_json,
+};
 use crate::claude::review_state;
 use crate::prompt::{
     OperatorContext, data_block, new_nonce, operator_prompt, review_operator_prompt,
@@ -130,12 +132,17 @@ impl ClaudeAgent {
             .iter()
             .map(|d| (d.name.clone(), d.path.display().to_string()))
             .collect();
-        let mut allowed = default_allowed();
-        for a in repos.iter().flat_map(|r| r.extra_allowed.iter()) {
-            if !allowed.contains(a) {
-                allowed.push(a.clone());
+        let mut allowed = if req.plan_mode {
+            plan_allowed()
+        } else {
+            let mut all = default_allowed();
+            for a in repos.iter().flat_map(|r| r.extra_allowed.iter()) {
+                if !all.contains(a) {
+                    all.push(a.clone());
+                }
             }
-        }
+            all
+        };
         allowed.extend(servers.iter().map(|s| format!("mcp__{s}")));
         let mut hook_command = self.cfg.hook_command.clone();
         if !servers.is_empty() {
@@ -995,6 +1002,18 @@ mod tests {
         assert_eq!(spec.hook_command, "/opt/mandord hook --mcp mandor --plan");
         assert!(spec.allowed.contains(&"mcp__mandor".to_owned()));
         assert!(spec.allowed.contains(&"ToolSearch".to_owned()));
+        // Giliran plan hanya-baca: tanpa tool penulis dan tanpa build/install.
+        for denied in [
+            "Write",
+            "Edit",
+            "Bash(cargo *)",
+            "Bash(npm *)",
+            "Bash(mkdir *)",
+        ] {
+            assert!(!spec.allowed.contains(&denied.to_owned()), "{denied}");
+        }
+        assert!(spec.allowed.contains(&"Read".to_owned()));
+        assert!(spec.allowed.contains(&"Bash(git diff*)".to_owned()));
         let argv = format!("{:?}", spec.allowed);
         assert!(!argv.contains("tok-rahasia"));
     }

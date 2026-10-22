@@ -58,8 +58,10 @@ pub fn args(spec: &SessionSpec) -> Vec<String> {
         "stream-json",
         "--verbose",
         "--permission-mode",
+        // Mode `plan` Claude menolak tool MCP ledger; giliran plan tetap
+        // hanya-baca lewat allowlist dan hook `--plan`.
         if spec.plan_mode {
-            "plan"
+            "default"
         } else {
             "acceptEdits"
         },
@@ -173,12 +175,15 @@ mod tests {
         assert!(!plain.contains(&"--max-budget-usd".to_owned()));
     }
 
+    /// Mode `plan` milik Claude menolak tool MCP ledger (`ac_set_design`), jadi
+    /// giliran plan memakai mode `default`: hanya tool di allowlist yang jalan,
+    /// edit berkas tidak otomatis disetujui, dan hook `--plan` menolak penulisan.
     #[test]
-    fn giliran_plan_memakai_mode_izin_plan() {
+    fn giliran_plan_memakai_mode_izin_default_bukan_plan() {
         let mut s = spec(Session::New("u-1".to_owned()));
         s.plan_mode = true;
         let a = args(&s);
-        assert_eq!(after(&a, "--permission-mode"), Some("plan"));
+        assert_eq!(after(&a, "--permission-mode"), Some("default"));
         assert!(a.contains(&"--strict-mcp-config".to_owned()));
     }
 

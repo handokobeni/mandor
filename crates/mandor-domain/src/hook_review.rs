@@ -227,9 +227,7 @@ fn redirects_to_file(cmd: &str) -> bool {
             if bytes.get(j) == Some(&b'>') {
                 j += 1;
             }
-            let target = cmd[j..].trim_start();
-            let ok = target.starts_with('&') || target.starts_with("/dev/null");
-            if !ok {
+            if !harmless_target(&cmd[j..]) {
                 return true;
             }
             i = j;
@@ -238,6 +236,30 @@ fn redirects_to_file(cmd: &str) -> bool {
         }
     }
     false
+}
+
+/// Target redirection yang tidak menulis berkas: duplikasi fd (`&1`, `&-`)
+/// atau tepat `/dev/null`, diikuti batas kata.
+fn harmless_target(rest: &str) -> bool {
+    let boundary = |s: &str| {
+        s.chars()
+            .next()
+            .is_none_or(|c| c.is_whitespace() || ";|&)".contains(c))
+    };
+    if let Some(fd) = rest.strip_prefix('&') {
+        let digits = fd.chars().take_while(char::is_ascii_digit).count();
+        let after = if digits > 0 {
+            &fd[digits..]
+        } else if let Some(a) = fd.strip_prefix('-') {
+            a
+        } else {
+            return false;
+        };
+        return boundary(after);
+    }
+    rest.trim_start()
+        .strip_prefix("/dev/null")
+        .is_some_and(boundary)
 }
 
 /// Opsi git yang bisa menjalankan perintah lain atau menulis berkas.
@@ -638,6 +660,11 @@ mod tests {
             "find . -name '*.rs' -delete",
             "find . -exec touch {} ;",
             "mkdir tmp",
+            "pnpm test >&out.txt",
+            "pnpm test > /dev/nullx",
+            "pnpm test >& 1x",
+            "pnpm test >| out.txt",
+            "pnpm test &> out.txt",
         ] {
             assert!(
                 matches!(classify_review(&bash(cmd), &s, &[]), Verdict::Deny(_)),
@@ -651,6 +678,8 @@ mod tests {
             "pnpm test",
             "cargo test 2>&1",
             "pnpm test > /dev/null 2>&1",
+            "cargo test 2>&-",
+            "cargo test >/dev/null;echo ok",
             "find . -name '*.rs'",
             "sed -n 1,5p a.rs",
         ] {

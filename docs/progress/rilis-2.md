@@ -104,3 +104,5 @@ Hasil F1–F2 (lulus):
 
 Belum: F3 (Waiting Fix + review otomatis), skenario Fail → Send to agent, dan Can't verify → konfirmasi.
 
+F3 percobaan pertama (2026-10-22): Waiting Fix + komentar → perbaikan → review otomatis berjalan, tetapi **tanpa browser** karena app mati (daemon di-restart untuk memasang perbaikan deskripsi PR; proses app ikut berhenti). Reviewer juga ditolak menjalankan `node --test tests/` karena test runner bawaan Node belum ada di allowlist reviewer. Hasil: 5 Can't verify, push ditahan ("Push held"), sesuai aturan gerbang. Perbaikan: `Bash(node --test*)` masuk allowlist reviewer; dialog konfirmasi manual tidak lagi melebihi layar (daftar bisa digulir, hanya judul AC, bukti dipotong 3 baris dengan teks lengkap di tooltip).
+

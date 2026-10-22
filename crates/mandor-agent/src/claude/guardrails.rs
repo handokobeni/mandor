@@ -45,6 +45,7 @@ pub fn review_allowed() -> Vec<String> {
         "Bash(go test*)",
         "Bash(pytest*)",
         "Bash(python3 -m pytest*)",
+        "Bash(node --test*)",
         "Bash(ls*)",
         "Bash(cd *)",
         "Bash(pwd)",
@@ -378,6 +379,17 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn reviewer_boleh_menjalankan_test_runner_bawaan_node() {
+        let allowed = review_allowed();
+        assert!(allowed.contains(&"Bash(node --test*)".to_owned()));
+        assert!(
+            !allowed.iter().any(|a| a == "Bash(node *)"),
+            "hanya --test, bukan node bebas"
+        );
+    }
+
     use mandor_domain::hook::classify;
 
     fn hook(input: &str) -> (u8, String) {

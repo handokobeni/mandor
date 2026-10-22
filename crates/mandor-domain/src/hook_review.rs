@@ -273,15 +273,20 @@ const GIT_DANGEROUS_LONG: &[&str] = &[
     "upload-pack",
     "receive-pack",
     "textconv",
+    "git-dir",
+    "work-tree",
+    "namespace",
 ];
 
 /// Opsi pendek git yang berbahaya (`-c k=v`, `-o`/`-O` berkas atau pager);
 /// juga ditolak saat digabung atau ditempeli nilai (`-cX`, `-nO`).
 const GIT_DANGEROUS_SHORT: &[char] = &['c', 'o', 'O'];
 
-/// Program yang mengubah environment perintah berikutnya.
-const ENV_CHANGERS: &[&str] = &[
-    "env", "export", "declare", "typeset", "set", "unset", "alias", "source", ".",
+/// Program yang mengubah environment perintah berikutnya, atau yang menjalankan
+/// git dengan argumen yang tidak terlihat di teks perintah (stdin, variabel).
+const GIT_PRECEDERS: &[&str] = &[
+    "xargs", "parallel", "eval", "exec", "sh", "bash", "zsh", "dash", "command", "builtin", "env",
+    "export", "declare", "typeset", "set", "unset", "alias", "source", ".",
 ];
 
 fn dangerous_git_opt(arg: &str) -> bool {
@@ -315,9 +320,11 @@ fn mutating_git(cmd: &str) -> Option<String> {
         }
         if let Some(env) = words[..i]
             .iter()
-            .find(|w| assigns_env(w) || ENV_CHANGERS.contains(&crate::hook::program_name(w)))
+            .find(|w| assigns_env(w) || GIT_PRECEDERS.contains(&crate::hook::program_name(w)))
         {
-            return Some(format!("`{env}` before git changes how git runs"));
+            return Some(format!(
+                "`{env}` before git changes how git runs or hides its arguments"
+            ));
         }
         let rest = &words[i + 1..];
         let end = rest
@@ -333,7 +340,10 @@ fn mutating_git(cmd: &str) -> Option<String> {
             let take = !skip && !a.starts_with('-');
             skip = matches!(a.as_str(), "-C" | "--git-dir" | "--work-tree");
             take
-        })?;
+        });
+        let Some(sub) = sub else {
+            return Some("`git` without a visible subcommand".to_owned());
+        };
         (!GIT_READ_ONLY.contains(&sub.to_lowercase().as_str()))
             .then(|| format!("`git {sub}` changes the worktree"))
     })
@@ -686,6 +696,14 @@ mod tests {
             "env GIT_PAGER=sh git log",
             "XDG_CONFIG_HOME=/tmp git diff",
             "export HOME=/tmp; git diff",
+            "echo -cdiff.external=x | xargs git diff",
+            "parallel git ::: stash",
+            "eval git stash",
+            "sh -c 'git stash'",
+            "git",
+            "git --git-dir=/tmp/evil/.git log",
+            "git --work-tree /tmp diff",
+            "git --git-d=/tmp/evil/.git log",
         ] {
             assert!(
                 matches!(classify_review(&bash(cmd), &s, &[]), Verdict::Deny(_)),

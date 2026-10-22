@@ -825,3 +825,5 @@ label.gate-row:has(input:checked) { border-color: color-mix(in oklab, var(--stat
 .tc-ac[data-tone="failed"] svg { color: var(--status-failed); }
 .tc-ac[data-tone="warning"] svg { color: var(--status-warning); }
 .plan-doc.plan-gaps-wrap { flex-shrink: 0; padding-bottom: 0; width: 100%; }
+/* Teks AC dari tracker bisa berisi judul + skenario Gherkin per baris. */
+.pg-txt .ac-text, .ac-txt .clamp { white-space: pre-line; }

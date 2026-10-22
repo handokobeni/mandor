@@ -41,7 +41,7 @@
             <div class="pg-row" data-follow={on ? 'true' : undefined}>
               <span class="mono pg-id">{id}</span>
               <div class="pg-txt">
-                <div>{r.text}</div>
+                <div class="ac-text">{r.text}</div>
                 <div class="pg-meta">
                   <AcChip kind="design" value={r.design} />
                   {#if r.design_note}<span class="muted">{r.design_note}</span>{/if}

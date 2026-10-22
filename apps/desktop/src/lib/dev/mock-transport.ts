@@ -269,7 +269,28 @@ const MESSAGES: Record<string, MessageView[]> = {
     {
       id: 4,
       role: 'agent',
-      body: { type: 'assistant_message', text: 'The plan is ready in the Plan tab. Reply here to revise it.' },
+      body: {
+        type: 'assistant_message',
+        text: [
+          '# PGS-1350 — Cache employee search results',
+          '',
+          '## Pendekatan',
+          '',
+          'Tambahkan cache per tenant selama 60 detik di `searchEmployees`.',
+          '',
+          '- **`src/lib/api/search.ts`** — bungkus `searchEmployees` dengan cache',
+          '- **`src/lib/api/search.test.ts`** — uji hit, kedaluwarsa, dan invalidasi',
+          '',
+          '**Nilai Design per AC** sudah dicatat lewat `ac_set_design`:',
+          '',
+          '| AC | Design | Catatan |',
+          '| --- | --- | --- |',
+          '| AC-8807 (AC-1) | `in_design` | Frame 01: F(10)=55; frame 02: pesan "n harus 0 atau lebih" |',
+          '| AC-8811 (AC-5) | `conflicts` | Desain memakai 3 tab (`nav.tabs`), bukan dropdown |',
+          '',
+          '> Plan ada di tab Plan. Balas di sini untuk merevisi.'
+        ].join('\n')
+      },
       created_at_ms: 0
     },
     { id: 5, role: 'agent', body: { type: 'done', is_error: false, result: 'ok' }, created_at_ms: 0 }

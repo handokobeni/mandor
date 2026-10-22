@@ -827,3 +827,27 @@ label.gate-row:has(input:checked) { border-color: color-mix(in oklab, var(--stat
 .plan-doc.plan-gaps-wrap { flex-shrink: 0; padding-bottom: 0; width: 100%; }
 /* Teks AC dari tracker bisa berisi judul + skenario Gherkin per baris. */
 .pg-txt .ac-text, .ac-txt .clamp { white-space: pre-line; }
+
+/* Markdown pesan agent di chat: setara .prose di tab Plan, lebih ringkas. */
+.msg-agent .md > :first-child { margin-top: 0; }
+.msg-agent .md h1, .msg-agent .md h2, .msg-agent .md h3, .msg-agent .md h4 { font-weight: 600; line-height: 1.35; color: var(--foreground); text-wrap: balance; }
+.msg-agent .md h1 { font-size: 17px; margin: 4px 0 10px; }
+.msg-agent .md h2 { font-size: 15px; margin: 18px 0 8px; padding-bottom: 4px; border-bottom: 1px solid var(--border); }
+.msg-agent .md h3 { font-size: 14px; margin: 14px 0 6px; }
+.msg-agent .md h4 { font-size: 13px; margin: 12px 0 4px; color: var(--muted-foreground); }
+.msg-agent .md p { margin: 0 0 8px; }
+.msg-agent .md ul, .msg-agent .md ol { margin: 0 0 8px; padding-left: 20px; }
+.msg-agent .md li { margin: 3px 0; }
+.msg-agent .md li > ul, .msg-agent .md li > ol { margin: 3px 0 0; }
+.msg-agent .md strong { font-weight: 600; color: var(--foreground); }
+.msg-agent .md hr { border: 0; border-top: 1px solid var(--border); margin: 16px 0; }
+.msg-agent .md blockquote { margin: 0 0 8px; padding: 2px 12px; border-left: 3px solid var(--primary); color: var(--muted-foreground); }
+.msg-agent .md pre { margin: 0 0 10px; overflow-wrap: normal; }
+/* Kode inline tidak dipotong di tengah kata (mis. `in_design`). */
+.msg-agent .md :not(pre) > code { overflow-wrap: break-word; word-break: normal; }
+.msg-agent .md table { display: block; width: max-content; max-width: 100%; overflow-x: auto; margin: 0 0 10px; border-collapse: collapse; font-size: 12.5px; line-height: 1.5; border: 1px solid var(--border); border-radius: var(--radius); }
+.msg-agent .md th, .msg-agent .md td { padding: 6px 10px; border-bottom: 1px solid var(--border); text-align: left; vertical-align: top; overflow-wrap: normal; }
+.msg-agent .md th + th, .msg-agent .md td + td { border-left: 1px solid var(--border); }
+.msg-agent .md thead th { background: var(--muted); font-weight: 600; white-space: nowrap; }
+.msg-agent .md tbody tr:last-child td { border-bottom: 0; }
+.msg-agent .md td code { white-space: nowrap; }

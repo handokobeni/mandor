@@ -200,6 +200,8 @@ impl<D: Deps> RunService<D> {
         }
         run.state = RunState::InReviewLoop;
         run.last_error = None;
+        // Catatan seperti "Push held" sudah selesai begitu PR terbuat.
+        run.note = None;
         self.runs.save(run, run.generation, self.now()).await?;
         self.notifier
             .notify(notice(self, NoticeKind::PrCreated, run, url).await)

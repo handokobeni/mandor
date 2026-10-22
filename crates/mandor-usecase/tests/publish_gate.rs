@@ -381,6 +381,16 @@ async fn covers_ae6_review_otomatis_gagal_di_mode_blok_menahan_push() {
         notes.iter().any(|n| n.body.contains("Push held")),
         "{notes:?}"
     );
+
+    // Dev memutuskan Push anyway: PR diperbarui dan catatan "Push held" hilang.
+    let run_id = st.runs.only().id;
+    st.svc
+        .publish_gated(&run_id, &decision(&[], Some("Diterima PM")))
+        .await
+        .unwrap();
+    let run = st.runs.only();
+    assert_eq!(run.state, RunState::InReviewLoop);
+    assert_eq!(run.note, None, "catatan Push held dibersihkan setelah push");
 }
 
 #[tokio::test(flavor = "multi_thread")]

@@ -66,6 +66,17 @@ impl<D: Deps> RunService<D> {
             }))
     }
 
+    /// State app milik run pemilik saat ini, bila ada.
+    ///
+    /// # Errors
+    /// Penyimpanan gagal.
+    pub async fn app_owner_status(&self) -> Result<Option<AppRecord>, RunError> {
+        let Some(owner) = self.apps.app_owner().await? else {
+            return Ok(None);
+        };
+        Ok(self.apps.app_record(&owner).await?)
+    }
+
     /// Perubahan per repo untuk konfirmasi sebelum app dijalankan.
     ///
     /// # Errors

@@ -151,27 +151,26 @@ impl<D: Deps> RunService<D> {
         self.spawn_turn(run, req, None).await
     }
 
-    /// Fakta kesiapan uji browser: repo Web dengan uji browser aktif, app run
-    /// ini menyala dari snapshot yang sama, login dikonfirmasi, dan ekstensi
-    /// tersambung (R13, KTD-38).
-    async fn review_facts(
+    /// Kesiapan uji browser per item untuk dialog kesiapan (KTD-39).
+    ///
+    /// # Errors
+    /// Run tidak ada, snapshot gagal, atau penyimpanan gagal.
+    pub async fn review_readiness(&self, run_id: &str) -> Result<ReviewReadiness, RunError> {
+        let run = self.load(run_id).await?;
+        let snapshot = self.code_snapshot(&run).await?;
+        self.readiness(&run, &snapshot).await
+    }
+
+    async fn readiness(
         &self,
         run: &RunRecord,
         snapshot: &BTreeMap<String, String>,
-    ) -> Result<ReviewFacts, RunError> {
+    ) -> Result<ReviewReadiness, RunError> {
         let members = self.members(run).await?;
         let web: Vec<_> = members
             .iter()
             .filter(|m| m.repo.app.test_mode == TestMode::Web)
             .collect();
-        let without = |reason: &str| ReviewFacts {
-            browser: false,
-            reason: Some(reason.to_owned()),
-            app_urls: Vec::new(),
-        };
-        if web.is_empty() {
-            return Ok(without("No app for this run"));
-        }
         let browser_tests = match &run.workspace {
             Some(ws) => self
                 .repos
@@ -180,34 +179,46 @@ impl<D: Deps> RunService<D> {
                 .is_none_or(|w| w.browser_tests),
             None => web.iter().all(|m| m.repo.app.browser_tests),
         };
-        if !browser_tests {
-            return Ok(without("Browser tests are off"));
-        }
-        let app = self.apps.app_record(&run.id).await?;
         let owner = self.apps.app_owner().await?;
-        let Some(app) = app.filter(|a| {
-            a.state == AppRunState::Running && owner.as_deref() == Some(run.id.as_str())
-        }) else {
-            return Ok(without("The app is not running"));
+        let app = self
+            .apps
+            .app_record(&run.id)
+            .await?
+            .filter(|_| owner.as_deref() == Some(run.id.as_str()));
+        let app_current = app.as_ref().is_some_and(|a| {
+            web.iter()
+                .all(|m| a.snapshot.get(&m.repo.id) == snapshot.get(&m.repo.id))
+        });
+        let app_state = match &app {
+            Some(a) if a.state == AppRunState::Running && app_current => AppReadiness::Current,
+            Some(a) if a.state == AppRunState::Running => AppReadiness::OlderCode,
+            _ => AppReadiness::NotRunning,
         };
-        let same_code = web
-            .iter()
-            .all(|m| app.snapshot.get(&m.repo.id) == snapshot.get(&m.repo.id));
-        if !same_code {
-            return Ok(without("app running older code"));
-        }
-        if !app.login_confirmed {
-            return Ok(without("Login not confirmed"));
-        }
-        if !self.reviews.chrome_connected().await {
-            return Ok(without("Claude in Chrome extension not connected"));
-        }
-        let app_urls = app.members.iter().filter_map(|m| m.url.clone()).collect();
-        Ok(ReviewFacts {
-            browser: true,
-            reason: None,
-            app_urls,
+        Ok(ReviewReadiness {
+            web: !web.is_empty(),
+            browser_tests,
+            app: app_state,
+            other_owner: owner.filter(|o| o != &run.id),
+            confirmed: Confirmations {
+                database: app.as_ref().is_some_and(|a| a.database_confirmed),
+                login: app.as_ref().is_some_and(|a| a.login_confirmed),
+            },
+            app_urls: app
+                .map(|a| a.members.into_iter().filter_map(|m| m.url).collect())
+                .unwrap_or_default(),
+            chrome_connected: self.reviews.chrome_connected().await,
         })
+    }
+
+    /// Fakta kesiapan uji browser: repo Web dengan uji browser aktif, app run
+    /// ini menyala dari snapshot yang sama, login dikonfirmasi, dan ekstensi
+    /// tersambung (R13, KTD-38).
+    async fn review_facts(
+        &self,
+        run: &RunRecord,
+        snapshot: &BTreeMap<String, String>,
+    ) -> Result<ReviewFacts, RunError> {
+        Ok(self.readiness(run, snapshot).await?.facts())
     }
 
     /// Akhir giliran reviewer: verdict dilengkapi atau review gagal, riwayat
@@ -425,5 +436,84 @@ fn review_request(
         model: settings.model.clone(),
         budget_cents: settings.budget_cents.max(1),
         timeout: Duration::from_secs(settings.timeout_secs.max(60)),
+    }
+}
+
+/// App run untuk uji browser.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum AppReadiness {
+    #[default]
+    NotRunning,
+    /// Menyala dari kode yang lebih lama dari kode saat ini.
+    OlderCode,
+    Current,
+}
+
+impl AppReadiness {
+    #[must_use]
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::NotRunning => "not_running",
+            Self::OlderCode => "older_code",
+            Self::Current => "current",
+        }
+    }
+}
+
+/// Konfirmasi dev yang disimpan di state app (KTD-36).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct Confirmations {
+    pub database: bool,
+    pub login: bool,
+}
+
+/// Kesiapan uji browser per item (dialog kesiapan, KTD-39).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ReviewReadiness {
+    /// Run punya repo dengan cara uji Web.
+    pub web: bool,
+    pub browser_tests: bool,
+    pub app: AppReadiness,
+    /// Run lain yang app-nya sedang menyala.
+    pub other_owner: Option<String>,
+    pub confirmed: Confirmations,
+    pub app_urls: Vec<String>,
+    pub chrome_connected: bool,
+}
+
+impl ReviewReadiness {
+    /// Dialog kesiapan hanya untuk run dengan repo Web dan uji browser aktif.
+    #[must_use]
+    pub fn needs_dialog(&self) -> bool {
+        self.web && self.browser_tests
+    }
+
+    /// Fakta untuk prompt reviewer: browser hanya bila semua syarat terpenuhi.
+    #[must_use]
+    pub fn facts(&self) -> ReviewFacts {
+        let reason = if !self.web {
+            Some("No app for this run")
+        } else if !self.browser_tests {
+            Some("Browser tests are off")
+        } else if self.app == AppReadiness::NotRunning {
+            Some("The app is not running")
+        } else if self.app == AppReadiness::OlderCode {
+            Some("app running older code")
+        } else if !self.confirmed.login {
+            Some("Login not confirmed")
+        } else if !self.chrome_connected {
+            Some("Claude in Chrome extension not connected")
+        } else {
+            None
+        };
+        ReviewFacts {
+            browser: reason.is_none(),
+            reason: reason.map(str::to_owned),
+            app_urls: if reason.is_none() {
+                self.app_urls.clone()
+            } else {
+                Vec::new()
+            },
+        }
     }
 }

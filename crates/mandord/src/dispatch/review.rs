@@ -2,9 +2,10 @@
 
 use mandor_domain::{Design, Verdict};
 use mandor_protocol::{
-    AcLedgerView, ErrorCode, LedgerToolInfo, LedgerToolSetDesign, LedgerToolSetVerdict,
-    ReviewFindings, ReviewStart, ReviewVerdictView, ReviewView, ReviewerSettingsView, RpcError,
-    RunRef, method,
+    AcLedgerView, ChromeCheckParams, ChromeCheckView, ErrorCode, LedgerToolInfo,
+    LedgerToolSetDesign, LedgerToolSetVerdict, ReadinessConfirmations, ReviewFindings,
+    ReviewReadinessView, ReviewStart, ReviewVerdictView, ReviewView, ReviewerSettingsView,
+    RpcError, RunRef, method,
 };
 use mandor_usecase::review::{CapabilityRole, CapabilityScope, LedgerToolError};
 use mandor_usecase::run_ports::{ReviewRecord, ReviewTrigger, ReviewerSettings};
@@ -95,6 +96,27 @@ fn usecase_scope(s: &mandor_api::CapabilityScope) -> Option<CapabilityScope> {
         run_id: s.run_id.clone(),
         role,
     })
+}
+
+/// Kunci hasil cek ekstensi terakhir.
+const CHROME_CHECKED_KEY: &str = "chrome_check";
+/// Umur cache cek ekstensi.
+const CHROME_CACHE_MS: i64 = 60_000;
+
+fn readiness_view(r: mandor_usecase::review::ReviewReadiness) -> ReviewReadinessView {
+    ReviewReadinessView {
+        needs_dialog: r.needs_dialog(),
+        cant_verify_reason: r.facts().reason,
+        browser_tests: r.browser_tests,
+        app: r.app.as_str().to_owned(),
+        other_owner: r.other_owner,
+        confirmed: ReadinessConfirmations {
+            database: r.confirmed.database,
+            login: r.confirmed.login,
+        },
+        app_urls: r.app_urls,
+        chrome_connected: r.chrome_connected,
+    }
 }
 
 fn review_view(r: &ReviewRecord) -> ReviewView {
@@ -207,6 +229,45 @@ impl AppDispatch {
         ok(&rows.iter().map(ac_row_view).collect::<Vec<_>>())
     }
 
+    /// Status ekstensi Claude in Chrome: cache 60 detik di tabel `settings`;
+    /// hasilnya juga dibaca saat review dimulai (KTD-32).
+    async fn chrome_check(
+        &self,
+        s: &crate::session::LarkSession,
+        force: bool,
+    ) -> Result<ChromeCheckView, RpcError> {
+        let store = &self.app.store;
+        let now = crate::prod::now_ms();
+        let cached = store
+            .setting(CHROME_CHECKED_KEY)
+            .await
+            .map_err(super::store_error)?
+            .and_then(|raw| serde_json::from_str::<ChromeCheckView>(&raw).ok());
+        if let Some(c) = cached.filter(|c| !force && now - c.checked_at_ms < CHROME_CACHE_MS) {
+            return Ok(c);
+        }
+        let cwd = self.app.cfg.home.join("agent");
+        let check = s.agent.chrome_check(&cwd).await;
+        let view = ChromeCheckView {
+            connected: check.connected,
+            detail: check.detail,
+            checked_at_ms: now,
+        };
+        let raw = serde_json::to_string(&view).map_err(super::rejected)?;
+        store
+            .set_setting(CHROME_CHECKED_KEY, &raw)
+            .await
+            .map_err(super::store_error)?;
+        store
+            .set_setting(
+                mandor_store::CHROME_KEY,
+                if view.connected { "true" } else { "false" },
+            )
+            .await
+            .map_err(super::store_error)?;
+        Ok(view)
+    }
+
     /// Skill plugin atau user masih terpasang.
     async fn skill_installed(&self, name: &str) -> bool {
         mandor_agent::available_skills(&self.app.cfg.user_home.join(".claude"))
@@ -220,6 +281,8 @@ impl AppDispatch {
             method::LEDGER_GET,
             method::REVIEW_START,
             method::REVIEW_CANCEL,
+            method::REVIEW_READINESS,
+            method::SYSTEM_CHROME_CHECK,
             method::REVIEW_HISTORY,
             method::REVIEW_SEND_FINDINGS,
             method::SETTINGS_REVIEWER_GET,
@@ -276,6 +339,19 @@ impl AppDispatch {
                         .map_err(run_error)?;
                 }
                 ok(&review_view(&rec))
+            }
+            method::REVIEW_READINESS => {
+                let p: RunRef = params(v)?;
+                let r = s
+                    .runs
+                    .review_readiness(&p.run_id)
+                    .await
+                    .map_err(run_error)?;
+                ok(&readiness_view(r))
+            }
+            method::SYSTEM_CHROME_CHECK => {
+                let p: ChromeCheckParams = params(v)?;
+                ok(&self.chrome_check(&s, p.force).await?)
             }
             method::REVIEW_CANCEL => {
                 let p: RunRef = params(v)?;

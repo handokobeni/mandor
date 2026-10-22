@@ -778,6 +778,47 @@ pub struct ReviewerSettingsView {
     pub timeout_secs: u64,
 }
 
+/// Kesiapan uji browser per item (dialog kesiapan, KTD-39).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+pub struct ReviewReadinessView {
+    /// Dialog hanya untuk run dengan repo Web dan uji browser aktif.
+    pub needs_dialog: bool,
+    pub browser_tests: bool,
+    /// `not_running`, `older_code`, atau `current`.
+    pub app: String,
+    /// Run lain yang app-nya sedang menyala.
+    pub other_owner: Option<String>,
+    pub confirmed: ReadinessConfirmations,
+    pub app_urls: Vec<String>,
+    pub chrome_connected: bool,
+    /// Alasan Can't verify untuk AC tampilan bila review jalan sekarang.
+    pub cant_verify_reason: Option<String>,
+}
+
+/// Konfirmasi dev untuk app run (database menyala, sudah login).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+pub struct ReadinessConfirmations {
+    pub database: bool,
+    pub login: bool,
+}
+
+/// Hasil `system.chrome_check`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+pub struct ChromeCheckView {
+    pub connected: bool,
+    pub detail: String,
+    #[ts(type = "number")]
+    pub checked_at_ms: i64,
+}
+
+/// Parameter `system.chrome_check`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+pub struct ChromeCheckParams {
+    /// Abaikan cache 60 detik.
+    #[serde(default)]
+    pub force: bool,
+}
+
 /// Parameter `runs.approve_plan`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
 pub struct ApprovePlanParams {

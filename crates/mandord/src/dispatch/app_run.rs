@@ -83,6 +83,7 @@ impl AppDispatch {
             method::APP_STOP,
             method::APP_CONFIRM,
             method::APP_LOGS,
+            method::APP_OWNER,
         ]
         .contains(&name)
     }
@@ -91,6 +92,10 @@ impl AppDispatch {
         let s = self.session().await?;
         let runs = &s.runs;
         match name {
+            method::APP_OWNER => {
+                let owner = runs.app_owner_status().await.map_err(run_error)?;
+                ok(&owner.map(app_view))
+            }
             method::APP_RUN => {
                 let p: AppRunParams = params(v)?;
                 let rec = runs

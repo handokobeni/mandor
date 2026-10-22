@@ -396,6 +396,53 @@ impl ClaudeAgent {
         self.toolless_cmd(worktree, prompt, PR_DESCRIPTION_TIMEOUT)
     }
 
+    /// Pemeriksaan ekstensi Claude in Chrome (U13): sesi `claude -p --chrome`
+    /// singkat dengan model kecil dan batas biaya kecil yang hanya boleh
+    /// memanggil `tabs_context_mcp`. Timeout dan kegagalan = tidak tersambung.
+    pub async fn chrome_check(&self, cwd: &Path) -> ChromeCheck {
+        match run(&self.chrome_check_cmd(cwd)).await {
+            Ok(out) => chrome_check_result(&out.stdout, &out.stderr),
+            Err(e) => ChromeCheck {
+                connected: false,
+                detail: e.to_string(),
+            },
+        }
+    }
+
+    fn chrome_check_cmd(&self, cwd: &Path) -> Cmd {
+        let hook = format!("{} --mcp claude-in-chrome", self.cfg.hook_command);
+        Cmd::new(&self.cfg.claude_bin)
+            .args([
+                "-p",
+                "--chrome",
+                "--model",
+                &self.cfg.commit_model,
+                "--max-budget-usd",
+                "0.05",
+                "--output-format",
+                "stream-json",
+                "--verbose",
+                "--strict-mcp-config",
+                "--permission-mode",
+                "default",
+                "--permission-prompts",
+                "none",
+                "--no-session-persistence",
+                "--allowedTools",
+                "mcp__claude-in-chrome__tabs_context_mcp,ToolSearch",
+                "--settings",
+                &settings_json(&hook),
+            ])
+            .cwd(cwd)
+            .env_policy(EnvPolicy::Explicit(self.cfg.env.clone()))
+            .stdin_bytes(
+                "Call mcp__claude-in-chrome__tabs_context_mcp once, then reply OK. Do not call any other tool."
+                    .as_bytes()
+                    .to_vec(),
+            )
+            .timeout(CHROME_CHECK_TIMEOUT)
+    }
+
     /// `claude -p` tanpa tool, tanpa MCP, env agent tanpa token, dan hook yang sama.
     fn toolless_cmd(&self, worktree: &Path, prompt: String, timeout: Duration) -> Cmd {
         Cmd::new(&self.cfg.claude_bin)
@@ -659,6 +706,60 @@ fn shell_quote(path: &str) -> String {
         path.to_owned()
     } else {
         format!("'{}'", path.replace('\'', "'\\''"))
+    }
+}
+
+/// Hasil pemeriksaan ekstensi Claude in Chrome.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ChromeCheck {
+    pub connected: bool,
+    /// Alasan bila tidak tersambung.
+    pub detail: String,
+}
+
+/// Batas waktu pemeriksaan ekstensi.
+const CHROME_CHECK_TIMEOUT: Duration = Duration::from_secs(30);
+
+/// Tersambung bila `tabs_context_mcp` dipanggil dan hasilnya bukan error.
+#[must_use]
+pub fn chrome_check_result(stdout: &str, stderr: &str) -> ChromeCheck {
+    let events: Vec<AgentEvent> = stdout
+        .lines()
+        .flat_map(crate::claude::stream::parse_line)
+        .collect();
+    let call = events.iter().find_map(|e| match e {
+        AgentEvent::ToolUse { id, name, .. } if name.ends_with("tabs_context_mcp") => {
+            Some(id.clone())
+        }
+        _ => None,
+    });
+    let result = call.and_then(|id| {
+        events.iter().find_map(|e| match e {
+            AgentEvent::ToolResult {
+                tool_use_id,
+                is_error,
+                preview,
+            } if *tool_use_id == id => Some((*is_error, preview.clone())),
+            _ => None,
+        })
+    });
+    match result {
+        Some((false, _)) => ChromeCheck {
+            connected: true,
+            detail: String::new(),
+        },
+        Some((true, preview)) => ChromeCheck {
+            connected: false,
+            detail: preview,
+        },
+        None => ChromeCheck {
+            connected: false,
+            detail: stderr
+                .lines()
+                .next()
+                .unwrap_or("the extension did not answer")
+                .to_owned(),
+        },
     }
 }
 
@@ -971,6 +1072,18 @@ mod tests {
         assert_eq!(written.origins, ["http://localhost:5173"]);
         agent.end_review("rv1").await;
         assert!(!agent.review_state_path("rv1").exists());
+    }
+
+    #[test]
+    fn hasil_cek_ekstensi_dari_stream() {
+        let ok = r#"{"type":"assistant","message":{"content":[{"type":"tool_use","id":"t1","name":"mcp__claude-in-chrome__tabs_context_mcp","input":{}}]}}
+{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"t1","is_error":false,"content":"availableTabs"}]}}"#;
+        assert!(chrome_check_result(ok, "").connected);
+        let failed = ok.replace("\"is_error\":false", "\"is_error\":true");
+        assert!(!chrome_check_result(&failed, "").connected);
+        let none = chrome_check_result("", "Error: browser extension not connected");
+        assert!(!none.connected);
+        assert!(none.detail.contains("not connected"));
     }
 
     #[tokio::test]

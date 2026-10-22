@@ -34,6 +34,12 @@ pub mod method {
     pub const LEDGER_TOOL_SET_DESIGN: &str = "ledger.tool.set_design";
     /// Koneksi kapabilitas, peran verdict: `LedgerToolSetVerdict`.
     pub const LEDGER_TOOL_SET_VERDICT: &str = "ledger.tool.set_verdict";
+    /// Kesiapan uji browser (`RunRef` → `ReviewReadinessView`).
+    pub const REVIEW_READINESS: &str = "review.readiness";
+    /// Cek ekstensi Claude in Chrome (`ChromeCheckParams` → `ChromeCheckView`).
+    pub const SYSTEM_CHROME_CHECK: &str = "system.chrome_check";
+    /// App yang sedang menyala (`AppRunView` atau `null`).
+    pub const APP_OWNER: &str = "app.owner";
     /// Memulai review AC (`ReviewStart` → `ReviewView`).
     pub const REVIEW_START: &str = "review.start";
     /// Membatalkan review yang berjalan (`RunRef` → `{}`).
@@ -264,6 +270,22 @@ fn review_bindings() -> Result<Vec<(&'static str, String)>, String> {
         )?,
         one("AppRunView.ts", AppRunView::export_to_string(&cfg))?,
         one("ReviewView.ts", ReviewView::export_to_string(&cfg))?,
+        one(
+            "ReviewReadinessView.ts",
+            ReviewReadinessView::export_to_string(&cfg),
+        )?,
+        one(
+            "ChromeCheckView.ts",
+            ChromeCheckView::export_to_string(&cfg),
+        )?,
+        one(
+            "ReadinessConfirmations.ts",
+            ReadinessConfirmations::export_to_string(&cfg),
+        )?,
+        one(
+            "ChromeCheckParams.ts",
+            ChromeCheckParams::export_to_string(&cfg),
+        )?,
         one(
             "LedgerRowsEvent.ts",
             LedgerRowsEvent::export_to_string(&cfg),

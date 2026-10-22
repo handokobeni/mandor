@@ -6,8 +6,23 @@ import type { MessageView } from '#lib/protocol/MessageView.ts';
 import type { RunView } from '#lib/protocol/RunView.ts';
 import type { Transport } from '#lib/api/client.ts';
 import type { AcRowView } from '#lib/protocol/AcRowView.ts';
+import type { AppRunView } from '#lib/protocol/AppRunView.ts';
 import { activeRows, gate } from '#lib/ac-review.ts';
 import { history, ledger, scenarioFor, scenarioRows } from './mock-ac.ts';
+
+/** State Run app tiruan per run. */
+const APP = new Map<string, AppRunView>();
+let chromeConnected = false;
+function appView(runId: string, state: string): AppRunView {
+  return {
+    run_id: runId,
+    state,
+    members: [{ repo_id: 'pegasus-web', url: 'http://localhost:5173', state }],
+    database_confirmed: false,
+    login_confirmed: false,
+    error: state === 'failed' ? 'pegasus-web: the app exited (code 1) before opening its port' : null
+  };
+}
 
 /** Buku AC tiruan per run; berubah saat review atau Push & PR. */
 const AC = new Map<string, AcRowView[]>();
@@ -261,7 +276,17 @@ const repos: unknown[] = setup
         gh_profile: null,
         companions: [],
         trusted_reviewers: ['ou_51aa6c'],
-        extra_allowed: ['Bash(pnpm test *)']
+        extra_allowed: ['Bash(pnpm test *)'],
+        gate_mode: null,
+        app: {
+          test_mode: 'web',
+          setup_command: 'pnpm install',
+          start_command: 'pnpm dev',
+          port: 5173,
+          app_url: null,
+          env_keys: ['VITE_API_URL'],
+          browser_tests: true
+        }
       },
       {
         id: 'pegasus-api',
@@ -270,7 +295,17 @@ const repos: unknown[] = setup
         gh_profile: null,
         companions: [],
         trusted_reviewers: [],
-        extra_allowed: ['Bash(cargo *)']
+        extra_allowed: ['Bash(cargo *)'],
+        gate_mode: null,
+        app: {
+          test_mode: 'no_app',
+          setup_command: null,
+          start_command: null,
+          port: null,
+          app_url: null,
+          env_keys: [],
+          browser_tests: true
+        }
       }
     ];
 const workspaces: Record<string, unknown>[] = setup
@@ -322,7 +357,17 @@ function handle(method: string, params: Record<string, unknown>): unknown {
         gh_profile: null,
         companions: [],
         trusted_reviewers: [],
-        extra_allowed: []
+        extra_allowed: [],
+        gate_mode: null,
+        app: {
+          test_mode: 'no_app',
+          setup_command: null,
+          start_command: null,
+          port: null,
+          app_url: null,
+          env_keys: [],
+          browser_tests: true
+        }
       });
       return repos.at(-1);
     case 'lark.settings.set':
@@ -471,6 +516,52 @@ function handle(method: string, params: Record<string, unknown>): unknown {
     case 'runs.start':
     case 'runs.takeover':
       return RUNS[0];
+    case 'app.run':
+      return appView(String(params.run_id), 'starting');
+    case 'app.status':
+      return APP.get(String(params.run_id)) ?? appView(String(params.run_id), 'off');
+    case 'app.owner':
+      return [...APP.values()].find((a) => a.state !== 'off' && a.state !== 'stopped_by_other_run') ?? null;
+    case 'app.changes':
+      return [
+        {
+          repo_id: 'pegasus-web',
+          snapshot: 'tree-mock',
+          files: ['src/routes/invoices/Filters.svelte', 'package.json', 'src/lib/api/invoices.ts'],
+          flagged: ['package.json']
+        }
+      ];
+    case 'app.stop': {
+      const a = appView(String(params.run_id), 'off');
+      APP.set(a.run_id, a);
+      return a;
+    }
+    case 'app.confirm': {
+      const a = APP.get(String(params.run_id)) ?? appView(String(params.run_id), 'off');
+      if (typeof params.database === 'boolean') a.database_confirmed = params.database;
+      if (typeof params.login === 'boolean') a.login_confirmed = params.login;
+      return a;
+    }
+    case 'app.logs':
+      return [{ repo_id: 'pegasus-web', text: '$ pnpm dev\n  VITE v6 ready in 412 ms\n  ➜  Local: http://localhost:5173/' }];
+    case 'review.readiness': {
+      const a = APP.get(String(params.run_id));
+      const running = a?.state === 'running';
+      const ready = params.run_id === '1';
+      return {
+        needs_dialog: ready,
+        browser_tests: true,
+        app: running ? 'current' : 'not_running',
+        other_owner: null,
+        confirmed: { database: a?.database_confirmed ?? false, login: a?.login_confirmed ?? false },
+        app_urls: running ? ['http://localhost:5173'] : [],
+        chrome_connected: chromeConnected,
+        cant_verify_reason: running ? null : 'The app is not running'
+      };
+    }
+    case 'system.chrome_check':
+      chromeConnected = true;
+      return { connected: true, detail: '', checked_at_ms: Date.now() };
     case 'ledger.get': {
       const id = String(params.run_id);
       return ledger(id, acRows(id), scenarioFor(id));
@@ -513,6 +604,16 @@ export class MockTransport implements Transport {
 
   private emit(method: string, params: unknown): void {
     this.onLine?.(JSON.stringify({ jsonrpc: '2.0', method, params }));
+  }
+
+  /** Run app tiruan: setup, start, tunggu port, lalu Running. */
+  private playApp(runId: string): void {
+    ['setting_up', 'starting', 'waiting_for_port', 'running'].forEach((state, i) =>
+      setTimeout(() => {
+        APP.set(runId, appView(runId, state));
+        this.emit('app.updated', { run_id: runId });
+      }, 600 * i)
+    );
   }
 
   /** Review tiruan: run menjadi Reviewing, baris terisi satu per satu, lalu kembali ke dev. */
@@ -578,6 +679,7 @@ export class MockTransport implements Transport {
         this.onLine?.(JSON.stringify({ jsonrpc: '2.0', method: 'run.message', params: { run_id: req.params?.run_id } }));
       }
       if (req.method === 'review.start') this.playReview(String(req.params?.run_id));
+      if (req.method === 'app.run') this.playApp(String(req.params?.run_id));
     }, delay);
   }
 }

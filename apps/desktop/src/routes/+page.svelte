@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount, untrack } from 'svelte';
   import { toast } from 'svelte-sonner';
+  import { appRun } from '#lib/stores/app-run.svelte.ts';
   import { TauriTransport } from '#lib/api/tauri-transport.ts';
   import { flagMeta } from '#lib/board.ts';
   import Board from '#lib/components/kanban/Board.svelte';
@@ -86,7 +87,8 @@
       runs.attach(client),
       workspace.attach(client),
       notifications.attach(client),
-      people.attach(client)
+      people.attach(client),
+      appRun.attach(client)
     ]);
     return () => offs.forEach((off) => off());
   });

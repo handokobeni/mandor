@@ -42,6 +42,8 @@ pub struct LarkSession {
     pub sync: Arc<SyncService<Prod>>,
     pub runs: Arc<RunService<Prod>>,
     pub git: Git,
+    /// Adapter agent untuk pemeriksaan ekstensi Claude in Chrome.
+    pub agent: ClaudeAgent,
     /// Jeda tenang Waiting Fix (detik); bisa diubah tanpa memulai ulang sesi.
     pub quiet_secs: AtomicI64,
     pub reauth: AtomicBool,
@@ -128,7 +130,7 @@ pub async fn start(
         Arc::clone(&sync),
         RunPorts {
             git: GitAdapter::new(git.clone()),
-            agent,
+            agent: agent.clone(),
             runs: BroadcastRuns::new(RunsStore::new(env.store.clone()), env.events.clone()),
             notifier: DaemonNotifier::new(env.store.clone(), env.events.clone()),
             spawner: TrackerSpawner::new(env.tracker.clone()),
@@ -155,6 +157,7 @@ pub async fn start(
         me,
         sync,
         runs,
+        agent,
         git,
         quiet_secs: AtomicI64::new(settings.quiet_secs),
         reauth: AtomicBool::new(false),

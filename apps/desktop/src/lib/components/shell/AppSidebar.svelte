@@ -10,6 +10,15 @@
   import { people } from '#lib/stores/people.svelte.ts';
   import { runs } from '#lib/stores/runs.svelte.ts';
   import { workspace } from '#lib/stores/workspace.svelte.ts';
+  import AppWindow from '@lucide/svelte/icons/app-window';
+  import { appStarting, appStateMeta } from '#lib/app-run.ts';
+  import { appRun } from '#lib/stores/app-run.svelte.ts';
+
+  // Penanda run pemilik app yang menyala (hanya satu app dalam satu waktu).
+  const appOwner = $derived(
+    appRun.owner && (appRun.owner.state === 'running' || appStarting(appRun.owner.state)) ? appRun.owner : null
+  );
+  const appOwnerRun = $derived(appOwner ? runs.byId(appOwner.run_id) : undefined);
 
   const flags = $derived(
     new Map<string, FlagView>(board.cards.flatMap((c) => (c.flag ? [[c.record_id, c.flag] as const] : [])))
@@ -46,6 +55,20 @@
     </button>
   </nav>
   <hr class="separator" />
+  {#if appOwner}
+    <button
+      type="button"
+      class="nav-item app-owner"
+      title="This run's app is running. Only one run's app runs at a time."
+      onclick={() => appOwnerRun && nav.run(appOwnerRun.id)}
+    >
+      <AppWindow class="icon" aria-hidden="true" />
+      <span class="label-text">
+        App: <span class="mono">{appOwnerRun?.key ?? 'a run'}</span>
+        <span class="muted">· {appStateMeta(appOwner.state).label}</span>
+      </span>
+    </button>
+  {/if}
   <div class="sidebar-group-label caps" style="padding-top:12px">
     <span class="label-text">Active agents</span><span class="count mono">{runs.runs.length}</span>
   </div>

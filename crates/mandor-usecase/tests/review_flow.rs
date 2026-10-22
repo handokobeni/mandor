@@ -379,3 +379,24 @@ async fn setelan_reviewer_baru_dipakai_review_berikutnya_dan_prasyarat_dicek() {
         Err(RunError::InvalidState(_))
     ));
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn kesiapan_per_item_menyebut_pemilik_app_lain_dan_dialog_hanya_untuk_web() {
+    let (lark, clock) = setup();
+    let (st, run) = waiting(&lark, &clock).await;
+    let r = st.svc.review_readiness(&run).await.unwrap();
+    assert!(!r.needs_dialog(), "repo tanpa app web");
+    st.repos.repos.lock().unwrap()[0].app = AppSettings {
+        test_mode: TestMode::Web,
+        start_command: Some("bun run dev".to_owned()),
+        port: Some(5173),
+        browser_tests: true,
+        ..AppSettings::default()
+    };
+    st.apps.set_app_owner(Some("run-lain")).await.unwrap();
+    let r = st.svc.review_readiness(&run).await.unwrap();
+    assert!(r.needs_dialog());
+    assert_eq!(r.app, mandor_usecase::review::AppReadiness::NotRunning);
+    assert_eq!(r.other_owner.as_deref(), Some("run-lain"));
+    assert_eq!(r.facts().reason.as_deref(), Some("The app is not running"));
+}

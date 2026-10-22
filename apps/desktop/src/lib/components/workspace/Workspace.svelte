@@ -60,6 +60,17 @@
   import type { PublishParams } from '#lib/protocol/PublishParams.ts';
   import type { PublishResult } from '#lib/protocol/PublishResult.ts';
   import { LedgerStore } from '#lib/stores/ledger.svelte.ts';
+  import { appRun } from '#lib/stores/app-run.svelte.ts';
+  import { runs } from '#lib/stores/runs.svelte.ts';
+  import { snapshots } from '#lib/app-run.ts';
+  import type { AppChangesView } from '#lib/protocol/AppChangesView.ts';
+  import type { AppLogView } from '#lib/protocol/AppLogView.ts';
+  import type { RepoView } from '#lib/protocol/RepoView.ts';
+  import type { ReviewReadinessView } from '#lib/protocol/ReviewReadinessView.ts';
+  import AppLogsDrawer from './AppLogsDrawer.svelte';
+  import ReadinessDialog from './ReadinessDialog.svelte';
+  import RunAppConfirm from './RunAppConfirm.svelte';
+  import RunAppControl from './RunAppControl.svelte';
   import TaskDetails from './TaskDetails.svelte';
   import TaskTab from './TaskTab.svelte';
 
@@ -93,6 +104,32 @@
   const gateNow = $derived(acGate(acRows, ledger.ledger?.gate_mode ?? 'block', reviewing));
   const acCount = $derived(tabCount(acRows));
   const failing = $derived(acRows.filter((r) => r.in_gate && !r.stale && r.verdict === 'fail'));
+
+  // Run app (Rilis 2 U13).
+  let repos = $state<RepoView[]>([]);
+  let appChanges = $state<AppChangesView[] | null>(null);
+  let appLogs = $state<AppLogView[] | null>(null);
+  let readiness = $state<{ view: ReviewReadinessView; trigger: 'manual' | 'push' } | null>(null);
+  let checking = $state(false);
+  $effect(() => {
+    const id = run.id;
+    untrack(() => appRun.watch(id));
+  });
+  $effect(() => {
+    untrack(() => {
+      void rpc
+        .request<RepoView[]>('repos.list')
+        .then((r) => (repos = r))
+        .catch(() => (repos = []));
+    });
+  });
+  const memberIds = $derived(run.repos.map((r) => r.repo_id));
+  const runnable = $derived(
+    repos.some((r) => memberIds.includes(r.id) && !!r.app.start_command && r.app.port !== null)
+  );
+  const envKeys = $derived(Object.fromEntries(repos.filter((r) => memberIds.includes(r.id)).map((r) => [r.id, r.app.env_keys])));
+  const ownerRun = $derived(appRun.otherOwner(run.id));
+  const ownerKey = $derived(ownerRun ? (runs.byId(ownerRun.run_id)?.key ?? 'another run') : null);
 
   // Detak per detik hanya selama jeda tenang (hitung mundur).
   $effect(() => {
@@ -217,6 +254,9 @@
       case 'warn':
         gateDialog = 'warn';
         return;
+      case 'review_needed':
+        void requestReview('push');
+        return;
       default:
         void push({ run_id: run.id });
     }
@@ -245,8 +285,68 @@
     });
   }
 
-  function startReview(): void {
-    void act(() => rpc.request('review.start', { run_id: run.id }), 'Review started');
+  /** Review dimulai lewat checklist kesiapan bila run punya repo Web (KTD-39). */
+  async function requestReview(trigger: 'manual' | 'push'): Promise<void> {
+    try {
+      const view = await rpc.request<ReviewReadinessView>('review.readiness', { run_id: run.id });
+      if (view.needs_dialog) readiness = { view, trigger };
+      else await beginReview(trigger);
+    } catch (err) {
+      toast.error('Something went wrong', { description: message(err) });
+    }
+  }
+
+  async function beginReview(trigger: 'manual' | 'push'): Promise<void> {
+    readiness = null;
+    if (trigger === 'push') await push({ run_id: run.id });
+    else await act(() => rpc.request('review.start', { run_id: run.id }), 'Review started');
+  }
+
+  async function startFromReadiness(confirmed: { database: boolean; login: boolean }, trigger: 'manual' | 'push'): Promise<void> {
+    try {
+      await rpc.request('app.confirm', { run_id: run.id, database: confirmed.database, login: confirmed.login });
+    } catch (err) {
+      toast.error('Could not save your confirmation', { description: message(err) });
+      return;
+    }
+    await beginReview(trigger);
+  }
+
+  async function recheckChrome(): Promise<void> {
+    if (!readiness) return;
+    checking = true;
+    try {
+      await rpc.request('system.chrome_check', { force: true });
+      const view = await rpc.request<ReviewReadinessView>('review.readiness', { run_id: run.id });
+      readiness = { ...readiness, view };
+    } catch (err) {
+      toast.error('Could not check the extension', { description: message(err) });
+    } finally {
+      checking = false;
+    }
+  }
+
+  async function openRunApp(): Promise<void> {
+    readiness = null;
+    try {
+      appChanges = await rpc.request<AppChangesView[]>('app.changes', { run_id: run.id });
+    } catch (err) {
+      toast.error('Could not prepare the app', { description: message(err) });
+    }
+  }
+
+  function confirmRunApp(): void {
+    const changes = appChanges ?? [];
+    appChanges = null;
+    void act(() => rpc.request('app.run', { run_id: run.id, snapshots: snapshots(changes) }), 'Starting the app');
+  }
+
+  async function openLogs(): Promise<void> {
+    try {
+      appLogs = await rpc.request<AppLogView[]>('app.logs', { run_id: run.id });
+    } catch (err) {
+      toast.error('Could not load the logs', { description: message(err) });
+    }
   }
 
   function sendFindings(acIds: string[]): void {
@@ -351,6 +451,15 @@
       </span></span>
   {/if}
   <span class="right">
+    {#if runnable && run.phase === 'implement' && !['orphaned', 'stopped', 'failed'].includes(run.state)}
+      <RunAppControl
+        app={appRun.current}
+        disabled={busy || working}
+        onrun={() => void openRunApp()}
+        onstop={() => act(() => rpc.request('app.stop', { run_id: run.id }), 'App stopped')}
+        onlogs={() => void openLogs()}
+      />
+    {/if}
     {#if reviewing}
       <Button variant="outline" size="sm" disabled={busy} onclick={() => act(() => rpc.request('review.cancel', { run_id: run.id }), 'Review cancelled')}>
         <Square />Stop review
@@ -553,7 +662,7 @@
           {reviewing}
           agentBusy={(working && !reviewing) || run.phase !== 'implement' || run.state !== 'awaiting_dev'}
           {now}
-          onreview={startReview}
+          onreview={() => void requestReview('manual')}
           onsend={sendFindings}
           onfile={(p) => void openFile(p)}
         />
@@ -584,6 +693,41 @@
         await rpc.request('runs.start_fix', params);
         fixOpen = false;
       }, 'Fix started')}
+  />
+{/if}
+
+{#if appChanges}
+  <RunAppConfirm
+    taskKey={key}
+    changes={appChanges}
+    {envKeys}
+    otherRun={ownerKey}
+    oncancel={() => (appChanges = null)}
+    onconfirm={confirmRunApp}
+    onfile={(p) => {
+      appChanges = null;
+      void openFile(p);
+    }}
+  />
+{/if}
+
+{#if appLogs}
+  <AppLogsDrawer logs={appLogs} error={appRun.current?.error ?? null} onclose={() => (appLogs = null)} />
+{/if}
+
+{#if readiness}
+  {@const r = readiness}
+  <ReadinessDialog
+    taskKey={key}
+    trigger={r.trigger === 'push' ? 'Push & create PR' : 'Run review'}
+    readiness={r.view}
+    ownerLabel={ownerKey}
+    {checking}
+    oncancel={() => (readiness = null)}
+    onstart={(c) => void startFromReadiness(c, r.trigger)}
+    onanyway={() => void beginReview(r.trigger)}
+    onrunapp={() => void openRunApp()}
+    onrecheck={() => void recheckChrome()}
   />
 {/if}
 

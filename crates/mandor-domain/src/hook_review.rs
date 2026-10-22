@@ -138,6 +138,11 @@ pub fn classify_review(call: &ToolCall, state: &ReviewState, allowed_mcp: &[Stri
         return browser_verdict(call, kind, state);
     }
     if let Some(cmd) = &call.command {
+        if let Some(prog) = runs_interpreter(cmd) {
+            return deny(&format!(
+                "`{prog}` runs commands the review cannot check; the review is read-only"
+            ));
+        }
         if let Some(reason) = mutating_git(cmd) {
             return deny(&format!("{reason}; the review is read-only"));
         }
@@ -289,6 +294,36 @@ const GIT_PRECEDERS: &[&str] = &[
     "export", "declare", "typeset", "set", "unset", "alias", "source", ".",
 ];
 
+/// Interpreter dan pembungkus yang menjalankan perintah dari teks, stdin, atau
+/// variabel; ditolak di posisi mana pun karena isinya tidak bisa diperiksa.
+const INTERPRETERS: &[&str] = &[
+    "sh", "bash", "zsh", "dash", "ksh", "fish", "eval", "exec", "xargs", "parallel",
+];
+
+/// Kata perintah seperti dibaca shell: tanda kutip dan backslash di dalam kata
+/// dihapus (`g''it` dan `g\it` menjadi `git`), pemisah menjadi batas kata.
+fn shell_words(cmd: &str) -> Vec<String> {
+    cmd.chars()
+        .filter(|c| !matches!(c, '\'' | '"' | '\\'))
+        .map(|c| match c {
+            ';' | '&' | '|' | '(' | ')' | '{' | '}' | '<' | '>' | '\n' | '\t' | '$' | '`' => ' ',
+            other => other,
+        })
+        .collect::<String>()
+        .split(' ')
+        .filter(|w| !w.is_empty())
+        .map(str::to_owned)
+        .collect()
+}
+
+/// Interpreter atau pembungkus pertama di perintah, bila ada.
+fn runs_interpreter(cmd: &str) -> Option<String> {
+    shell_words(cmd)
+        .into_iter()
+        .map(|w| crate::hook::program_name(&w).to_lowercase())
+        .find(|p| INTERPRETERS.contains(&p.as_str()))
+}
+
 fn dangerous_git_opt(arg: &str) -> bool {
     if let Some(long) = arg.strip_prefix("--") {
         let name = long.split('=').next().unwrap_or(long);
@@ -313,7 +348,7 @@ fn assigns_env(word: &str) -> bool {
 /// yang menjalankan perintah lain atau menulis berkas, atau env yang diubah
 /// sebelum git (git membaca `GIT_*`, `HOME`, dan `XDG_CONFIG_HOME`).
 fn mutating_git(cmd: &str) -> Option<String> {
-    let words = crate::hook::words(cmd);
+    let words = shell_words(cmd);
     words.iter().enumerate().find_map(|(i, w)| {
         if crate::hook::program_name(w).to_lowercase() != "git" {
             return None;
@@ -665,6 +700,29 @@ mod tests {
             classify_review(&browser("tabs_context_mcp", None), &s, &[]),
             Verdict::Allow
         );
+    }
+
+    #[test]
+    fn mode_review_menolak_interpreter_dan_git_bertanda_kutip() {
+        let s = state();
+        for cmd in [
+            "sh -c 'g''it stash'",
+            "g\\it stash",
+            "g\"\"it stash",
+            "cargo test; bash run.sh",
+            "eval \"$CMD\"",
+            "ls | xargs cat",
+        ] {
+            let call = ToolCall {
+                tool_name: "Bash".to_owned(),
+                command: Some(cmd.to_owned()),
+                ..ToolCall::default()
+            };
+            assert!(
+                matches!(classify_review(&call, &s, &[]), Verdict::Deny(_)),
+                "{cmd}"
+            );
+        }
     }
 
     #[test]

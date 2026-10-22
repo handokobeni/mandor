@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO reviews (id, run_id, trigger, status, browser_used, error, cost_usd,\n                                  usage_json, started_at_ms, finished_at_ms)\n             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)\n             ON CONFLICT (id) DO UPDATE SET status = excluded.status,\n                 browser_used = excluded.browser_used, error = excluded.error,\n                 cost_usd = excluded.cost_usd, usage_json = excluded.usage_json,\n                 finished_at_ms = excluded.finished_at_ms",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 10
+    },
+    "nullable": []
+  },
+  "hash": "6f6aceeb2202c52b7158ca30e8f0ad237b9dc3b805eca0c51da75392efd0f8ea"
+}

@@ -1,0 +1,26 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT settings_json FROM workspaces WHERE id = ?",
+  "describe": {
+    "columns": [
+      {
+        "name": "settings_json",
+        "ordinal": 0,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "workspaces",
+            "name": "settings_json"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "c5d6d06d93d894f18005d9a4a4a354bca727e340b1004a16e088c4b8a60c046a"
+}

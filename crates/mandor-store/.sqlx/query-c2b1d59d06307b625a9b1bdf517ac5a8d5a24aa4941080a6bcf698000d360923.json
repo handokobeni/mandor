@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO design_sources (id, name, kind, config_json, created_at_ms)\n             VALUES (?, ?, ?, ?, ?)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 5
+    },
+    "nullable": []
+  },
+  "hash": "c2b1d59d06307b625a9b1bdf517ac5a8d5a24aa4941080a6bcf698000d360923"
+}

@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "DELETE FROM reviews WHERE id IN (\n               SELECT id FROM (\n                 SELECT id, ROW_NUMBER() OVER (\n                   PARTITION BY run_id ORDER BY started_at_ms DESC, id DESC) AS n\n                 FROM reviews)\n               WHERE n > ?)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": []
+  },
+  "hash": "8575f6ae26e033474695948c7e2708dcce07ecad5d68a29d992fb1b7da955fb8"
+}

@@ -3,15 +3,19 @@
 //! Satu-satunya crate yang memakai `sqlx`. Error `sqlx` diterjemahkan ke
 //! [`StoreError`] sebelum keluar dari crate.
 
+mod ac_ledger;
 mod codec;
+mod design_sources;
 mod error;
 mod journal;
 mod messages;
 mod notifications;
 mod outbox;
 mod repos;
+mod reviews;
 mod run_port;
 mod runs;
+mod settings;
 mod tasks;
 mod workspaces;
 
@@ -21,11 +25,13 @@ use std::time::Duration;
 
 use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePool, SqlitePoolOptions};
 
+pub use design_sources::DesignSourceRow;
 pub use error::StoreError;
 pub use messages::Message;
 pub use notifications::{NOTIFICATIONS_KEPT, Notification};
 pub use outbox::{OutboxItem, OutboxStatus};
 pub use repos::{NewRepo, Repo};
+pub use reviews::{StoredReview, StoredVerdict};
 pub use run_port::{ReposStore, RunsStore};
 pub use tasks::TaskStore;
 pub use workspaces::{NewWorkspace, Workspace};

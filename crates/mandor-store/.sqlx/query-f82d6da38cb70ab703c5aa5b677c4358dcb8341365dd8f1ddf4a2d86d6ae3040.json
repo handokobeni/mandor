@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "DELETE FROM design_sources WHERE id = ?",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": []
+  },
+  "hash": "f82d6da38cb70ab703c5aa5b677c4358dcb8341365dd8f1ddf4a2d86d6ae3040"
+}

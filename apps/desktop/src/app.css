@@ -8,6 +8,8 @@
    ========================================================================== */
 @import "tailwindcss";
 @import "tw-animate-css";
+/* Dokumen dan prototype desain di root repo bukan sumber kelas aplikasi. */
+@source not "../../../docs";
 /* Fonts: npm i @fontsource-variable/space-grotesk @fontsource-variable/jetbrains-mono
    then import them in the root +layout.svelte, or use ../vendor/fonts/fonts.css */
 

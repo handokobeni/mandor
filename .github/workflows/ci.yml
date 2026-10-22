@@ -2,7 +2,9 @@ name: ci
 on:
   push:
     branches: [main]
+    paths-ignore: ["docs/**", "**/*.md"]   # dokumen tidak di-build atau di-test
   pull_request:
+    paths-ignore: ["docs/**", "**/*.md"]
   schedule:
     - cron: "17 2 * * *"   # advisories harian (Linux)
     - cron: "37 3 * * 1"   # matrix penuh mingguan

@@ -362,6 +362,47 @@ esac"#,
 }
 
 #[tokio::test]
+async fn gh_membaca_dan_mengganti_badan_pr() {
+    let f = fixture();
+    let args_log = f.root.join("gh-args");
+    let stdin_log = f.root.join("gh-stdin");
+    let gh = fake_gh(
+        &f.root,
+        &format!(
+            r#"echo "$@" >> {log}
+case "$2" in
+  view) printf '%s\n' '{{"body":"Lark task: PGS-1\r\n\r\nCreated by mandor."}}';;
+  edit) cat > {stdin};;
+esac"#,
+            log = args_log.display(),
+            stdin = stdin_log.display()
+        ),
+    );
+    let mut cfg = GitConfig::new(f.root.join("workspaces"));
+    cfg.gh_bin = gh;
+    let git = Git::new(cfg);
+    let url = "https://github.com/o/r/pull/7";
+    let body = git.pr_body(&f.repo, url, None).await.unwrap();
+    assert_eq!(
+        body.as_deref(),
+        Some("Lark task: PGS-1\r\n\r\nCreated by mandor.")
+    );
+    git.set_pr_body(&f.repo, url, "## Summary\nBaru", None)
+        .await
+        .unwrap();
+    assert_eq!(
+        std::fs::read_to_string(&stdin_log).unwrap(),
+        "## Summary\nBaru"
+    );
+    let log = std::fs::read_to_string(&args_log).unwrap();
+    assert!(log.contains(&format!("pr view {url} --json body")), "{log}");
+    assert!(
+        log.contains(&format!("pr edit {url} --body-file -")),
+        "{log}"
+    );
+}
+
+#[tokio::test]
 async fn gh_tanpa_pr_mengembalikan_none() {
     let f = fixture();
     let gh = fake_gh(

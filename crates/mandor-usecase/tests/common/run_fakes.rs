@@ -37,6 +37,10 @@ pub struct GitState {
     pub prs: HashMap<String, String>,
     pub created_prs: Vec<(String, String)>,
     pub pr_bodies: Vec<String>,
+    /// Badan PR saat ini per URL, seperti yang dikembalikan `gh pr view`.
+    pub bodies: HashMap<String, String>,
+    /// Jumlah `gh pr edit --body` yang dijalankan.
+    pub body_edits: usize,
 }
 
 /// Kunci PR palsu: repo dan branch (run workspace memakai branch yang sama).
@@ -193,7 +197,23 @@ impl GitPort for FakeGit {
         );
         st.created_prs.push((branch.to_owned(), title.to_owned()));
         st.prs.insert(pr_key(r, branch), url.clone());
+        st.bodies.insert(url.clone(), body.to_owned());
         Ok(url)
+    }
+    async fn pr_body(&self, _r: &RepoInfo, url: &str) -> Result<Option<String>, PortError> {
+        Ok(self.state.lock().unwrap().bodies.get(url).cloned())
+    }
+    async fn set_pr_body(
+        &self,
+        _r: &RepoInfo,
+        _wt: &Path,
+        url: &str,
+        body: &str,
+    ) -> Result<(), PortError> {
+        let mut st = self.state.lock().unwrap();
+        st.bodies.insert(url.to_owned(), body.to_owned());
+        st.body_edits += 1;
+        Ok(())
     }
 }
 

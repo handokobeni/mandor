@@ -1,5 +1,6 @@
 //! Port untuk orkestrasi task run: git, agent, penyimpanan run, notifikasi.
 
+use std::collections::BTreeMap;
 use std::future::Future;
 use std::path::{Path, PathBuf};
 
@@ -142,6 +143,20 @@ pub trait GitPort: Send + Sync {
         title: &str,
         body: &str,
     ) -> impl Future<Output = Result<String, PortError>> + Send;
+    /// Badan PR saat ini; `None` bila PR tidak ditemukan.
+    fn pr_body(
+        &self,
+        repo: &RepoInfo,
+        url: &str,
+    ) -> impl Future<Output = Result<Option<String>, PortError>> + Send;
+    /// Mengganti badan PR (`gh pr edit --body-file -`).
+    fn set_pr_body(
+        &self,
+        repo: &RepoInfo,
+        worktree: &Path,
+        url: &str,
+        body: &str,
+    ) -> impl Future<Output = Result<(), PortError>> + Send;
 }
 
 /// Sesi agent baru dengan ID pilihan daemon, atau lanjutan.
@@ -269,6 +284,9 @@ pub struct RunRecord {
     /// terakhir record task saat loop perbaikan dimulai). Dasar kepercayaan
     /// Feedback QA (KTD-41).
     pub fix_requested_by: Option<String>,
+    /// Hash badan PR yang terakhir ditulis Mandor, per URL PR. Badan yang hash-nya
+    /// berbeda sudah disunting manusia dan tidak ditimpa.
+    pub pr_body_hashes: BTreeMap<String, String>,
     /// Diisi store saat membaca; diabaikan saat menyimpan.
     pub created_at_ms: i64,
     /// Diisi store saat membaca; diabaikan saat menyimpan.
@@ -301,6 +319,7 @@ impl RunRecord {
             plan_skill: None,
             quiet_until_ms: None,
             fix_requested_by: None,
+            pr_body_hashes: BTreeMap::new(),
             created_at_ms: 0,
             updated_at_ms: 0,
         }

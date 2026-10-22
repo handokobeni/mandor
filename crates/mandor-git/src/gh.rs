@@ -115,6 +115,60 @@ impl Git {
             .ok_or_else(|| GitError::Parse(out.stdout.clone()))
     }
 
+    /// Badan PR di `url`; `None` bila PR tidak ditemukan.
+    ///
+    /// # Errors
+    /// [`GitError::Command`] bila `gh pr view` gagal, [`GitError::Parse`] bila
+    /// keluarannya tidak bisa diurai.
+    pub async fn pr_body(
+        &self,
+        repo: &Path,
+        url: &str,
+        token: Option<&SecretString>,
+    ) -> Result<Option<String>, GitError> {
+        let out = run(&self
+            .gh(repo, token)
+            .args(["pr", "view", url, "--json", "body"]))
+        .await?;
+        if !out.success() {
+            if out.stderr.contains("Could not resolve")
+                || out.stderr.contains("no pull requests found")
+            {
+                return Ok(None);
+            }
+            return Err(GitError::Command {
+                op: "gh pr view",
+                stderr: out.stderr.trim().to_owned(),
+            });
+        }
+        let v: serde_json::Value =
+            serde_json::from_str(&out.stdout).map_err(|e| GitError::Parse(e.to_string()))?;
+        Ok(v.get("body")
+            .and_then(serde_json::Value::as_str)
+            .map(str::to_owned))
+    }
+
+    /// Mengganti badan PR di `url`; badan dikirim lewat stdin.
+    ///
+    /// # Errors
+    /// [`GitError::Command`] bila `gh pr edit` gagal.
+    pub async fn set_pr_body(
+        &self,
+        repo: &Path,
+        url: &str,
+        body: &str,
+        token: Option<&SecretString>,
+    ) -> Result<(), GitError> {
+        self.ok(
+            "gh pr edit",
+            self.gh(repo, token)
+                .args(["pr", "edit", url, "--body-file", "-"])
+                .stdin_bytes(body.as_bytes().to_vec()),
+        )
+        .await?;
+        Ok(())
+    }
+
     /// PR untuk `branch`, bila ada.
     ///
     /// # Errors

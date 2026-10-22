@@ -612,3 +612,79 @@ async fn feedback_qa_hanya_dipercaya_bila_penulisnya_yang_memindahkan_ke_waiting
     st.svc.sync().poll(true, &[]).await.unwrap();
     assert!(tick(&st).await.started.is_empty());
 }
+
+const PR1: &str = "https://github.com/o/r/pull/1";
+
+/// Satu putaran perbaikan dari komentar tepercaya sampai push selesai.
+async fn fix_round_pushed(lark: &FakeLark, st: &Station) {
+    *lark.replies.lock().unwrap() = vec![reply("r1", "ou_qa", NOW - 600, "Tombol simpan error")];
+    assert_eq!(tick(st).await.started, ["rec1"]);
+    drain(st).await;
+    st.git.set_changes(
+        &wt(),
+        WorkChanges {
+            dirty: true,
+            unpushed: 0,
+            files: vec!["src/form.rs".to_owned()],
+            diff: "+fix".to_owned(),
+        },
+    );
+    st.agent.last().done();
+    eventually(|| st.runs.only().state == RunState::InReviewLoop).await;
+}
+
+#[tokio::test]
+async fn push_perbaikan_memperbarui_badan_pr_template_lama() {
+    let (lark, _clock, st) = setup(true).await;
+    st.git.st().bodies.insert(
+        PR1.to_owned(),
+        "Lark task: PGS-7\n\nCreated by mandor.".to_owned(),
+    );
+    fix_round_pushed(&lark, &st).await;
+    let body = st.git.st().bodies[PR1].clone();
+    assert!(body.contains("## Summary"), "{body}");
+    assert!(body.contains("Lark task: PGS-7"), "{body}");
+}
+
+#[tokio::test]
+async fn push_perbaikan_memperbarui_lagi_badan_yang_ditulis_mandor() {
+    let (lark, _clock, st) = setup(true).await;
+    st.git.st().bodies.insert(
+        PR1.to_owned(),
+        "Lark task: PGS-7\n\nCreated by mandor.".to_owned(),
+    );
+    fix_round_pushed(&lark, &st).await;
+    let first_edits = st.git.st().body_edits;
+    // Putaran kedua: badan masih tulisan Mandor (GitHub boleh mengubah \n jadi \r\n).
+    let crlf = st.git.st().bodies[PR1].replace('\n', "\r\n");
+    st.git.st().bodies.insert(PR1.to_owned(), crlf);
+    lark.edit("rec1", |t| t.status = TaskStatus::WaitingFix);
+    st.svc.sync().poll(true, &[]).await.unwrap();
+    *lark.replies.lock().unwrap() = vec![
+        reply("r1", "ou_qa", NOW - 600, "Tombol simpan error"),
+        reply("r2", "ou_qa", NOW - 500, "Masih error"),
+    ];
+    assert_eq!(tick(&st).await.started, ["rec1"]);
+    drain(&st).await;
+    st.git.set_changes(
+        &wt(),
+        WorkChanges {
+            dirty: true,
+            unpushed: 0,
+            files: vec!["src/form.rs".to_owned()],
+            diff: "+fix lagi".to_owned(),
+        },
+    );
+    st.agent.last().done();
+    eventually(|| st.git.st().body_edits > first_edits).await;
+}
+
+#[tokio::test]
+async fn push_perbaikan_tidak_menimpa_badan_pr_yang_disunting_manusia() {
+    let (lark, _clock, st) = setup(true).await;
+    let edited = "Reviewer notes: keep this.".to_owned();
+    st.git.st().bodies.insert(PR1.to_owned(), edited.clone());
+    fix_round_pushed(&lark, &st).await;
+    assert_eq!(st.git.st().bodies[PR1], edited);
+    assert_eq!(st.git.st().body_edits, 0);
+}

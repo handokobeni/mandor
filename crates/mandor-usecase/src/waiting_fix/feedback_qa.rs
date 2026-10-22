@@ -7,6 +7,7 @@
 
 use mandor_domain::{Reply, Task};
 
+use crate::hash::fnv1a_hex;
 use crate::ports::AcItem;
 
 /// Awalan ID balasan sintetis Feedback QA.
@@ -31,7 +32,7 @@ pub fn feedback_qa_replies(task: &Task, acs: &[AcItem], requester: Option<&str>)
             Some(Reply {
                 record_id: task.record_id.clone(),
                 comment_id: format!("{PREFIX}:{}", ac.record_id),
-                reply_id: format!("{PREFIX}:{}:{:016x}", ac.record_id, fnv1a(feedback)),
+                reply_id: format!("{PREFIX}:{}:{}", ac.record_id, fnv1a_hex(feedback)),
                 author: ac
                     .last_modified_by
                     .clone()
@@ -42,14 +43,6 @@ pub fn feedback_qa_replies(task: &Task, acs: &[AcItem], requester: Option<&str>)
             })
         })
         .collect()
-}
-
-/// FNV-1a 64-bit: hash yang stabil lintas versi Rust, untuk ID yang disimpan di
-/// jurnal. Bukan untuk keamanan.
-fn fnv1a(s: &str) -> u64 {
-    s.bytes().fold(0xcbf2_9ce4_8422_2325, |h, b| {
-        (h ^ u64::from(b)).wrapping_mul(0x0000_0100_0000_01b3)
-    })
 }
 
 #[cfg(test)]
@@ -97,11 +90,5 @@ mod tests {
             ""
         );
         assert_eq!(feedback_qa_replies(&task, &acs, None)[0].author, "");
-    }
-
-    #[test]
-    fn hash_fnv1a_sesuai_nilai_referensi() {
-        assert_eq!(fnv1a(""), 0xcbf2_9ce4_8422_2325);
-        assert_eq!(fnv1a("a"), 0xaf63_dc4c_8601_ec8c);
     }
 }

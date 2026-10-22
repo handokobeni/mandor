@@ -137,12 +137,12 @@ fn fixture_browser_terbaca_dan_pagar_review_menolak_bacaan_di_luar_origin() {
         ("tabs_create_mcp", true),
         ("navigate", true),
         ("find", true),
-        // Isian form tidak memindah halaman.
         ("form_input", true),
-        ("find", true),
-        ("computer:left_click", true),
-        // Setelah klik, alamat belum terkonfirmasi: bacaan dan interaksi
-        // berikutnya menunggu `computer wait` atau `tabs_context_mcp`.
+        // Setiap interaksi membuat alamat belum terkonfirmasi.
+        ("find", false),
+        ("computer:left_click", false),
+        // Bacaan dan interaksi menunggu `computer wait` atau
+        // `tabs_context_mcp` (rekaman tidak memanggilnya).
         ("computer:screenshot", false),
         ("get_page_text", false),
         ("read_page", false),

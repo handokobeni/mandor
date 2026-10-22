@@ -45,20 +45,10 @@ pub struct ReviewState {
     pub tabs: BTreeMap<u64, TabState>,
 }
 
-/// Tool yang bisa memindah halaman: navigasi, klik, dan ketikan. Isian
-/// `form_input`, scroll, dan hover tetap tercatat lewat post-nya.
+/// Tool yang bisa memindah halaman: navigasi dan setiap interaksi, termasuk
+/// `form_input` (mis. `<select>` dengan onchange) dan scroll. Gagal-tertutup.
 fn moves_page(call: &ToolCall) -> bool {
-    match kind(call) {
-        Some(Kind::Navigate) => true,
-        Some(Kind::Interact) => {
-            call.tool_name.ends_with("computer")
-                && !matches!(
-                    call.action.as_deref(),
-                    Some("scroll" | "scroll_to" | "hover")
-                )
-        }
-        _ => false,
-    }
+    matches!(kind(call), Some(Kind::Navigate | Kind::Interact))
 }
 
 /// Jenis tool browser menurut pagar.
@@ -643,13 +633,26 @@ mod tests {
         let form = browser("form_input", Some(7));
         assert!(matches!(classify_review(&form, &s, &[]), Verdict::Deny(_)));
         assert!(matches!(classify_review(&click, &s, &[]), Verdict::Deny(_)));
-        // form_input dan scroll tidak membuat tab belum terkonfirmasi.
-        let mut s = owned_on_app();
-        mark_before(&form, &mut s);
-        let mut scroll = browser("computer", Some(7));
-        scroll.action = Some("scroll".to_owned());
-        mark_before(&scroll, &mut s);
-        assert!(s.tabs[&7].settled);
+        // form_input dan scroll juga membuat tab belum terkonfirmasi.
+        for action in [None, Some("scroll")] {
+            let mut s = owned_on_app();
+            let mut call = match action {
+                None => browser("form_input", Some(7)),
+                Some(a) => {
+                    let mut c = browser("computer", Some(7));
+                    c.action = Some(a.to_owned());
+                    c
+                }
+            };
+            mark_before(&call, &mut s);
+            assert!(!s.tabs[&7].settled);
+            call.response = Some(context(7, APP));
+            record_post(&call, &mut s);
+            assert!(matches!(
+                classify_review(&browser("read_page", Some(7)), &s, &[]),
+                Verdict::Deny(_)
+            ));
+        }
     }
 
     #[test]

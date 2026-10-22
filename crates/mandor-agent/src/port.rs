@@ -21,6 +21,39 @@ use crate::prompt::{
     OperatorContext, data_block, new_nonce, operator_prompt, review_operator_prompt,
 };
 
+/// Tool ledger untuk giliran plan (peran Design).
+const PLAN_LEDGER_TOOLS: [&str; 2] = ["ac_ledger_read", "ac_set_design"];
+
+/// Allowlist `--allowedTools` giliran biasa atau plan. Giliran plan hanya-baca:
+/// allowlist plan ditambah tool ledger Design saja, tanpa allowlist tambahan
+/// repo dan tanpa server MCP workspace.
+fn allowed_tools(
+    req: &AgentRequest,
+    repos: &[&RepoInfo],
+    servers: &[String],
+    ledger: bool,
+) -> Vec<String> {
+    if req.plan_mode {
+        let mut allowed = plan_allowed();
+        if ledger {
+            allowed.extend(
+                PLAN_LEDGER_TOOLS
+                    .iter()
+                    .map(|t| format!("mcp__{LEDGER_SERVER_NAME}__{t}")),
+            );
+        }
+        return allowed;
+    }
+    let mut allowed = default_allowed();
+    for a in repos.iter().flat_map(|r| r.extra_allowed.iter()) {
+        if !allowed.contains(a) {
+            allowed.push(a.clone());
+        }
+    }
+    allowed.extend(servers.iter().map(|s| format!("mcp__{s}")));
+    allowed
+}
+
 /// Tenggat setelah SIGINT/SIGTERM sebelum SIGKILL (KTD-17).
 const STOP_GRACE: Duration = Duration::from_secs(10);
 /// Batas waktu pembuat pesan commit.
@@ -132,18 +165,7 @@ impl ClaudeAgent {
             .iter()
             .map(|d| (d.name.clone(), d.path.display().to_string()))
             .collect();
-        let mut allowed = if req.plan_mode {
-            plan_allowed()
-        } else {
-            let mut all = default_allowed();
-            for a in repos.iter().flat_map(|r| r.extra_allowed.iter()) {
-                if !all.contains(a) {
-                    all.push(a.clone());
-                }
-            }
-            all
-        };
-        allowed.extend(servers.iter().map(|s| format!("mcp__{s}")));
+        let allowed = allowed_tools(req, &repos, &servers, self.ledger_enabled(req));
         let mut hook_command = self.cfg.hook_command.clone();
         if !servers.is_empty() {
             hook_command.push_str(" --mcp ");
@@ -1000,7 +1022,11 @@ mod tests {
         }
         let spec = agent.spec(&req, Some(path));
         assert_eq!(spec.hook_command, "/opt/mandord hook --mcp mandor --plan");
-        assert!(spec.allowed.contains(&"mcp__mandor".to_owned()));
+        // Giliran plan hanya mendapat dua tool ledger, bukan seluruh server MCP.
+        assert!(!spec.allowed.contains(&"mcp__mandor".to_owned()));
+        for tool in ["mcp__mandor__ac_ledger_read", "mcp__mandor__ac_set_design"] {
+            assert!(spec.allowed.contains(&tool.to_owned()), "{tool}");
+        }
         assert!(spec.allowed.contains(&"ToolSearch".to_owned()));
         // Giliran plan hanya-baca: tanpa tool penulis dan tanpa build/install.
         for denied in [

@@ -127,6 +127,34 @@ fn origin_allowed(origins: &[String], url: Option<&str>) -> bool {
         .is_some_and(|o| origins.contains(&o))
 }
 
+/// Alasan perintah shell tidak hanya-membaca; dipakai sesi review dan fase
+/// plan. Bentuk yang tidak bisa diperiksa pasti (ekspansi, interpreter) ikut
+/// ditolak.
+pub(crate) fn readonly_violation(cmd: &str) -> Option<String> {
+    if let Some(what) = expands_words(cmd) {
+        return Some(format!("{what} can build a command that cannot be checked"));
+    }
+    if let Some(prog) = runs_interpreter(cmd) {
+        return Some(format!("`{prog}` runs commands that cannot be checked"));
+    }
+    if runs_preprocessor(cmd) {
+        return Some("`rg --pre` runs another program".to_owned());
+    }
+    if let Some(reason) = mutating_git(cmd) {
+        return Some(reason);
+    }
+    writes_files(cmd).map(|what| format!("{what} writes files"))
+}
+
+/// `rg --pre`/`--pre-glob`: ripgrep menjalankan program untuk setiap berkas.
+fn runs_preprocessor(cmd: &str) -> bool {
+    let words = shell_words(cmd);
+    words.iter().enumerate().any(|(i, w)| {
+        crate::hook::program_name(w) == "rg"
+            && words[i + 1..].iter().any(|a| a.starts_with("--pre"))
+    })
+}
+
 fn deny(reason: &str) -> Verdict {
     Verdict::Deny(format!("mandor: {reason}"))
 }
@@ -137,23 +165,8 @@ pub fn classify_review(call: &ToolCall, state: &ReviewState, allowed_mcp: &[Stri
     if let Some(kind) = kind(call) {
         return browser_verdict(call, kind, state);
     }
-    if let Some(cmd) = &call.command {
-        if let Some(what) = expands_words(cmd) {
-            return deny(&format!(
-                "{what} can build a command the review cannot check; the review is read-only"
-            ));
-        }
-        if let Some(prog) = runs_interpreter(cmd) {
-            return deny(&format!(
-                "`{prog}` runs commands the review cannot check; the review is read-only"
-            ));
-        }
-        if let Some(reason) = mutating_git(cmd) {
-            return deny(&format!("{reason}; the review is read-only"));
-        }
-        if let Some(what) = writes_files(cmd) {
-            return deny(&format!("{what} writes files; the review is read-only"));
-        }
+    if let Some(reason) = call.command.as_deref().and_then(readonly_violation) {
+        return deny(&format!("{reason}; the review is read-only"));
     }
     match classify_planning(call, allowed_mcp) {
         Verdict::Deny(reason) if reason.contains("planning phase") => {
@@ -757,6 +770,8 @@ mod tests {
             "cargo test; bash run.sh",
             "eval \"$CMD\"",
             "ls | xargs cat",
+            "rg --pre ./x.sh foo",
+            "rg --pre=./x.sh foo",
             "g$()it stash",
             "g`true`it stash",
             "g${X}it stash",

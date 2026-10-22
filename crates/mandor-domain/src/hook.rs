@@ -104,6 +104,13 @@ pub fn classify_planning(call: &ToolCall, allowed_mcp: &[String]) -> Verdict {
                 .to_owned(),
         );
     }
+    if let Some(reason) = call
+        .command
+        .as_deref()
+        .and_then(crate::hook_review::readonly_violation)
+    {
+        return Verdict::Deny(format!("mandor: {reason}; the planning phase is read-only"));
+    }
     classify_with_mcp(call, allowed_mcp)
 }
 
@@ -337,6 +344,38 @@ mod tests {
             classify_planning(&call("Read", "/home/u/.ssh/id_rsa"), &[]),
             Verdict::Deny(_)
         ));
+    }
+
+    #[test]
+    fn fase_plan_hanya_menjalankan_bash_yang_membaca() {
+        let bash = |cmd: &str| ToolCall {
+            tool_name: "Bash".to_owned(),
+            command: Some(cmd.to_owned()),
+            ..ToolCall::default()
+        };
+        for cmd in [
+            "rg --pre ./x.sh foo",
+            "rg --pre-glob '*.rs' --pre sh foo",
+            "git diff --output=/wt/x.patch",
+            "git log --ext-diff",
+            "git stash",
+            "cat a.rs > b.rs",
+            "ls | xargs rm",
+            "grep -r foo $(echo src)",
+        ] {
+            assert!(
+                matches!(classify_planning(&bash(cmd), &[]), Verdict::Deny(_)),
+                "{cmd}"
+            );
+        }
+        for cmd in [
+            "rg -n 'fn main' src",
+            "git diff main",
+            "cat README.md",
+            "ls web",
+        ] {
+            assert_eq!(classify_planning(&bash(cmd), &[]), Verdict::Allow, "{cmd}");
+        }
     }
 
     #[test]

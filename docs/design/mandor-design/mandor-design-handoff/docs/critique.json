@@ -1,0 +1,15 @@
+{
+  "kind": "critique-panel",
+  "score": 4,
+  "scope": "Phase 1 + Phase 2: all screens in the design prompt sections 7.1 to 7.11, component sheet, frames gallery, design notes",
+  "axes": {
+    "philosophy": { "score": 4, "notes": "Dense developer-tool posture held across every screen, including onboarding and spec pages. No marketing patterns." },
+    "hierarchy": { "score": 4, "notes": "Waiting for you is the single strongest signal everywhere it appears: filled chip, pinned sidebar group, title-bar tally, unread bell chip, tray dot." },
+    "execution": { "score": 3, "notes": "All 43 frames render without JS errors in a headless DOM and the onboarding flow passes an automated click-through. Not yet reviewed visually: spacing, overflow, and the 960 layout still need a human look." },
+    "specificity": { "score": 5, "notes": "Copy, states, error reasons, and flags come from the prompt and the Lark domain; no invented metrics. Notification grouping and tray quit rules accepted 2026-10-19." },
+    "restraint": { "score": 4, "notes": "Amber primary limited to one action per view and the focus ring. One flourish: the attention pulse, 3 cycles only, off under reduced motion." }
+  },
+  "open": [
+    "Visual review of frames.html (Both x Both)"
+  ]
+}

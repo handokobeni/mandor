@@ -1,0 +1,108 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>System tray · Mandor</title>
+  <link rel="stylesheet" href="vendor/fonts/fonts.css">
+  <link rel="stylesheet" href="css/mandor.css">
+  <style>
+    .spec-page { max-width: 1120px; margin: 0 auto; padding: 32px 32px 64px; }
+    .spec-page h1 { font-size: var(--text-xl); font-weight: 600; letter-spacing: -0.015em; }
+    .spec-page header p { color: var(--muted-foreground); margin-top: 6px; max-width: 72ch; }
+    .spec-page section { margin-top: 32px; }
+    .spec-page h2 { font-size: var(--text-lg); font-weight: 600; letter-spacing: -0.01em; }
+    .spec-page h2 + p { color: var(--muted-foreground); margin-top: 4px; max-width: 72ch; }
+    .tray-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 24px; margin-top: 14px; }
+    /* Taskbar strip mock: the OS draws the real tray; Mandor supplies the icon and menu items. */
+    .taskbar { position: relative; height: 40px; border-radius: var(--radius); background: var(--sidebar); border: 1px solid var(--sidebar-border); display: flex; align-items: center; justify-content: flex-end; gap: 14px; padding: 0 14px; color: var(--muted-foreground); font: 12px var(--font-mono); }
+    .stage { position: relative; height: 300px; display: flex; flex-direction: column; justify-content: flex-end; }
+    .cap { font: 11px var(--font-mono); color: var(--muted-foreground); margin-top: 8px; }
+    .icons { display: flex; gap: 24px; margin-top: 14px; align-items: center; }
+    .icon-spec { display: grid; gap: 8px; justify-items: center; }
+    .icon-spec .box { width: 56px; height: 56px; border-radius: var(--radius); display: grid; place-items: center; border: 1px solid var(--border); }
+    .icon-spec .box.light { background: var(--foreground); color: var(--background); }
+    .icon-spec .box.dark { background: var(--sidebar); color: var(--foreground); }
+    .rules { margin-top: 12px; display: grid; gap: 8px; padding-left: 18px; max-width: 80ch; line-height: 1.55; }
+  </style>
+</head>
+<body class="page-scroll" data-page="tray">
+  <main class="spec-page" data-od-id="tray">
+    <header>
+      <a class="btn btn-ghost btn-sm" href="index.html" style="margin-bottom:12px"><i data-lucide="arrow-left" aria-hidden="true"></i>All screens</a>
+      <h1>System tray</h1>
+      <p>Mandor keeps running in the tray when the window closes, so agents keep working. The tray menu is a short way back to anything waiting for you. Click the icons below to open each menu.</p>
+    </header>
+
+    <section>
+      <h2>Tray menu</h2>
+      <p>Native menu, drawn by the OS. Up to 5 waiting runs are listed, oldest wait first; a 6th and beyond collapse into "Show all on the board".</p>
+      <div class="tray-grid" id="tray-grid"></div>
+    </section>
+
+    <section>
+      <h2>Tray icon</h2>
+      <p>Monochrome mark so it follows the OS theme (macOS template image). The attention variant adds a dot when at least one run is waiting for you, failed, or needs attention.</p>
+      <div class="icons">
+        <div class="icon-spec"><div class="box dark"><span class="tray-icon" style="cursor:default"><span class="brand-mark" aria-hidden="true"><i></i><i></i><i></i></span></span></div><span class="cap">idle · dark taskbar</span></div>
+        <div class="icon-spec"><div class="box dark"><span class="tray-icon" data-attention="true" style="cursor:default"><span class="brand-mark" aria-hidden="true"><i></i><i></i><i></i></span></span></div><span class="cap">attention · dark</span></div>
+        <div class="icon-spec"><div class="box light"><span class="tray-icon" style="cursor:default;color:inherit"><span class="brand-mark" aria-hidden="true"><i></i><i></i><i></i></span></span></div><span class="cap">idle · light taskbar</span></div>
+        <div class="icon-spec"><div class="box light"><span class="tray-icon" data-attention="true" style="cursor:default;color:inherit"><span class="brand-mark" aria-hidden="true"><i></i><i></i><i></i></span></span></div><span class="cap">attention · light</span></div>
+      </div>
+    </section>
+
+    <section>
+      <h2>Behaviour</h2>
+      <ul class="rules">
+        <li>Closing the window hides it; agents and syncing continue. Turn this off in Settings › General › "Keep running in the tray when closed".</li>
+        <li>Clicking the icon (left click on Windows and Linux) opens the menu; "Open Mandor" restores the window where it was.</li>
+        <li>A waiting item opens that task's workspace and brings the window to the front.</li>
+        <li>Quit Mandor asks for confirmation only when runs are active: "3 agents are running. They keep running in the daemon; Mandor reconnects next time you open it."</li>
+        <li>Tooltip on hover: "Mandor · 2 waiting for you" or "Mandor · all quiet".</li>
+      </ul>
+    </section>
+  </main>
+
+  <script src="vendor/lucide.min.js"></script>
+  <script src="js/data.js"></script>
+  <script src="js/shell.js"></script>
+  <script>
+  (function () {
+    var M = window.MANDOR, U = window.UI, esc = U.esc, ic = U.ic;
+    var waitingKeys = ['PGS-1391', 'PGS-1388'];
+    var variants = [
+      { id: 'attn', label: 'Two agents waiting', waiting: waitingKeys.map(function (k) { return M.baseTask(k); }) },
+      { id: 'idle', label: 'Nothing waiting', waiting: [] }
+    ];
+    function menu(v) {
+      return '<div class="popover tray-menu" role="menu" data-ui="TrayMenu" id="menu-' + v.id + '" hidden>' +
+        '<button class="menu-item" role="menuitem" data-go="board.html">' + ic('app-window') + 'Open Mandor</button><div class="menu-sep"></div>' +
+        (v.waiting.length
+          ? '<div class="hdr caps muted">Waiting for you (' + v.waiting.length + ')</div>' + v.waiting.map(function (t) { return '<button class="menu-item" role="menuitem" data-go="workspace.html?task=' + t.key + '"><span class="k">' + t.key + '</span><span class="t">' + esc(t.title) + '</span></button>'; }).join('')
+          : '<div class="menu-item" role="menuitem" aria-disabled="true">' + ic('check') + 'No agents waiting for you</div>') +
+        '<div class="menu-sep"></div><button class="menu-item" role="menuitem" data-quit="1">' + ic('power') + 'Quit Mandor</button></div>';
+    }
+    document.getElementById('tray-grid').innerHTML = variants.map(function (v) {
+      return '<div><div class="stage">' + menu(v) + '<div class="taskbar"><span>EN</span><span>09:41</span><button class="tray-icon" data-menu="' + v.id + '" aria-haspopup="menu" aria-expanded="false" title="' + (v.waiting.length ? 'Mandor · ' + v.waiting.length + ' waiting for you' : 'Mandor · all quiet') + '"' + (v.waiting.length ? ' data-attention="true"' : '') + ' aria-label="Mandor tray icon"><span class="brand-mark" aria-hidden="true"><i></i><i></i><i></i></span></button></div></div><div class="cap">' + v.label + '</div></div>';
+    }).join('');
+    document.querySelectorAll('[data-menu]').forEach(function (b) {
+      b.onclick = function (e) {
+        e.stopPropagation();
+        var m = document.getElementById('menu-' + b.dataset.menu), open = m.hidden;
+        document.querySelectorAll('.tray-menu').forEach(function (x) { x.hidden = true; });
+        document.querySelectorAll('[data-menu]').forEach(function (x) { x.setAttribute('aria-expanded', 'false'); });
+        m.hidden = !open; b.setAttribute('aria-expanded', String(open));
+        if (open) m.querySelector('.menu-item').focus();
+      };
+    });
+    document.addEventListener('click', function (e) {
+      var go = e.target.closest('[data-go]'); if (go) { location.href = go.dataset.go; return; }
+      if (e.target.closest('[data-quit]')) { U.toast('Quit Mandor?', '2 agents are running. They keep running in the daemon; Mandor reconnects next time you open it.', 'power'); return; }
+      if (!e.target.closest('.tray-menu')) document.querySelectorAll('.tray-menu').forEach(function (x) { x.hidden = true; });
+    });
+    document.addEventListener('keydown', function (e) { if (e.key === 'Escape') document.querySelectorAll('.tray-menu').forEach(function (x) { x.hidden = true; }); });
+    U.icons();
+  })();
+  </script>
+</body>
+</html>

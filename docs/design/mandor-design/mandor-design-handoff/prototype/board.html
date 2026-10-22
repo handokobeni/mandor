@@ -1,0 +1,126 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Board · Mandor</title>
+  <link rel="stylesheet" href="vendor/fonts/fonts.css">
+  <link rel="stylesheet" href="css/mandor.css">
+</head>
+<body data-page="board">
+  <div class="app">
+    <header class="titlebar" id="titlebar"></header>
+    <div class="body">
+      <aside class="sidebar" id="sidebar" aria-label="Active agents"></aside>
+
+      <main class="main" id="main" data-od-id="board">
+        <!-- Board / Toolbar -->
+        <div class="toolbar" data-ui="Board / Toolbar">
+          <h1>Board</h1>
+          <select class="select input-sm" id="f-sprint" style="width:auto" aria-label="Sprint" data-ui="Select / size=sm">
+            <option value="all">All sprints</option>
+            <option value="s42" selected>Sprint 42 · Oct 13 to Oct 24</option>
+            <option value="s41">Sprint 41 · Sep 29 to Oct 10</option>
+            <option value="s43">Sprint 43 · Oct 27 to Nov 7</option>
+          </select>
+          <div class="search">
+            <i data-lucide="search" class="icon-sm" aria-hidden="true"></i>
+            <input class="input input-sm" id="f-search" placeholder="Search key or title" aria-label="Search by key or title" data-ui="Input / size=sm">
+          </div>
+          <div class="toggle-group" role="group" aria-label="Whose tasks" data-ui="ToggleGroup / size=sm">
+            <button type="button" data-scope="mine" aria-pressed="false">Mine</button>
+            <button type="button" data-scope="all" aria-pressed="true">All assigned</button>
+          </div>
+          <span style="flex:1"></span>
+          <span class="sync" id="sync" aria-live="polite"></span>
+          <button class="btn btn-secondary btn-sm" id="btn-refresh" data-ui="Button / variant=secondary / size=sm"><i data-lucide="refresh-cw" aria-hidden="true"></i>Refresh</button>
+        </div>
+
+        <div class="banners" id="banners" data-ui="Alert / stack"></div>
+        <div class="board scroll-area" id="board" data-ui="Board / Columns" aria-label="Kanban board. Cards move through actions or in Lark, not by dragging."></div>
+      </main>
+    </div>
+  </div>
+
+  <!-- Dialog: Start task -->
+  <dialog class="dialog" id="dlg-start" aria-labelledby="st-title" data-ui="Dialog / StartTask" style="width:620px">
+    <div class="dialog-header">
+      <div style="display:flex;align-items:center;gap:8px"><span class="mono muted" id="st-key"></span><span id="st-ready"></span></div>
+      <h2 class="dialog-title" id="st-title" style="margin-top:6px"></h2>
+      <p class="dialog-description">Mandor claims the task, creates a worktree, starts an agent with the title, description, and acceptance criteria, and moves Lark to In Progress.</p>
+    </div>
+    <div class="dialog-body" id="st-body">
+      <div id="st-form">
+        <div class="field">
+          <label class="label" for="st-repo">Repo</label>
+          <select class="select" id="st-repo" data-ui="Select"></select>
+          <p class="field-help" id="st-repo-help"></p>
+        </div>
+        <div id="st-norepo"></div>
+        <div id="st-r2"></div>
+        <div class="field">
+          <label class="label" for="st-note">Note to the agent <span class="muted" style="font-weight:400">(optional)</span></label>
+          <textarea class="textarea" id="st-note" placeholder="Extra instructions, e.g. reuse the PaymentBadge component from the invoice list" data-ui="Textarea"></textarea>
+        </div>
+      </div>
+      <div id="st-steps" hidden>
+        <div class="steps" data-ui="StepProgress" id="st-step-list"></div>
+      </div>
+    </div>
+    <div class="dialog-footer" id="st-foot">
+      <span class="left"><span class="kbd">Esc</span> to cancel</span>
+      <button class="btn btn-ghost" data-close>Cancel</button>
+      <button class="btn btn-default" id="st-go" data-ui="Button / variant=default"><i data-lucide="play" aria-hidden="true"></i>Start</button>
+    </div>
+  </dialog>
+
+  <!-- Dialog: Take over -->
+  <dialog class="dialog" id="dlg-takeover" aria-labelledby="to-title" data-ui="Dialog / TakeOver">
+    <div class="dialog-header">
+      <span class="mono muted" id="to-key"></span>
+      <h2 class="dialog-title" id="to-title" style="margin-top:6px"></h2>
+      <p class="dialog-description" id="to-desc"></p>
+    </div>
+    <div class="dialog-body">
+      <div id="to-form">
+        <div class="field">
+          <label class="label" for="to-repo">Repo</label>
+          <select class="select" id="to-repo"></select>
+        </div>
+        <div class="alert alert-warning" style="margin-top:14px" data-ui="Alert / variant=warning">
+          <i data-lucide="triangle-alert" aria-hidden="true"></i>
+          <div id="to-warn"></div>
+        </div>
+      </div>
+      <div id="to-steps" hidden><div class="steps" id="to-step-list"></div></div>
+    </div>
+    <div class="dialog-footer" id="to-foot">
+      <button class="btn btn-ghost" data-close>Cancel</button>
+      <button class="btn btn-default" id="to-go"><i data-lucide="arrow-left-right" aria-hidden="true"></i>Take over</button>
+    </div>
+  </dialog>
+
+  <!-- Alert Dialog: confirm (Close run) -->
+  <dialog class="dialog" id="dlg-confirm" role="alertdialog" aria-labelledby="cf-title" style="width:440px" data-ui="AlertDialog">
+    <div class="dialog-header">
+      <h2 class="dialog-title" id="cf-title"></h2>
+      <p class="dialog-description" id="cf-desc"></p>
+    </div>
+    <div class="dialog-footer" style="margin-top:16px">
+      <button class="btn btn-ghost" data-close>Cancel</button>
+      <button class="btn btn-destructive" id="cf-go"></button>
+    </div>
+  </dialog>
+
+  <!-- Dropdown Menu: card -->
+  <div class="popover" id="card-menu" role="menu" hidden data-ui="DropdownMenu"></div>
+
+  <script src="vendor/lucide.min.js"></script>
+  <script src="js/data.js"></script>
+  <script src="js/shell.js"></script>
+  <script src="js/components.js"></script>
+  <script src="js/ac-data.js"></script>
+  <script src="js/ac.js"></script>
+  <script src="js/board.js"></script>
+</body>
+</html>

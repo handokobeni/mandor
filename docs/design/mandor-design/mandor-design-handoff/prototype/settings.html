@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Settings · Mandor</title>
+  <link rel="stylesheet" href="vendor/fonts/fonts.css">
+  <link rel="stylesheet" href="css/mandor.css">
+</head>
+<body data-page="settings">
+  <div class="app">
+    <header class="titlebar" id="titlebar"></header>
+    <div class="body">
+      <aside class="sidebar" id="sidebar" aria-label="Active agents"></aside>
+      <main class="main" data-od-id="settings">
+        <div class="settings">
+          <nav class="settings-nav" aria-label="Settings sections" data-ui="Settings / Nav">
+            <a class="nav-item" href="#lark" data-sec="lark"><i data-lucide="link-2" aria-hidden="true"></i>Lark</a>
+            <a class="nav-item" href="#repos" data-sec="repos"><i data-lucide="folder-git-2" aria-hidden="true"></i>Repos</a>
+            <a class="nav-item" href="#workspaces" data-sec="workspaces"><i data-lucide="folders" aria-hidden="true"></i>Workspaces</a>
+            <a class="nav-item" href="#design" data-sec="design"><i data-lucide="frame" aria-hidden="true"></i>Design sources</a>
+            <a class="nav-item" href="#general" data-sec="general"><i data-lucide="sliders-horizontal" aria-hidden="true"></i>General</a>
+            <a class="nav-item" href="#about" data-sec="about"><i data-lucide="info" aria-hidden="true"></i>About</a>
+          </nav>
+          <div class="settings-main scroll-area" id="settings-main"></div>
+        </div>
+      </main>
+    </div>
+  </div>
+
+  <!-- Dialog: Add repo -->
+  <dialog class="dialog" id="dlg-addrepo" aria-labelledby="ar-title" data-ui="Dialog / AddRepo">
+    <div class="dialog-header">
+      <h2 class="dialog-title" id="ar-title">Add a repo</h2>
+      <p class="dialog-description">The path is on the daemon machine (inside WSL on Windows). Agents create worktrees next to it.</p>
+    </div>
+    <div class="dialog-body">
+      <div class="field">
+        <label class="label" for="ar-path">Path</label>
+        <input class="input mono" id="ar-path" placeholder="/home/beni/work/pegasus-mobile" aria-describedby="ar-msg" autocomplete="off">
+        <div id="ar-msg"><p class="field-help">Absolute path to a git clone with an <span class="mono">origin</span> remote.</p></div>
+      </div>
+      <div class="field">
+        <label class="label" for="ar-gh">gh profile <span class="muted" style="font-weight:400">(optional)</span></label>
+        <select class="select" id="ar-gh"><option value="default">default</option><option value="pegasus-bot">pegasus-bot</option></select>
+        <p class="field-help">Which GitHub CLI login creates the PRs for this repo.</p>
+      </div>
+    </div>
+    <div class="dialog-footer">
+      <button class="btn btn-ghost" data-close>Cancel</button>
+      <button class="btn btn-default" id="ar-go">Add repo</button>
+    </div>
+  </dialog>
+
+  <!-- Alert Dialog: remove repo -->
+  <dialog class="dialog" id="dlg-rmrepo" role="alertdialog" aria-labelledby="rr-title" style="width:440px" data-ui="AlertDialog">
+    <div class="dialog-header">
+      <h2 class="dialog-title" id="rr-title"></h2>
+      <p class="dialog-description" id="rr-desc"></p>
+    </div>
+    <div class="dialog-footer" style="margin-top:16px">
+      <button class="btn btn-ghost" data-close>Cancel</button>
+      <button class="btn btn-destructive" id="rr-go">Remove repo</button>
+    </div>
+  </dialog>
+
+  <script src="vendor/lucide.min.js"></script>
+  <script src="js/data.js"></script>
+  <script src="js/shell.js"></script>
+  <script src="js/components.js"></script>
+  <script src="js/ac-data.js"></script>
+  <script src="js/ac.js"></script>
+  <script src="js/settings.js"></script>
+</body>
+</html>

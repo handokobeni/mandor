@@ -1,0 +1,93 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Connecting · Mandor</title>
+  <link rel="stylesheet" href="vendor/fonts/fonts.css">
+  <link rel="stylesheet" href="css/mandor.css">
+</head>
+<body data-page="connection">
+  <div class="conn-screen" data-od-id="connection">
+    <header class="titlebar" data-ui="TitleBar / variant=minimal">
+      <span class="brand"><span class="brand-mark" aria-hidden="true"><i></i><i></i><i></i></span>Mandor</span>
+      <span class="spacer"></span>
+      <div class="win-ctl" aria-hidden="true"><button tabindex="-1"><i data-lucide="minus" class="icon-sm"></i></button><button tabindex="-1"><i data-lucide="square" class="icon-sm"></i></button><button tabindex="-1"><i data-lucide="x" class="icon-sm"></i></button></div>
+    </header>
+    <div class="conn-center">
+      <div class="conn-card" id="conn-card" role="status" aria-live="polite"></div>
+    </div>
+  </div>
+
+  <script src="vendor/lucide.min.js"></script>
+  <script src="js/data.js"></script>
+  <script src="js/shell.js"></script>
+  <script>
+  /* Connection states (full window): connecting, unreachable (auto-retry
+     with backoff), version mismatch (fatal). */
+  (function () {
+    var U = window.UI, M = window.MANDOR, ic = U.ic, card = U.$('#conn-card');
+    var state = U.params.get('state') || 'connecting';
+    var attempt = 3, backoff = [2, 4, 8, 16, 30], left = 0, timer = null;
+
+    function connecting(next) {
+      card.innerHTML =
+        '<div class="empty" style="padding:0;justify-items:start;text-align:left">' +
+        '<span class="ico">' + ic('loader-circle', 'spin') + '</span>' +
+        '<h1>Connecting to the daemon…</h1>' +
+        '<p>Starting <span class="mono">mandord</span> in WSL. The first launch after a reboot can take a few seconds on Windows.</p></div>' +
+        '<div class="checklist" data-ui="StepProgress"><div class="steps">' +
+          '<div class="step" data-s="done">' + ic('circle-check') + '<span>WSL distro Ubuntu-24.04 is running</span></div>' +
+          '<div class="step" data-s="active">' + ic('loader-circle', 'spin') + '<span>Waiting for mandord on 127.0.0.1:47830</span></div>' +
+          '<div class="step" data-s="todo">' + ic('circle') + '<span>Loading the board</span></div>' +
+        '</div></div>';
+      U.icons();
+      setTimeout(next, 2600);
+    }
+
+    function unreachable() {
+      left = backoff[Math.min(attempt - 1, backoff.length - 1)];
+      card.innerHTML =
+        '<div style="display:flex;gap:12px;align-items:flex-start"><span class="ico" style="width:40px;height:40px;border-radius:10px;display:grid;place-items:center;background:var(--error-bg);color:var(--status-failed);flex:none">' + ic('unplug') + '</span>' +
+        '<div><h1>Can\'t reach the daemon</h1><p>Mandor keeps retrying. Agents that were already running inside the daemon are not affected.</p></div></div>' +
+        '<div class="alert" data-ui="Alert"><span class="run" data-tone="warning">' + ic('timer') + '</span><div>Attempt <span class="mono">' + attempt + '</span> failed: connection refused on <span class="mono">127.0.0.1:47830</span>.<br><span class="muted">Retrying in <span class="mono" id="retry-left">' + left + 's</span></span></div>' +
+        '<div class="alert-actions"><button class="btn btn-secondary btn-sm" id="retry">' + ic('refresh-cw') + 'Retry now</button></div></div>' +
+        '<div class="checklist"><b>What to check</b><ul>' +
+          '<li>' + ic('circle-help', 'icon-sm') + '<span>Is mandord installed in WSL? Run <code>mandord --version</code> in your Ubuntu terminal.</span></li>' +
+          '<li>' + ic('circle-help', 'icon-sm') + '<span>Is it running? Start it with <code>systemctl --user start mandord</code>.</span></li>' +
+          '<li>' + ic('circle-help', 'icon-sm') + '<span>Another app using port 47830? See <code>~/.local/share/mandor/logs/daemon.log</code>.</span></li>' +
+        '</ul><a class="link" href="#" onclick="UI.toast(\'Opened the setup guide\', \'docs/setup-windows.md\', \'external-link\');return false">' + ic('book-open', 'icon-sm') + 'Setup guide for Windows and WSL</a></div>';
+      U.icons();
+      U.$('#retry').onclick = retry;
+      clearInterval(timer);
+      timer = setInterval(function () {
+        left--; var el = U.$('#retry-left'); if (el) el.textContent = left + 's';
+        if (left <= 0) retry();
+      }, 1000);
+    }
+    function retry() { clearInterval(timer); attempt++; connecting(unreachable); }
+
+    function mismatch() {
+      card.innerHTML =
+        '<div style="display:flex;gap:12px;align-items:flex-start"><span class="ico" style="width:40px;height:40px;border-radius:10px;display:grid;place-items:center;background:var(--error-bg);color:var(--status-failed);flex:none">' + ic('octagon-x') + '</span>' +
+        '<div><h1>App and daemon versions differ</h1><p>Mandor can\'t talk to this daemon safely. Update both to the same version, then reopen Mandor.</p></div></div>' +
+        '<div class="checklist"><dl class="versions">' +
+          '<dt class="muted">Mandor app</dt><dd class="mono" style="margin:0">' + M.version.app + '</dd>' +
+          '<dt class="muted">mandord daemon</dt><dd class="mono" style="margin:0;color:var(--status-failed)">0.3.9</dd>' +
+          '<dt class="muted">Protocol</dt><dd class="mono" style="margin:0">app v5 · daemon v4</dd>' +
+        '</dl></div>' +
+        '<div class="checklist"><b>Update the daemon in WSL</b><span class="muted">Install mandord ' + M.version.app + ' from the release page in the setup guide, then restart it:</span><pre class="mono" style="margin:0;padding:8px 10px;border-radius:4px;background:var(--muted);color:var(--foreground);font-size:12px">systemctl --user restart mandord\nmandord --version</pre></div>' +
+        '<div style="display:flex;gap:8px"><button class="btn btn-secondary" id="copy-cmd">' + ic('copy') + 'Copy commands</button><button class="btn btn-ghost" id="quit">Quit Mandor</button></div>';
+      U.icons();
+      U.$('#copy-cmd').onclick = function () { U.toast('Commands copied', null, 'copy'); };
+      U.$('#quit').onclick = function () { U.toast('Quitting Mandor…', null, 'x'); };
+    }
+
+    if (state === 'mismatch') mismatch();
+    else if (state === 'unreachable') unreachable();
+    else if (state === 'connecting-hold') connecting(function () {});
+    else connecting(function () { location.href = 'board.html'; });
+  })();
+  </script>
+</body>
+</html>

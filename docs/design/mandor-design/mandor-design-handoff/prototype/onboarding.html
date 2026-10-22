@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Set up Mandor</title>
+  <link rel="stylesheet" href="vendor/fonts/fonts.css">
+  <link rel="stylesheet" href="css/mandor.css">
+  <style>
+    /* Onboarding wizard: Card + stepper built from Badge and Separator */
+    .ob { height: 100vh; display: grid; grid-template-rows: var(--titlebar-h) 1fr; }
+    .ob-main { overflow: auto; display: grid; justify-items: center; align-content: start; padding: 40px 24px; }
+    .ob-card { width: 640px; max-width: 100%; }
+    .ob h1 { font-size: var(--text-xl); font-weight: 600; letter-spacing: -0.015em; line-height: 1.2; }
+    .ob .lede { color: var(--muted-foreground); margin-top: 6px; max-width: 60ch; }
+    .points { display: grid; gap: 14px; margin-top: 20px; }
+    .point { display: grid; grid-template-columns: 28px 1fr; gap: 12px; }
+    .point .ico { width: 28px; height: 28px; border-radius: var(--radius); display: grid; place-items: center; background: var(--muted); color: var(--foreground); }
+    .point b { display: block; font-weight: 500; }
+    .point span { color: var(--muted-foreground); }
+    .prereq { display: grid; gap: 1px; border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; margin-top: 16px; }
+    .pr-row { display: grid; grid-template-columns: 20px 1fr auto; gap: 12px; align-items: start; padding: 12px 14px; background: var(--card); }
+    .pr-row .st[data-s="ok"] { color: var(--status-ok); } .pr-row .st[data-s="missing"] { color: var(--status-warning); } .pr-row .st[data-s="checking"] { color: var(--status-working); }
+    .pr-row .t { font-weight: 500; } .pr-row .d { color: var(--muted-foreground); font-size: var(--text-sm); margin-top: 2px; }
+    .pr-row .confirm { display: flex; gap: 8px; align-items: center; margin-top: 8px; font-size: var(--text-sm); }
+    .summary { display: grid; gap: 8px; margin-top: 16px; }
+    .summary div { display: flex; gap: 10px; align-items: center; }
+    .summary [data-lucide] { color: var(--status-ok); }
+    @media (max-width: 1100px) { .stepper li .lbl { display: none; } .stepper li[aria-current="step"] .lbl { display: inline; } }
+  </style>
+</head>
+<body data-page="onboarding">
+  <div class="ob">
+    <header class="titlebar" data-ui="TitleBar / variant=minimal">
+      <span class="brand"><span class="brand-mark" aria-hidden="true"><i></i><i></i><i></i></span>Mandor</span>
+      <span class="spacer"></span>
+      <div class="win-ctl" aria-hidden="true"><button tabindex="-1"><i data-lucide="minus" class="icon-sm"></i></button><button tabindex="-1"><i data-lucide="square" class="icon-sm"></i></button><button tabindex="-1"><i data-lucide="x" class="icon-sm"></i></button></div>
+    </header>
+    <main class="ob-main" data-od-id="onboarding">
+      <div class="ob-card">
+        <ol class="stepper" id="stepper" aria-label="Setup steps" data-ui="Stepper (Badge + Separator)"></ol>
+        <div class="card" data-ui="Card / OnboardingStep">
+          <div class="card-content" id="ob-body" style="padding:24px"></div>
+          <div class="card-footer" id="ob-foot" style="justify-content:space-between"></div>
+        </div>
+      </div>
+    </main>
+  </div>
+
+  <script src="vendor/lucide.min.js"></script>
+  <script src="js/data.js"></script>
+  <script src="js/shell.js"></script>
+  <script src="js/onboarding.js"></script>
+</body>
+</html>

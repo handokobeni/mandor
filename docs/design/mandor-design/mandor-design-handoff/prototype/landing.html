@@ -1,0 +1,289 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Mandor · Run a crew of Claude Code agents from one board</title>
+  <meta name="description" content="Mandor puts every Claude Code agent on one kanban board, synced both ways with Lark Base. Each agent works in its own git worktree, opens a PR, and never merges to main. Early access.">
+  <link rel="stylesheet" href="vendor/fonts/fonts.css">
+  <link rel="stylesheet" href="css/mandor.css">
+  <link rel="stylesheet" href="css/landing.css">
+</head>
+<body class="page-scroll lp">
+
+  <!-- ===== Nav ===== -->
+  <header class="lp-nav" data-od-id="nav">
+    <div class="lp-wrap lp-nav-in">
+      <a class="brand" href="#top" aria-label="Mandor home"><span class="brand-mark" aria-hidden="true"><i></i><i></i><i></i></span>Mandor</a>
+      <span class="badge lp-ea">Early access</span>
+      <nav class="lp-links" aria-label="Sections">
+        <a href="#demo">Demo</a>
+        <a href="#lark">Lark sync</a>
+        <a href="#fix">Review loop</a>
+        <a href="#safety">Safety</a>
+        <a href="#roadmap">Roadmap</a>
+        <a href="#pricing">Pricing</a>
+        <a href="#faq">FAQ</a>
+      </nav>
+      <a class="btn btn-default btn-sm" href="#join" data-ui="Button / variant=default / size=sm">Join early access</a>
+    </div>
+  </header>
+
+  <main id="top">
+    <!-- ===== Hero ===== -->
+    <section class="lp-hero" data-od-id="hero">
+      <div class="lp-wrap">
+        <p class="lp-eyebrow mono">Early access · Linux and Windows (WSL)</p>
+        <h1 class="lp-h1">Run a crew of Claude&nbsp;Code agents from one board.</h1>
+        <p class="lp-lede">Mandor puts every agent on a kanban board that stays in sync with Lark Base, both ways. Each agent works in its own git worktree, opens a PR, and never merges to main. You see who is working, who is waiting for you, and what broke.</p>
+        <form class="lp-join" id="join-hero" novalidate data-ui="Form / Waitlist">
+          <label class="sr-only" for="hero-email">Work email</label>
+          <input class="input lp-input" id="hero-email" type="email" placeholder="you@company.com" autocomplete="email" required>
+          <button class="btn btn-default lp-btn" type="submit">Join early access</button>
+          <p class="lp-form-msg" aria-live="polite"></p>
+        </form>
+        <p class="lp-req">Needs your own Claude Code subscription, a Lark Custom App with a Sprint Tasks base, and the GitHub CLI.</p>
+      </div>
+
+      <!-- Interactive demo: the one flourish -->
+      <div class="lp-wrap lp-demo-wrap" id="demo">
+        <div class="demo" data-ui="LandingDemo" aria-label="Interactive Mandor demo">
+          <div class="demo-bar">
+            <span class="brand-mark" aria-hidden="true"><i></i><i></i><i></i></span><b>Mandor</b>
+            <span class="conn"><span class="dot"></span>Daemon connected</span>
+            <span class="demo-tally" id="d-tally" hidden><i data-lucide="hand" class="icon-sm" aria-hidden="true"></i><span>1 waiting for you</span></span>
+            <span class="demo-lark mono" id="d-lark" aria-live="polite"></span>
+          </div>
+          <div class="demo-body">
+            <aside class="demo-side" aria-label="Active agents">
+              <div class="caps muted demo-side-h">Active agents</div>
+              <div id="d-agents"></div>
+            </aside>
+            <div class="demo-board" id="d-board"></div>
+          </div>
+          <div class="demo-panel" id="d-panel" hidden></div>
+        </div>
+        <ol class="demo-steps" id="d-steps" aria-label="Demo steps">
+          <li data-s="1"><span class="mono">01</span>Start from Lark</li>
+          <li data-s="2"><span class="mono">02</span>Agent works in its worktree</li>
+          <li data-s="3"><span class="mono">03</span>Your turn</li>
+          <li data-s="4"><span class="mono">04</span>PR opened, Lark updated</li>
+          <li data-s="5"><span class="mono">05</span>Review fixes run themselves</li>
+        </ol>
+        <p class="demo-hint" id="d-hint" aria-live="polite"></p>
+      </div>
+    </section>
+
+    <!-- ===== Problem ===== -->
+    <section class="lp-sec lp-problem" data-od-id="problem">
+      <div class="lp-wrap lp-split">
+        <div>
+          <p class="lp-kicker mono">The problem</p>
+          <h2 class="lp-h2">Six terminals. Which one is waiting for you?</h2>
+          <p class="lp-p">Running agents in parallel works until you lose track. One terminal per task, one task per Lark record, and nothing tells you which session finished its turn twenty minutes ago. Then the Lark board drifts, because someone has to copy every status by hand.</p>
+        </div>
+        <div class="lp-term" aria-hidden="true">
+          <div class="lp-term-tabs"><span>claude</span><span>claude</span><span class="on">claude</span><span>claude</span><span>claude</span><span>claude</span></div>
+          <pre class="mono">$ claude
+&gt; which task was this again?
+<span class="dim">… 3 other sessions finished their turn</span>
+<span class="dim">… Lark still says "To Do"</span></pre>
+        </div>
+      </div>
+    </section>
+
+    <!-- ===== How it works ===== -->
+    <section class="lp-sec" data-od-id="how">
+      <div class="lp-wrap">
+        <p class="lp-kicker mono">How it works</p>
+        <h2 class="lp-h2">The board is the foreman. You stay the reviewer.</h2>
+        <ol class="lp-how">
+          <li><span class="n mono">01</span><h3>Press Start on a ready task</h3><p>Mandor claims the Lark record, creates a worktree from origin, and starts Claude Code with the title, description, and acceptance criteria. Lark moves to In Progress.</p></li>
+          <li><span class="n mono">02</span><h3>Every agent in one sidebar</h3><p>Working, waiting for you, failed, or parked. Runs that need your reply are pinned to the top, with a count in the title bar and the tray.</p></li>
+          <li><span class="n mono">03</span><h3>Push &amp; create PR</h3><p>When the diff looks right, one button commits, pushes the branch, and opens the PR. Lark moves to Waiting Review. Merging stays with your team.</p></li>
+          <li><span class="n mono">04</span><h3>Review fixes come back on their own</h3><p>A reviewer moves the task to Waiting Fix and comments in Lark. Mandor forwards trusted comments, the agent fixes, and the task returns to review.</p></li>
+        </ol>
+      </div>
+    </section>
+
+    <!-- ===== Lark sync ===== -->
+    <section class="lp-sec lp-alt" id="lark" data-od-id="lark">
+      <div class="lp-wrap lp-split">
+        <div>
+          <p class="lp-kicker mono">Two-way Lark sync</p>
+          <h2 class="lp-h2">Lark stays the source of truth.</h2>
+          <p class="lp-p">Columns come from Task Status, not a second board. Titles, descriptions, acceptance criteria, and assignees are read from Lark and never edited by Mandor. When Lark and Mandor disagree, Lark wins and the card says so.</p>
+          <ul class="lp-ticks">
+            <li><i data-lucide="check" aria-hidden="true"></i>Only three automatic moves: To Do → In Progress, In Progress → Waiting Review, Waiting Fix → In Progress</li>
+            <li><i data-lucide="check" aria-hidden="true"></i>Starts only tasks marked Ready To Dev or Commit To Sprint</li>
+            <li><i data-lucide="check" aria-hidden="true"></i>One owner per task. If two people press Start, one gets a clear "lost the claim"</li>
+          </ul>
+        </div>
+        <div class="lp-map card" data-ui="Table / StatusMapping">
+          <div class="lp-map-h"><span class="caps muted">Lark Task Status</span><span></span><span class="caps muted">Mandor column</span></div>
+          <div class="lp-map-r"><span>To Do</span><i data-lucide="arrow-left-right" aria-hidden="true"></i><span>Todo</span></div>
+          <div class="lp-map-r"><span>In Progress · Waiting Fix</span><i data-lucide="arrow-left-right" aria-hidden="true"></i><span>In Progress</span></div>
+          <div class="lp-map-r"><span>Waiting Review · In Review</span><i data-lucide="arrow-left-right" aria-hidden="true"></i><span>Review</span></div>
+          <div class="lp-map-r"><span>Waiting Deploy · Delivered</span><i data-lucide="arrow-left-right" aria-hidden="true"></i><span>Done</span></div>
+          <div class="lp-map-r dim"><span>Anything else</span><i data-lucide="arrow-right" aria-hidden="true"></i><span>Unknown, shown only when used</span></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ===== Waiting Fix loop ===== -->
+    <section class="lp-sec" id="fix" data-od-id="fix">
+      <div class="lp-wrap">
+        <p class="lp-kicker mono">The review loop</p>
+        <h2 class="lp-h2">"Waiting Fix" no longer waits for you.</h2>
+        <p class="lp-p lp-narrow">Reviewers keep working the way they do today: change the status in Lark and leave a comment on the record. Mandor handles the rest, and asks you only when a comment comes from someone it should not trust.</p>
+        <ol class="lp-loop" data-ui="Timeline / WaitingFix">
+          <li><span class="run" data-tone="waiting"><i data-lucide="message-square-text" aria-hidden="true"></i><span class="lbl">Reviewer comments in Lark</span></span><p>The task moves to Waiting Fix with a comment on the record.</p></li>
+          <li><span class="run" data-tone="waiting"><i data-lucide="timer" aria-hidden="true"></i><span class="lbl">Quiet period</span></span><p>Mandor waits about two minutes so the reviewer can finish writing.</p></li>
+          <li><span class="run" data-tone="ok"><i data-lucide="shield-check" aria-hidden="true"></i><span class="lbl">Trusted comments forwarded</span></span><p>From assignees, the reporter, and the reviewers you list per repo. Others are shown to you only.</p></li>
+          <li><span class="run" data-tone="working"><i data-lucide="wrench" aria-hidden="true"></i><span class="lbl">Fixing</span></span><p>The agent applies the feedback in the same worktree and pushes to the same PR.</p></li>
+          <li><span class="run" data-tone="waiting"><i data-lucide="git-pull-request" aria-hidden="true"></i><span class="lbl">Back to Waiting Review</span></span><p>Lark is updated. Nobody had to open a terminal.</p></li>
+        </ol>
+      </div>
+    </section>
+
+    <!-- ===== Safety ===== -->
+    <section class="lp-sec lp-alt" id="safety" data-od-id="safety">
+      <div class="lp-wrap lp-split">
+        <div>
+          <p class="lp-kicker mono">Safety</p>
+          <h2 class="lp-h2">Agents write code. They don't ship it.</h2>
+          <ul class="lp-safe">
+            <li><b>One worktree per task.</b> Agents never touch your checkout or each other's branches.</li>
+            <li><b>No merges to main, ever.</b> Mandor opens PRs; your team decides what lands.</li>
+            <li><b><code>git push</code> belongs to Mandor.</b> The agent's own push is denied; pushing happens through Push &amp; create PR.</li>
+            <li><b>Sensitive files are held.</b> Changes to CI, agent config, or git hooks wait for your confirmation before any push.</li>
+            <li><b>Lark text is data, not instructions.</b> Titles, AC, and comments reach the agent as untrusted content.</li>
+          </ul>
+        </div>
+        <div class="lp-safe-demo" aria-hidden="true">
+          <details class="toolgroup" open><summary><i data-lucide="chevron-right" class="chev icon-sm"></i><i data-lucide="wrench" class="icon-sm"></i><span>Read 2 files, ran 2 commands</span><span class="issues"><span class="badge" style="color:var(--status-failed)"><i data-lucide="ban"></i>1 denied</span></span></summary>
+            <details class="toolcall" data-s="ok"><summary><i data-lucide="square-terminal" class="icon-sm"></i><span class="tname">Bash</span><span class="tprev">pnpm test src/lib/api/invoice</span><span class="tstate"></span></summary></details>
+            <details class="toolcall" data-s="denied" open><summary><i data-lucide="ban" class="icon-sm"></i><span class="tname">Bash</span><span class="tprev">git push origin beni/pgs-1391-partial-payments</span><span class="tstate"><i data-lucide="ban" class="icon-sm"></i>Denied</span></summary><div class="denial">`git push` is run only by the daemon. Use Push &amp; create PR in Mandor.</div></details>
+          </details>
+          <div class="alert alert-warning" style="margin-top:12px"><i data-lucide="shield-alert"></i><div><div class="alert-title">Push held: changes touch CI</div><div class="muted"><span class="mono">.github/workflows/ci.yml</span> needs your confirmation.</div></div></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ===== Requirements ===== -->
+    <section class="lp-sec" data-od-id="requirements">
+      <div class="lp-wrap">
+        <p class="lp-kicker mono">What you need</p>
+        <h2 class="lp-h2">Bring your own tools. Mandor brings the board.</h2>
+        <div class="lp-reqs">
+          <div><h3>Claude Code, your subscription</h3><p>Mandor runs the Claude Code CLI as it is, logged in with your own subscription. No API key, no resold usage.</p></div>
+          <div><h3>Lark Custom App + Base</h3><p>A Custom App with access to your Sprint Tasks table and its Acceptance Criteria table. You log in with Lark once.</p></div>
+          <div><h3>GitHub CLI</h3><p><code>gh</code> logged in on the machine where agents run. It opens the PRs, with a separate profile per repo if you like.</p></div>
+          <div><h3>Linux, or Windows with WSL</h3><p>The daemon runs on Linux or inside WSL on Windows. macOS is not supported yet.</p></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ===== Roadmap ===== -->
+    <section class="lp-sec lp-alt" id="roadmap" data-od-id="roadmap">
+      <div class="lp-wrap">
+        <p class="lp-kicker mono">Roadmap</p>
+        <h2 class="lp-h2">What works today, and what is coming.</h2>
+        <div class="lp-road">
+          <div class="lp-road-col now">
+            <span class="badge"><i data-lucide="circle-check" aria-hidden="true"></i>Release 1 · available in early access</span>
+            <ul>
+              <li>Kanban board synced with Lark Sprint Tasks</li>
+              <li>Start, chat, diff, and Push &amp; create PR per task</li>
+              <li>Active agents sidebar, notifications, and tray</li>
+              <li>Automatic Waiting Fix loop with trusted reviewers</li>
+            </ul>
+          </div>
+          <div class="lp-road-col">
+            <span class="badge"><i data-lucide="clock" aria-hidden="true"></i>Release 2 · coming</span>
+            <h3>AC review</h3>
+            <p>Before the PR, a pass or fail check against each acceptance criterion, which you can send back to the agent.</p>
+          </div>
+          <div class="lp-road-col">
+            <span class="badge"><i data-lucide="clock" aria-hidden="true"></i>Release 3 · coming</span>
+            <h3>AI Lembur</h3>
+            <p>Queue ready tasks for overnight agents on a team machine. In the morning, a report of what got done, what got parked, and the agents' open questions.</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ===== Pricing ===== -->
+    <section class="lp-sec" id="pricing" data-od-id="pricing">
+      <div class="lp-wrap">
+        <p class="lp-kicker mono">Pricing</p>
+        <h2 class="lp-h2">Early access first. Pricing before launch.</h2>
+        <div class="lp-price">
+          <div class="card lp-plan">
+            <div class="lp-plan-h"><h3>Early access</h3><span class="badge badge-secondary">Now</span></div>
+            <p class="lp-plan-price">Invite only</p>
+            <ul class="lp-ticks">
+              <li><i data-lucide="check" aria-hidden="true"></i>Everything in Release 1: board, agents, PRs, Waiting Fix loop</li>
+              <li><i data-lucide="check" aria-hidden="true"></i>Linux, or Windows with WSL</li>
+              <li><i data-lucide="check" aria-hidden="true"></i>Your own Claude Code subscription, unchanged</li>
+            </ul>
+            <a class="btn btn-default" href="#join">Join early access</a>
+          </div>
+          <div class="card lp-plan">
+            <div class="lp-plan-h"><h3>Team</h3><span class="badge">At launch</span></div>
+            <p class="lp-plan-price muted">Pricing to be announced</p>
+            <p class="lp-p">Pricing will be published before general availability.</p>
+            <p class="lp-note">In every plan you bring your own Claude Code subscription. Mandor does not resell model usage.</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ===== FAQ ===== -->
+    <section class="lp-sec lp-alt" id="faq" data-od-id="faq">
+      <div class="lp-wrap lp-faq-wrap">
+        <div>
+          <p class="lp-kicker mono">FAQ</p>
+          <h2 class="lp-h2">Questions developers ask first.</h2>
+        </div>
+        <div class="lp-faq" data-ui="Accordion">
+          <details><summary>Does Mandor need an Anthropic API key?<i data-lucide="plus" aria-hidden="true"></i></summary><p>No. Mandor starts the Claude Code CLI unmodified, using the subscription you are already logged in with.</p></details>
+          <details><summary>Will an agent ever merge to main?<i data-lucide="plus" aria-hidden="true"></i></summary><p>No. Each task gets its own branch and worktree. Mandor pushes that branch and opens a PR. Merging is always a person on your team.</p></details>
+          <details><summary>Can I drag cards between columns?<i data-lucide="plus" aria-hidden="true"></i></summary><p>No, on purpose. Columns follow Task Status in Lark. Cards move when you press Start or Push &amp; create PR, or when someone changes the status in Lark.</p></details>
+          <details><summary>What if two developers start the same task?<i data-lucide="plus" aria-hidden="true"></i></summary><p>One claim wins. The other person sees "lost the claim" and nothing is created on their machine. An inactive claim can be taken over later.</p></details>
+          <details><summary>Does it run on macOS or native Windows?<i data-lucide="plus" aria-hidden="true"></i></summary><p>Not yet. Today the daemon runs on Linux, or inside WSL on Windows. Other platforms are not verified.</p></details>
+          <details><summary>Where does my code go?<i data-lucide="plus" aria-hidden="true"></i></summary><p>Agents run on your machine, in worktrees next to your repo. Code goes where Claude Code itself sends it, and to GitHub when you push.</p></details>
+          <details><summary>Is Mandor affiliated with Anthropic, Lark, or GitHub?<i data-lucide="plus" aria-hidden="true"></i></summary><p>No. Mandor is an independent tool that works with Claude Code, Lark Base, and the GitHub CLI.</p></details>
+        </div>
+      </div>
+    </section>
+
+    <!-- ===== Final CTA ===== -->
+    <section class="lp-sec lp-final" data-od-id="cta">
+      <div class="lp-wrap lp-final-in">
+        <h2 class="lp-h2">Get your crew on one board.</h2>
+        <p class="lp-p">Early access is open to teams already running Claude Code on Lark Sprint Tasks.</p>
+        <form class="lp-join" id="join" novalidate data-ui="Form / Waitlist">
+          <label class="sr-only" for="final-email">Work email</label>
+          <input class="input lp-input" id="final-email" type="email" placeholder="you@company.com" autocomplete="email" required>
+          <label class="sr-only" for="final-team">Team size</label>
+          <select class="select lp-input lp-team" id="final-team"><option value="">Team size</option><option>Just me</option><option>2 to 5</option><option>6 to 15</option><option>More than 15</option></select>
+          <button class="btn btn-default lp-btn" type="submit">Join early access</button>
+          <p class="lp-form-msg" aria-live="polite"></p>
+        </form>
+      </div>
+    </section>
+  </main>
+
+  <footer class="lp-foot" data-od-id="footer">
+    <div class="lp-wrap lp-foot-in">
+      <span class="brand"><span class="brand-mark" aria-hidden="true"><i></i><i></i><i></i></span>Mandor</span>
+      <span class="muted">[mandor.example] · © [Company name]</span>
+      <span class="muted lp-foot-legal">Claude Code, Lark, and GitHub are trademarks of their respective owners. Mandor is an independent product and is not affiliated with or endorsed by them.</span>
+    </div>
+  </footer>
+
+  <script src="vendor/lucide.min.js"></script>
+  <script src="js/landing.js"></script>
+</body>
+</html>

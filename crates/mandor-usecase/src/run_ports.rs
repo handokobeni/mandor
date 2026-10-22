@@ -204,8 +204,30 @@ pub trait AgentPort: Send + Sync {
         worktree: &Path,
         diff: &str,
     ) -> impl Future<Output = Result<String, PortError>> + Send;
+    /// Deskripsi PR (Markdown) dari diff branch dan konteks task, dijalankan tanpa
+    /// tool dan tanpa token seperti pesan commit (KTD-11).
+    fn pr_description(
+        &self,
+        worktree: &Path,
+        ctx: &PrContext<'_>,
+    ) -> impl Future<Output = Result<String, PortError>> + Send;
     /// Menghentikan process group yatim dari daemon sebelumnya (KTD-13).
     fn reap(&self, pid: u32) -> impl Future<Output = ()> + Send;
+}
+
+/// Bahan deskripsi PR. Semua teks berasal dari Lark atau diff dan diperlakukan
+/// sebagai data tidak tepercaya oleh adapter agent.
+#[derive(Debug, Clone, Copy)]
+pub struct PrContext<'a> {
+    /// Judul PR, mis. `PGS-7: Tab Data`.
+    pub title: &'a str,
+    pub description: &'a str,
+    /// AC aktif sebagai `label: teks`.
+    pub acs: &'a [String],
+    /// Plan yang disetujui dev, bila run melewati fase plan.
+    pub plan: Option<&'a str>,
+    /// Diff branch terhadap base, sudah dipotong.
+    pub diff: &'a str,
 }
 
 /// Run untuk satu record di laptop pemilik.

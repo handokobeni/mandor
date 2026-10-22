@@ -9,13 +9,19 @@ use std::sync::Arc;
 
 use super::{RunError, RunService};
 use crate::ports::Deps;
+use mandor_domain::Task;
+
 use crate::run_ports::{
-    AgentPort, AgentRequest, AgentWorkspace, ChatItem, GitPort, RepoInfo, Repos, RunPhase,
-    RunRecord, RunStore, SessionRef, WorkChanges,
+    AgentPort, AgentRequest, AgentWorkspace, ChatItem, GitPort, PrContext, RepoInfo, Repos,
+    RunPhase, RunRecord, RunStore, SessionRef, WorkChanges,
 };
 
 /// Batas diff untuk pembuat pesan commit.
 const COMMIT_DIFF_MAX: usize = 50_000;
+/// Batas diff branch yang dikirim ke pembuat deskripsi PR.
+const PR_DIFF_MAX: usize = 60_000;
+/// Batas deskripsi buatan model; GitHub menolak badan PR di atas 65.536 karakter.
+const PR_BODY_MAX: usize = 20_000;
 
 /// Satu repo dalam run beserta worktree dan link PR-nya.
 #[derive(Debug, Clone)]
@@ -268,14 +274,50 @@ impl<D: Deps> RunService<D> {
             Some(k) => format!("{k}: {}", task.title),
             None => task.title.clone(),
         };
-        let body = format!(
-            "Lark task: {}\n\nCreated by mandor.",
-            task.key.as_deref().unwrap_or(&task.record_id)
-        );
+        let body = self.pr_body(run, m, &task, &title).await;
         Ok(self
             .git
             .create_pr(&m.repo, &m.worktree, branch, &title, &body)
             .await?)
+    }
+
+    /// Badan PR: deskripsi buatan model dari diff branch dan konteks task, diapit
+    /// tautan task dan penanda Mandor. Bila model atau bahan gagal, PR tetap
+    /// dibuat dengan badan minimal.
+    async fn pr_body(&self, run: &RunRecord, m: &Member, task: &Task, title: &str) -> String {
+        let key = task.key.as_deref().unwrap_or(&task.record_id);
+        let header = format!("Lark task: {key}");
+        let footer = "Created by Mandor.";
+        let generated = async {
+            let diff: String = self
+                .git
+                .branch_diff(&m.repo, &m.worktree)
+                .await?
+                .chars()
+                .take(PR_DIFF_MAX)
+                .collect();
+            let acs = self.ac_texts(task).await.unwrap_or_default();
+            let ctx = PrContext {
+                title,
+                description: &task.description,
+                acs: &acs,
+                plan: run.plan.as_deref(),
+                diff: &diff,
+            };
+            self.agent.pr_description(&m.worktree, &ctx).await
+        }
+        .await;
+        match generated {
+            Ok(text) if !text.trim().is_empty() => {
+                let text: String = text.trim().chars().take(PR_BODY_MAX).collect();
+                format!("{header}\n\n{text}\n\n---\n{footer}")
+            }
+            Ok(_) => format!("{header}\n\n{footer}"),
+            Err(e) => {
+                tracing::warn!(error = %e, "deskripsi PR otomatis gagal; memakai badan minimal");
+                format!("{header}\n\n{footer}")
+            }
+        }
     }
 
     /// Menghapus worktree anggota (rollback Start atau tutup run), lalu folder

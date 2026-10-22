@@ -10,8 +10,9 @@ use std::time::Duration;
 use mandor_domain::AgentEvent;
 use mandor_usecase::PortError;
 use mandor_usecase::run_ports::{
-    AgentPort, AgentRequest, AgentRunHandle, ChatItem, GitPort, Journal, Notice, Notifier, PrRef,
-    RepoInfo, Repos, RunRecord, RunStore, Spawner, Stopper, WorkChanges, WorkspaceInfo,
+    AgentPort, AgentRequest, AgentRunHandle, ChatItem, GitPort, Journal, Notice, Notifier,
+    PrContext, PrRef, RepoInfo, Repos, RunRecord, RunStore, Spawner, Stopper, WorkChanges,
+    WorkspaceInfo,
 };
 use tokio::sync::mpsc;
 
@@ -35,6 +36,7 @@ pub struct GitState {
     pub pushes: Vec<String>,
     pub prs: HashMap<String, String>,
     pub created_prs: Vec<(String, String)>,
+    pub pr_bodies: Vec<String>,
 }
 
 /// Kunci PR palsu: repo dan branch (run workspace memakai branch yang sama).
@@ -177,9 +179,10 @@ impl GitPort for FakeGit {
         _wt: &Path,
         branch: &str,
         title: &str,
-        _body: &str,
+        body: &str,
     ) -> Result<String, PortError> {
         let mut st = self.state.lock().unwrap();
+        st.pr_bodies.push(body.to_owned());
         if st.fail_create_pr.contains(&r.id) {
             return Err(PortError::Transient(format!("gh pr create {}", r.id)));
         }
@@ -283,6 +286,17 @@ pub struct FakeAgent {
     pub fail_spawn: Arc<Mutex<bool>>,
     pub commit_diffs: Arc<Mutex<Vec<String>>>,
     pub reaped: Arc<Mutex<Vec<u32>>>,
+    pub pr_contexts: Arc<Mutex<Vec<OwnedPrContext>>>,
+    pub fail_pr_description: Arc<Mutex<bool>>,
+}
+
+/// Salinan [`PrContext`] yang diterima fake agent.
+#[derive(Debug, Clone)]
+pub struct OwnedPrContext {
+    pub title: String,
+    pub acs: Vec<String>,
+    pub plan: Option<String>,
+    pub diff: String,
 }
 
 impl FakeAgent {
@@ -319,6 +333,18 @@ impl AgentPort for FakeAgent {
     async fn commit_message(&self, _wt: &Path, diff: &str) -> Result<String, PortError> {
         self.commit_diffs.lock().unwrap().push(diff.to_owned());
         Ok("feat: implementasi task".to_owned())
+    }
+    async fn pr_description(&self, _wt: &Path, ctx: &PrContext<'_>) -> Result<String, PortError> {
+        self.pr_contexts.lock().unwrap().push(OwnedPrContext {
+            title: ctx.title.to_owned(),
+            acs: ctx.acs.to_vec(),
+            plan: ctx.plan.map(str::to_owned),
+            diff: ctx.diff.to_owned(),
+        });
+        if *self.fail_pr_description.lock().unwrap() {
+            return Err(PortError::Transient("claude timeout".to_owned()));
+        }
+        Ok("## Summary\nAdds the tab.\n\n## Changes\n- src/a.rs".to_owned())
     }
     async fn reap(&self, pid: u32) {
         self.reaped.lock().unwrap().push(pid);

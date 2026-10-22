@@ -445,7 +445,7 @@ impl<D: Deps> RunService<D> {
         Ok(())
     }
 
-    async fn ac_texts(&self, task: &Task) -> Result<Vec<String>, RunError> {
+    pub(crate) async fn ac_texts(&self, task: &Task) -> Result<Vec<String>, RunError> {
         Ok(self
             .sync
             .lark

@@ -181,6 +181,12 @@ impl<D: Deps> RunService<D> {
                 (ws.root.clone(), Some(ctx))
             }
         };
+        let plan_mode = run.phase != RunPhase::Implement;
+        // Giliran brainstorm/plan mengisi kolom Design lewat tool ledger.
+        let ledger = plan_mode.then(|| crate::review::LedgerAccess {
+            role: crate::review::CapabilityRole::Design,
+            token: self.issue_capability(&run.id, crate::review::CapabilityRole::Design),
+        });
         Ok(AgentRequest {
             repo: primary.repo,
             worktree,
@@ -188,7 +194,8 @@ impl<D: Deps> RunService<D> {
             session,
             message,
             workspace,
-            plan_mode: run.phase != RunPhase::Implement,
+            plan_mode,
+            ledger,
         })
     }
 

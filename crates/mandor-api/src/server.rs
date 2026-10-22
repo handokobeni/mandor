@@ -28,6 +28,13 @@ const MAX_IN_FLIGHT_PER_CONN: usize = 16;
 /// Kapasitas antrean pesan keluar per koneksi.
 const OUTBOUND_CAPACITY: usize = 256;
 
+/// Lingkup koneksi yang memakai token kapabilitas (KTD-26).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CapabilityScope {
+    pub run_id: String,
+    pub role: String,
+}
+
 /// Penangan method; diimplementasikan lapisan app di atas use case.
 pub trait Dispatch: Send + Sync + 'static {
     /// Menjalankan `method` dengan `params`.
@@ -36,6 +43,39 @@ pub trait Dispatch: Send + Sync + 'static {
         method: &str,
         params: serde_json::Value,
     ) -> impl Future<Output = Result<serde_json::Value, RpcError>> + Send;
+
+    /// Lingkup token kapabilitas bila masih berlaku; `None` menolak.
+    fn verify_capability(
+        &self,
+        _token: &str,
+    ) -> impl Future<Output = Option<CapabilityScope>> + Send {
+        async { None }
+    }
+
+    /// Method untuk koneksi kapabilitas; hanya tool ledger yang boleh lewat.
+    fn call_scoped(
+        &self,
+        _scope: &CapabilityScope,
+        method: &str,
+        _params: serde_json::Value,
+    ) -> impl Future<Output = Result<serde_json::Value, RpcError>> + Send {
+        let method = method.to_owned();
+        async move {
+            Err(RpcError::new(
+                ErrorCode::Unauthorized,
+                format!("{method} is not available on this connection"),
+            ))
+        }
+    }
+}
+
+/// Jenis koneksi yang diterima saat `hello`.
+enum Accepted {
+    /// Token daemon: semua method dan broadcast event.
+    Full,
+    /// Token kapabilitas: hanya tool ledger, tanpa event; token diperiksa ulang
+    /// di setiap request.
+    Scoped(String),
 }
 
 /// Konfigurasi server.
@@ -95,11 +135,20 @@ enum Step {
 
 async fn connection<D: Dispatch>(socket: WebSocket, shared: Arc<Shared<D>>) {
     let (mut sink, mut stream) = socket.split();
-    let reply = handshake(&mut stream, &shared.cfg).await;
-    let accepted = reply.is_ok();
-    let resp = reply.unwrap_or_else(|e| e);
-    if sink.send(text(&resp)).await.is_err() || !accepted {
+    let (reply, accepted) = match handshake(&mut stream, &shared).await {
+        Ok((resp, kind)) => (resp, Some(kind)),
+        Err(resp) => (resp, None),
+    };
+    let Some(kind) = accepted else {
+        let _ = sink.send(text(&reply)).await;
         let _ = sink.close().await;
+        return;
+    };
+    if sink.send(text(&reply)).await.is_err() {
+        return;
+    }
+    if let Accepted::Scoped(token) = kind {
+        scoped_connection(sink, stream, &shared, &token).await;
         return;
     }
 
@@ -127,6 +176,54 @@ async fn connection<D: Dispatch>(socket: WebSocket, shared: Arc<Shared<D>>) {
         }
     }
     tasks.shutdown().await;
+}
+
+/// Koneksi kapabilitas: request diproses berurutan, tanpa event, dan token
+/// diverifikasi ulang setiap request; token yang dicabut menutup koneksi.
+async fn scoped_connection<D: Dispatch>(
+    mut sink: WsSink,
+    mut stream: futures::stream::SplitStream<WebSocket>,
+    shared: &Shared<D>,
+    token: &str,
+) {
+    loop {
+        let msg = tokio::select! {
+            () = shared.shutdown.cancelled() => break,
+            msg = stream.next() => msg,
+        };
+        let body = match msg {
+            Some(Ok(Message::Text(body))) => body,
+            Some(Ok(Message::Close(_)) | Err(_)) | None => break,
+            Some(Ok(_)) => continue,
+        };
+        let Ok(req) = serde_json::from_str::<Request>(body.as_str()) else {
+            let resp = Response::err(0, RpcError::new(ErrorCode::ParseError, "invalid JSON-RPC"));
+            if sink.send(text(&resp)).await.is_err() {
+                break;
+            }
+            continue;
+        };
+        let Some(scope) = shared.dispatch.verify_capability(token).await else {
+            let resp = Response::err(
+                req.id,
+                RpcError::new(ErrorCode::Unauthorized, "capability expired"),
+            );
+            let _ = sink.send(text(&resp)).await;
+            break;
+        };
+        let resp = match shared
+            .dispatch
+            .call_scoped(&scope, &req.method, req.params)
+            .await
+        {
+            Ok(result) => Response::ok(req.id, result),
+            Err(err) => Response::err(req.id, err),
+        };
+        if sink.send(text(&resp)).await.is_err() {
+            break;
+        }
+    }
+    let _ = sink.close().await;
 }
 
 async fn send_line(sink: &mut WsSink, line: String) -> Step {
@@ -172,11 +269,16 @@ async fn spawn_request<D: Dispatch>(
     Step::Continue
 }
 
-/// Memvalidasi `hello`. `Ok` berisi respons sukses, `Err` berisi respons error.
-async fn handshake<S>(stream: &mut S, cfg: &ServerConfig) -> Result<Response, Response>
+/// Memvalidasi `hello`. `Ok` berisi respons sukses dan jenis koneksi, `Err`
+/// berisi respons error.
+async fn handshake<S, D: Dispatch>(
+    stream: &mut S,
+    shared: &Shared<D>,
+) -> Result<(Response, Accepted), Response>
 where
     S: futures::Stream<Item = Result<Message, axum::Error>> + Unpin,
 {
+    let cfg = &shared.cfg;
     let first = tokio::time::timeout(HELLO_TIMEOUT, stream.next()).await;
     let Ok(Some(Ok(Message::Text(body)))) = first else {
         return Err(Response::err(
@@ -203,12 +305,21 @@ where
         ));
     };
     let expected = cfg.token.expose_secret().as_bytes();
-    if !bool::from(expected.ct_eq(hello.token.as_bytes())) {
+    let kind = if bool::from(expected.ct_eq(hello.token.as_bytes())) {
+        Accepted::Full
+    } else if shared
+        .dispatch
+        .verify_capability(&hello.token)
+        .await
+        .is_some()
+    {
+        Accepted::Scoped(hello.token.clone())
+    } else {
         return Err(Response::err(
             req.id,
             RpcError::new(ErrorCode::Unauthorized, "invalid token"),
         ));
-    }
+    };
     if major_of(&hello.protocol) != Some(PROTOCOL_MAJOR) {
         return Err(Response::err(
             req.id,
@@ -226,7 +337,7 @@ where
         protocol: PROTOCOL_VERSION.to_owned(),
     };
     match serde_json::to_value(ok) {
-        Ok(value) => Ok(Response::ok(req.id, value)),
+        Ok(value) => Ok((Response::ok(req.id, value), kind)),
         Err(_) => Err(Response::err(
             req.id,
             RpcError::new(ErrorCode::Internal, "failed to build hello"),

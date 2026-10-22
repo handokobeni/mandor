@@ -5,7 +5,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use futures::{SinkExt, StreamExt};
-use mandor_api::{Dispatch, ServerConfig, relay_lines, serve};
+use mandor_api::{CapabilityScope, Dispatch, ServerConfig, mcp_lines, relay_lines, serve};
 use mandor_protocol::{ErrorCode, Notification, Request, Response, RpcError};
 use secrecy::SecretString;
 use serde_json::{Value, json};
@@ -15,8 +15,11 @@ use tokio::sync::broadcast;
 use tokio_tungstenite::tungstenite::Message;
 use tokio_util::sync::CancellationToken;
 
-#[derive(Debug)]
-struct Echo;
+#[derive(Debug, Default)]
+struct Echo {
+    /// Token kapabilitas `cap-ok` sudah dicabut.
+    revoked: std::sync::atomic::AtomicBool,
+}
 
 impl Dispatch for Echo {
     async fn call(&self, method: &str, params: Value) -> Result<Value, RpcError> {
@@ -24,6 +27,27 @@ impl Dispatch for Echo {
             "status" => Ok(json!({"ok": true})),
             "echo" => Ok(params),
             _ => Err(RpcError::new(ErrorCode::MethodNotFound, method)),
+        }
+    }
+
+    async fn verify_capability(&self, token: &str) -> Option<CapabilityScope> {
+        (token == "cap-ok" && !self.revoked.load(std::sync::atomic::Ordering::SeqCst)).then(|| {
+            CapabilityScope {
+                run_id: "run1".to_owned(),
+                role: "verdict".to_owned(),
+            }
+        })
+    }
+
+    async fn call_scoped(
+        &self,
+        scope: &CapabilityScope,
+        method: &str,
+        _params: Value,
+    ) -> Result<Value, RpcError> {
+        match method {
+            "ledger.tool.info" => Ok(json!({"run_id": scope.run_id, "role": scope.role})),
+            _ => Err(RpcError::new(ErrorCode::Unauthorized, "ledger tools only")),
         }
     }
 }
@@ -46,7 +70,7 @@ async fn start() -> Daemon {
     tokio::spawn(serve(
         listener,
         cfg,
-        Arc::new(Echo),
+        Arc::new(Echo::default()),
         events.clone(),
         shutdown.clone(),
     ));
@@ -195,4 +219,166 @@ async fn relay_meneruskan_baris_tanpa_menyisipkan_token() {
     assert_eq!(resp.error.unwrap().code, ErrorCode::Unauthorized);
     let _ = tokio::time::timeout(Duration::from_secs(3), relay).await;
     d.shutdown.cancel();
+}
+
+#[tokio::test]
+async fn token_kapabilitas_membuka_koneksi_terbatas_tanpa_event() {
+    let d = start().await;
+    let mut ws = connect(d.addr).await;
+    send(&mut ws, &hello("cap-ok", "1.0")).await;
+    let ok: Response = serde_json::from_value(recv(&mut ws).await).unwrap();
+    assert!(ok.error.is_none(), "{ok:?}");
+
+    send(&mut ws, &Request::new(2, "ledger.tool.info", Value::Null)).await;
+    let info: Response = serde_json::from_value(recv(&mut ws).await).unwrap();
+    assert_eq!(
+        info.result.unwrap(),
+        json!({"run_id": "run1", "role": "verdict"})
+    );
+
+    // Metode biasa tidak lewat jalur penuh.
+    send(&mut ws, &Request::new(3, "status", Value::Null)).await;
+    let denied: Response = serde_json::from_value(recv(&mut ws).await).unwrap();
+    assert_eq!(denied.error.unwrap().code, ErrorCode::Unauthorized);
+
+    // Broadcast tidak diteruskan ke koneksi kapabilitas.
+    let _ = d
+        .events
+        .send(Notification::new("run.updated", json!({"run_id": "x"})));
+    let quiet = tokio::time::timeout(Duration::from_millis(300), ws.next()).await;
+    assert!(quiet.is_err(), "tidak ada event: {quiet:?}");
+    d.shutdown.cancel();
+}
+
+#[tokio::test]
+async fn token_kapabilitas_yang_dicabut_menutup_koneksi() {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let (events, _) = broadcast::channel(16);
+    let shutdown = CancellationToken::new();
+    let echo = Arc::new(Echo::default());
+    tokio::spawn(serve(
+        listener,
+        ServerConfig {
+            token: SecretString::from("rahasia-uji".to_owned()),
+            daemon_version: "0.1.0".into(),
+        },
+        Arc::clone(&echo),
+        events,
+        shutdown.clone(),
+    ));
+    let mut ws = connect(addr).await;
+    send(&mut ws, &hello("cap-ok", "1.0")).await;
+    let _ok = recv(&mut ws).await;
+    echo.revoked
+        .store(true, std::sync::atomic::Ordering::SeqCst);
+    send(&mut ws, &Request::new(2, "ledger.tool.info", Value::Null)).await;
+    let resp: Response = serde_json::from_value(recv(&mut ws).await).unwrap();
+    assert_eq!(resp.error.unwrap().code, ErrorCode::Unauthorized);
+    let next = tokio::time::timeout(Duration::from_secs(3), ws.next())
+        .await
+        .unwrap();
+    assert!(matches!(next, None | Some(Ok(Message::Close(_)) | Err(_))));
+    shutdown.cancel();
+}
+
+#[tokio::test]
+async fn mcp_stdio_menerjemahkan_tools_list_lewat_token_kapabilitas() {
+    let d = start().await;
+    let (mut client, daemon_side) = tokio::io::duplex(4096);
+    let (server_in, server_out) = tokio::io::split(daemon_side);
+    let mcp = tokio::spawn(mcp_lines(
+        d.addr,
+        SecretString::from("cap-ok".to_owned()),
+        server_in,
+        server_out,
+    ));
+    client
+        .write_all(b"{\"jsonrpc\":\"2.0\",\"id\":7,\"method\":\"tools/list\"}\n")
+        .await
+        .unwrap();
+    let mut lines = BufReader::new(&mut client).lines();
+    let line = tokio::time::timeout(Duration::from_secs(3), lines.next_line())
+        .await
+        .unwrap()
+        .unwrap()
+        .unwrap();
+    let v: Value = serde_json::from_str(&line).unwrap();
+    assert_eq!(v["id"], 7);
+    let names: Vec<&str> = v["result"]["tools"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|t| t["name"].as_str().unwrap())
+        .collect();
+    assert_eq!(names, ["ac_ledger_read", "ac_set_verdict"]);
+    drop(lines);
+    drop(client);
+    let done = tokio::time::timeout(Duration::from_secs(3), mcp)
+        .await
+        .unwrap();
+    assert!(done.unwrap().is_ok());
+    d.shutdown.cancel();
+}
+
+async fn mcp_satu_permintaan(addr: SocketAddr, token: &str, line: &str) -> Value {
+    let (mut client, daemon_side) = tokio::io::duplex(4096);
+    let (server_in, server_out) = tokio::io::split(daemon_side);
+    let mcp = tokio::spawn(mcp_lines(
+        addr,
+        SecretString::from(token.to_owned()),
+        server_in,
+        server_out,
+    ));
+    client
+        .write_all(format!("{line}\n").as_bytes())
+        .await
+        .unwrap();
+    let mut lines = BufReader::new(&mut client).lines();
+    let reply = tokio::time::timeout(Duration::from_secs(8), lines.next_line())
+        .await
+        .unwrap()
+        .unwrap()
+        .unwrap();
+    drop(lines);
+    drop(client);
+    let done = tokio::time::timeout(Duration::from_secs(3), mcp)
+        .await
+        .unwrap();
+    assert!(done.unwrap().is_ok());
+    serde_json::from_str(&reply).unwrap()
+}
+
+#[tokio::test]
+async fn mcp_stdio_dengan_token_salah_mengembalikan_error() {
+    let d = start().await;
+    let v = mcp_satu_permintaan(
+        d.addr,
+        "salah",
+        r#"{"jsonrpc":"2.0","id":1,"method":"tools/list"}"#,
+    )
+    .await;
+    assert_eq!(v["id"], 1);
+    assert!(v["error"]["message"].is_string(), "{v}");
+    d.shutdown.cancel();
+}
+
+#[tokio::test]
+async fn mcp_stdio_daemon_tidak_terjangkau_menjadi_error_tool_tanpa_hang() {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    drop(listener);
+    let v = mcp_satu_permintaan(
+        addr,
+        "cap-ok",
+        r#"{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"ac_ledger_read"}}"#,
+    )
+    .await;
+    assert_eq!(v["result"]["isError"], true, "{v}");
+    assert!(
+        v["result"]["content"][0]["text"]
+            .as_str()
+            .unwrap()
+            .contains("unreachable")
+    );
 }

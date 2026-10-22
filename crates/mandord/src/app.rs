@@ -31,6 +31,8 @@ pub struct App {
     pub tracker: TaskTracker,
     pub shutdown: CancellationToken,
     pub started: Instant,
+    /// Port WebSocket daemon; dipakai server MCP ledger milik agent.
+    pub rpc_port: u16,
     settings: RwLock<Option<LarkSettings>>,
     session: RwLock<Option<Arc<LarkSession>>>,
     /// Nama akun Lark yang login (token lama tidak menyimpannya).
@@ -51,6 +53,7 @@ impl App {
         events: broadcast::Sender<Notification>,
         tracker: TaskTracker,
         shutdown: CancellationToken,
+        rpc_port: u16,
     ) -> Self {
         Self {
             cfg,
@@ -59,6 +62,7 @@ impl App {
             tracker,
             shutdown,
             started: Instant::now(),
+            rpc_port,
             settings: RwLock::new(None),
             session: RwLock::new(None),
             my_name: RwLock::new(None),
@@ -117,6 +121,7 @@ impl App {
             events: &self.events,
             tracker: &self.tracker,
             parent: &self.shutdown,
+            rpc_port: self.rpc_port,
         };
         let s = session::start(&env, settings, me).await?;
         *self.session.write().await = Some(s);

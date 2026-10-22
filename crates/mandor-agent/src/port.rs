@@ -49,7 +49,21 @@ pub struct ClaudeConfig {
     /// Folder konfigurasi MCP per run (`~/.mandor/agent/mcp`), di luar folder
     /// kerja agent agar agent tidak bisa menambah server.
     pub mcp_dir: PathBuf,
+    /// Server MCP ledger milik daemon (`mandord mcp`); `None` di test lama.
+    pub ledger_server: Option<LedgerServer>,
 }
+
+/// Cara agent menjangkau server MCP ledger milik daemon (KTD-26).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LedgerServer {
+    /// Biner `mandord` absolut.
+    pub command: PathBuf,
+    /// Port WebSocket daemon di `127.0.0.1`.
+    pub port: u16,
+}
+
+/// Nama server MCP ledger milik daemon.
+pub const LEDGER_SERVER_NAME: &str = "mandor";
 
 /// Adapter agent Claude Code.
 #[derive(Debug, Clone)]
@@ -83,10 +97,13 @@ impl ClaudeAgent {
                 })
                 .collect()
         });
-        let servers: &[String] = req
+        let mut servers: Vec<String> = req
             .workspace
             .as_ref()
-            .map_or(&[], |ws| ws.mcp_servers.as_slice());
+            .map_or_else(Vec::new, |ws| ws.mcp_servers.clone());
+        if self.ledger_enabled(req) {
+            servers.push(LEDGER_SERVER_NAME.to_owned());
+        }
         let mut companions: Vec<PathBuf> = Vec::new();
         for c in repos.iter().flat_map(|r| r.companions.iter()) {
             if !companions.contains(c) {
@@ -135,9 +152,16 @@ impl ClaudeAgent {
         }
     }
 
-    /// Menyiapkan folder run workspace: `CLAUDE.md` folder induk disalin bila
-    /// belum ada, dan berkas MCP berisi hanya server terpilih ditulis di
-    /// [`ClaudeConfig::mcp_dir`] (0600). `None` bila bukan workspace atau tanpa server.
+    /// Giliran ini memakai server MCP ledger milik daemon.
+    fn ledger_enabled(&self, req: &AgentRequest) -> bool {
+        req.ledger.is_some() && self.cfg.ledger_server.is_some()
+    }
+
+    /// Menyiapkan konfigurasi MCP giliran: untuk run workspace, `CLAUDE.md`
+    /// folder induk disalin bila belum ada dan hanya server terpilih yang ikut;
+    /// untuk giliran dengan akses ledger, server `mandor` ditambahkan dengan
+    /// token giliran itu. Berkas ditulis di [`ClaudeConfig::mcp_dir`] (0600).
+    /// `None` bila tidak ada server.
     ///
     /// # Errors
     /// [`PortError::Storage`] bila berkas tidak bisa dibaca atau ditulis.
@@ -145,24 +169,41 @@ impl ClaudeAgent {
         &self,
         req: &AgentRequest,
     ) -> Result<Option<PathBuf>, PortError> {
-        let Some(ws) = &req.workspace else {
-            return Ok(None);
-        };
         let io = |e: std::io::Error| PortError::Storage(e.to_string());
-        let claude_md = ws.source.join("CLAUDE.md");
-        let target = req.worktree.join("CLAUDE.md");
-        if tokio::fs::try_exists(&claude_md).await.unwrap_or(false)
-            && !tokio::fs::try_exists(&target).await.unwrap_or(false)
-        {
-            tokio::fs::copy(&claude_md, &target).await.map_err(io)?;
+        let mut picked = serde_json::Map::new();
+        if let Some(ws) = &req.workspace {
+            let claude_md = ws.source.join("CLAUDE.md");
+            let target = req.worktree.join("CLAUDE.md");
+            if tokio::fs::try_exists(&claude_md).await.unwrap_or(false)
+                && !tokio::fs::try_exists(&target).await.unwrap_or(false)
+            {
+                tokio::fs::copy(&claude_md, &target).await.map_err(io)?;
+            }
+            if !ws.mcp_servers.is_empty() {
+                let raw = tokio::fs::read_to_string(ws.source.join(".mcp.json"))
+                    .await
+                    .map_err(io)?;
+                picked = selected_servers(&raw, &ws.mcp_servers)?;
+            }
         }
-        if ws.mcp_servers.is_empty() {
+        if let (Some(access), Some(server)) = (&req.ledger, &self.cfg.ledger_server) {
+            picked.insert(
+                LEDGER_SERVER_NAME.to_owned(),
+                serde_json::json!({
+                    "command": server.command.display().to_string(),
+                    "args": ["mcp"],
+                    "env": {
+                        "MANDOR_MCP_PORT": server.port.to_string(),
+                        "MANDOR_MCP_TOKEN": access.token.expose(),
+                    }
+                }),
+            );
+        }
+        if picked.is_empty() {
             return Ok(None);
         }
-        let raw = tokio::fs::read_to_string(ws.source.join(".mcp.json"))
-            .await
-            .map_err(io)?;
-        let config = selected_servers(&raw, &ws.mcp_servers)?;
+        let config = serde_json::to_string_pretty(&serde_json::json!({ "mcpServers": picked }))
+            .map_err(|e| PortError::Storage(e.to_string()))?;
         tokio::fs::create_dir_all(&self.cfg.mcp_dir)
             .await
             .map_err(io)?;
@@ -375,7 +416,10 @@ fn server_names(raw: &str) -> Result<Vec<String>, PortError> {
 }
 
 /// Isi `.mcp.json` dengan hanya server terpilih.
-fn selected_servers(raw: &str, servers: &[String]) -> Result<String, PortError> {
+fn selected_servers(
+    raw: &str,
+    servers: &[String],
+) -> Result<serde_json::Map<String, serde_json::Value>, PortError> {
     let parsed: serde_json::Value = serde_json::from_str(raw)
         .map_err(|e| PortError::Rejected(format!("invalid .mcp.json: {e}")))?;
     let mut picked = serde_json::Map::new();
@@ -389,8 +433,7 @@ fn selected_servers(raw: &str, servers: &[String]) -> Result<String, PortError> 
             }
         }
     }
-    serde_json::to_string_pretty(&serde_json::json!({ "mcpServers": picked }))
-        .map_err(|e| PortError::Storage(e.to_string()))
+    Ok(picked)
 }
 
 /// Nama berkas aman dari path folder kerja.
@@ -437,6 +480,7 @@ mod tests {
             message: "halo".to_owned(),
             workspace: None,
             plan_mode: false,
+            ledger: None,
         };
         let spec = agent.spec(&req, None);
         assert_eq!(spec.mcp_config, None);
@@ -457,6 +501,10 @@ mod tests {
             model: None,
             commit_model: "haiku".to_owned(),
             mcp_dir,
+            ledger_server: Some(LedgerServer {
+                command: "/opt/mandord".into(),
+                port: 41_234,
+            }),
         })
     }
 
@@ -495,6 +543,7 @@ mod tests {
                 mcp_servers: vec!["graft".to_owned()],
             }),
             plan_mode: false,
+            ledger: None,
         }
     }
 
@@ -533,6 +582,50 @@ mod tests {
             spec.operator_prompt
                 .contains("kelola-web/ (base branch main)")
         );
+    }
+
+    #[tokio::test]
+    async fn giliran_dengan_ledger_mendapat_server_mandor_tanpa_token_di_argv() {
+        use mandor_usecase::review::{CapabilityRole, LedgerAccess};
+        let dir = tempfile::tempdir().unwrap();
+        let agent = test_agent(dir.path().join("mcp"));
+        let mut req = workspace_req(dir.path().to_path_buf());
+        req.workspace.as_mut().unwrap().mcp_servers.clear();
+        req.plan_mode = true;
+        let token = mandor_usecase::review::CapabilityToken::for_test("tok-rahasia");
+        req.ledger = Some(LedgerAccess {
+            role: CapabilityRole::Design,
+            token,
+        });
+        let path = agent.prepare_workspace(&req).await.unwrap().unwrap();
+        let raw = std::fs::read_to_string(&path).unwrap();
+        let cfg: serde_json::Value = serde_json::from_str(&raw).unwrap();
+        let server = &cfg["mcpServers"]["mandor"];
+        assert_eq!(server["command"], "/opt/mandord");
+        assert_eq!(server["args"], serde_json::json!(["mcp"]));
+        assert_eq!(server["env"]["MANDOR_MCP_PORT"], "41234");
+        assert_eq!(server["env"]["MANDOR_MCP_TOKEN"], "tok-rahasia");
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mode = std::fs::metadata(&path).unwrap().permissions().mode();
+            assert_eq!(mode & 0o777, 0o600);
+        }
+        let spec = agent.spec(&req, Some(path));
+        assert_eq!(spec.hook_command, "/opt/mandord hook --mcp mandor --plan");
+        assert!(spec.allowed.contains(&"mcp__mandor".to_owned()));
+        assert!(spec.allowed.contains(&"ToolSearch".to_owned()));
+        let argv = format!("{:?}", spec.allowed);
+        assert!(!argv.contains("tok-rahasia"));
+    }
+
+    #[tokio::test]
+    async fn run_satu_repo_tanpa_ledger_tidak_membuat_berkas_mcp() {
+        let dir = tempfile::tempdir().unwrap();
+        let agent = test_agent(dir.path().join("mcp"));
+        let mut req = workspace_req(dir.path().to_path_buf());
+        req.workspace = None;
+        assert_eq!(agent.prepare_workspace(&req).await.unwrap(), None);
     }
 
     #[tokio::test]

@@ -761,6 +761,19 @@ impl AppDispatch {
 }
 
 impl Dispatch for AppDispatch {
+    async fn verify_capability(&self, token: &str) -> Option<mandor_api::CapabilityScope> {
+        self.capability(token).await
+    }
+
+    async fn call_scoped(
+        &self,
+        scope: &mandor_api::CapabilityScope,
+        name: &str,
+        v: Value,
+    ) -> Result<Value, RpcError> {
+        self.ledger_tool_call(scope, name, v).await
+    }
+
     async fn call(&self, name: &str, v: Value) -> Result<Value, RpcError> {
         match name {
             method::STATUS => self.status().await,

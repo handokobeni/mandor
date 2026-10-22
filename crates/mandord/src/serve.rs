@@ -63,6 +63,7 @@ pub async fn run(cfg: Config) -> anyhow::Result<()> {
         events.clone(),
         tracker.clone(),
         shutdown.clone(),
+        port,
     ));
     let booting = Arc::clone(&app);
     tracker.spawn(async move { booting.boot().await });

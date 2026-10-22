@@ -132,6 +132,7 @@ impl<D: Deps> RunService<D> {
         end: TurnEnd,
     ) -> Result<(), RunError> {
         self.clear_stopper(run_id, generation);
+        self.revoke_capabilities(run_id);
         let mut run = self.load(run_id).await?;
         if run.generation != generation {
             return Ok(());

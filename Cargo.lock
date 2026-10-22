@@ -1188,6 +1188,7 @@ version = "0.1.0"
 dependencies = [
  "mandor-domain",
  "pretty_assertions",
+ "secrecy",
  "thiserror",
  "tokio",
  "tracing",

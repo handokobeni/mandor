@@ -7,7 +7,7 @@ use std::time::{Duration, Instant};
 
 use anyhow::Context;
 use mandor_agent::claude::guardrails::{agent_env, prepare_agent_home};
-use mandor_agent::{ClaudeAgent, ClaudeConfig, ClaudePrompts};
+use mandor_agent::{ClaudeAgent, ClaudeConfig, ClaudePrompts, LedgerServer};
 use mandor_git::{Git, GitAdapter, GitConfig};
 use mandor_lark::{FileTokenStore, LarkClient, LarkConfig, LarkGateway, TableRef};
 use mandor_protocol::{Notification, SyncStatusView, event};
@@ -67,6 +67,8 @@ pub struct SessionEnv<'a> {
     pub events: &'a broadcast::Sender<Notification>,
     pub tracker: &'a TaskTracker,
     pub parent: &'a CancellationToken,
+    /// Port WebSocket daemon untuk server MCP ledger (`mandord mcp`).
+    pub rpc_port: u16,
 }
 
 /// Klien Lark dari pengaturan.
@@ -109,7 +111,7 @@ pub async fn start(
     }
     let scope = format!("{}/{}", settings.app_token, settings.table_id);
     let tasks = TaskStore::new(env.store.clone(), scope);
-    let agent = build_agent(env.cfg).await?;
+    let agent = build_agent(env.cfg, env.rpc_port).await?;
     let git = Git::new(GitConfig::new(env.cfg.workspaces_dir()));
 
     let sync = Arc::new(SyncService::<Prod>::new(
@@ -169,7 +171,7 @@ fn warn_err<T, E: std::fmt::Display>(r: Result<T, E>, msg: &str) -> Option<T> {
 }
 
 /// Adapter agent dengan environment tanpa secret dan config git/gh terisolasi.
-async fn build_agent(cfg: &Config) -> anyhow::Result<ClaudeAgent> {
+async fn build_agent(cfg: &Config, rpc_port: u16) -> anyhow::Result<ClaudeAgent> {
     let login_env = login_env(cfg).await;
     let agent_home = prepare_agent_home(&cfg.home)
         .await
@@ -181,6 +183,10 @@ async fn build_agent(cfg: &Config) -> anyhow::Result<ClaudeAgent> {
         model: None,
         commit_model: "haiku".to_owned(),
         mcp_dir: cfg.home.join("agent").join("mcp"),
+        ledger_server: Some(LedgerServer {
+            command: cfg.exe.clone(),
+            port: rpc_port,
+        }),
     }))
 }
 

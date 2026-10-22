@@ -57,6 +57,8 @@ pub struct RunService<D: Deps> {
     /// Waktu sinkron AC terakhir yang berhasil per run (dibangun ulang saat
     /// refresh berikutnya setelah restart).
     pub(crate) ledger_synced: Mutex<HashMap<String, i64>>,
+    /// Token kapabilitas tool ledger yang berlaku (KTD-26).
+    pub(crate) capabilities: Arc<Mutex<crate::review::capability::Issued>>,
     /// Balasan komentar terakhir yang diambil (dibangun ulang tiap poll).
     pub(crate) replies: Mutex<Vec<mandor_domain::Reply>>,
     /// Kursor yang terakhir diantrekan per record, agar tidak diantrekan berulang.
@@ -103,6 +105,7 @@ impl<D: Deps> RunService<D> {
             prompts: ports.prompts,
             reviews: ports.reviews,
             ledger_synced: Mutex::new(HashMap::new()),
+            capabilities: crate::review::capability::empty(),
             replies: Mutex::new(Vec::new()),
             cursor_sent: Mutex::new(HashMap::new()),
             stoppers: Mutex::new(HashMap::new()),

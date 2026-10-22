@@ -5,6 +5,7 @@
 //! - `connect`: relay stdio ke daemon, menjalankan daemon terlepas bila belum ada.
 //! - `token`: mencetak token `hello` (menjalankan daemon bila belum ada); dipakai
 //!   client yang tidak bisa membaca `daemon.json` langsung (mode WSL).
+//! - `mcp`: server MCP ledger (stdio) untuk satu giliran agent.
 //! - `hook`: hook `PreToolUse` Claude Code untuk agent; fail-closed (exit 2).
 
 mod app;
@@ -13,6 +14,7 @@ mod connect;
 mod discovery;
 mod dispatch;
 mod hook;
+mod mcp;
 mod prereq;
 mod prod;
 mod serve;
@@ -53,13 +55,14 @@ async fn run(args: Vec<String>) -> ExitCode {
         None | Some("serve") => serve::run(cfg).await,
         Some("connect") => connect::run(&cfg).await,
         Some("token") => connect::print_token(&cfg).await,
+        Some("mcp") => mcp::run(&cfg).await,
         Some("--version") => {
             tracing_subscriber::fmt().init();
             tracing::info!(version = VERSION, "mandord");
             Ok(())
         }
         Some(other) => Err(anyhow::anyhow!(
-            "unknown subcommand: {other} (use serve, connect, token, or hook)"
+            "unknown subcommand: {other} (use serve, connect, token, mcp, or hook)"
         )),
     };
     match result {

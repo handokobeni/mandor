@@ -9,6 +9,7 @@ description = "Orkestrasi mandor dan trait port (bundel Deps)."
 
 [dependencies]
 mandor-domain.workspace = true
+secrecy.workspace = true
 thiserror.workspace = true
 tracing.workspace = true
 

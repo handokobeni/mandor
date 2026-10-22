@@ -26,6 +26,14 @@ pub mod method {
     pub const WAITING_FIX_QUIET_SET: &str = "waiting_fix.quiet.set";
     /// Buku AC run (`RunRef` → `AcLedgerView`), di-refresh dari tracker dulu.
     pub const LEDGER_GET: &str = "ledger.get";
+    /// Koneksi kapabilitas (`mandord mcp`): lingkup token (`LedgerToolInfo`).
+    pub const LEDGER_TOOL_INFO: &str = "ledger.tool.info";
+    /// Koneksi kapabilitas: buku AC (`Vec<AcRowView>`).
+    pub const LEDGER_TOOL_READ: &str = "ledger.tool.read";
+    /// Koneksi kapabilitas, peran design: `LedgerToolSetDesign`.
+    pub const LEDGER_TOOL_SET_DESIGN: &str = "ledger.tool.set_design";
+    /// Koneksi kapabilitas, peran verdict: `LedgerToolSetVerdict`.
+    pub const LEDGER_TOOL_SET_VERDICT: &str = "ledger.tool.set_verdict";
     pub const LARK_LOGIN_BEGIN: &str = "lark.login.begin";
     pub const LARK_LOGIN_COMPLETE: &str = "lark.login.complete";
     pub const LARK_LOGOUT: &str = "lark.logout";

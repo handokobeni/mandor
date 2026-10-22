@@ -569,3 +569,31 @@ pub struct AcLedgerView {
     /// Alasan refresh dari tracker gagal; `rows` adalah data terakhir.
     pub sync_error: Option<String>,
 }
+
+/// Lingkup koneksi kapabilitas.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct LedgerToolInfo {
+    pub run_id: String,
+    /// `design` atau `verdict`.
+    pub role: String,
+}
+
+/// Parameter `ledger.tool.set_design`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct LedgerToolSetDesign {
+    pub ac_id: String,
+    /// `in_design`, `partly`, `missing`, `conflicts`, atau `not_checked`.
+    pub design: String,
+    #[serde(default)]
+    pub note: Option<String>,
+}
+
+/// Parameter `ledger.tool.set_verdict`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct LedgerToolSetVerdict {
+    pub ac_id: String,
+    /// `pass`, `fail`, atau `cant_verify`.
+    pub verdict: String,
+    #[serde(default)]
+    pub evidence: Option<String>,
+}

@@ -22,6 +22,12 @@ pub struct Config {
     pub shell: PathBuf,
     /// Perintah hook absolut: biner `mandord` ini ditambah ` hook`.
     pub hook_command: String,
+    /// Biner `mandord` ini (server MCP ledger untuk agent).
+    pub exe: PathBuf,
+    /// Subcommand `mcp`: port daemon (`MANDOR_MCP_PORT`).
+    pub mcp_port: Option<u16>,
+    /// Subcommand `mcp`: token kapabilitas giliran (`MANDOR_MCP_TOKEN`).
+    pub mcp_token: Option<secrecy::SecretString>,
     /// Environment dasar (PATH, HOME, bahasa) bila env login shell gagal ditangkap.
     pub base_env: Vec<(String, String)>,
 }
@@ -51,6 +57,13 @@ impl Config {
             .map_or_else(|| PathBuf::from("/bin/bash"), PathBuf::from);
         let exe = std::env::current_exe().context("locating the mandord binary")?;
         let hook_command = format!("{} hook", shell_quote(&exe.display().to_string()));
+        let mcp_port = std::env::var("MANDOR_MCP_PORT")
+            .ok()
+            .and_then(|p| p.parse().ok());
+        let mcp_token = std::env::var("MANDOR_MCP_TOKEN")
+            .ok()
+            .filter(|t| !t.is_empty())
+            .map(secrecy::SecretString::from);
         let base_env = ["PATH", "HOME", "USER", "LANG", "LC_ALL", "TERM", "TMPDIR"]
             .iter()
             .filter_map(|k| std::env::var(k).ok().map(|v| ((*k).to_owned(), v)))
@@ -63,6 +76,9 @@ impl Config {
             claude_bin,
             shell,
             hook_command,
+            exe,
+            mcp_port,
+            mcp_token,
             base_env,
         })
     }

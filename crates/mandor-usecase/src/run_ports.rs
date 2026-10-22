@@ -199,6 +199,8 @@ pub struct AgentRequest {
     pub workspace: Option<AgentWorkspace>,
     /// Giliran plan: agent hanya membaca dan menulis plan di pesan akhirnya.
     pub plan_mode: bool,
+    /// Tool ledger milik daemon untuk giliran ini (KTD-26).
+    pub ledger: Option<crate::review::LedgerAccess>,
 }
 
 /// Konteks agent untuk run workspace.

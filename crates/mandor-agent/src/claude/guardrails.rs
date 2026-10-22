@@ -30,6 +30,8 @@ pub fn default_allowed() -> Vec<String> {
         // Skill plugin hanya memuat instruksi; tool yang dipakai skill tetap
         // melewati allowlist dan hook.
         "Skill",
+        // Memuat skema tool MCP yang ditunda; hanya baca (spike A1).
+        "ToolSearch",
         "Bash(git status*)",
         "Bash(git diff*)",
         "Bash(git log*)",

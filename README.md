@@ -99,6 +99,7 @@ Agent yang sedang berjalan ikut berhenti saat daemon di-restart. Run-nya ditanda
 ```bash
 make check        # fmt, clippy pedantic, cargo deny, cek sqlx offline, test + coverage
 make red-check    # bukti lapisan crate ditegakkan
+make clean-build  # bersihkan folder build daemon dan Tauri bila sudah menumpuk
 cd apps/desktop && bun run check && bun run test
 cd apps/desktop/src-tauri && cargo clippy --all-targets -- -D warnings && cargo test
 ```

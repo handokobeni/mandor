@@ -10,12 +10,13 @@ use std::sync::Arc;
 use super::{RunError, RunService};
 use crate::ports::Deps;
 use mandor_domain::Task;
+use mandor_domain::push_gate::pr_summary;
 
 use crate::hash::fnv1a_hex;
 
 use crate::run_ports::{
-    AgentPort, AgentRequest, AgentWorkspace, ChatItem, GitPort, PrContext, RepoInfo, Repos,
-    RunPhase, RunRecord, RunStore, SessionRef, WorkChanges,
+    AgentPort, AgentRequest, AgentWorkspace, ChatItem, GitPort, LedgerStore, PrContext, RepoInfo,
+    Repos, RunPhase, RunRecord, RunStore, SessionRef, WorkChanges,
 };
 
 /// Batas diff untuk pembuat pesan commit.
@@ -391,15 +392,29 @@ impl<D: Deps> RunService<D> {
             self.agent.pr_description(&m.worktree, &ctx).await
         }
         .await;
+        // Ringkasan per AC (R31): label, status, alasan, dan pemutus saja (R33).
+        let summary = match self.reviews.ac_rows(&run.id).await {
+            Ok(rows) if !rows.is_empty() => {
+                let at = self
+                    .synced_at(&run.id)
+                    .map(crate::review::settings::utc_minutes);
+                format!("\n\n{}", pr_summary(&rows, at.as_deref()).trim_end())
+            }
+            Ok(_) => String::new(),
+            Err(e) => {
+                tracing::warn!(error = %e, "buku AC tidak terbaca; PR tanpa ringkasan AC");
+                String::new()
+            }
+        };
         match generated {
             Ok(text) if !text.trim().is_empty() => {
                 let text: String = text.trim().chars().take(PR_BODY_MAX).collect();
-                format!("{header}\n\n{text}\n\n---\n{footer}")
+                format!("{header}\n\n{text}{summary}\n\n---\n{footer}")
             }
-            Ok(_) => format!("{header}\n\n{footer}"),
+            Ok(_) => format!("{header}{summary}\n\n{footer}"),
             Err(e) => {
                 tracing::warn!(error = %e, "deskripsi PR otomatis gagal; memakai badan minimal");
-                format!("{header}\n\n{footer}")
+                format!("{header}{summary}\n\n{footer}")
             }
         }
     }

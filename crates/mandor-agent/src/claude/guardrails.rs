@@ -15,6 +15,45 @@ const HOOK_INPUT_MAX: u64 = 1024 * 1024;
 /// Kode keluar hook yang memblokir tool call.
 pub const HOOK_BLOCK: u8 = 2;
 
+/// Allowlist sesi reviewer: membaca, git baca, dan perintah test; tanpa
+/// interpreter umum maupun alat yang menulis berkas (KTD-29). Perintah test
+/// khusus repo datang dari allowlist repo.
+#[must_use]
+pub fn review_allowed() -> Vec<String> {
+    [
+        "Read",
+        "Glob",
+        "Grep",
+        "TodoWrite",
+        "Skill",
+        "ToolSearch",
+        "Bash(git status*)",
+        "Bash(git diff*)",
+        "Bash(git log*)",
+        "Bash(git show*)",
+        "Bash(git rev-parse*)",
+        "Bash(cargo test*)",
+        "Bash(cargo nextest*)",
+        "Bash(make test*)",
+        "Bash(npm test*)",
+        "Bash(npm run test*)",
+        "Bash(bun test*)",
+        "Bash(bun run test*)",
+        "Bash(pnpm test*)",
+        "Bash(pnpm run test*)",
+        "Bash(yarn test*)",
+        "Bash(go test*)",
+        "Bash(pytest*)",
+        "Bash(python3 -m pytest*)",
+        "Bash(ls*)",
+        "Bash(cd *)",
+        "Bash(pwd)",
+    ]
+    .into_iter()
+    .map(str::to_owned)
+    .collect()
+}
+
 /// Allowlist default per repo: test, build, lint, dan git baca.
 #[must_use]
 pub fn default_allowed() -> Vec<String> {

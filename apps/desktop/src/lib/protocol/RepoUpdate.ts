@@ -8,4 +8,8 @@ export type RepoUpdate = { id: string, gh_profile: string | null, companions: Ar
 /**
  * Pengaturan run app; tidak diisi = tidak berubah.
  */
-app?: RepoAppView, };
+app?: RepoAppView, 
+/**
+ * `block`, `warn`, atau `inherit` (hapus override); tidak diisi = tidak berubah.
+ */
+gate_mode?: string, };

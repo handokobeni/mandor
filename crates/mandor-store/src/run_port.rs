@@ -2,6 +2,7 @@
 
 use std::path::PathBuf;
 
+use mandor_domain::GateMode;
 use mandor_domain::RunState;
 use mandor_domain::app_run::{AppSettings, TestMode};
 use mandor_usecase::PortError;
@@ -89,6 +90,9 @@ struct RepoSettings {
     extra_allowed: Vec<String>,
     #[serde(default)]
     app: StoredApp,
+    /// Override mode gerbang (`block` | `warn`).
+    #[serde(default)]
+    gate_mode: Option<String>,
 }
 
 /// Bentuk simpan [`AppSettings`] di `settings_json.app` (KTD-37).
@@ -459,10 +463,15 @@ impl Repos for ReposStore {
         match self.store.get_workspace(id).await {
             Ok(w) => {
                 let settings = self.store.workspace_settings(&w.id).await?;
-                let browser_tests = serde_json::from_str::<serde_json::Value>(&settings)
-                    .ok()
+                let parsed = serde_json::from_str::<serde_json::Value>(&settings).ok();
+                let browser_tests = parsed
+                    .as_ref()
                     .and_then(|v| v.get("browser_tests").and_then(serde_json::Value::as_bool))
                     .unwrap_or(true);
+                let gate_mode = parsed
+                    .as_ref()
+                    .and_then(|v| v.get("gate_mode").and_then(serde_json::Value::as_str))
+                    .and_then(GateMode::parse);
                 Ok(Some(WorkspaceInfo {
                     id: w.id,
                     name: w.name,
@@ -470,6 +479,7 @@ impl Repos for ReposStore {
                     repo_ids: w.repo_ids,
                     mcp_servers: w.mcp_servers,
                     browser_tests,
+                    gate_mode,
                 }))
             }
             Err(StoreError::NotFound) => Ok(None),
@@ -494,6 +504,7 @@ impl Repos for ReposStore {
             trusted_reviewers: settings.trusted_reviewers,
             extra_allowed: settings.extra_allowed,
             app,
+            gate_mode: settings.gate_mode.as_deref().and_then(GateMode::parse),
         }))
     }
 }

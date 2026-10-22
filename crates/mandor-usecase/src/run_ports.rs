@@ -23,6 +23,8 @@ pub struct RepoInfo {
     pub extra_allowed: Vec<String>,
     /// Run app dan cara uji reviewer (KTD-36, KTD-37).
     pub app: mandor_domain::app_run::AppSettings,
+    /// Override mode gerbang repo (KTD-37); `None` = ikut workspace/bawaan.
+    pub gate_mode: Option<mandor_domain::GateMode>,
 }
 
 /// Daftar repo yang terhubung.
@@ -47,6 +49,8 @@ pub struct WorkspaceInfo {
     pub mcp_servers: Vec<String>,
     /// Uji browser oleh reviewer untuk run workspace ini (KTD-37).
     pub browser_tests: bool,
+    /// Mode gerbang workspace; `None` = bawaan Block.
+    pub gate_mode: Option<mandor_domain::GateMode>,
 }
 
 /// Perubahan di worktree terhadap branch remote.

@@ -4,6 +4,7 @@ pub(crate) mod capability;
 mod design;
 mod ledger;
 pub(crate) mod service;
+pub mod settings;
 mod snapshot;
 
 pub use capability::{

@@ -431,6 +431,7 @@ async fn port_git_siklus_worktree_perubahan_commit_push() {
         trusted_reviewers: vec![],
         extra_allowed: vec![],
         app: mandor_domain::app_run::AppSettings::default(),
+        gate_mode: None,
     };
     let branch = "mandor/pgs-1-uji";
     let wt = port.prepare_worktree(&repo, branch, None).await.unwrap();
@@ -484,6 +485,7 @@ async fn worktree_workspace_dikumpulkan_di_folder_run_dan_folder_dihapus_saat_tu
         trusted_reviewers: vec![],
         extra_allowed: vec![],
         app: mandor_domain::app_run::AppSettings::default(),
+        gate_mode: None,
     };
     let wt = port
         .prepare_worktree(&repo, "mandor/pgs-9", Some("kelola-v2-mandor-pgs-9"))

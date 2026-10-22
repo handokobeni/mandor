@@ -127,6 +127,18 @@ impl<D: Deps> RunService<D> {
         Ok(record)
     }
 
+    /// Versi ter-box dari [`Self::start_review`] untuk pemanggil di dalam akhir
+    /// giliran (memutus siklus tipe async driver → review → giliran baru).
+    pub(crate) fn start_review_boxed<'a>(
+        self: &'a Arc<Self>,
+        run_id: &'a str,
+        trigger: ReviewTrigger,
+    ) -> std::pin::Pin<
+        Box<dyn std::future::Future<Output = Result<ReviewRecord, RunError>> + Send + 'a>,
+    > {
+        Box::pin(self.start_review(run_id, trigger, None))
+    }
+
     async fn spawn_review(
         self: &Arc<Self>,
         run: &mut RunRecord,
@@ -262,6 +274,15 @@ impl<D: Deps> RunService<D> {
         self.runs
             .append(&run.id, &ChatItem::System(summary.clone()), self.now())
             .await?;
+        if record
+            .as_ref()
+            .is_some_and(|r| r.trigger == ReviewTrigger::AutomaticFix)
+        {
+            let failure = record.as_ref().and_then(|r| r.error.clone());
+            return self
+                .after_fix_review(run, status == ReviewStatus::Finished, failure)
+                .await;
+        }
         run.state = RunState::AwaitingDev;
         if !run.queue.is_empty() {
             let next = run.queue.remove(0);

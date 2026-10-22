@@ -3,4 +3,28 @@
 /**
  * Hasil `runs.publish`.
  */
-export type PublishResult = { pr_url: string, };
+export type PublishResult = { 
+/**
+ * `published`, `review_started`, `blocked`, atau `needs_confirmation`.
+ */
+outcome: string, pr_url: string | null, 
+/**
+ * Label AC gagal (Blocked).
+ */
+failed: Array<string>, 
+/**
+ * Label AC Can't verify yang butuh konfirmasi (`needs_confirmation`).
+ */
+unverified: Array<string>, 
+/**
+ * Label AC Fail/Can't verify yang dibiarkan (mode peringatan).
+ */
+warnings: Array<string>, 
+/**
+ * AC tidak bisa disegarkan dari tracker.
+ */
+sync_warning: string | null, 
+/**
+ * Review yang dimulai (`review_started`).
+ */
+review_id: string | null, };

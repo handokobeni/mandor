@@ -143,6 +143,9 @@ pub fn classify_review(call: &ToolCall, state: &ReviewState, allowed_mcp: &[Stri
                 "`git {sub}` changes the worktree; the review is read-only"
             ));
         }
+        if let Some(what) = writes_files(cmd) {
+            return deny(&format!("{what} writes files; the review is read-only"));
+        }
     }
     match classify_planning(call, allowed_mcp) {
         Verdict::Deny(reason) if reason.contains("planning phase") => {
@@ -174,6 +177,67 @@ fn browser_verdict(call: &ToolCall, kind: Kind, state: &ReviewState) -> Verdict 
         ),
         _ => Verdict::Allow,
     }
+}
+
+/// Program yang menulis atau menghapus berkas.
+const WRITING_PROGRAMS: &[&str] = &[
+    "rm", "mv", "cp", "mkdir", "touch", "tee", "chmod", "chown", "ln", "dd", "truncate", "rmdir",
+    "install", "patch",
+];
+
+/// Primitif penulis berkas di perintah shell sesi reviewer: redirection ke
+/// berkas (selain `/dev/null` dan duplikasi fd), program penulis, `sed -i`,
+/// dan `find -delete`/`-exec`.
+fn writes_files(cmd: &str) -> Option<String> {
+    if redirects_to_file(cmd) {
+        return Some("Output redirection".to_owned());
+    }
+    let words = crate::hook::words(cmd);
+    for (i, w) in words.iter().enumerate() {
+        let prog = crate::hook::program_name(w);
+        if WRITING_PROGRAMS.contains(&prog) {
+            return Some(format!("`{prog}`"));
+        }
+        let rest = &words[i + 1..];
+        if prog == "sed"
+            && rest
+                .iter()
+                .any(|a| a.starts_with("-i") || a == "--in-place")
+        {
+            return Some("`sed -i`".to_owned());
+        }
+        if prog == "find"
+            && rest
+                .iter()
+                .any(|a| matches!(a.as_str(), "-delete" | "-exec" | "-execdir" | "-fprint"))
+        {
+            return Some("`find` with an action".to_owned());
+        }
+    }
+    None
+}
+
+/// `>` atau `>>` ke berkas; `2>&1` dan `>/dev/null` diizinkan.
+fn redirects_to_file(cmd: &str) -> bool {
+    let bytes = cmd.as_bytes();
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'>' {
+            let mut j = i + 1;
+            if bytes.get(j) == Some(&b'>') {
+                j += 1;
+            }
+            let target = cmd[j..].trim_start();
+            let ok = target.starts_with('&') || target.starts_with("/dev/null");
+            if !ok {
+                return true;
+            }
+            i = j;
+        } else {
+            i += 1;
+        }
+    }
+    false
 }
 
 /// Opsi git yang bisa menjalankan perintah lain atau menulis berkas.
@@ -566,10 +630,29 @@ mod tests {
             );
         }
         for cmd in [
+            "echo x > src/a.rs",
+            "cat a >> b",
+            "pnpm test | tee out.txt",
+            "rm -rf src",
+            "sed -i 's/a/b/' x.rs",
+            "find . -name '*.rs' -delete",
+            "find . -exec touch {} ;",
+            "mkdir tmp",
+        ] {
+            assert!(
+                matches!(classify_review(&bash(cmd), &s, &[]), Verdict::Deny(_)),
+                "{cmd}"
+            );
+        }
+        for cmd in [
             "cargo test",
             "git diff main",
             "git -C web log -5",
             "pnpm test",
+            "cargo test 2>&1",
+            "pnpm test > /dev/null 2>&1",
+            "find . -name '*.rs'",
+            "sed -n 1,5p a.rs",
         ] {
             assert_eq!(
                 classify_review(&bash(cmd), &s, &[]),

@@ -7,12 +7,13 @@ use mandor_api::Dispatch;
 use mandor_protocol::{
     ApprovePlanParams, BoardView, CommentView, DirEntryView, DirListingView, DirQuery, ErrorCode,
     FileChangeView, FileDiffParams, LarkSettingsInput, LoginComplete, MessageView, MessagesQuery,
-    NoticeView, NotificationsRead, PeopleQuery, PersonView, PublishResult, QuietPeriodSet,
-    RecordRef, RepoAdd, RepoCandidateView, RepoRef, RepoUpdate, RepoView, RpcError, RunRef,
-    SendParams, SendResult, SkillView, StartFixParams, StartParams, StartPlanning,
+    NoticeView, NotificationsRead, PeopleQuery, PersonView, PublishParams, PublishResult,
+    QuietPeriodSet, RecordRef, RepoAdd, RepoCandidateView, RepoRef, RepoUpdate, RepoView, RpcError,
+    RunRef, SendParams, SendResult, SkillView, StartFixParams, StartParams, StartPlanning,
     StartProgressView, StatusResult, TakeoverParams, event, method,
 };
 use mandor_store::{NewRepo, StoreError};
+use mandor_usecase::run::PublishOutcome;
 use mandor_usecase::{
     Planning, PortError, RunError, SendOutcome, StartStep, StartTarget, SyncError,
 };
@@ -436,11 +437,22 @@ impl AppDispatch {
             Some(view) => app_run::app_settings_from(view)?,
             None => mandor_store::app_settings_of(&current.settings),
         };
+        let gate_mode = match p.gate_mode.as_deref() {
+            None => current
+                .settings
+                .get("gate_mode")
+                .and_then(Value::as_str)
+                .map(str::to_owned),
+            Some("inherit") => None,
+            Some(m) if mandor_domain::GateMode::parse(m).is_some() => Some(m.to_owned()),
+            Some(_) => return Err(rejected("gate mode must be block, warn, or inherit")),
+        };
         let settings = json!({
             "companions": p.companions,
             "trusted_reviewers": p.trusted_reviewers,
             "extra_allowed": p.extra_allowed,
             "app": mandor_store::app_settings_json(&app),
+            "gate_mode": gate_mode,
         });
         self.app
             .store
@@ -549,6 +561,56 @@ impl AppDispatch {
     }
 
     /// Start dengan event `start.progress` per langkah untuk dialog Start.
+    /// Push & PR dengan gerbang AC; keputusan dev dicatat atas nama akun Lark
+    /// yang login (KTD-35).
+    async fn publish(&self, s: &LarkSession, p: PublishParams) -> Result<Value, RpcError> {
+        let decision = mandor_domain::GateDecision {
+            confirmed: p.confirmed.unwrap_or_default(),
+            push_anyway_reason: p.push_anyway_reason.filter(|r| !r.trim().is_empty()),
+            decided_by: self.app.lark_status().await.name,
+        };
+        let out = s
+            .runs
+            .publish_gated(&p.run_id, &decision)
+            .await
+            .map_err(run_error)?;
+        let mut view = PublishResult {
+            outcome: String::new(),
+            pr_url: None,
+            failed: Vec::new(),
+            unverified: Vec::new(),
+            warnings: Vec::new(),
+            sync_warning: None,
+            review_id: None,
+        };
+        match out {
+            PublishOutcome::Published {
+                url,
+                warnings,
+                sync_warning,
+            } => {
+                s.poke.notify_one();
+                "published".clone_into(&mut view.outcome);
+                view.pr_url = Some(url);
+                view.warnings = warnings;
+                view.sync_warning = sync_warning;
+            }
+            PublishOutcome::ReviewStarted { review_id } => {
+                "review_started".clone_into(&mut view.outcome);
+                view.review_id = Some(review_id);
+            }
+            PublishOutcome::Blocked { failed } => {
+                "blocked".clone_into(&mut view.outcome);
+                view.failed = failed;
+            }
+            PublishOutcome::NeedsConfirmation { unverified } => {
+                "needs_confirmation".clone_into(&mut view.outcome);
+                view.unverified = unverified;
+            }
+        }
+        ok(&view)
+    }
+
     async fn start(&self, s: &LarkSession, p: StartParams) -> Result<Value, RpcError> {
         let events = self.app.events.clone();
         let record_id = p.record_id.clone();
@@ -651,12 +713,7 @@ impl AppDispatch {
                 runs.stop(&p.run_id).await.map_err(run_error)?;
                 ok(&json!({}))
             }
-            method::RUNS_PUBLISH => {
-                let p: RunRef = params(v)?;
-                let url = runs.publish(&p.run_id).await.map_err(run_error)?;
-                s.poke.notify_one();
-                ok(&PublishResult { pr_url: url })
-            }
+            method::RUNS_PUBLISH => self.publish(&s, params(v)?).await,
             method::RUNS_RESUME => {
                 let p: SendParams = params(v)?;
                 let text = Some(p.text.as_str()).filter(|t| !t.trim().is_empty());
@@ -754,6 +811,11 @@ fn repo_view(r: mandor_store::Repo) -> RepoView {
         trusted_reviewers,
         extra_allowed,
         app: app_run::repo_app_view(&app),
+        gate_mode: r
+            .settings
+            .get("gate_mode")
+            .and_then(Value::as_str)
+            .map(str::to_owned),
     }
 }
 

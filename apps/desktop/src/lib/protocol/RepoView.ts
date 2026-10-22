@@ -8,4 +8,8 @@ export type RepoView = { id: string, path: string, default_branch: string | null
 /**
  * Run app dan cara uji reviewer (KTD-37).
  */
-app: RepoAppView, };
+app: RepoAppView, 
+/**
+ * Override mode gerbang: `block`, `warn`, atau `null` (ikut workspace).
+ */
+gate_mode: string | null, };

@@ -638,6 +638,7 @@ impl Default for FakeRepos {
                 trusted_reviewers: vec!["ou_qa".to_owned()],
                 extra_allowed: vec![],
                 app: mandor_domain::app_run::AppSettings::default(),
+                gate_mode: None,
             }])),
         }
     }

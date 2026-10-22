@@ -83,6 +83,7 @@ pub mod method {
     pub const RUNS_SEND: &str = "runs.send";
     pub const RUNS_SEND_NOW: &str = "runs.send_now";
     pub const RUNS_STOP: &str = "runs.stop";
+    /// `PublishParams` → `PublishResult` (gerbang AC, KTD-35).
     pub const RUNS_PUBLISH: &str = "runs.publish";
     pub const RUNS_RESUME: &str = "runs.resume";
     pub const RUNS_START_FIX: &str = "runs.start_fix";
@@ -252,6 +253,7 @@ fn review_bindings() -> Result<Vec<(&'static str, String)>, String> {
             "ApprovePlanParams.ts",
             ApprovePlanParams::export_to_string(&cfg),
         )?,
+        one("PublishParams.ts", PublishParams::export_to_string(&cfg))?,
         one(
             "DesignSourceView.ts",
             DesignSourceView::export_to_string(&cfg),

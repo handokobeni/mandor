@@ -8,17 +8,19 @@ use std::collections::HashSet;
 use std::sync::{Arc, PoisonError};
 
 use mandor_domain::cursor::newer_than;
+use mandor_domain::push_gate::evaluate;
 use mandor_domain::run::touches_sensitive_path;
 use mandor_domain::trust::is_trusted;
 use mandor_domain::{AppField, Cursor, Reply, RunState, Task, TaskStatus, WriteOp};
+use mandor_domain::{GateDecision, GateOutcome};
 
 use super::feedback_qa::feedback_qa_replies;
 use crate::notify::notice;
 use crate::ports::{Clock, Deps, LarkTasks, TaskCache};
 use crate::run::{RunError, RunService, TurnEnd};
 use crate::run_ports::{
-    FixContext, GitPort, Journal, NoticeKind, Notifier, Prompts, RepoInfo, RunRecord, RunStore,
-    SessionRef,
+    FixContext, GitPort, Journal, LedgerStore, NoticeKind, Notifier, Prompts, RepoInfo,
+    ReviewTrigger, RunRecord, RunStore, SessionRef,
 };
 
 /// Jeda tenang default sejak komentar tepercaya pertama.
@@ -564,6 +566,73 @@ impl<D: Deps> RunService<D> {
                 )
                 .await;
         }
+        // Perbaikan dengan perubahan direview sebelum push otomatis (KTD-40).
+        let gated = self
+            .reviews
+            .ac_rows(&run.id)
+            .await?
+            .iter()
+            .any(mandor_domain::AcRow::in_gate);
+        if gated {
+            self.runs.save(&run, generation, self.now()).await?;
+            return match self
+                .start_review_boxed(&run.id, ReviewTrigger::AutomaticFix)
+                .await
+            {
+                Ok(_) => Ok(()),
+                Err(e) => {
+                    let run = self.load(&run.id).await?;
+                    self.flag_fix(
+                        run,
+                        RunState::AwaitingDev,
+                        &format!("Push held: the review could not start ({e})"),
+                    )
+                    .await
+                }
+            };
+        }
+        run.state = RunState::Publishing;
+        self.runs.save(&run, generation, self.now()).await?;
+        let url = self.publish_members(&mut run, &work).await?;
+        self.mark_waiting_review(&mut run, &url, false).await
+    }
+
+    /// Lanjutan review perbaikan otomatis (KTD-40): gerbang Ready (atau mode
+    /// peringatan) mendorong push dan Waiting Review; selain itu push ditahan,
+    /// task ditandai, dan dev diberi tahu. Status Lark tidak berubah.
+    pub(crate) async fn after_fix_review(
+        self: &Arc<Self>,
+        mut run: RunRecord,
+        finished: bool,
+        failure: Option<String>,
+    ) -> Result<(), RunError> {
+        if !finished {
+            let why = failure.unwrap_or_else(|| "the review did not finish".to_owned());
+            return self
+                .flag_fix(run, RunState::AwaitingDev, &format!("Push held: {why}"))
+                .await;
+        }
+        let rows = self.reviews.ac_rows(&run.id).await?;
+        let mode = self.gate_mode(&run).await?;
+        let held = match evaluate(&rows, mode, &GateDecision::default()) {
+            GateOutcome::Ready { .. } => None,
+            GateOutcome::Blocked { failed } => Some(format!(
+                "Push held: {} failed the review",
+                failed.join(", ")
+            )),
+            GateOutcome::NeedsConfirmation { unverified } => Some(format!(
+                "Push held: {} could not be verified; check manually before pushing",
+                unverified.join(", ")
+            )),
+            GateOutcome::NeedsReview => {
+                Some("Push held: the code changed during the review".to_owned())
+            }
+        };
+        if let Some(note) = held {
+            return self.flag_fix(run, RunState::AwaitingDev, &note).await;
+        }
+        let generation = run.generation;
+        let work = self.member_changes(&run).await?;
         run.state = RunState::Publishing;
         self.runs.save(&run, generation, self.now()).await?;
         let url = self.publish_members(&mut run, &work).await?;

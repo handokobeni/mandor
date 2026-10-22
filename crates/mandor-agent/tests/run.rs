@@ -295,6 +295,7 @@ async fn sesi_reviewer_dihentikan_saat_melewati_batas_waktu() {
             trusted_reviewers: vec![],
             extra_allowed: vec![],
             app: mandor_domain::app_run::AppSettings::default(),
+            gate_mode: None,
         },
         worktree: dir.path().to_path_buf(),
         branch: "mandor/x".to_owned(),

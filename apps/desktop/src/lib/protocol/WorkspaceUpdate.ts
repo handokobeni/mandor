@@ -3,4 +3,12 @@
 /**
  * Parameter `workspaces.update`.
  */
-export type WorkspaceUpdate = { id: string, repo_ids: Array<string>, mcp_servers: Array<string>, };
+export type WorkspaceUpdate = { id: string, repo_ids: Array<string>, mcp_servers: Array<string>, 
+/**
+ * Tidak diisi = tidak berubah.
+ */
+browser_tests?: boolean, 
+/**
+ * `block` atau `warn`; tidak diisi = tidak berubah.
+ */
+gate_mode?: string, };

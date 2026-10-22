@@ -7,4 +7,12 @@ export type WorkspaceView = { id: string, name: string, root: string, repo_ids: 
 /**
  * MCP server dari `.mcp.json` folder induk yang boleh dipakai agent.
  */
-mcp_servers: Array<string>, };
+mcp_servers: Array<string>, 
+/**
+ * Uji browser oleh reviewer (KTD-37).
+ */
+browser_tests: boolean, 
+/**
+ * `block` atau `warn`.
+ */
+gate_mode: string, };

@@ -39,6 +39,7 @@ fn repo(id: &str, allowed: &str) -> RepoInfo {
         trusted_reviewers: vec![],
         extra_allowed: vec![allowed.to_owned()],
         app: mandor_domain::app_run::AppSettings::default(),
+        gate_mode: None,
     }
 }
 
@@ -57,6 +58,7 @@ fn with_workspace(st: &Station) {
         ],
         mcp_servers: vec!["graft".to_owned()],
         browser_tests: true,
+        gate_mode: None,
     });
 }
 

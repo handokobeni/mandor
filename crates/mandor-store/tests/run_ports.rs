@@ -196,3 +196,38 @@ async fn pengaturan_app_repo_dan_state_app_per_run() {
     apps.set_app_owner(None).await.unwrap();
     assert_eq!(apps.app_owner().await.unwrap(), None);
 }
+
+#[tokio::test]
+async fn setelan_workspace_uji_browser_dan_mode_gerbang() {
+    use mandor_domain::GateMode;
+    use mandor_store::NewWorkspace;
+
+    let (s, _d) = open().await;
+    s.insert_workspace(&NewWorkspace {
+        id: "kv2".to_owned(),
+        name: "kv2".to_owned(),
+        root_path: "/src/kv2".to_owned(),
+        repo_ids: vec!["repo1".to_owned()],
+        mcp_servers: vec![],
+        now_ms: 1,
+    })
+    .await
+    .unwrap();
+    let repos = ReposStore::new(s.clone());
+    let w = repos.workspace("kv2").await.unwrap().unwrap();
+    assert!(w.browser_tests, "bawaan aktif");
+    assert_eq!(w.gate_mode, None);
+    s.set_workspace_settings("kv2", r#"{"browser_tests":false,"gate_mode":"warn"}"#)
+        .await
+        .unwrap();
+    let w = repos.workspace("kv2").await.unwrap().unwrap();
+    assert!(!w.browser_tests);
+    assert_eq!(w.gate_mode, Some(GateMode::Warn));
+    s.set_repo_settings("repo1", &json!({"gate_mode": "block"}))
+        .await
+        .unwrap();
+    assert_eq!(
+        repos.repo("repo1").await.unwrap().unwrap().gate_mode,
+        Some(GateMode::Block)
+    );
+}

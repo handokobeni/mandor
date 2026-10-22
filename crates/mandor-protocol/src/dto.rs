@@ -305,7 +305,33 @@ pub struct StartFixParams {
 /// Hasil `runs.publish`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
 pub struct PublishResult {
-    pub pr_url: String,
+    /// `published`, `review_started`, `blocked`, atau `needs_confirmation`.
+    pub outcome: String,
+    pub pr_url: Option<String>,
+    /// Label AC gagal (Blocked).
+    pub failed: Vec<String>,
+    /// Label AC Can't verify yang butuh konfirmasi (`needs_confirmation`).
+    pub unverified: Vec<String>,
+    /// Label AC Fail/Can't verify yang dibiarkan (mode peringatan).
+    pub warnings: Vec<String>,
+    /// AC tidak bisa disegarkan dari tracker.
+    pub sync_warning: Option<String>,
+    /// Review yang dimulai (`review_started`).
+    pub review_id: Option<String>,
+}
+
+/// Parameter `runs.publish` dengan keputusan dev (KTD-35).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+pub struct PublishParams {
+    pub run_id: String,
+    /// `ac_id` baris Can't verify yang dicek manual oleh dev.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub confirmed: Option<Vec<String>>,
+    /// Alasan Push anyway untuk baris Fail (mode blokir).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub push_anyway_reason: Option<String>,
 }
 
 /// Satu berkas yang berubah di worktree.
@@ -376,6 +402,8 @@ pub struct RepoView {
     pub extra_allowed: Vec<String>,
     /// Run app dan cara uji reviewer (KTD-37).
     pub app: RepoAppView,
+    /// Override mode gerbang: `block`, `warn`, atau `null` (ikut workspace).
+    pub gate_mode: Option<String>,
 }
 
 /// Pengaturan run app per repo.
@@ -411,6 +439,10 @@ pub struct RepoUpdate {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub app: Option<RepoAppView>,
+    /// `block`, `warn`, atau `inherit` (hapus override); tidak diisi = tidak berubah.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub gate_mode: Option<String>,
 }
 
 /// State app satu repo anggota run.
@@ -482,6 +514,10 @@ pub struct WorkspaceView {
     pub repo_ids: Vec<String>,
     /// MCP server dari `.mcp.json` folder induk yang boleh dipakai agent.
     pub mcp_servers: Vec<String>,
+    /// Uji browser oleh reviewer (KTD-37).
+    pub browser_tests: bool,
+    /// `block` atau `warn`.
+    pub gate_mode: String,
 }
 
 /// Parameter `workspaces.add`.
@@ -499,6 +535,14 @@ pub struct WorkspaceUpdate {
     pub id: String,
     pub repo_ids: Vec<String>,
     pub mcp_servers: Vec<String>,
+    /// Tidak diisi = tidak berubah.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub browser_tests: Option<bool>,
+    /// `block` atau `warn`; tidak diisi = tidak berubah.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub gate_mode: Option<String>,
 }
 
 /// Parameter `workspaces.mcp_servers`: folder induk (path absolut).

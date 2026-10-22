@@ -13,7 +13,7 @@ use mandor_usecase::run_ports::{
 
 use crate::backend::{AgentRun, ClaudeBackend, RunStopper};
 use crate::claude::command::{ReviewFlags, Session, SessionSpec};
-use crate::claude::guardrails::{default_allowed, default_denied, settings_json};
+use crate::claude::guardrails::{default_allowed, default_denied, review_allowed, settings_json};
 use crate::claude::review_state;
 use crate::prompt::{
     OperatorContext, data_block, new_nonce, operator_prompt, review_operator_prompt,
@@ -199,10 +199,7 @@ impl ClaudeAgent {
             Some(ws) => ws.repos.iter().map(|(r, _)| r).collect(),
             None => vec![&req.repo],
         };
-        let mut allowed: Vec<String> = default_allowed()
-            .into_iter()
-            .filter(|t| !REVIEW_WRITE_TOOLS.contains(&t.as_str()))
-            .collect();
+        let mut allowed = review_allowed();
         for a in repos.iter().flat_map(|r| r.extra_allowed.iter()) {
             if !allowed.contains(a) {
                 allowed.push(a.clone());
@@ -712,6 +709,7 @@ mod tests {
                 trusted_reviewers: vec![],
                 extra_allowed: vec!["Bash(just *)".to_owned()],
                 app: mandor_domain::app_run::AppSettings::default(),
+                gate_mode: None,
             },
             worktree: "/wt/x".into(),
             branch: "mandor/x".to_owned(),
@@ -764,6 +762,7 @@ mod tests {
             trusted_reviewers: vec![],
             extra_allowed: vec![allowed.to_owned()],
             app: mandor_domain::app_run::AppSettings::default(),
+            gate_mode: None,
         }
     }
 
@@ -948,6 +947,16 @@ mod tests {
         assert_eq!(spec.model.as_deref(), Some("haiku"));
         assert!(!spec.allowed.contains(&"Edit".to_owned()));
         assert!(!spec.allowed.contains(&"Write".to_owned()));
+        for general in [
+            "Bash(python3 *)",
+            "Bash(node *)",
+            "Bash(sed *)",
+            "Bash(mkdir *)",
+        ] {
+            assert!(!spec.allowed.contains(&general.to_owned()), "{general}");
+        }
+        // Perintah test khusus repo tetap boleh.
+        assert!(spec.allowed.contains(&"Bash(cargo *)".to_owned()));
         assert!(spec.denied.contains(&"Write".to_owned()));
         assert!(spec.allowed.contains(&"mcp__claude-in-chrome".to_owned()));
         assert!(spec.allowed.contains(&"mcp__mandor".to_owned()));

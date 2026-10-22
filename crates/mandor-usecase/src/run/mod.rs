@@ -3,6 +3,7 @@
 mod members;
 mod ownership;
 mod publish;
+pub use publish::PublishOutcome;
 mod reconcile;
 mod session;
 mod start;

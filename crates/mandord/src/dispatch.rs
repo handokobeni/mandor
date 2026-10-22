@@ -189,9 +189,17 @@ impl AppDispatch {
             .collect();
         let now = now_ms();
         let team = s.sync.team_board();
+        let summaries = self.ac_summaries().await?;
         let mut cards: Vec<_> = cached
             .iter()
-            .map(|c| card_view(c, runs.get(&c.task.record_id), &s.me, now))
+            .map(|c| {
+                let run = runs.get(&c.task.record_id);
+                let mut card = card_view(c, run, &s.me, now);
+                if let (Some(view), Some(r)) = (card.run.as_mut(), run) {
+                    view.ac = summaries.get(&r.id).cloned();
+                }
+                card
+            })
             .collect();
         cards.extend(
             team.iter()
@@ -223,12 +231,29 @@ impl AppDispatch {
 
     async fn runs_list(&self) -> Result<Value, RpcError> {
         let s = self.session().await?;
+        let summaries = self.ac_summaries().await?;
         let mut out = Vec::new();
         for r in s.runs.active_runs().await.map_err(run_error)? {
             let task = s.sync.cached(&r.record_id).await.map_err(sync_error)?;
-            out.push(run_view(&r, task.as_ref().map(|c| &c.task)));
+            let mut view = run_view(&r, task.as_ref().map(|c| &c.task));
+            view.ac = summaries.get(&r.id).cloned();
+            out.push(view);
         }
         ok(&out)
+    }
+
+    /// Ringkasan buku AC semua run aktif (satu query).
+    async fn ac_summaries(
+        &self,
+    ) -> Result<HashMap<String, mandor_protocol::AcSummaryView>, RpcError> {
+        let mut by_run: HashMap<String, Vec<mandor_domain::AcRow>> = HashMap::new();
+        for (run_id, row) in self.app.store.active_ac_rows().await.map_err(store_error)? {
+            by_run.entry(run_id).or_default().push(row);
+        }
+        Ok(by_run
+            .into_iter()
+            .filter_map(|(id, rows)| crate::views::ac_summary(&rows).map(|s| (id, s)))
+            .collect())
     }
 
     async fn messages(&self, q: MessagesQuery) -> Result<Value, RpcError> {
@@ -648,6 +673,12 @@ impl AppDispatch {
             )
             .await
             .map_err(run_error)?;
+        if let Some(skill) = p.reviewer_skill.as_deref().filter(|k| !k.trim().is_empty()) {
+            s.runs
+                .set_reviewer_skill(&run.id, Some(skill))
+                .await
+                .map_err(run_error)?;
+        }
         s.poke.notify_one();
         ok(&run_view(&run, None))
     }

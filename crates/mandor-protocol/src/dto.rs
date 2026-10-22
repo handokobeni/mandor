@@ -121,6 +121,24 @@ pub struct RunView {
     pub started_at_ms: i64,
     #[ts(type = "number")]
     pub updated_at_ms: i64,
+    /// Ringkasan buku AC (Rilis 2); `None` bila task tanpa AC.
+    pub ac: Option<AcSummaryView>,
+}
+
+/// Ringkasan buku AC untuk kartu dan sidebar.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+pub struct AcSummaryView {
+    /// Baris aktif (tanpa Removed).
+    pub total: u32,
+    /// Pass, Checked manually, Skipped, atau Follows design.
+    pub ok: u32,
+    pub failed: u32,
+    pub unverified: u32,
+    pub not_reviewed: u32,
+    /// Ada verdict yang usang.
+    pub stale: bool,
+    /// Baris Missing, Partly, atau Conflicts di kolom Design.
+    pub design_gaps: u32,
 }
 
 /// Satu repo dalam run.
@@ -234,6 +252,10 @@ pub struct StartParams {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub design_sources: Option<Vec<String>>,
+    /// Skill reviewer (`plugin:skill`); tidak diisi = prompt bawaan (R14).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub reviewer_skill: Option<String>,
 }
 
 /// Pilihan planning saat Start.

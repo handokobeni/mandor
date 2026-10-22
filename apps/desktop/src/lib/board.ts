@@ -44,17 +44,36 @@ export function runMeta(state: string): StateMeta {
   return RUN_STATES[state] ?? { label: state, tone: 'muted', spin: false };
 }
 
-/** Label run di fase brainstorm atau plan; `undefined` = label bawaan state. */
-export function runLabel(run: Pick<RunView, 'state' | 'phase'>): string | undefined {
+/**
+ * Label run di fase brainstorm atau plan, hasil review AC, atau push yang
+ * ditahan; `undefined` = label bawaan state.
+ */
+export function runLabel(
+  run: Pick<RunView, 'state' | 'phase'> & Partial<Pick<RunView, 'note' | 'ac'>>
+): string | undefined {
   const labels: Record<string, [string, string]> = {
     brainstorm: ['Brainstorming', 'Question for you'],
     plan: ['Planning', 'Plan ready']
   };
   const pair = labels[run.phase];
-  if (!pair) return undefined;
-  if (run.state === 'running') return pair[0];
-  if (run.state === 'awaiting_dev') return pair[1];
+  if (pair) {
+    if (run.state === 'running') return pair[0];
+    if (run.state === 'awaiting_dev') return pair[1];
+    return undefined;
+  }
+  if (run.state !== 'awaiting_dev') return undefined;
+  if (run.note?.startsWith('Push held')) return 'Push held';
+  if (run.ac && run.ac.failed > 0) return `Review: ${run.ac.failed} failed`;
+  if (run.ac && run.ac.unverified > 0) return 'Needs your check';
   return undefined;
+}
+
+/** Chip AC di kartu: `AC 5/7`, `2 failed`, atau `Review stale`; `null` tanpa AC. */
+export function acChip(ac: RunView['ac']): { text: string; tone: Tone } | null {
+  if (!ac || ac.total === 0) return null;
+  if (ac.stale) return { text: 'Review stale', tone: 'warning' };
+  if (ac.failed > 0) return { text: `${ac.failed} failed`, tone: 'failed' };
+  return { text: `AC ${ac.ok}/${ac.total}`, tone: ac.ok === ac.total ? 'ok' : 'muted' };
 }
 
 export function stateLabel(state: string): string {

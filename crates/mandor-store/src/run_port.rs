@@ -42,6 +42,8 @@ struct RunExtra {
     #[serde(default)]
     review_id: Option<String>,
     #[serde(default)]
+    reviewer_skill: Option<String>,
+    #[serde(default)]
     workspace: Option<StoredWorkspace>,
     #[serde(default)]
     extra: Vec<StoredMember>,
@@ -191,6 +193,7 @@ fn extra_of(r: &RunRecord) -> Result<String, StoreError> {
             })
             .collect(),
         review_id: r.review_id.clone(),
+        reviewer_skill: r.reviewer_skill.clone(),
         workspace: r.workspace.as_ref().map(|w| StoredWorkspace {
             id: w.id.clone(),
             root: w.root.clone(),
@@ -274,6 +277,7 @@ fn to_record(row: Row) -> Result<RunRecord, StoreError> {
             })
             .collect(),
         review_id: extra.review_id,
+        reviewer_skill: extra.reviewer_skill,
         workspace: extra.workspace.map(|w| RunWorkspace {
             id: w.id,
             root: w.root,

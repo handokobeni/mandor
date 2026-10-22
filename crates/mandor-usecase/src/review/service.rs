@@ -48,6 +48,8 @@ impl<D: Deps> RunService<D> {
         skill: Option<&str>,
     ) -> Result<ReviewRecord, RunError> {
         let mut run = self.load(run_id).await?;
+        let skill = skill.or(run.reviewer_skill.as_deref()).map(str::to_owned);
+        let skill = skill.as_deref();
         let allowed = match trigger {
             ReviewTrigger::AutomaticFix => run.state == RunState::WfRunning,
             ReviewTrigger::Manual | ReviewTrigger::PushAndPr => {
@@ -302,7 +304,7 @@ impl<D: Deps> RunService<D> {
         }
         self.runs.save(&run, generation, self.now()).await?;
         let kind = if status == ReviewStatus::Finished {
-            NoticeKind::AwaitingAnswer
+            NoticeKind::ReviewFinished
         } else {
             NoticeKind::Failed
         };
@@ -335,6 +337,21 @@ impl<D: Deps> RunService<D> {
         if let Some(stopper) = self.take_stopper(run_id) {
             stopper.stop().await;
         }
+        Ok(())
+    }
+
+    /// Menyimpan skill reviewer pilihan dev saat Start (R14).
+    ///
+    /// # Errors
+    /// Run tidak ada atau penyimpanan gagal.
+    pub async fn set_reviewer_skill(
+        &self,
+        run_id: &str,
+        skill: Option<&str>,
+    ) -> Result<(), RunError> {
+        let mut run = self.load(run_id).await?;
+        run.reviewer_skill = skill.map(str::to_owned);
+        self.runs.save(&run, run.generation, self.now()).await?;
         Ok(())
     }
 

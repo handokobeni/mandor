@@ -400,3 +400,34 @@ async fn kesiapan_per_item_menyebut_pemilik_app_lain_dan_dialog_hanya_untuk_web(
     assert_eq!(r.other_owner.as_deref(), Some("run-lain"));
     assert_eq!(r.facts().reason.as_deref(), Some("The app is not running"));
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn skill_reviewer_dari_start_dipakai_kecuali_ada_skill_eksplisit() {
+    let (lark, clock) = setup();
+    let (st, run) = waiting(&lark, &clock).await;
+    st.svc
+        .set_reviewer_skill(&run, Some("ac-check"))
+        .await
+        .unwrap();
+    let rec = st
+        .svc
+        .start_review(&run, ReviewTrigger::Manual, None)
+        .await
+        .unwrap();
+    assert_eq!(rec.skill.as_deref(), Some("ac-check"));
+    assert!(st.agent.last().req.message.contains("SKILL:ac-check"));
+    st.agent.last().done();
+    reviewed(&st, &run).await;
+    let notes = st.notifier.sent.lock().unwrap().clone();
+    assert_eq!(
+        notes.last().unwrap().kind,
+        mandor_usecase::run_ports::NoticeKind::ReviewFinished
+    );
+
+    let rec = st
+        .svc
+        .start_review(&run, ReviewTrigger::Manual, Some("lain"))
+        .await
+        .unwrap();
+    assert_eq!(rec.skill.as_deref(), Some("lain"));
+}

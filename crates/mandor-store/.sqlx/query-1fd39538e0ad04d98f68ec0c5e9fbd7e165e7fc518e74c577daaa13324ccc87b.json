@@ -1,0 +1,158 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT a.run_id, a.ac_id, a.label, a.text, a.design, a.design_note, a.verdict,\n                    a.evidence, a.stale, a.status, a.reason, a.decided_by\n             FROM ac_rows a JOIN runs r ON r.id = a.run_id\n             WHERE r.closed = 0 ORDER BY a.run_id, a.position",
+  "describe": {
+    "columns": [
+      {
+        "name": "run_id",
+        "ordinal": 0,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "ac_rows",
+            "name": "run_id"
+          }
+        }
+      },
+      {
+        "name": "ac_id",
+        "ordinal": 1,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "ac_rows",
+            "name": "ac_id"
+          }
+        }
+      },
+      {
+        "name": "label",
+        "ordinal": 2,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "ac_rows",
+            "name": "label"
+          }
+        }
+      },
+      {
+        "name": "text",
+        "ordinal": 3,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "ac_rows",
+            "name": "text"
+          }
+        }
+      },
+      {
+        "name": "design",
+        "ordinal": 4,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "ac_rows",
+            "name": "design"
+          }
+        }
+      },
+      {
+        "name": "design_note",
+        "ordinal": 5,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "ac_rows",
+            "name": "design_note"
+          }
+        }
+      },
+      {
+        "name": "verdict",
+        "ordinal": 6,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "ac_rows",
+            "name": "verdict"
+          }
+        }
+      },
+      {
+        "name": "evidence",
+        "ordinal": 7,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "ac_rows",
+            "name": "evidence"
+          }
+        }
+      },
+      {
+        "name": "stale",
+        "ordinal": 8,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "ac_rows",
+            "name": "stale"
+          }
+        }
+      },
+      {
+        "name": "status",
+        "ordinal": 9,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "ac_rows",
+            "name": "status"
+          }
+        }
+      },
+      {
+        "name": "reason",
+        "ordinal": 10,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "ac_rows",
+            "name": "reason"
+          }
+        }
+      },
+      {
+        "name": "decided_by",
+        "ordinal": 11,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "ac_rows",
+            "name": "decided_by"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      false,
+      false,
+      true,
+      false,
+      false,
+      true,
+      false,
+      true,
+      false,
+      false,
+      true,
+      true
+    ]
+  },
+  "hash": "1fd39538e0ad04d98f68ec0c5e9fbd7e165e7fc518e74c577daaa13324ccc87b"
+}

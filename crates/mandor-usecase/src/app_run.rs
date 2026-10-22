@@ -9,8 +9,8 @@ use mandor_domain::app_run::{AppRunState, is_flagged_change};
 use crate::ports::{Deps, PortError};
 use crate::run::{RunError, RunService};
 use crate::run_ports::{
-    AppMember, AppMemberRecord, AppProcesses, AppRecord, AppRecords, GitPort, Repos, RunStore,
-    Spawner,
+    AppMember, AppMemberRecord, AppProcesses, AppRecord, AppRecords, GitPort, Notifier, Repos,
+    RunStore, Spawner,
 };
 
 /// Berkas yang berubah di satu repo sejak app terakhir dijalankan (atau sejak
@@ -230,6 +230,20 @@ impl<D: Deps> RunService<D> {
                 }
                 rec.error = Some(format!("{}: {e}", m.repo_id));
                 self.save_quietly(&rec).await;
+                if let Ok(run) = self.load(&rec.run_id).await {
+                    let body = format!("The app failed to start ({})", m.repo_id);
+                    self.notifier
+                        .notify(
+                            crate::notify::notice(
+                                self,
+                                crate::run_ports::NoticeKind::AppFailed,
+                                &run,
+                                &body,
+                            )
+                            .await,
+                        )
+                        .await;
+                }
                 return;
             }
         }

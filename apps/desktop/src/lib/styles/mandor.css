@@ -818,3 +818,10 @@ label.gate-row:has(input:checked) { border-color: color-mix(in oklab, var(--stat
   .pg-act { grid-column: 2; }
 }
 
+
+/* Rilis 2 U14: chip AC di kartu dan selisih desain saat approve plan. */
+.tc-ac { display: inline-flex; align-items: center; gap: 4px; font-size: var(--text-xs); color: var(--muted-foreground); }
+.tc-ac[data-tone="ok"] svg { color: var(--status-ok); }
+.tc-ac[data-tone="failed"] svg { color: var(--status-failed); }
+.tc-ac[data-tone="warning"] svg { color: var(--status-warning); }
+.plan-doc.plan-gaps-wrap { flex-shrink: 0; padding-bottom: 0; width: 100%; }

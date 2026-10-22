@@ -270,6 +270,7 @@ fn review_bindings() -> Result<Vec<(&'static str, String)>, String> {
         )?,
         one("AppRunView.ts", AppRunView::export_to_string(&cfg))?,
         one("ReviewView.ts", ReviewView::export_to_string(&cfg))?,
+        one("AcSummaryView.ts", AcSummaryView::export_to_string(&cfg))?,
         one(
             "ReviewReadinessView.ts",
             ReviewReadinessView::export_to_string(&cfg),

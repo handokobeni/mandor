@@ -3,7 +3,9 @@
   import FolderGit2 from '@lucide/svelte/icons/folder-git-2';
   import Info from '@lucide/svelte/icons/info';
   import Layers from '@lucide/svelte/icons/layers';
+  import Frame from '@lucide/svelte/icons/frame';
   import Link from '@lucide/svelte/icons/link';
+  import DesignSourceSettings from './DesignSourceSettings.svelte';
   import type { Rpc } from '#lib/rpc.ts';
   import { nav, type SettingsSection } from '#lib/stores/nav.svelte.ts';
   import AboutSettings from './AboutSettings.svelte';
@@ -18,6 +20,7 @@
     { id: 'lark', label: 'Lark', icon: Link },
     { id: 'repos', label: 'Repos', icon: FolderGit2 },
     { id: 'workspaces', label: 'Workspaces', icon: Layers },
+    { id: 'design-sources', label: 'Design sources', icon: Frame },
     { id: 'general', label: 'General', icon: Bolt },
     { id: 'about', label: 'About', icon: Info }
   ];
@@ -44,8 +47,10 @@
       <RepoSettings {rpc} />
     {:else if nav.section === 'workspaces'}
       <WorkspaceSettings {rpc} />
+    {:else if nav.section === 'design-sources'}
+      <DesignSourceSettings {rpc} />
     {:else if nav.section === 'general'}
-      <GeneralSettings />
+      <GeneralSettings {rpc} />
     {:else}
       <AboutSettings {rpc} />
     {/if}

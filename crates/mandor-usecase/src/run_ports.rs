@@ -344,6 +344,8 @@ pub struct RunRecord {
     pub design: Vec<crate::review::DesignRoot>,
     /// Review yang sedang berjalan (state `Reviewing`).
     pub review_id: Option<String>,
+    /// Skill reviewer pilihan dev saat Start; `None` = prompt bawaan.
+    pub reviewer_skill: Option<String>,
     /// Diisi store saat membaca; diabaikan saat menyimpan.
     pub created_at_ms: i64,
     /// Diisi store saat membaca; diabaikan saat menyimpan.
@@ -380,6 +382,7 @@ impl RunRecord {
             review_snapshot: BTreeMap::new(),
             design: Vec::new(),
             review_id: None,
+            reviewer_skill: None,
             created_at_ms: 0,
             updated_at_ms: 0,
         }
@@ -498,6 +501,8 @@ pub enum NoticeKind {
     WaitingFix,
     NeedsAttention,
     PrCreated,
+    ReviewFinished,
+    AppFailed,
 }
 
 impl NoticeKind {
@@ -509,6 +514,8 @@ impl NoticeKind {
             Self::WaitingFix => "waiting_fix",
             Self::NeedsAttention => "needs_attention",
             Self::PrCreated => "pr_created",
+            Self::ReviewFinished => "review_finished",
+            Self::AppFailed => "app_failed",
         }
     }
 }

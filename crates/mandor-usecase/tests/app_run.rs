@@ -178,6 +178,10 @@ async fn setup_gagal_atau_port_dipakai_program_lain_membuat_failed() {
     assert_eq!(rec.state, AppRunState::Failed);
     assert!(rec.error.as_deref().unwrap().contains("setup failed"));
     assert!(!st.apps.calls().iter().any(|c| c.starts_with("spawn:")));
+    let notes = st.notifier.sent.lock().unwrap().clone();
+    let last = notes.last().unwrap();
+    assert_eq!(last.kind, mandor_usecase::run_ports::NoticeKind::AppFailed);
+    assert!(last.body.contains("repo1"), "{}", last.body);
 
     {
         let mut st_apps = st.apps.st.lock().unwrap();

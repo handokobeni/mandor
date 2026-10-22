@@ -39,7 +39,41 @@ pub fn run_view(run: &RunRecord, task: Option<&Task>) -> RunView {
         quiet_until_ms: run.quiet_until_ms,
         started_at_ms: run.created_at_ms,
         updated_at_ms: run.updated_at_ms,
+        ac: None,
     }
+}
+
+/// Ringkasan buku AC; `None` bila tidak ada baris aktif.
+#[must_use]
+pub fn ac_summary(rows: &[mandor_domain::AcRow]) -> Option<mandor_protocol::AcSummaryView> {
+    use mandor_domain::{Design, RowStatus, Verdict};
+    let active: Vec<_> = rows
+        .iter()
+        .filter(|r| r.status != RowStatus::Removed)
+        .collect();
+    if active.is_empty() {
+        return None;
+    }
+    let count = |f: &dyn Fn(&mandor_domain::AcRow) -> bool| {
+        u32::try_from(active.iter().filter(|r| f(r)).count()).unwrap_or(u32::MAX)
+    };
+    Some(mandor_protocol::AcSummaryView {
+        total: count(&|_| true),
+        ok: count(&|r| {
+            r.design == Design::FollowDesign
+                || matches!(
+                    r.verdict,
+                    Verdict::Pass | Verdict::CheckedManually | Verdict::Skipped
+                )
+        }),
+        failed: count(&|r| r.in_gate() && r.verdict == Verdict::Fail),
+        unverified: count(&|r| r.in_gate() && r.verdict == Verdict::CantVerify),
+        not_reviewed: count(&|r| {
+            r.in_gate() && matches!(r.verdict, Verdict::NotReviewed | Verdict::FixInProgress)
+        }),
+        stale: active.iter().any(|r| r.stale),
+        design_gaps: count(&|r| r.design.is_gap()),
+    })
 }
 
 /// Alasan Start dinonaktifkan untuk kartu ini, bila ada.
@@ -337,5 +371,41 @@ mod tests {
         );
         t.status = TaskStatus::Unknown("Blocked".to_owned());
         assert_eq!(card_view(&cached(t), None, "ou_a", 1).column, "unknown");
+    }
+
+    #[test]
+    fn ringkasan_ac_menghitung_baris_aktif_dan_mengabaikan_removed() {
+        use mandor_domain::{AcRow, Design, RowStatus, Verdict};
+        assert_eq!(ac_summary(&[]), None);
+        let row = |id: &str, v: Verdict| {
+            let mut r = AcRow::new(id, None, "t", RowStatus::Active);
+            r.verdict = v;
+            r
+        };
+        let mut follow = row("5", Verdict::NotReviewed);
+        follow.design = Design::FollowDesign;
+        let mut gap = row("6", Verdict::FixInProgress);
+        gap.design = Design::Missing;
+        gap.stale = true;
+        let mut removed = row("7", Verdict::Fail);
+        removed.status = RowStatus::Removed;
+        let rows = [
+            row("1", Verdict::Pass),
+            row("2", Verdict::Fail),
+            row("3", Verdict::CantVerify),
+            row("4", Verdict::Skipped),
+            follow,
+            gap,
+            removed,
+        ];
+        let s = ac_summary(&rows).unwrap();
+        assert_eq!(
+            (s.total, s.ok, s.failed, s.unverified, s.not_reviewed),
+            (6, 3, 1, 1, 1)
+        );
+        assert!(s.stale);
+        assert_eq!(s.design_gaps, 1);
+        let only_removed = [rows[6].clone()];
+        assert_eq!(ac_summary(&only_removed), None);
     }
 }

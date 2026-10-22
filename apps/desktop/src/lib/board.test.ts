@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  acChip,
   agentGroups,
   assigneeLabel,
   canChat,
@@ -67,6 +68,7 @@ function run(id: string, state: string, extra: Partial<RunView> = {}): RunView {
     quiet_until_ms: null,
     started_at_ms: 0,
     updated_at_ms: 0,
+    ac: null,
     ...extra
   };
 }
@@ -260,5 +262,27 @@ describe('nama sprint', () => {
     expect(opts.map((o) => o.id)).toEqual(['spr2', 'spr1', 'sprX']);
     expect(opts[0].label).toBe('Sprint 42 · Oct 13 to Oct 24');
     expect(opts[2].label).toBe('sprX');
+  });
+});
+
+describe('label review AC dan chip kartu', () => {
+  const ac = { total: 7, ok: 5, failed: 2, unverified: 0, not_reviewed: 0, stale: false, design_gaps: 1 };
+  it('runLabel untuk Reviewing, gagal, perlu cek, dan Push held', () => {
+    expect(runMeta('reviewing').label).toBe('Reviewing AC');
+    expect(runLabel({ state: 'awaiting_dev', phase: 'implement', ac, note: null })).toBe('Review: 2 failed');
+    expect(runLabel({ state: 'awaiting_dev', phase: 'implement', ac: { ...ac, failed: 0, unverified: 1 } })).toBe(
+      'Needs your check'
+    );
+    expect(runLabel({ state: 'awaiting_dev', phase: 'implement', note: 'Push held: AC-3 failed the review' })).toBe(
+      'Push held'
+    );
+    expect(runLabel({ state: 'awaiting_dev', phase: 'implement' })).toBeUndefined();
+  });
+
+  it('chip AC 5/7, 2 failed, dan Review stale', () => {
+    expect(acChip({ ...ac, failed: 0 })).toEqual({ text: 'AC 5/7', tone: 'muted' });
+    expect(acChip(ac)).toEqual({ text: '2 failed', tone: 'failed' });
+    expect(acChip({ ...ac, stale: true })?.text).toBe('Review stale');
+    expect(acChip(null)).toBeNull();
   });
 });

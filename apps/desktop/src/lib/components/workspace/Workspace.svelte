@@ -54,6 +54,7 @@
   import DiffViewer from './DiffViewer.svelte';
   import StartFixDialog from './StartFixDialog.svelte';
   import AcReviewTab from './AcReviewTab.svelte';
+  import PlanApproval from './PlanApproval.svelte';
   import GateDialogs from './GateDialogs.svelte';
   import { activeRows, gate as acGate, gateButtonLabel, label as acLabel, tabCount } from '#lib/ac-review.ts';
   import * as Popover from '#lib/components/ui/popover/index.ts';
@@ -157,9 +158,13 @@
     void act(() => rpc.request('runs.continue_to_plan', { run_id: run.id }), 'The agent is writing the plan');
   }
 
+  // AC yang ditandai Follow design di tab Plan; dikirim saat approve.
+  let follow = $state<string[]>([]);
+
   function approvePlan(): void {
     void act(async () => {
-      await rpc.request('runs.approve_plan', { run_id: run.id });
+      await rpc.request('runs.approve_plan', { run_id: run.id, follow_design: follow });
+      follow = [];
       tab = 'chat';
     }, 'Plan approved; the agent is coding');
   }
@@ -627,6 +632,9 @@
               <Copy />Copy Markdown
             </Button>
           </div>
+          {#if planning && run.state === 'awaiting_dev' && ledger.ledger}
+            <PlanApproval ledger={ledger.ledger} bind:follow />
+          {/if}
           <MarkdownDoc source={plan} />
         {:else}
           <div class="task-doc">

@@ -1,6 +1,8 @@
 // Transport tiruan untuk melihat UI di browser tanpa daemon dan Lark (`bun run dev`, buka `/?mock`).
 // Hanya dimuat lewat dynamic import di mode dev; tidak masuk build produksi.
 
+import type { DesignSourceView } from '#lib/protocol/DesignSourceView.ts';
+import type { ReviewerSettingsView } from '#lib/protocol/ReviewerSettingsView.ts';
 import type { CardView } from '#lib/protocol/CardView.ts';
 import type { MessageView } from '#lib/protocol/MessageView.ts';
 import type { RunView } from '#lib/protocol/RunView.ts';
@@ -52,18 +54,22 @@ function run(id: string, key: string, title: string, state: string, extra: Parti
     quiet_until_ms: state === 'wf_quiet' ? Date.now() + 95_000 : null,
     started_at_ms: Date.now() - 42 * 60_000,
     updated_at_ms: Date.now() - 60_000,
+    ac: null,
     ...extra
   };
 }
 
 const RUNS: RunView[] = [
-  run('1', 'PGS-1402', 'Filter invoices by status and date range', 'awaiting_dev'),
+  run('1', 'PGS-1402', 'Filter invoices by status and date range', 'awaiting_dev', {
+    ac: { total: 5, ok: 3, failed: 1, unverified: 1, not_reviewed: 0, stale: false, design_gaps: 1 }
+  }),
   run('2', 'PGS-1388', 'Map cluster markers for branch offices', 'running', { queued: ['Also run the e2e tests'] }),
   run('3', 'PGS-1379', 'Export payroll report to XLSX', 'failed', {
     last_error: 'claude exited with code 1: session limit reached'
   }),
   run('4', 'PGS-1371', 'Policy limit error message on claims form', 'wf_quiet'),
   run('5', 'PGS-1365', 'Add audit log to approval flow', 'in_review_loop', {
+    ac: { total: 5, ok: 5, failed: 0, unverified: 0, not_reviewed: 0, stale: false, design_gaps: 0 },
     pr_url: 'https://github.com/pegasus/pegasus-web/pull/482'
   }),
   run('6', 'PGS-1360', 'Retry webhook delivery with backoff', 'orphaned', {
@@ -116,6 +122,7 @@ const RUNS: RunView[] = [
   run('9', 'PGS-1344', 'Show payroll cut-off on web and API', 'in_review_loop', {
     repo_id: 'pegasus-api',
     workspace_id: 'pegasus',
+    ac: { total: 5, ok: 3, failed: 0, unverified: 0, not_reviewed: 2, stale: true, design_gaps: 0 },
     pr_url: 'https://github.com/pegasus/pegasus-api/pull/77\nhttps://github.com/pegasus/pegasus-web/pull/483',
     repos: [
       { repo_id: 'pegasus-api', pr_url: 'https://github.com/pegasus/pegasus-api/pull/77' },
@@ -124,6 +131,13 @@ const RUNS: RunView[] = [
   }),
   run('10', 'PGS-1347', 'Overtime approval reminders', 'awaiting_dev', { phase: 'brainstorm' })
 ];
+
+// Sumber desain dan setelan reviewer tiruan (Rilis 2 U14).
+let designSources: DesignSourceView[] = [
+  { id: 'ds1', name: 'pegasus-mock', kind: 'folder', path: '/home/beni/work/pegasus-mock', ready: true, status: 'Ready' },
+  { id: 'ds2', name: 'old-figma-export', kind: 'folder', path: '/home/beni/old/figma', ready: false, status: 'Path missing' }
+];
+let reviewer: ReviewerSettingsView = { model: null, budget_cents: 200, timeout_secs: 900 };
 
 function card(r: RunView | null, extra: Partial<CardView>): CardView {
   return {
@@ -316,7 +330,9 @@ const workspaces: Record<string, unknown>[] = setup
         name: 'pegasus',
         root: '/home/beni/work',
         repo_ids: ['pegasus-api', 'pegasus-web'],
-        mcp_servers: ['graft']
+        mcp_servers: ['graft'],
+        browser_tests: true,
+        gate_mode: 'block'
       }
     ];
 
@@ -404,7 +420,7 @@ function handle(method: string, params: Record<string, unknown>): unknown {
     case 'workspaces.list':
       return workspaces;
     case 'workspaces.add': {
-      const ws = { id: String(params.name).toLowerCase().replace(/[^a-z0-9]+/g, '-'), ...params };
+      const ws = { id: String(params.name).toLowerCase().replace(/[^a-z0-9]+/g, '-'), browser_tests: true, gate_mode: 'block', ...params };
       workspaces.push(ws);
       return ws;
     }
@@ -559,6 +575,29 @@ function handle(method: string, params: Record<string, unknown>): unknown {
         cant_verify_reason: running ? null : 'The app is not running'
       };
     }
+    case 'design_sources.list':
+      return designSources;
+    case 'design_sources.test':
+      return { ready: true, status: 'Ready' };
+    case 'design_sources.add': {
+      const p = params as { name: string; path: string };
+      const s = { id: `ds${designSources.length + 1}`, name: p.name, kind: 'folder', path: p.path, ready: true, status: 'Ready' };
+      designSources = [...designSources, s];
+      return s;
+    }
+    case 'design_sources.update': {
+      const p = params as { id: string; name: string; path: string };
+      designSources = designSources.map((s) => (s.id === p.id ? { ...s, name: p.name, path: p.path } : s));
+      return designSources.find((s) => s.id === p.id) ?? null;
+    }
+    case 'design_sources.remove':
+      designSources = designSources.filter((s) => s.id !== String(params.id));
+      return {};
+    case 'settings.reviewer.get':
+      return reviewer;
+    case 'settings.reviewer.set':
+      reviewer = params as unknown as ReviewerSettingsView;
+      return reviewer;
     case 'system.chrome_check':
       chromeConnected = true;
       return { connected: true, detail: '', checked_at_ms: Date.now() };

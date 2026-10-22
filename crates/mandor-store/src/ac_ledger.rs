@@ -63,24 +63,88 @@ impl Store {
         .map_err(StoreError::internal)?;
         rows.into_iter()
             .map(|r| {
-                Ok(AcRow {
+                to_row(Raw {
                     ac_id: r.ac_id,
                     label: r.label,
                     text: r.text,
-                    design: Design::parse(&r.design).ok_or_else(|| corrupt("design", &r.design))?,
+                    design: r.design,
                     design_note: r.design_note,
-                    verdict: Verdict::parse(&r.verdict)
-                        .ok_or_else(|| corrupt("verdict", &r.verdict))?,
+                    verdict: r.verdict,
                     evidence: r.evidence,
-                    stale: r.stale != 0,
-                    status: RowStatus::parse(&r.status)
-                        .ok_or_else(|| corrupt("status", &r.status))?,
+                    stale: r.stale,
+                    status: r.status,
                     reason: r.reason,
                     decided_by: r.decided_by,
                 })
             })
             .collect()
     }
+
+    /// Baris buku AC semua run aktif dalam satu query: `(run_id, baris)`, untuk
+    /// ringkasan AC di papan dan sidebar.
+    ///
+    /// # Errors
+    /// [`StoreError::Internal`] bila pembacaan gagal atau nilai rusak.
+    pub async fn active_ac_rows(&self) -> Result<Vec<(String, AcRow)>, StoreError> {
+        let rows = sqlx::query!(
+            "SELECT a.run_id, a.ac_id, a.label, a.text, a.design, a.design_note, a.verdict,
+                    a.evidence, a.stale, a.status, a.reason, a.decided_by
+             FROM ac_rows a JOIN runs r ON r.id = a.run_id
+             WHERE r.closed = 0 ORDER BY a.run_id, a.position"
+        )
+        .fetch_all(&self.pool)
+        .await
+        .map_err(StoreError::internal)?;
+        rows.into_iter()
+            .map(|r| {
+                let row = to_row(Raw {
+                    ac_id: r.ac_id,
+                    label: r.label,
+                    text: r.text,
+                    design: r.design,
+                    design_note: r.design_note,
+                    verdict: r.verdict,
+                    evidence: r.evidence,
+                    stale: r.stale,
+                    status: r.status,
+                    reason: r.reason,
+                    decided_by: r.decided_by,
+                })?;
+                Ok((r.run_id, row))
+            })
+            .collect()
+    }
+}
+
+/// Kolom baris `ac_rows` sebelum dipetakan.
+struct Raw {
+    ac_id: String,
+    label: Option<String>,
+    text: String,
+    design: String,
+    design_note: Option<String>,
+    verdict: String,
+    evidence: Option<String>,
+    stale: i64,
+    status: String,
+    reason: Option<String>,
+    decided_by: Option<String>,
+}
+
+fn to_row(r: Raw) -> Result<AcRow, StoreError> {
+    Ok(AcRow {
+        ac_id: r.ac_id,
+        label: r.label,
+        text: r.text,
+        design: Design::parse(&r.design).ok_or_else(|| corrupt("design", &r.design))?,
+        design_note: r.design_note,
+        verdict: Verdict::parse(&r.verdict).ok_or_else(|| corrupt("verdict", &r.verdict))?,
+        evidence: r.evidence,
+        stale: r.stale != 0,
+        status: RowStatus::parse(&r.status).ok_or_else(|| corrupt("status", &r.status))?,
+        reason: r.reason,
+        decided_by: r.decided_by,
+    })
 }
 
 /// Nilai enum yang tidak dikenal di database.

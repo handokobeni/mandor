@@ -322,3 +322,41 @@ async fn riwayat_review_sebagai_port_dengan_verdict_dan_setelan_reviewer() {
     s.set_setting(CHROME_KEY, "true").await.unwrap();
     assert!(port.chrome_connected().await);
 }
+
+#[tokio::test]
+async fn buku_ac_aktif_hanya_dari_run_yang_belum_ditutup() {
+    let dir = tempfile::tempdir().unwrap();
+    let s = open(&dir).await;
+    with_run(&s, "run1").await;
+    with_run(&s, "run2").await;
+    s.save_ac_rows("run1", &[ac("1", Verdict::Fail), ac("2", Verdict::Pass)])
+        .await
+        .unwrap();
+    s.save_ac_rows("run2", &[ac("3", Verdict::Pass)])
+        .await
+        .unwrap();
+    s.close_run("run2", 5).await.unwrap();
+    let got = s.active_ac_rows().await.unwrap();
+    let ids: Vec<(&str, &str)> = got
+        .iter()
+        .map(|(run, r)| (run.as_str(), r.ac_id.as_str()))
+        .collect();
+    assert_eq!(ids, [("run1", "1"), ("run1", "2")]);
+    assert_eq!(got[0].1, ac("1", Verdict::Fail));
+}
+
+#[tokio::test]
+async fn skill_reviewer_run_bertahan_di_penyimpanan() {
+    let dir = tempfile::tempdir().unwrap();
+    let s = open(&dir).await;
+    with_run(&s, "run1").await;
+    let runs = RunsStore::new(s.clone());
+    let mut r = runs.get("run1").await.unwrap().unwrap();
+    r.reviewer_skill = Some("ac-check".to_owned());
+    runs.save(&r, r.generation, 2).await.unwrap();
+    drop(runs);
+    drop(s);
+    let s = open(&dir).await;
+    let got = RunsStore::new(s).get("run1").await.unwrap().unwrap();
+    assert_eq!(got.reviewer_skill.as_deref(), Some("ac-check"));
+}

@@ -111,7 +111,11 @@ git config core.hooksPath .githooks
 
 CI di `.github/workflows/ci.yml` menjalankan gerbang yang sama di Linux untuk setiap push ke `main` dan setiap pull request, serta pengecekan advisory harian. Linux, macOS, dan Windows berjalan seminggu sekali dan bisa dipicu manual dari tab Actions (**Run workflow**), karena menit macOS dan Windows di repo private memakan kuota lebih banyak.
 
-Smoke test terhadap Lark, GitHub, dan Claude sungguhan: lihat `crates/mandor-e2e/README.md`.
+Smoke test terhadap Lark, GitHub, dan Claude sungguhan (Rilis 1 dan Rilis 2): lihat `crates/mandor-e2e/README.md`.
+
+## Review AC (Rilis 2)
+
+Sumber desain, app web untuk diuji di Chrome, gerbang Push & PR, view "Design gaps" di Lark, dan biaya review: lihat `docs/runbook/ac-review.md`.
 
 ## Build rilis
 

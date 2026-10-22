@@ -39,7 +39,8 @@ Acceptance Criteria. Catat dari URL Base:
 
 Saat login pertama, mandor membuat field milik app bila belum ada (idempoten):
 `mandor_branch`, `mandor_pr`, `mandor_owner`, `mandor_comment_cursor`,
-`mandor_modified` (ModifiedTime, untuk polling inkremental), dan `Fix Notes`.
+`mandor_modified` (ModifiedTime, untuk polling inkremental), `Fix Notes`, dan
+`mandor_design_gaps` (selisih desain per AC, Rilis 2; lihat `ac-review.md`).
 Field `kanban_column`, `repo_id`, dan `order_within_column` yang sudah ada dipakai
 sebagai cermin tampilan. Field milik manusia (judul, deskripsi, AC, assignee) tidak
 pernah ditulis app.

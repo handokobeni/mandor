@@ -260,6 +260,19 @@ const MESSAGES: Record<string, MessageView[]> = {
       created_at_ms: 0
     },
     { id: 10, role: 'agent', body: { type: 'done', is_error: false, result: 'ok' }, created_at_ms: 0 }
+  ],
+  // Giliran plan: chat tetap berisi aktivitas walau run terbuka di tab Plan.
+  '8': [
+    { id: 1, role: 'dev', body: { type: 'text', text: 'Started: plan with Mandor built-in.' }, created_at_ms: 0 },
+    { id: 2, role: 'agent', body: { type: 'tool_use', id: 'p1', name: 'Read', preview: 'src/lib/api/search.ts' }, created_at_ms: 0 },
+    { id: 3, role: 'agent', body: { type: 'tool_result', tool_use_id: 'p1', is_error: false, preview: 'export async function searchEmployees(…' }, created_at_ms: 0 },
+    {
+      id: 4,
+      role: 'agent',
+      body: { type: 'assistant_message', text: 'The plan is ready in the Plan tab. Reply here to revise it.' },
+      created_at_ms: 0
+    },
+    { id: 5, role: 'agent', body: { type: 'done', is_error: false, result: 'ok' }, created_at_ms: 0 }
   ]
 };
 

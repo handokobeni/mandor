@@ -1,5 +1,6 @@
 <script lang="ts" generics="T extends { id: number }">
   import type { Snippet } from 'svelte';
+  import { offsetsOf, visibleRange } from '#lib/virtual.ts';
 
   interface Props {
     items: T[];
@@ -22,25 +23,16 @@
 
   const offsets = $derived.by(() => {
     void measured;
-    const out = new Array<number>(items.length + 1);
-    out[0] = 0;
-    for (let i = 0; i < items.length; i++) out[i + 1] = out[i] + (heights.get(items[i].id) ?? estimate);
-    return out;
+    return offsetsOf(
+      items.map((i) => i.id),
+      heights,
+      estimate
+    );
   });
 
-  function indexAt(y: number): number {
-    let lo = 0;
-    let hi = items.length;
-    while (lo < hi) {
-      const mid = (lo + hi) >> 1;
-      if (offsets[mid + 1] <= y) lo = mid + 1;
-      else hi = mid;
-    }
-    return lo;
-  }
-
-  const start = $derived(indexAt(Math.max(0, scrollTop - overscanPx)));
-  const end = $derived(Math.min(items.length, indexAt(scrollTop + containerHeight + overscanPx) + 1));
+  const range = $derived(visibleRange(offsets, scrollTop, containerHeight, overscanPx));
+  const start = $derived(range.start);
+  const end = $derived(range.end);
   const visible = $derived(items.slice(start, end));
 
   function measure(node: HTMLElement, id: number) {

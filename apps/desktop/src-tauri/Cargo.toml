@@ -43,3 +43,11 @@ print_stdout = "deny"
 print_stderr = "deny"
 await_holding_lock = "deny"
 module_name_repetitions = "allow"
+
+# Ukuran target/: lihat catatan di Cargo.toml root. Dependensi Tauri dan WebKit
+# besar, jadi debug info dependensi dimatikan; kode kita cukup nomor baris.
+[profile.dev]
+debug = "line-tables-only"
+
+[profile.dev.package."*"]
+debug = false

@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  acTitle,
   canSend,
   counts,
   evidenceParts,
@@ -132,5 +133,13 @@ describe('dialog gerbang', () => {
     expect(evidenceParts('<img src=x onerror=alert(1)>')).toEqual([
       { kind: 'text', text: '<img src=x onerror=alert(1)>' }
     ]);
+  });
+});
+
+describe('acTitle', () => {
+  it('mengambil baris pertama teks AC (judul sebelum skenario Gherkin)', () => {
+    expect(acTitle('AC-1 — Fibonacci\nGiven pengguna membuka halaman\nWhen …')).toBe('AC-1 — Fibonacci');
+    expect(acTitle('  Satu baris saja  ')).toBe('Satu baris saja');
+    expect(acTitle('\nGiven tanpa judul')).toBe('Given tanpa judul');
   });
 });

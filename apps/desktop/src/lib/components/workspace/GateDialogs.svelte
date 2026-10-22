@@ -5,7 +5,7 @@
   import CircleQuestionMark from '@lucide/svelte/icons/circle-question-mark';
   import CircleX from '@lucide/svelte/icons/circle-x';
   import GitPullRequestArrow from '@lucide/svelte/icons/git-pull-request-arrow';
-  import { label, publishParams, validReason } from '#lib/ac-review.ts';
+  import { acTitle, label, publishParams, validReason } from '#lib/ac-review.ts';
   import * as Alert from '#lib/components/ui/alert/index.ts';
   import { Button } from '#lib/components/ui/button/index.ts';
   import { Checkbox } from '#lib/components/ui/checkbox/index.ts';
@@ -58,7 +58,7 @@
 </script>
 
 <Dialog.Root open onOpenChange={(o) => !o && oncancel()}>
-  <Dialog.Content class="sm:max-w-[560px]">
+  <Dialog.Content class="sm:max-w-[560px] max-h-[90vh] overflow-y-auto">
     <Dialog.Header>
       <Dialog.Title class="text-[length:var(--text-md)]">{title}</Dialog.Title>
       <Dialog.Description>
@@ -84,8 +84,8 @@
           <div class="gate-row">
             <CircleX class="gate-x" aria-hidden="true" />
             <span>
-              <span class="mono">{label(r)}</span> {r.text}
-              {#if r.evidence}<span class="muted gate-why">Reviewer found: {r.evidence}</span>{/if}
+              <span class="mono">{label(r)}</span> <span title={r.text}>{acTitle(r.text)}</span>
+              {#if r.evidence}<span class="muted gate-why" title={r.evidence}>Reviewer found: {r.evidence}</span>{/if}
             </span>
           </div>
         {/each}
@@ -115,7 +115,7 @@
             {#if mode === 'warn'}
               <div class="gate-row">
                 <CircleQuestionMark class="gate-q" aria-hidden="true" />
-                <span><span class="mono">{label(r)}</span> {r.text}{#if r.evidence}<span class="muted gate-why">{r.evidence}</span>{/if}</span>
+                <span><span class="mono">{label(r)}</span> <span title={r.text}>{acTitle(r.text)}</span>{#if r.evidence}<span class="muted gate-why" title={r.evidence}>{r.evidence}</span>{/if}</span>
               </div>
             {:else}
               <label class="gate-row">
@@ -125,8 +125,8 @@
                   aria-label="I checked {label(r)} myself"
                 />
                 <span>
-                  <span class="mono">{label(r)}</span> {r.text}
-                  {#if r.evidence}<span class="muted gate-why">{r.evidence}</span>{/if}
+                  <span class="mono">{label(r)}</span> <span title={r.text}>{acTitle(r.text)}</span>
+                  {#if r.evidence}<span class="muted gate-why" title={r.evidence}>{r.evidence}</span>{/if}
                   <span class="gate-ck">I checked this myself</span>
                 </span>
               </label>

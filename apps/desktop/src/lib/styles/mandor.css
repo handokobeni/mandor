@@ -642,13 +642,13 @@ button.notif-item { width: 100%; border-left: 0; border-right: 0; border-top: 0;
 .gp-act { display: flex; gap: 6px; justify-content: flex-end; padding: 8px 10px; flex-wrap: wrap; }
 
 /* Gate dialogs */
-.gate-list { display: grid; gap: 6px; }
+.gate-list { display: grid; gap: 6px; max-height: min(46vh, 420px); overflow-y: auto; padding-right: 2px; }
 .gate-row { display: flex; gap: 10px; align-items: flex-start; padding: 8px 10px; border: 1px solid var(--border); border-radius: var(--radius); font-size: var(--text-sm); line-height: 1.45; }
 label.gate-row { cursor: pointer; }
 label.gate-row:has(input:checked) { border-color: color-mix(in oklab, var(--status-ok), transparent 40%); }
 .gate-row .checkbox { margin-top: 2px; }
 .gate-row .mono { font-weight: 600; margin-right: 4px; }
-.gate-why { display: block; margin-top: 2px; }
+.gate-why { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; margin-top: 2px; }
 .gate-ck { display: block; margin-top: 4px; font-weight: 500; }
 .gate-x { color: var(--status-failed); margin-top: 2px; }
 .gate-q { color: var(--status-warning); margin-top: 2px; }

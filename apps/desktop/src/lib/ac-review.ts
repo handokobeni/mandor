@@ -37,6 +37,16 @@ export function shownVerdict(r: AcRowView): string {
   return r.design === 'follow_design' ? 'follows_design' : r.verdict;
 }
 
+/** Judul AC: baris pertama yang tidak kosong (teks bisa memuat skenario Gherkin). */
+export function acTitle(text: string): string {
+  return (
+    text
+      .split('\n')
+      .map((l) => l.trim())
+      .find((l) => l.length > 0) ?? ''
+  );
+}
+
 export function label(r: AcRowView): string {
   return r.label ?? 'AC';
 }

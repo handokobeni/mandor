@@ -137,6 +137,12 @@ pub(crate) fn readonly_violation(cmd: &str) -> Option<String> {
     if let Some(prog) = runs_interpreter(cmd) {
         return Some(format!("`{prog}` runs commands that cannot be checked"));
     }
+    if runs_node_code(cmd) {
+        return Some(
+            "Only `node --test` with test paths is allowed; other `node` options can run code"
+                .to_owned(),
+        );
+    }
     if runs_preprocessor(cmd) {
         return Some("This `rg` option runs another program".to_owned());
     }
@@ -147,6 +153,22 @@ pub(crate) fn readonly_violation(cmd: &str) -> Option<String> {
         return Some(reason);
     }
     writes_files(cmd).map(|what| format!("{what} writes files"))
+}
+
+/// `node` selain `node --test <path…>`: opsi seperti `-e`, `--import`,
+/// `--require`, atau `--loader` menjalankan kode bebas di luar berkas test.
+fn runs_node_code(cmd: &str) -> bool {
+    cmd.split([';', '&', '|', '(', ')']).any(|segment| {
+        let words = shell_words(segment);
+        words
+            .iter()
+            .position(|w| crate::hook::program_name(w) == "node")
+            .is_some_and(|i| {
+                let args = &words[i + 1..];
+                args.first().map(String::as_str) != Some("--test")
+                    || args[1..].iter().any(|a| a.starts_with('-'))
+            })
+    })
 }
 
 /// Opsi `rg` yang menjalankan program lain: `--pre`/`--pre-glob` per berkas,
@@ -822,6 +844,13 @@ mod tests {
             "env -i cargo test",
             "export PATH=/tmp; cargo test",
             "time FOO=1 rg x",
+            "node --test -e 1",
+            "node --test --import data:text/javascript,1 tests/",
+            "node --test --require ./x.js",
+            "node --test --loader ./x.mjs tests/",
+            "node --testx",
+            "node -p 1",
+            "node tests/a.test.js",
             "! FOO=1 rg x",
             "timeout 5 env X=1 rg x",
             "nice -n 1 rg --no-config x; declare -x A=1",
@@ -861,6 +890,9 @@ mod tests {
             "rg -n 'a=b' src",
             "git log --grep=fix",
             "rg foo .",
+            "node --test",
+            "node --test tests/",
+            "node --test tests/calculator-core.test.js 2>&1",
             "ls .",
             "rg -n \"key=value\" src",
         ] {

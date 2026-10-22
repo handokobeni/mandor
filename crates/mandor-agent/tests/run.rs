@@ -233,6 +233,7 @@ async fn deskripsi_pr_tanpa_tool_dan_bahan_dibungkus_sebagai_data() {
                 acs: &acs,
                 plan: Some("1. Tambah tab"),
                 diff: "+fn a() {}",
+                follow_design: &["AC-2".to_owned()],
             },
         )
         .await
@@ -250,6 +251,7 @@ async fn deskripsi_pr_tanpa_tool_dan_bahan_dibungkus_sebagai_data() {
         "task_description",
         "acceptance_criteria",
         "plan",
+        "follows_design",
     ] {
         assert!(
             stdin.contains(&format!("<<<MANDOR_DATA {label}")),

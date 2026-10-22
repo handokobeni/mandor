@@ -415,6 +415,34 @@ async fn deskripsi_pr_gagal_dibuat_tetap_membuat_pr_dengan_template() {
 
 /// Semua AC di buku AC sudah lulus review (meniru review selesai) agar
 /// gerbang Push & PR Rilis 2 terbuka.
+#[tokio::test]
+async fn deskripsi_pr_diberi_tahu_ac_yang_mengikuti_desain() {
+    let (lark, clock) = setup();
+    let st = started(&lark, &clock).await;
+    st.agent.last().done();
+    eventually(|| st.runs.only().state == RunState::AwaitingDev).await;
+    let wt = st.runs.only().worktree.unwrap();
+    st.git.set_changes(
+        &wt,
+        WorkChanges {
+            dirty: true,
+            unpushed: 0,
+            files: vec!["src/a.rs".to_owned()],
+            diff: "+fn a(){}".to_owned(),
+        },
+    );
+    reviewed(&st);
+    let label = {
+        let mut ledgers = st.reviews.ledgers.lock().unwrap();
+        let row = ledgers.values_mut().next().unwrap().first_mut().unwrap();
+        row.design = mandor_domain::Design::FollowDesign;
+        row.display_label().to_owned()
+    };
+    st.svc.publish(&st.runs.only().id).await.unwrap();
+    let ctx = st.agent.pr_contexts.lock().unwrap()[0].clone();
+    assert_eq!(ctx.follow_design, [label]);
+}
+
 fn reviewed(st: &Station) {
     for rows in st.reviews.ledgers.lock().unwrap().values_mut() {
         for r in rows.iter_mut() {

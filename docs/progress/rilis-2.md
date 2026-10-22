@@ -91,4 +91,16 @@ Temuan F1 (giliran plan):
 
 - Planner menemukan selisih desain dengan benar di teks plan, tetapi `mcp__mandor__ac_ledger_read` ditolak Claude CLI ("no approval surface"), jadi kolom Design tidak tercatat dan Follow design tidak bisa dipakai. Penyebab: `--permission-mode plan` milik Claude menolak tool MCP yang tidak read-only walau ada di `--allowedTools` (dibuktikan dengan server MCP tiruan: mode plan menolak, mode default/acceptEdits menjalankan). Perbaikan: giliran plan memakai mode `default` dengan allowlist hanya-baca terpisah (`plan_allowed`: Read/Glob/Grep, git baca, ToolSearch, server MCP run; tanpa Edit/Write dan tanpa build/install/test), hook `--plan` tetap menolak penulisan, dan `ac_ledger_read` diberi `readOnlyHint`. Sesi review memakai `acceptEdits`, jadi tool verdict tidak terkena.
 - Tab Chat kosong setelah plan siap. Penyebab: run terbuka langsung di tab Plan, daftar chat virtual mengukur semua baris 0 px saat panelnya tersembunyi, lalu menganggap semua baris terlewati dan tidak pernah merender lagi. Perbaikan: tinggi 0 diabaikan (perkiraan tetap dipakai), perhitungan dipindah ke `lib/virtual.ts` dengan test.
+- Setelah perbaikan: planner mencatat Design lewat `ac_set_design` dan panel Design gaps tampil (AC-4 Missing, AC-5 Conflicts, AC-6 Conflicts; AC-1–3 In design). Teks AC (judul + Gherkin) kini tampil per baris.
+- AC-5 ikut di-approve sebagai Follow design (tombol terklik sebelum keputusan "AC sebagai acuan"); pemilik produk memilih melanjutkan, sehingga jalur Follow design ikut teruji: AC-5 keluar dari gerbang dan `mandor_design_gaps` di Lark berisi tiga baris, termasuk "AC-8811: Follow design: PM please update the AC".
+
+Hasil F1–F2 (lulus):
+
+- Approve plan → implementasi (`web/calculator.html`, `web/calculator-core.js`, test `node:test`, README).
+- Run app (Web, `python3 -m http.server 5173 --directory web`) lalu Push & create PR memulai review berbrowser (`push_and_pr`, `browser_used`).
+- Review pertama: 5 Pass, 1 Follows design. **Biaya US$1,30**, durasi 2,4 menit, token: input 40, output 11.467, cache write 106.988, cache read 1.066.607 (batas US$2,00 / 15 menit).
+- Push & create PR → `handokobeni/mandor-smoke#2`; kartu PGS-1511 Waiting Review, `mandor_pr` terisi. Deskripsi PR berisi ringkasan AC per verdict dan catatan "Verdicts are the AI reviewer's findings, not a sign-off".
+- Temuan: bagian Acceptance criteria tulisan agent di deskripsi PR menyebut AC-5 "Not addressed / tidak terpenuhi" padahal AC-5 sengaja mengikuti desain. Perbaikan: penulis deskripsi PR menerima blok `follows_design` dan instruksi menulisnya sebagai keputusan, bukan kekurangan. Tampilan markdown chat (judul, tabel, kode inline terpotong) dirapikan setara tab Plan.
+
+Belum: F3 (Waiting Fix + review otomatis), skenario Fail → Send to agent, dan Can't verify → konfirmasi.
 

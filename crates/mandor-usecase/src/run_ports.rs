@@ -292,6 +292,9 @@ pub struct PrContext<'a> {
     pub plan: Option<&'a str>,
     /// Diff branch terhadap base, sudah dipotong.
     pub diff: &'a str,
+    /// Label AC yang sengaja mengikuti desain (Follow design saat approve
+    /// plan); bukan AC yang belum terpenuhi.
+    pub follow_design: &'a [String],
 }
 
 /// Run untuk satu record di laptop pemilik.

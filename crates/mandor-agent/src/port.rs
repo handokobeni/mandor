@@ -67,7 +67,10 @@ in English Markdown, for a code reviewer. Use these sections:\n\
 ## Summary: two or three sentences on what the change does and why, based on the task.\n\
 ## Changes: bullets grouped by area or file, each saying what changed and why.\n\
 ## Acceptance criteria: one bullet per criterion saying how the diff addresses it, or \
-\"Not addressed in this diff\" when the diff does not show it.\n\
+\"Not addressed in this diff\" when the diff does not show it. Criteria listed in the \
+follows_design block were deliberately built to match the design instead of their text, by the \
+developer's decision when approving the plan: write \"Follows the design by decision; the PM was \
+asked to update this criterion\" for them, and do not call them unmet or raise them as reviewer notes.\n\
 ## Notes for reviewers: only real risks, migrations, or follow-ups visible in the diff; omit the \
 section when there are none.\n\
 Base every statement on the diff and the task data. Do not claim that tests were run; mention \
@@ -419,6 +422,14 @@ impl ClaudeAgent {
         }
         if let Some(plan) = ctx.plan.filter(|p| !p.trim().is_empty()) {
             prompt.push_str(&data_block("plan", plan, &nonce));
+            prompt.push('\n');
+        }
+        if !ctx.follow_design.is_empty() {
+            prompt.push_str(&data_block(
+                "follows_design",
+                &ctx.follow_design.join("\n"),
+                &nonce,
+            ));
             prompt.push('\n');
         }
         prompt.push_str(&data_block("diff", ctx.diff, &nonce));

@@ -493,8 +493,12 @@ impl mandor_usecase::run_ports::Prompts for PlainMessage {
         )
     }
 
-    fn approve_message(&self) -> String {
-        "APPROVED".to_owned()
+    fn approve_message(&self, follow_design: &[String]) -> String {
+        if follow_design.is_empty() {
+            "APPROVED".to_owned()
+        } else {
+            format!("APPROVED FOLLOW {}", follow_design.join("|"))
+        }
     }
 
     fn brainstorm_message(

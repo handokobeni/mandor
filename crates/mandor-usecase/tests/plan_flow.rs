@@ -148,7 +148,7 @@ async fn setujui_plan_memulai_implementasi_di_sesi_yang_sama() {
     plan_ready(&st).await;
 
     let id = st.runs.only().id;
-    st.svc.approve_plan(&id).await.unwrap();
+    st.svc.approve_plan(&id, &[]).await.unwrap();
     let req = st.agent.last().req;
     assert!(!req.plan_mode);
     assert!(matches!(req.session, SessionRef::Resume(_)));
@@ -162,7 +162,7 @@ async fn setujui_plan_memulai_implementasi_di_sesi_yang_sama() {
     st.agent.last().done();
     eventually(|| st.runs.only().state == RunState::AwaitingDev).await;
     assert_eq!(
-        st.svc.approve_plan(&id).await.unwrap_err(),
+        st.svc.approve_plan(&id, &[]).await.unwrap_err(),
         RunError::InvalidState("no plan to approve")
     );
 }
@@ -172,7 +172,10 @@ async fn persetujuan_ditolak_saat_plan_belum_selesai() {
     let (lark, clock) = setup();
     let st = planned(&lark, &clock, Planning::Plan { skill: None }).await;
     assert_eq!(
-        st.svc.approve_plan(&st.runs.only().id).await.unwrap_err(),
+        st.svc
+            .approve_plan(&st.runs.only().id, &[])
+            .await
+            .unwrap_err(),
         RunError::InvalidState("running")
     );
 }
@@ -235,7 +238,7 @@ async fn brainstorm_dulu_dengan_pertanyaan_lewat_chat_tanpa_plan() {
     );
     // Belum ada plan untuk disetujui.
     assert_eq!(
-        st.svc.approve_plan(&run.id).await.unwrap_err(),
+        st.svc.approve_plan(&run.id, &[]).await.unwrap_err(),
         RunError::InvalidState("no plan to approve")
     );
 
@@ -264,7 +267,7 @@ async fn lanjut_ke_plan_memakai_skill_plan_pilihan_lalu_bisa_disetujui() {
 
     plan_ready(&st).await;
     assert_eq!(st.runs.only().plan.as_deref(), Some(PLAN));
-    st.svc.approve_plan(&id).await.unwrap();
+    st.svc.approve_plan(&id, &[]).await.unwrap();
     assert_eq!(st.runs.only().phase, RunPhase::Implement);
     // Lanjut ke plan hanya dari fase brainstorm.
     st.agent.last().done();

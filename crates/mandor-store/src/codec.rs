@@ -89,6 +89,7 @@ pub(crate) enum FieldJson {
     CommentCursor(String),
     KanbanMirror(String),
     RepoId(String),
+    DesignGaps(String),
 }
 
 #[derive(Serialize, Deserialize)]
@@ -112,6 +113,7 @@ fn field_to(f: &AppField) -> FieldJson {
         AppField::CommentCursor(v) => FieldJson::CommentCursor(v.clone()),
         AppField::KanbanMirror(v) => FieldJson::KanbanMirror(v.clone()),
         AppField::RepoId(v) => FieldJson::RepoId(v.clone()),
+        AppField::DesignGaps(v) => FieldJson::DesignGaps(v.clone()),
     }
 }
 
@@ -123,6 +125,7 @@ fn field_from(f: FieldJson) -> AppField {
         FieldJson::CommentCursor(v) => AppField::CommentCursor(v),
         FieldJson::KanbanMirror(v) => AppField::KanbanMirror(v),
         FieldJson::RepoId(v) => AppField::RepoId(v),
+        FieldJson::DesignGaps(v) => AppField::DesignGaps(v),
     }
 }
 

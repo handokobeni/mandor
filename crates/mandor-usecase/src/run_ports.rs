@@ -533,8 +533,9 @@ pub trait Prompts: Send + Sync {
         dev_note: Option<&str>,
         skill: Option<&str>,
     ) -> String;
-    /// Pesan setelah dev menyetujui plan: kerjakan plan itu.
-    fn approve_message(&self) -> String;
+    /// Pesan setelah dev menyetujui plan: kerjakan plan itu. `follow_design`:
+    /// teks AC (dengan label) yang mengikuti desain, bukan AC (R8a).
+    fn approve_message(&self, follow_design: &[String]) -> String;
     /// Pesan giliran brainstorm: baca kode, tanyakan hal yang belum jelas satu
     /// per satu, lalu ringkas requirements yang disepakati.
     fn brainstorm_message(

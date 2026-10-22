@@ -8,15 +8,16 @@ use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
 
-use mandor_domain::{AgentEvent, RunState};
+use mandor_domain::ac_ledger::design_gaps_text;
+use mandor_domain::{AcRow, AgentEvent, AppField, Design, RunState, WriteOp};
 
 use super::members::session_of;
 use super::{RunError, RunService};
 use crate::notify::notice;
-use crate::ports::Deps;
+use crate::ports::{Deps, PortError};
 use crate::run_ports::{
-    AgentPort, AgentRequest, AgentRunHandle, ChatItem, NoticeKind, Notifier, Prompts, RunPhase,
-    RunRecord, RunStore, Spawner, Stopper,
+    AgentPort, AgentRequest, AgentRunHandle, ChatItem, LedgerStore, NoticeKind, Notifier, Prompts,
+    RunPhase, RunRecord, RunStore, Spawner, Stopper,
 };
 
 /// Hasil akhir satu giliran.
@@ -193,10 +194,18 @@ impl<D: Deps> RunService<D> {
     }
 
     /// "Approve plan & implement": agent mengerjakan plan terakhir di sesi yang sama.
+    /// `follow_design`: AC berselisih desain yang mengikuti desain (R8a); daftar
+    /// ini berlaku saat approve, jadi undo cukup dengan mengirim ulang daftar.
+    /// Setelah agent berjalan, selisih desain ditulis ke tracker (KTD-34).
     ///
     /// # Errors
-    /// Run tidak ada, agent masih bekerja, belum ada plan, atau agent gagal.
-    pub async fn approve_plan(self: &Arc<Self>, run_id: &str) -> Result<(), RunError> {
+    /// Run tidak ada, agent masih bekerja, belum ada plan, AC follow design
+    /// tidak valid, atau agent gagal.
+    pub async fn approve_plan(
+        self: &Arc<Self>,
+        run_id: &str,
+        follow_design: &[String],
+    ) -> Result<(), RunError> {
         let mut run = self.load(run_id).await?;
         if run.state != RunState::AwaitingDev {
             return Err(RunError::InvalidState(run.state.as_str()));
@@ -204,15 +213,29 @@ impl<D: Deps> RunService<D> {
         if run.phase != RunPhase::Plan || run.plan.is_none() {
             return Err(RunError::InvalidState("no plan to approve"));
         }
+        let rows = follow_design_rows(self.reviews.ac_rows(run_id).await?, follow_design)?;
+        let followed: Vec<String> = rows
+            .iter()
+            .filter(|r| follow_design.contains(&r.ac_id))
+            .map(|r| format!("{}: {}", r.display_label(), r.text))
+            .collect();
         run.phase = RunPhase::Implement;
-        let message = self.prompts.approve_message();
+        let message = self.prompts.approve_message(&followed);
         let req = self.resume_request(&mut run, message).await?;
         self.spawn_turn(
             &mut run,
             req,
             Some("Plan approved; implement it".to_owned()),
         )
-        .await
+        .await?;
+        if run.design.is_empty() {
+            return Ok(());
+        }
+        self.reviews.save_ac_rows(run_id, &rows).await?;
+        let gaps = design_gaps_text(&rows, DESIGN_GAPS_LIMIT);
+        let op = WriteOp::Fields(vec![AppField::DesignGaps(gaps)]);
+        self.sync.request_write(&run.record_id, &op).await?;
+        Ok(())
     }
 
     /// "Continue to plan": dari brainstorm ke plan di sesi yang sama, memakai
@@ -315,4 +338,30 @@ impl<D: Deps> RunService<D> {
         }
         Ok(true)
     }
+}
+
+/// Batas panjang field `mandor_design_gaps` (KTD-34).
+const DESIGN_GAPS_LIMIT: usize = 4_000;
+
+/// Buku AC dengan baris follow design diterapkan. Hanya baris Missing, Partly,
+/// atau Conflicts milik run yang boleh mengikuti desain.
+fn follow_design_rows(mut rows: Vec<AcRow>, ids: &[String]) -> Result<Vec<AcRow>, RunError> {
+    for id in ids {
+        let row = rows
+            .iter_mut()
+            .find(|r| &r.ac_id == id)
+            .ok_or_else(|| rejected(format!("unknown acceptance criterion: {id}")))?;
+        if !row.design.is_gap() {
+            return Err(rejected(format!(
+                "{} is not missing from or in conflict with the design",
+                row.display_label()
+            )));
+        }
+        row.design = Design::FollowDesign;
+    }
+    Ok(rows)
+}
+
+fn rejected(message: String) -> RunError {
+    RunError::Port(PortError::Rejected(message))
 }

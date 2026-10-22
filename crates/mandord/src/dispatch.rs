@@ -5,12 +5,12 @@ use std::sync::Arc;
 
 use mandor_api::Dispatch;
 use mandor_protocol::{
-    BoardView, CommentView, DirEntryView, DirListingView, DirQuery, ErrorCode, FileChangeView,
-    FileDiffParams, LarkSettingsInput, LoginComplete, MessageView, MessagesQuery, NoticeView,
-    NotificationsRead, PeopleQuery, PersonView, PublishResult, QuietPeriodSet, RecordRef, RepoAdd,
-    RepoCandidateView, RepoRef, RepoUpdate, RepoView, RpcError, RunRef, SendParams, SendResult,
-    SkillView, StartFixParams, StartParams, StartPlanning, StartProgressView, StatusResult,
-    TakeoverParams, event, method,
+    ApprovePlanParams, BoardView, CommentView, DirEntryView, DirListingView, DirQuery, ErrorCode,
+    FileChangeView, FileDiffParams, LarkSettingsInput, LoginComplete, MessageView, MessagesQuery,
+    NoticeView, NotificationsRead, PeopleQuery, PersonView, PublishResult, QuietPeriodSet,
+    RecordRef, RepoAdd, RepoCandidateView, RepoRef, RepoUpdate, RepoView, RpcError, RunRef,
+    SendParams, SendResult, SkillView, StartFixParams, StartParams, StartPlanning,
+    StartProgressView, StatusResult, TakeoverParams, event, method,
 };
 use mandor_store::{NewRepo, StoreError};
 use mandor_usecase::{
@@ -681,9 +681,8 @@ impl AppDispatch {
                 ok(&json!({}))
             }
             method::RUNS_APPROVE_PLAN => {
-                let p: RunRef = params(v)?;
-                runs.approve_plan(&p.run_id).await.map_err(run_error)?;
-                ok(&json!({}))
+                let p: ApprovePlanParams = params(v)?;
+                approve(runs, &p).await
             }
             method::RUNS_CONTINUE_TO_PLAN => {
                 let p: RunRef = params(v)?;
@@ -764,6 +763,17 @@ impl AppDispatch {
             _ => ok(&self.app.settings_view().await),
         }
     }
+}
+
+async fn approve<D: mandor_usecase::Deps>(
+    runs: &Arc<mandor_usecase::RunService<D>>,
+    p: &ApprovePlanParams,
+) -> Result<Value, RpcError> {
+    let follow = p.follow_design.as_deref().unwrap_or_default();
+    runs.approve_plan(&p.run_id, follow)
+        .await
+        .map_err(run_error)?;
+    ok(&json!({}))
 }
 
 impl Dispatch for AppDispatch {

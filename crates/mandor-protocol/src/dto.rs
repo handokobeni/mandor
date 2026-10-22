@@ -576,6 +576,16 @@ pub struct AcLedgerView {
     pub design_sources: Vec<String>,
 }
 
+/// Parameter `runs.approve_plan`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+pub struct ApprovePlanParams {
+    pub run_id: String,
+    /// `ac_id` baris Missing, Partly, atau Conflicts yang mengikuti desain (R8a).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub follow_design: Option<Vec<String>>,
+}
+
 /// Sumber desain terdaftar (Settings → Design sources).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
 pub struct DesignSourceView {

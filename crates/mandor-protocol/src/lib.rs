@@ -68,6 +68,7 @@ pub mod method {
     pub const RUNS_FILE_DIFF: &str = "runs.file_diff";
     pub const RUNS_DISCARD_FILE: &str = "runs.discard_file";
     /// Menyetujui plan agent dan memulai implementasi.
+    /// `ApprovePlanParams` → `{}`.
     pub const RUNS_APPROVE_PLAN: &str = "runs.approve_plan";
     /// Mengakhiri brainstorm dan meminta agent menulis plan.
     pub const RUNS_CONTINUE_TO_PLAN: &str = "runs.continue_to_plan";
@@ -219,6 +220,10 @@ fn review_bindings() -> Result<Vec<(&'static str, String)>, String> {
     Ok(vec![
         one("AcRowView.ts", AcRowView::export_to_string(&cfg))?,
         one("AcLedgerView.ts", AcLedgerView::export_to_string(&cfg))?,
+        one(
+            "ApprovePlanParams.ts",
+            ApprovePlanParams::export_to_string(&cfg),
+        )?,
         one(
             "DesignSourceView.ts",
             DesignSourceView::export_to_string(&cfg),

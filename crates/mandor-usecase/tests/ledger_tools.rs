@@ -1,4 +1,5 @@
-//! Skenario U5–U6 Rilis 2: token kapabilitas, operasi ledger, dan sumber desain.
+//! Skenario U5–U7 Rilis 2: token kapabilitas, operasi ledger, sumber desain,
+//! dan follow design saat plan disetujui.
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
 mod common;
@@ -7,9 +8,9 @@ use std::sync::atomic::Ordering;
 
 use common::run_fakes::eventually;
 use common::{FakeClock, FakeLark, Station, ready_task, station};
-use mandor_domain::{Design, RunState, Verdict};
+use mandor_domain::{AppField, Design, RunState, Verdict};
 use mandor_usecase::review::{CapabilityRole, DesignRoot, LedgerToolError};
-use mandor_usecase::{AcItem, Planning, StartTarget};
+use mandor_usecase::{AcItem, Planning, PortError, RunError, StartTarget};
 use pretty_assertions::assert_eq;
 
 const DAY: i64 = 24 * 60 * 60 * 1000;
@@ -260,4 +261,135 @@ async fn start_tanpa_sumber_desain_tidak_meminta_design() {
     assert!(req.design.is_empty());
     assert!(!req.message.contains("DESIGN"), "{}", req.message);
     assert!(st.runs.only().design.is_empty());
+}
+
+/// Run plan dengan sumber desain dan plan siap: ac1 In design, ac2 Conflicts.
+async fn plan_with_design(lark: &FakeLark, clock: &FakeClock) -> (Station, String) {
+    let (st, run) = plan_run(lark, clock).await;
+    let scope = st
+        .svc
+        .verify_capability(st.agent.last().req.ledger.unwrap().token.expose())
+        .unwrap();
+    st.svc
+        .ledger_set_design(&scope, "ac1", Design::InDesign, None)
+        .await
+        .unwrap();
+    st.svc
+        .ledger_set_design(
+            &scope,
+            "ac2",
+            Design::Conflicts,
+            Some("Delete moved to detail"),
+        )
+        .await
+        .unwrap();
+    st.agent.last().finish("## Plan");
+    eventually(|| st.runs.only().state == RunState::AwaitingDev).await;
+    (st, run)
+}
+
+fn gaps_writes(lark: &FakeLark) -> Vec<String> {
+    lark.writes()
+        .into_iter()
+        .flat_map(|(_, _, fields)| fields)
+        .filter_map(|f| match f {
+            AppField::DesignGaps(t) => Some(t),
+            _ => None,
+        })
+        .collect()
+}
+
+#[tokio::test]
+async fn covers_ae10_follow_design_saat_approve_menulis_selisih_ke_tracker() {
+    let (lark, clock) = setup();
+    let (st, run) = plan_with_design(&lark, &clock).await;
+
+    st.svc
+        .approve_plan(&run, &["ac2".to_owned()])
+        .await
+        .unwrap();
+    let rows = st.svc.ledger(&run).await.unwrap();
+    assert_eq!(rows[1].design, Design::FollowDesign);
+    assert!(!rows[1].in_gate(), "follow design tidak menahan gerbang");
+    let msg = st.agent.last().req.message;
+    assert_eq!(msg, "APPROVED FOLLOW AC-ac2: teks ac2");
+
+    st.svc.sync().drain_outbox(10).await.unwrap();
+    assert_eq!(
+        gaps_writes(&lark),
+        ["AC-ac2: Follow design: PM please update the AC"]
+    );
+}
+
+#[tokio::test]
+async fn follow_design_hanya_untuk_baris_selisih_milik_run() {
+    let (lark, clock) = setup();
+    let (st, run) = plan_with_design(&lark, &clock).await;
+    let before = st.svc.ledger(&run).await.unwrap();
+
+    // In design tidak bisa diikuti; AC asing ditolak; state tidak berubah.
+    for ids in [vec!["ac1".to_owned()], vec!["ac9".to_owned()]] {
+        let err = st.svc.approve_plan(&run, &ids).await.unwrap_err();
+        assert!(
+            matches!(err, RunError::Port(PortError::Rejected(_))),
+            "{err:?}"
+        );
+    }
+    assert_eq!(st.svc.ledger(&run).await.unwrap(), before);
+    assert_eq!(st.runs.only().state, RunState::AwaitingDev);
+
+    // Approve tanpa follow design: selisih Conflicts tetap ditulis apa adanya.
+    st.svc.approve_plan(&run, &[]).await.unwrap();
+    assert_eq!(st.agent.last().req.message, "APPROVED");
+    st.svc.sync().drain_outbox(10).await.unwrap();
+    assert_eq!(
+        gaps_writes(&lark),
+        ["AC-ac2: Conflicts with design: Delete moved to detail"]
+    );
+}
+
+#[tokio::test]
+async fn approve_tanpa_selisih_mengosongkan_field_dan_tanpa_sumber_tidak_menulis() {
+    let (lark, clock) = setup();
+    let (st, run) = plan_run(&lark, &clock).await;
+    st.agent.last().finish("## Plan");
+    eventually(|| st.runs.only().state == RunState::AwaitingDev).await;
+    st.svc.approve_plan(&run, &[]).await.unwrap();
+    st.svc.sync().drain_outbox(10).await.unwrap();
+    assert_eq!(gaps_writes(&lark), [String::new()]);
+
+    // Run tanpa sumber desain tidak menyentuh field selisih desain.
+    let (lark, clock) = setup();
+    let st = station(&lark, &clock, "ou_me");
+    st.svc
+        .start_planned(
+            "rec1",
+            &StartTarget::Repo("repo1".to_owned()),
+            None,
+            &Planning::Plan { skill: None },
+            &[],
+            &|_| {},
+        )
+        .await
+        .unwrap();
+    st.agent.last().finish("## Plan");
+    eventually(|| st.runs.only().state == RunState::AwaitingDev).await;
+    st.svc.approve_plan(&st.runs.only().id, &[]).await.unwrap();
+    st.svc.sync().drain_outbox(10).await.unwrap();
+    assert!(gaps_writes(&lark).is_empty());
+}
+
+#[tokio::test]
+async fn tulisan_selisih_desain_batal_bila_task_bukan_milik_dev_lagi() {
+    let (lark, clock) = setup();
+    let (st, run) = plan_with_design(&lark, &clock).await;
+    st.svc
+        .approve_plan(&run, &["ac2".to_owned()])
+        .await
+        .unwrap();
+    let mut t = lark.get("rec1").unwrap();
+    t.assignees = vec!["ou_lain".to_owned()];
+    lark.put(t);
+    let _ = st.svc.sync().drain_outbox(10).await;
+    assert!(gaps_writes(&lark).is_empty(), "validasi ulang KTD-7");
 }

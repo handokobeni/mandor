@@ -127,6 +127,19 @@ fn badan_tulis_hanya_berisi_field_milik_app_dan_status() {
 }
 
 #[test]
+fn selisih_desain_ditulis_sebagai_teks_dan_kosong_mengosongkan_field() {
+    let gaps = "AC-4: Follow design: PM please update the AC";
+    assert_eq!(
+        write_body(None, &[AppField::DesignGaps(gaps.to_owned())]),
+        json!({"mandor_design_gaps": gaps})
+    );
+    assert_eq!(
+        write_body(None, &[AppField::DesignGaps(String::new())]),
+        json!({"mandor_design_gaps": null})
+    );
+}
+
+#[test]
 fn link_pr_banyak_repo_memakai_url_pertama_dan_teks_lengkap_terbaca_kembali() {
     let urls = "https://x/api/pull/1\nhttps://x/web/pull/2";
     let body = write_body(None, &[AppField::PrUrl(urls.to_owned())]);

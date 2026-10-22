@@ -12,4 +12,8 @@ synced_at_ms: number | null,
 /**
  * Alasan refresh dari tracker gagal; `rows` adalah data terakhir.
  */
-sync_error: string | null, };
+sync_error: string | null, 
+/**
+ * Nama sumber desain run; kosong = "No design source".
+ */
+design_sources: Array<string>, };

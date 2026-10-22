@@ -229,9 +229,11 @@ impl<D: Deps> RunService<D> {
             return Err(RunError::InvalidState("not brainstorming"));
         }
         run.phase = RunPhase::Plan;
-        let message = self
-            .prompts
-            .continue_plan_message(run.plan_skill.as_deref());
+        let message = self.with_design(
+            &run,
+            self.prompts
+                .continue_plan_message(run.plan_skill.as_deref()),
+        );
         let req = self.resume_request(&mut run, message).await?;
         self.spawn_turn(&mut run, req, Some("Continue to plan".to_owned()))
             .await

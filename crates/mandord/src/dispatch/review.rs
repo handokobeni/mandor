@@ -174,6 +174,7 @@ impl AppDispatch {
                     rows: r.rows.iter().map(ac_row_view).collect(),
                     synced_at_ms: r.synced_at_ms,
                     sync_error: r.error,
+                    design_sources: r.design_sources,
                 })
             }
             _ => Err(RpcError::new(

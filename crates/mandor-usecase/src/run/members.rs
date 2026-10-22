@@ -182,8 +182,9 @@ impl<D: Deps> RunService<D> {
             }
         };
         let plan_mode = run.phase != RunPhase::Implement;
-        // Giliran brainstorm/plan mengisi kolom Design lewat tool ledger.
-        let ledger = plan_mode.then(|| crate::review::LedgerAccess {
+        // Giliran brainstorm/plan mengisi kolom Design lewat tool ledger bila
+        // ada sumber desain; tanpa sumber, Design tidak diisi (U6).
+        let ledger = (plan_mode && !run.design.is_empty()).then(|| crate::review::LedgerAccess {
             role: crate::review::CapabilityRole::Design,
             token: self.issue_capability(&run.id, crate::review::CapabilityRole::Design),
         });
@@ -196,6 +197,7 @@ impl<D: Deps> RunService<D> {
             workspace,
             plan_mode,
             ledger,
+            design: run.design.clone(),
         })
     }
 

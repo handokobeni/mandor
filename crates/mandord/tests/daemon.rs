@@ -496,3 +496,98 @@ fn rpc_workspace_dari_folder_induk_dengan_mcp_terpilih() {
     stop(home.path());
     let _ = daemon.wait();
 }
+
+#[test]
+fn rpc_sumber_desain_diuji_didaftarkan_dan_ditolak_bila_tidak_layak() {
+    let home = tempfile::tempdir().unwrap();
+    let mut daemon = serve(home.path());
+    let token = wait_for_info(home.path())["token"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let root = tempfile::tempdir().unwrap();
+    let mock = root.path().join("kelola-mock");
+    std::fs::create_dir_all(&mock).unwrap();
+    std::fs::write(root.path().join("berkas.txt"), "x").unwrap();
+    let mock_s = mock.to_str().unwrap();
+    let missing = root.path().join("tidak-ada");
+    let file = root.path().join("berkas.txt");
+    let state = home.path().join(".mandor");
+
+    let replies = connect_roundtrip(
+        home.path(),
+        &[
+            hello(&token),
+            rpc(2, "design_sources.test", &json!({"path": mock_s})),
+            rpc(
+                3,
+                "design_sources.test",
+                &json!({"path": missing.to_str().unwrap()}),
+            ),
+            rpc(
+                4,
+                "design_sources.test",
+                &json!({"path": file.to_str().unwrap()}),
+            ),
+            rpc(
+                5,
+                "design_sources.test",
+                &json!({"path": state.to_str().unwrap()}),
+            ),
+            rpc(
+                6,
+                "design_sources.add",
+                &json!({"name": "kelola-mock", "path": mock_s}),
+            ),
+            rpc(
+                7,
+                "design_sources.add",
+                &json!({"name": "hilang", "path": missing.to_str().unwrap()}),
+            ),
+            rpc(
+                8,
+                "design_sources.add",
+                &json!({"name": "kelola-mock", "path": mock_s}),
+            ),
+            rpc(9, "design_sources.list", &Value::Null),
+        ],
+    );
+    assert_eq!(
+        replies[1]["result"],
+        json!({"ready": true, "status": "Ready"})
+    );
+    assert_eq!(replies[2]["result"]["status"], "Path missing");
+    assert_eq!(replies[3]["result"]["status"], "Not a folder");
+    assert_eq!(replies[4]["result"]["ready"], false);
+    let added = &replies[5]["result"];
+    assert_eq!(added["name"], "kelola-mock");
+    assert_eq!(added["kind"], "folder");
+    assert_eq!(added["ready"], true);
+    assert_eq!(replies[6]["error"]["code"], "rejected");
+    assert_eq!(replies[7]["error"]["code"], "conflict");
+    let id = added["id"].as_str().unwrap().to_owned();
+    assert_eq!(replies[8]["result"][0]["id"], id.as_str());
+
+    // Sumber yang hilang tetap terdaftar dan ditandai; lalu bisa dihapus.
+    std::fs::remove_dir_all(&mock).unwrap();
+    let replies = connect_roundtrip(
+        home.path(),
+        &[
+            hello(&token),
+            rpc(2, "design_sources.list", &Value::Null),
+            rpc(
+                3,
+                "design_sources.update",
+                &json!({"id": id, "name": "mock", "path": root.path().to_str().unwrap()}),
+            ),
+            rpc(4, "design_sources.remove", &json!({"id": id})),
+            rpc(5, "design_sources.list", &Value::Null),
+        ],
+    );
+    assert_eq!(replies[1]["result"][0]["status"], "Path missing");
+    assert_eq!(replies[1]["result"][0]["ready"], false);
+    assert_eq!(replies[2]["result"]["name"], "mock");
+    assert_eq!(replies[4]["result"], json!([]));
+    stop(home.path());
+    let _ = daemon.wait();
+}

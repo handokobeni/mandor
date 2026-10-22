@@ -34,6 +34,16 @@ pub mod method {
     pub const LEDGER_TOOL_SET_DESIGN: &str = "ledger.tool.set_design";
     /// Koneksi kapabilitas, peran verdict: `LedgerToolSetVerdict`.
     pub const LEDGER_TOOL_SET_VERDICT: &str = "ledger.tool.set_verdict";
+    /// Sumber desain terdaftar (`Vec<DesignSourceView>`).
+    pub const DESIGN_SOURCES_LIST: &str = "design_sources.list";
+    /// `DesignSourceAdd` → `DesignSourceView`.
+    pub const DESIGN_SOURCES_ADD: &str = "design_sources.add";
+    /// `DesignSourceUpdate` → `DesignSourceView`.
+    pub const DESIGN_SOURCES_UPDATE: &str = "design_sources.update";
+    /// `DesignSourceRef` → `{}`.
+    pub const DESIGN_SOURCES_REMOVE: &str = "design_sources.remove";
+    /// `DesignSourceTest` → `DesignSourceCheckView`.
+    pub const DESIGN_SOURCES_TEST: &str = "design_sources.test";
     pub const LARK_LOGIN_BEGIN: &str = "lark.login.begin";
     pub const LARK_LOGIN_COMPLETE: &str = "lark.login.complete";
     pub const LARK_LOGOUT: &str = "lark.logout";
@@ -110,7 +120,7 @@ pub fn ts_bindings() -> Result<Vec<(&'static str, String)>, String> {
     let one = |name: &'static str, s: Result<String, ts_rs::ExportError>| {
         s.map(|body| (name, body)).map_err(|e| e.to_string())
     };
-    Ok(vec![
+    Ok([
         one("Hello.ts", Hello::export_to_string(&cfg))?,
         one("HelloOk.ts", HelloOk::export_to_string(&cfg))?,
         one("RpcError.ts", RpcError::export_to_string(&cfg))?,
@@ -129,8 +139,6 @@ pub fn ts_bindings() -> Result<Vec<(&'static str, String)>, String> {
             LarkSettingsInput::export_to_string(&cfg),
         )?,
         one("QuietPeriodSet.ts", QuietPeriodSet::export_to_string(&cfg))?,
-        one("AcRowView.ts", AcRowView::export_to_string(&cfg))?,
-        one("AcLedgerView.ts", AcLedgerView::export_to_string(&cfg))?,
         one("LoginBegin.ts", LoginBegin::export_to_string(&cfg))?,
         one("LoginComplete.ts", LoginComplete::export_to_string(&cfg))?,
         one("FlagView.ts", FlagView::export_to_string(&cfg))?,
@@ -195,5 +203,45 @@ pub fn ts_bindings() -> Result<Vec<(&'static str, String)>, String> {
         )?,
         one("StartPlanning.ts", StartPlanning::export_to_string(&cfg))?,
         one("SkillView.ts", SkillView::export_to_string(&cfg))?,
+    ]
+    .into_iter()
+    .chain(review_bindings()?)
+    .collect())
+}
+
+/// Tipe Rilis 2: buku AC dan sumber desain.
+fn review_bindings() -> Result<Vec<(&'static str, String)>, String> {
+    use ts_rs::{Config, TS};
+    let cfg = Config::new();
+    let one = |name: &'static str, s: Result<String, ts_rs::ExportError>| {
+        s.map(|body| (name, body)).map_err(|e| e.to_string())
+    };
+    Ok(vec![
+        one("AcRowView.ts", AcRowView::export_to_string(&cfg))?,
+        one("AcLedgerView.ts", AcLedgerView::export_to_string(&cfg))?,
+        one(
+            "DesignSourceView.ts",
+            DesignSourceView::export_to_string(&cfg),
+        )?,
+        one(
+            "DesignSourceAdd.ts",
+            DesignSourceAdd::export_to_string(&cfg),
+        )?,
+        one(
+            "DesignSourceUpdate.ts",
+            DesignSourceUpdate::export_to_string(&cfg),
+        )?,
+        one(
+            "DesignSourceRef.ts",
+            DesignSourceRef::export_to_string(&cfg),
+        )?,
+        one(
+            "DesignSourceTest.ts",
+            DesignSourceTest::export_to_string(&cfg),
+        )?,
+        one(
+            "DesignSourceCheckView.ts",
+            DesignSourceCheckView::export_to_string(&cfg),
+        )?,
     ])
 }

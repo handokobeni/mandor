@@ -520,6 +520,11 @@ impl mandor_usecase::run_ports::Prompts for PlainMessage {
         format!("CONTINUE SKILL:{}", skill.unwrap_or("-"))
     }
 
+    fn design_message(&self, sources: &[mandor_usecase::review::DesignRoot]) -> String {
+        let names: Vec<&str> = sources.iter().map(|s| s.name.as_str()).collect();
+        format!("DESIGN {}", names.join(","))
+    }
+
     fn fix_message(&self, ctx: &mandor_usecase::run_ports::FixContext<'_>) -> String {
         let comments: Vec<String> = ctx
             .comments

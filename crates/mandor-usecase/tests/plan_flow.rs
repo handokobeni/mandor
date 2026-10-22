@@ -36,6 +36,7 @@ async fn planned(lark: &FakeLark, clock: &FakeClock, planning: Planning) -> Stat
             &StartTarget::Repo("repo1".to_owned()),
             Some("pakai komponen lama"),
             &planning,
+            &[],
             |_| {},
         )
         .await

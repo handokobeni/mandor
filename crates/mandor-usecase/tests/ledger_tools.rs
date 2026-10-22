@@ -1,4 +1,4 @@
-//! Skenario U5 Rilis 2: token kapabilitas dan operasi ledger untuk agent.
+//! Skenario U5–U6 Rilis 2: token kapabilitas, operasi ledger, dan sumber desain.
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
 mod common;
@@ -8,7 +8,7 @@ use std::sync::atomic::Ordering;
 use common::run_fakes::eventually;
 use common::{FakeClock, FakeLark, Station, ready_task, station};
 use mandor_domain::{Design, RunState, Verdict};
-use mandor_usecase::review::{CapabilityRole, LedgerToolError};
+use mandor_usecase::review::{CapabilityRole, DesignRoot, LedgerToolError};
 use mandor_usecase::{AcItem, Planning, StartTarget};
 use pretty_assertions::assert_eq;
 
@@ -39,6 +39,14 @@ fn setup() -> (FakeLark, FakeClock) {
     (lark, clock)
 }
 
+fn mock_design() -> DesignRoot {
+    DesignRoot {
+        id: "ds1".to_owned(),
+        name: "kelola-mock".to_owned(),
+        path: "/design/kelola-mock".into(),
+    }
+}
+
 async fn plan_run(lark: &FakeLark, clock: &FakeClock) -> (Station, String) {
     let st = station(lark, clock, "ou_me");
     st.svc
@@ -47,6 +55,7 @@ async fn plan_run(lark: &FakeLark, clock: &FakeClock) -> (Station, String) {
             &StartTarget::Repo("repo1".to_owned()),
             None,
             &Planning::Plan { skill: None },
+            &[mock_design()],
             &|_| {},
         )
         .await
@@ -176,4 +185,79 @@ async fn token_salah_atau_kosong_ditolak() {
     let (st, _run) = plan_run(&lark, &clock).await;
     assert!(st.svc.verify_capability("").is_none());
     assert!(st.svc.verify_capability("bukan-token").is_none());
+}
+
+#[tokio::test]
+async fn covers_f1_plan_mengisi_design_dua_dari_tiga_ac_dan_plan_tersimpan() {
+    let (lark, clock) = setup();
+    let mut t = lark.get("rec1").unwrap();
+    t.ac_ids.push("ac3".to_owned());
+    lark.put(t);
+    lark.acs.lock().unwrap().insert(
+        "ac3".to_owned(),
+        AcItem {
+            record_id: "ac3".to_owned(),
+            label: Some("AC-ac3".to_owned()),
+            text: "teks ac3".to_owned(),
+            ..Default::default()
+        },
+    );
+    let (st, run) = plan_run(&lark, &clock).await;
+    let req = st.agent.last().req;
+    assert_eq!(req.design, [mock_design()]);
+    assert!(
+        req.message.contains("DESIGN kelola-mock"),
+        "{}",
+        req.message
+    );
+    assert_eq!(st.runs.only().design, [mock_design()]);
+    let scope = st
+        .svc
+        .verify_capability(req.ledger.unwrap().token.expose())
+        .unwrap();
+    st.svc
+        .ledger_set_design(&scope, "ac1", Design::InDesign, Some("Data tab"))
+        .await
+        .unwrap();
+    st.svc
+        .ledger_set_design(
+            &scope,
+            "ac2",
+            Design::Conflicts,
+            Some("design hides the button"),
+        )
+        .await
+        .unwrap();
+    st.agent.last().finish("## Plan\n1. Kerjakan");
+    eventually(|| st.runs.only().state == RunState::AwaitingDev).await;
+
+    let rows = st.svc.ledger(&run).await.unwrap();
+    let design: Vec<_> = rows.iter().map(|r| r.design).collect();
+    assert_eq!(
+        design,
+        [Design::InDesign, Design::Conflicts, Design::NotChecked]
+    );
+    assert_eq!(st.runs.only().plan.as_deref(), Some("## Plan\n1. Kerjakan"));
+}
+
+#[tokio::test]
+async fn start_tanpa_sumber_desain_tidak_meminta_design() {
+    let (lark, clock) = setup();
+    let st = station(&lark, &clock, "ou_me");
+    st.svc
+        .start_planned(
+            "rec1",
+            &StartTarget::Repo("repo1".to_owned()),
+            None,
+            &Planning::Plan { skill: None },
+            &[],
+            &|_| {},
+        )
+        .await
+        .unwrap();
+    let req = st.agent.last().req;
+    assert!(req.ledger.is_none(), "tanpa sumber, Design tidak diisi");
+    assert!(req.design.is_empty());
+    assert!(!req.message.contains("DESIGN"), "{}", req.message);
+    assert!(st.runs.only().design.is_empty());
 }

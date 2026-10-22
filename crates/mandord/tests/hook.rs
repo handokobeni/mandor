@@ -7,8 +7,13 @@ use std::process::{Command, Stdio};
 const BIN: &str = env!("CARGO_BIN_EXE_mandord");
 
 fn hook(input: &str, clear_env: bool) -> (i32, String) {
+    hook_with(input, clear_env, &[])
+}
+
+fn hook_with(input: &str, clear_env: bool, args: &[&str]) -> (i32, String) {
     let mut cmd = Command::new(BIN);
     cmd.arg("hook")
+        .args(args)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
@@ -54,4 +59,34 @@ fn input_rusak_menolak_dan_tanpa_konfigurasi_tetap_bekerja() {
     assert_eq!(hook("", true).0, 2);
     assert_eq!(hook(&bash("git push"), true).0, 2);
     assert_eq!(hook(&bash("cargo test"), true).0, 0);
+}
+
+fn file_tool(tool: &str, path: &std::path::Path) -> String {
+    serde_json::json!({"hook_event_name": "PreToolUse", "tool_name": tool, "tool_input": {"file_path": path}}).to_string()
+}
+
+#[cfg(unix)]
+#[test]
+fn akar_desain_hanya_baca_dan_symlink_keluar_ditolak() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path().join("mock");
+    std::fs::create_dir_all(root.join("src")).unwrap();
+    std::fs::write(root.join("src/page.tsx"), "x").unwrap();
+    std::fs::write(dir.path().join("secret.txt"), "s").unwrap();
+    std::os::unix::fs::symlink(dir.path().join("secret.txt"), root.join("link")).unwrap();
+    let root_arg = root.to_str().unwrap();
+    let args = ["--design", root_arg];
+
+    let read = file_tool("Read", &root.join("src/page.tsx"));
+    assert_eq!(hook_with(&read, false, &args).0, 0);
+    let write = file_tool("Write", &root.join("src/new.tsx"));
+    let (code, err) = hook_with(&write, false, &args);
+    assert_eq!(code, 2);
+    assert!(err.contains("read-only"), "{err}");
+    let escape = file_tool("Read", &root.join("link"));
+    assert_eq!(hook_with(&escape, false, &args).0, 2);
+    let dotdot = file_tool("Read", &root.join("../secret.txt"));
+    assert_eq!(hook_with(&dotdot, false, &args).0, 2);
+    // Tanpa akar desain, path di luar worktree diatur oleh aturan lain.
+    assert_eq!(hook_with(&read, false, &[]).0, 0);
 }

@@ -4,6 +4,7 @@ use std::path::PathBuf;
 
 use mandor_domain::RunState;
 use mandor_usecase::PortError;
+use mandor_usecase::review::DesignRoot;
 use mandor_usecase::run_ports::{
     ChatItem, Journal, RepoInfo, Repos, RunMember, RunPhase, RunRecord, RunStore, RunWorkspace,
     WorkspaceInfo,
@@ -35,6 +36,8 @@ struct RunExtra {
     #[serde(default)]
     review_snapshot: std::collections::BTreeMap<String, String>,
     #[serde(default)]
+    design: Vec<StoredDesign>,
+    #[serde(default)]
     workspace: Option<StoredWorkspace>,
     #[serde(default)]
     extra: Vec<StoredMember>,
@@ -51,6 +54,13 @@ struct RunExtra {
 }
 
 /// Bentuk simpan [`RunWorkspace`].
+#[derive(Serialize, Deserialize)]
+struct StoredDesign {
+    id: String,
+    name: String,
+    path: PathBuf,
+}
+
 #[derive(Serialize, Deserialize)]
 struct StoredWorkspace {
     id: String,
@@ -87,6 +97,15 @@ fn extra_of(r: &RunRecord) -> Result<String, StoreError> {
         fix_requested_by: r.fix_requested_by.clone(),
         pr_body_hashes: r.pr_body_hashes.clone(),
         review_snapshot: r.review_snapshot.clone(),
+        design: r
+            .design
+            .iter()
+            .map(|d| StoredDesign {
+                id: d.id.clone(),
+                name: d.name.clone(),
+                path: d.path.clone(),
+            })
+            .collect(),
         workspace: r.workspace.as_ref().map(|w| StoredWorkspace {
             id: w.id.clone(),
             root: w.root.clone(),
@@ -160,6 +179,15 @@ fn to_record(row: Row) -> Result<RunRecord, StoreError> {
         fix_requested_by: extra.fix_requested_by,
         pr_body_hashes: extra.pr_body_hashes,
         review_snapshot: extra.review_snapshot,
+        design: extra
+            .design
+            .into_iter()
+            .map(|d| DesignRoot {
+                id: d.id,
+                name: d.name,
+                path: d.path,
+            })
+            .collect(),
         workspace: extra.workspace.map(|w| RunWorkspace {
             id: w.id,
             root: w.root,

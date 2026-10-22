@@ -230,6 +230,10 @@ pub struct StartParams {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub planning: Option<StartPlanning>,
+    /// Id sumber desain yang dipilih (R5); kosong = tanpa sumber desain.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub design_sources: Option<Vec<String>>,
 }
 
 /// Pilihan planning saat Start.
@@ -568,6 +572,56 @@ pub struct AcLedgerView {
     pub synced_at_ms: Option<i64>,
     /// Alasan refresh dari tracker gagal; `rows` adalah data terakhir.
     pub sync_error: Option<String>,
+    /// Nama sumber desain run; kosong = "No design source".
+    pub design_sources: Vec<String>,
+}
+
+/// Sumber desain terdaftar (Settings → Design sources).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+pub struct DesignSourceView {
+    pub id: String,
+    pub name: String,
+    /// `folder` di 2.0.
+    pub kind: String,
+    pub path: String,
+    /// Bisa dipakai saat ini.
+    pub ready: bool,
+    /// `Ready`, `Path missing`, `Not a folder`, atau alasan penolakan.
+    pub status: String,
+}
+
+/// Parameter `design_sources.add`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+pub struct DesignSourceAdd {
+    pub name: String,
+    pub path: String,
+}
+
+/// Parameter `design_sources.update`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+pub struct DesignSourceUpdate {
+    pub id: String,
+    pub name: String,
+    pub path: String,
+}
+
+/// Parameter `design_sources.remove`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+pub struct DesignSourceRef {
+    pub id: String,
+}
+
+/// Parameter `design_sources.test`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+pub struct DesignSourceTest {
+    pub path: String,
+}
+
+/// Hasil `design_sources.test`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+pub struct DesignSourceCheckView {
+    pub ready: bool,
+    pub status: String,
 }
 
 /// Lingkup koneksi kapabilitas.

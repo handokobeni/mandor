@@ -201,6 +201,8 @@ pub struct AgentRequest {
     pub plan_mode: bool,
     /// Tool ledger milik daemon untuk giliran ini (KTD-26).
     pub ledger: Option<crate::review::LedgerAccess>,
+    /// Sumber desain hanya baca untuk agent (KTD-33).
+    pub design: Vec<crate::review::DesignRoot>,
 }
 
 /// Konteks agent untuk run workspace.
@@ -311,6 +313,9 @@ pub struct RunRecord {
     /// Snapshot kode (repo → tree id) saat review terakhir dimulai; kosong bila
     /// belum pernah direview (KTD-28).
     pub review_snapshot: BTreeMap<String, String>,
+    /// Sumber desain yang dipilih saat Start; dipakai semua giliran dan
+    /// reviewer (KTD-33). Kosong = run tanpa sumber desain.
+    pub design: Vec<crate::review::DesignRoot>,
     /// Diisi store saat membaca; diabaikan saat menyimpan.
     pub created_at_ms: i64,
     /// Diisi store saat membaca; diabaikan saat menyimpan.
@@ -345,6 +350,7 @@ impl RunRecord {
             fix_requested_by: None,
             pr_body_hashes: BTreeMap::new(),
             review_snapshot: BTreeMap::new(),
+            design: Vec::new(),
             created_at_ms: 0,
             updated_at_ms: 0,
         }
@@ -542,4 +548,7 @@ pub trait Prompts: Send + Sync {
     fn command_message(&self, name: &str, args: &str) -> String;
     /// Pesan dari brainstorm ke plan, di sesi yang sama.
     fn continue_plan_message(&self, skill: Option<&str>) -> String;
+    /// Tambahan pesan brainstorm/plan bila run punya sumber desain: baca
+    /// sumber dan isi kolom Design per AC lewat tool ledger.
+    fn design_message(&self, sources: &[crate::review::DesignRoot]) -> String;
 }

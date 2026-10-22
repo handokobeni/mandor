@@ -17,6 +17,12 @@ pub struct LedgerRefresh {
     pub synced_at_ms: Option<i64>,
     /// Alasan refresh gagal; buku AC dikembalikan apa adanya.
     pub error: Option<String>,
+    /// Nama sumber desain run; kosong = tanpa sumber desain ("No design source").
+    pub design_sources: Vec<String>,
+}
+
+fn design_names(run: &crate::run_ports::RunRecord) -> Vec<String> {
+    run.design.iter().map(|d| d.name.clone()).collect()
 }
 
 fn fetched(items: &[AcItem]) -> Vec<FetchedAc> {
@@ -83,6 +89,7 @@ impl<D: Deps> RunService<D> {
                     rows: existing,
                     synced_at_ms: self.synced_at(run_id),
                     error: Some(e.to_string()),
+                    design_sources: design_names(&run),
                 });
             }
         };
@@ -99,6 +106,7 @@ impl<D: Deps> RunService<D> {
             rows,
             synced_at_ms: self.synced_at(run_id),
             error: None,
+            design_sources: design_names(&run),
         })
     }
 

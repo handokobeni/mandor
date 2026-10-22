@@ -28,6 +28,7 @@ use crate::views::{
     card_view, notice_view, run_view, sprint_view, task_details_view, team_card_view,
 };
 
+mod design;
 mod review;
 mod workspaces;
 
@@ -563,6 +564,9 @@ impl AppDispatch {
             None => StartTarget::Repo(p.repo_id.clone()),
         };
         let planning = planning_of(p.planning.as_ref())?;
+        let design = self
+            .design_roots(p.design_sources.as_deref().unwrap_or_default())
+            .await?;
         let run = s
             .runs
             .start_planned(
@@ -570,6 +574,7 @@ impl AppDispatch {
                 &target,
                 p.note.as_deref(),
                 &planning,
+                &design,
                 progress,
             )
             .await
@@ -600,6 +605,7 @@ impl AppDispatch {
                 ok(&skills)
             }
             other if Self::is_workspaces_method(other) => self.workspaces_call(other, v).await,
+            other if Self::is_design_method(other) => self.design_call(other, v).await,
             other if Self::is_review_method(other) => self.review_call(other, v).await,
             other => self.run_action(other, v).await,
         }

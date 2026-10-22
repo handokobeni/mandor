@@ -105,11 +105,21 @@ impl ClaudeAgent {
             servers.push(LEDGER_SERVER_NAME.to_owned());
         }
         let mut companions: Vec<PathBuf> = Vec::new();
-        for c in repos.iter().flat_map(|r| r.companions.iter()) {
+        let design_roots = req.design.iter().map(|d| &d.path);
+        for c in repos
+            .iter()
+            .flat_map(|r| r.companions.iter())
+            .chain(design_roots)
+        {
             if !companions.contains(c) {
                 companions.push(c.clone());
             }
         }
+        let design: Vec<(String, String)> = req
+            .design
+            .iter()
+            .map(|d| (d.name.clone(), d.path.display().to_string()))
+            .collect();
         let mut allowed = default_allowed();
         for a in repos.iter().flat_map(|r| r.extra_allowed.iter()) {
             if !allowed.contains(a) {
@@ -121,6 +131,10 @@ impl ClaudeAgent {
         if !servers.is_empty() {
             hook_command.push_str(" --mcp ");
             hook_command.push_str(&servers.join(","));
+        }
+        for (_, root) in &design {
+            hook_command.push_str(" --design ");
+            hook_command.push_str(&shell_quote(root));
         }
         let mut denied = default_denied(&companions);
         if req.plan_mode {
@@ -140,6 +154,7 @@ impl ClaudeAgent {
                 branch: &req.branch,
                 base_branch: &req.repo.default_branch,
                 repos: &listing,
+                design: &design,
             }),
             model: self.cfg.model.clone(),
             allowed,
@@ -456,6 +471,18 @@ async fn restrict(_path: &Path) -> std::io::Result<()> {
     Ok(())
 }
 
+/// Kutip path untuk perintah hook yang dijalankan lewat shell.
+fn shell_quote(path: &str) -> String {
+    if path
+        .chars()
+        .all(|c| c.is_ascii_alphanumeric() || "/._-+:".contains(c))
+    {
+        path.to_owned()
+    } else {
+        format!("'{}'", path.replace('\'', "'\\''"))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -481,6 +508,7 @@ mod tests {
             workspace: None,
             plan_mode: false,
             ledger: None,
+            design: vec![],
         };
         let spec = agent.spec(&req, None);
         assert_eq!(spec.mcp_config, None);
@@ -544,7 +572,43 @@ mod tests {
             }),
             plan_mode: false,
             ledger: None,
+            design: vec![],
         }
+    }
+
+    #[test]
+    fn sumber_desain_menjadi_add_dir_hanya_baca_dan_argumen_hook() {
+        use mandor_usecase::review::DesignRoot;
+        let agent = test_agent("/tmp/mcp".into());
+        let mut req = workspace_req("/src/kelola-v2".into());
+        req.plan_mode = true;
+        req.design = vec![DesignRoot {
+            id: "ds1".to_owned(),
+            name: "kelola-mock".to_owned(),
+            path: "/design/kelola mock".into(),
+        }];
+        let spec = agent.spec(&req, None);
+        assert!(
+            spec.companions
+                .contains(&PathBuf::from("/design/kelola mock"))
+        );
+        assert!(
+            spec.denied
+                .contains(&"Edit(/design/kelola mock/**)".to_owned())
+        );
+        assert!(
+            spec.denied
+                .contains(&"Write(/design/kelola mock/**)".to_owned())
+        );
+        assert_eq!(
+            spec.hook_command,
+            "/opt/mandord hook --mcp graft --design '/design/kelola mock' --plan"
+        );
+        assert!(
+            spec.operator_prompt
+                .contains("kelola-mock: /design/kelola mock")
+        );
+        assert!(spec.operator_prompt.contains("design sources"));
     }
 
     #[test]

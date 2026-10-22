@@ -65,6 +65,12 @@ async fn run_bolak_balik_konflik_generasi_dan_pid_bisa_dikosongkan() {
     r.phase = RunPhase::Brainstorm;
     r.plan = Some("## Plan".to_owned());
     r.plan_skill = Some("compound-engineering:ce-plan".to_owned());
+    // Sumber desain run ikut tersimpan.
+    r.design = vec![mandor_usecase::review::DesignRoot {
+        id: "ds1".to_owned(),
+        name: "kelola-mock".to_owned(),
+        path: "/design/kelola-mock".into(),
+    }];
     runs.save(&r, 0, 2).await.unwrap();
     // Waktu dibuat dan diubah diisi oleh store.
     (r.created_at_ms, r.updated_at_ms) = (1, 2);

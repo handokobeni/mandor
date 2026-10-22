@@ -99,6 +99,49 @@ pub fn classify_planning(call: &ToolCall, allowed_mcp: &[String]) -> Verdict {
     classify_with_mcp(call, allowed_mcp)
 }
 
+/// Path menyentuh berkas kredensial atau state mandor (aturan KTD-21).
+#[must_use]
+pub fn is_credential_path(path: &str) -> bool {
+    let p = normalize_path(path);
+    CREDENTIAL_MARKERS.iter().any(|m| p.contains(m))
+}
+
+/// Aturan akar sumber desain (KTD-33, R7a). `raw` adalah path dari tool call,
+/// `canonical` hasil kanonisasi (`realpath`) oleh pemanggil, dan `roots` akar
+/// terdaftar yang sudah dikanonisasi. Path yang disebut di dalam akar harus
+/// tetap di dalam akar setelah kanonisasi (symlink atau `../` tidak bisa
+/// keluar), dan tidak ada tool penulis berkas di dalam akar.
+#[must_use]
+pub fn check_design_path(
+    tool: &str,
+    raw: &str,
+    canonical: &str,
+    roots: &[String],
+) -> Option<String> {
+    let named = roots.iter().find(|r| under(raw, r));
+    if let Some(root) = named {
+        if !under(canonical, root) {
+            return Some(format!(
+                "mandor: {raw} resolves outside the design source {root}"
+            ));
+        }
+    }
+    let inside = named.is_some() || roots.iter().any(|r| under(canonical, r));
+    if inside && WRITE_TOOLS.contains(&tool) {
+        return Some(format!("mandor: design sources are read-only ({raw})"));
+    }
+    None
+}
+
+/// `path` sama dengan `root` atau berada di bawahnya, per komponen path.
+fn under(path: &str, root: &str) -> bool {
+    let root = root.trim_end_matches('/');
+    path == root
+        || path
+            .strip_prefix(root)
+            .is_some_and(|rest| rest.starts_with('/'))
+}
+
 fn normalize_path(p: &str) -> String {
     p.replace('\\', "/").to_lowercase()
 }
@@ -186,6 +229,61 @@ fn check_command(cmd: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn roots() -> Vec<String> {
+        vec!["/design/mock".to_owned()]
+    }
+
+    #[test]
+    fn baca_di_akar_desain_boleh_tulis_ditolak() {
+        let r = roots();
+        let p = "/design/mock/src/page.tsx";
+        assert_eq!(check_design_path("Read", p, p, &r), None);
+        assert_eq!(
+            check_design_path("Grep", "/design/mock", "/design/mock", &r),
+            None
+        );
+        assert!(check_design_path("Write", p, p, &r).is_some());
+        assert!(check_design_path("Edit", p, p, &r).is_some());
+        // Path lain tidak terpengaruh, termasuk nama yang hanya berawalan sama.
+        assert_eq!(check_design_path("Write", "/wt/a.rs", "/wt/a.rs", &r), None);
+        assert_eq!(
+            check_design_path("Write", "/design/mockup/x", "/design/mockup/x", &r),
+            None
+        );
+    }
+
+    #[test]
+    fn symlink_atau_dotdot_yang_keluar_dari_akar_ditolak() {
+        let r = roots();
+        // Symlink di dalam akar menunjuk ke luar.
+        assert!(
+            check_design_path("Read", "/design/mock/link", "/home/dev/.ssh/id_rsa", &r).is_some()
+        );
+        // `../` yang keluar dari akar setelah kanonisasi.
+        assert!(
+            check_design_path(
+                "Read",
+                "/design/mock/../secret.txt",
+                "/design/secret.txt",
+                &r
+            )
+            .is_some()
+        );
+        // Symlink dari luar yang menunjuk ke dalam akar tetap hanya baca.
+        assert!(check_design_path("Write", "/wt/link", "/design/mock/a.css", &r).is_some());
+        assert_eq!(
+            check_design_path("Read", "/wt/link", "/design/mock/a.css", &r),
+            None
+        );
+    }
+
+    #[test]
+    fn path_kredensial_dikenali() {
+        assert!(is_credential_path("/home/dev/.mandor/design"));
+        assert!(is_credential_path("/home/dev/.ssh/"));
+        assert!(!is_credential_path("/home/dev/work/kelola-mock"));
+    }
 
     fn bash(cmd: &str) -> Verdict {
         classify(&ToolCall {

@@ -382,22 +382,16 @@ impl<D: Deps> RunService<D> {
                 .take(PR_DIFF_MAX)
                 .collect();
             let acs = self.ac_texts(task).await.unwrap_or_default();
-            let follow_design: Vec<String> = self
-                .reviews
-                .ac_rows(&run.id)
-                .await
-                .unwrap_or_default()
-                .iter()
-                .filter(|r| r.design == mandor_domain::Design::FollowDesign)
-                .map(|r| r.display_label().to_owned())
-                .collect();
+            let decided = mandor_domain::push_gate::pr_decisions(
+                &self.reviews.ac_rows(&run.id).await.unwrap_or_default(),
+            );
             let ctx = PrContext {
                 title,
                 description: &task.description,
                 acs: &acs,
                 plan: run.plan.as_deref(),
                 diff: &diff,
-                follow_design: &follow_design,
+                decided: &decided,
             };
             self.agent.pr_description(&m.worktree, &ctx).await
         }

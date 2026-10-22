@@ -153,6 +153,21 @@ pub fn pr_summary(rows: &[AcRow], ac_synced_at: Option<&str>) -> String {
     out
 }
 
+/// AC yang sudah punya keputusan dev (Follows design, Skipped dengan alasan,
+/// atau Checked manually), dalam format baris ringkasan PR. Penulis deskripsi
+/// PR memakainya agar tidak menyebut AC itu belum terpenuhi.
+#[must_use]
+pub fn pr_decisions(rows: &[AcRow]) -> Vec<String> {
+    rows.iter()
+        .filter(|r| r.status != RowStatus::Removed)
+        .filter(|r| {
+            r.design == Design::FollowDesign
+                || matches!(r.verdict, Verdict::Skipped | Verdict::CheckedManually)
+        })
+        .map(|r| format!("{}: {}", r.display_label(), row_result(r)))
+        .collect()
+}
+
 fn row_result(r: &AcRow) -> String {
     if r.design == Design::FollowDesign {
         return "Follows design (the PM was asked to update this AC)".to_owned();
@@ -195,6 +210,35 @@ mod tests {
             .filter(|r| r.display_label() == label)
             .map(|r| r.ac_id.clone())
             .collect()
+    }
+
+    #[test]
+    fn keputusan_ac_untuk_penulis_pr_hanya_baris_yang_sudah_diputuskan() {
+        let mut follow = row("AC-5", Verdict::NotReviewed);
+        follow.design = Design::FollowDesign;
+        let mut skipped = row("AC-6", Verdict::Skipped);
+        skipped.reason = Some("PM setuju 3 item".to_owned());
+        skipped.decided_by = Some("Beni".to_owned());
+        let mut manual = row("AC-1", Verdict::CheckedManually);
+        manual.decided_by = Some("Beni".to_owned());
+        let mut removed = row("AC-9", Verdict::Skipped);
+        removed.status = RowStatus::Removed;
+        let rows = vec![
+            manual,
+            row("AC-2", Verdict::Pass),
+            row("AC-3", Verdict::Fail),
+            follow,
+            skipped,
+            removed,
+        ];
+        assert_eq!(
+            pr_decisions(&rows),
+            [
+                "AC-1: Checked manually by Beni",
+                "AC-5: Follows design (the PM was asked to update this AC)",
+                "AC-6: Skipped by Beni: PM setuju 3 item",
+            ]
+        );
     }
 
     #[test]

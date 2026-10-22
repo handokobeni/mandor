@@ -416,7 +416,7 @@ async fn deskripsi_pr_gagal_dibuat_tetap_membuat_pr_dengan_template() {
 /// Semua AC di buku AC sudah lulus review (meniru review selesai) agar
 /// gerbang Push & PR Rilis 2 terbuka.
 #[tokio::test]
-async fn deskripsi_pr_diberi_tahu_ac_yang_mengikuti_desain() {
+async fn deskripsi_pr_diberi_tahu_keputusan_ac() {
     let (lark, clock) = setup();
     let st = started(&lark, &clock).await;
     st.agent.last().done();
@@ -440,7 +440,12 @@ async fn deskripsi_pr_diberi_tahu_ac_yang_mengikuti_desain() {
     };
     st.svc.publish(&st.runs.only().id).await.unwrap();
     let ctx = st.agent.pr_contexts.lock().unwrap()[0].clone();
-    assert_eq!(ctx.follow_design, [label]);
+    assert_eq!(
+        ctx.decided,
+        [format!(
+            "{label}: Follows design (the PM was asked to update this AC)"
+        )]
+    );
 }
 
 fn reviewed(st: &Station) {

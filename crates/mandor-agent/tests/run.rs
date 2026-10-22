@@ -233,7 +233,7 @@ async fn deskripsi_pr_tanpa_tool_dan_bahan_dibungkus_sebagai_data() {
                 acs: &acs,
                 plan: Some("1. Tambah tab"),
                 diff: "+fn a() {}",
-                follow_design: &["AC-2".to_owned()],
+                decided: &["AC-2: Skipped by Beni: PM setuju".to_owned()],
             },
         )
         .await
@@ -251,7 +251,7 @@ async fn deskripsi_pr_tanpa_tool_dan_bahan_dibungkus_sebagai_data() {
         "task_description",
         "acceptance_criteria",
         "plan",
-        "follows_design",
+        "decided_criteria",
     ] {
         assert!(
             stdin.contains(&format!("<<<MANDOR_DATA {label}")),
@@ -259,6 +259,7 @@ async fn deskripsi_pr_tanpa_tool_dan_bahan_dibungkus_sebagai_data() {
         );
     }
     assert!(stdin.contains("untrusted"));
+    assert!(stdin.contains("same language as the task"), "{stdin}");
 }
 
 #[tokio::test]

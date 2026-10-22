@@ -377,7 +377,7 @@ pub struct OwnedPrContext {
     pub acs: Vec<String>,
     pub plan: Option<String>,
     pub diff: String,
-    pub follow_design: Vec<String>,
+    pub decided: Vec<String>,
 }
 
 impl FakeAgent {
@@ -421,7 +421,7 @@ impl AgentPort for FakeAgent {
             acs: ctx.acs.to_vec(),
             plan: ctx.plan.map(str::to_owned),
             diff: ctx.diff.to_owned(),
-            follow_design: ctx.follow_design.to_vec(),
+            decided: ctx.decided.to_vec(),
         });
         if *self.fail_pr_description.lock().unwrap() {
             return Err(PortError::Transient("claude timeout".to_owned()));

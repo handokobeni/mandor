@@ -121,6 +121,17 @@ impl<D: Deps> RunService<D> {
         run_id: &str,
         confirmed: &BTreeMap<String, String>,
     ) -> Result<AppRecord, RunError> {
+        let run = self
+            .runs
+            .get(run_id)
+            .await?
+            .ok_or(RunError::NotFound("run"))?;
+        // Kode tidak boleh berubah antara konfirmasi dan start.
+        if run.state.is_busy() {
+            return Err(RunError::InvalidState(
+                "the agent is working; run the app when it finishes",
+            ));
+        }
         let members = self.app_members(run_id).await?;
         if members.is_empty() {
             return Err(rejected(
@@ -225,6 +236,7 @@ impl<D: Deps> RunService<D> {
             .settings
             .port
             .ok_or_else(|| PortError::Rejected("no port set".to_owned()))?;
+        self.ensure_unchanged(rec, m).await?;
         let hash = self.apps.lockfile_hash(&m.worktree).await;
         let setup = m
             .settings
@@ -244,6 +256,7 @@ impl<D: Deps> RunService<D> {
             )));
         }
         self.set_member_state(rec, i, AppRunState::Starting).await;
+        self.ensure_unchanged(rec, m).await?;
         let pgid = self.apps.spawn(&rec.run_id, m).await?;
         rec.members[i].pgid = Some(pgid);
         self.set_member_state(rec, i, AppRunState::WaitingForPort)
@@ -251,6 +264,18 @@ impl<D: Deps> RunService<D> {
         self.apps.wait_ready(&rec.run_id, &m.repo_id, port).await?;
         self.set_member_state(rec, i, AppRunState::Running).await;
         Ok(())
+    }
+
+    /// Kode repo masih sama dengan snapshot yang dikonfirmasi dev.
+    async fn ensure_unchanged(&self, rec: &AppRecord, m: &AppMember) -> Result<(), PortError> {
+        let current = self.git.snapshot(&m.worktree).await?;
+        if rec.snapshot.get(&m.repo_id) == Some(&current) {
+            Ok(())
+        } else {
+            Err(PortError::Rejected(
+                "the code changed after you confirmed it; review the changes again".to_owned(),
+            ))
+        }
     }
 
     async fn set_member_state(&self, rec: &mut AppRecord, i: usize, state: AppRunState) {

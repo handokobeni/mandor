@@ -60,6 +60,8 @@ async fn single(lark: &FakeLark, clock: &FakeClock) -> (Station, String) {
     st.repos.repos.lock().unwrap().clear();
     st.repos.add(repo("repo1", web(5173, Some("bun install"))));
     st.svc.start("rec1", "repo1", None).await.unwrap();
+    st.agent.last().done();
+    eventually(|| !st.runs.only().state.is_busy()).await;
     let id = st.runs.only().id;
     (st, id)
 }
@@ -208,6 +210,8 @@ async fn covers_r27_anggota_dinyalakan_berurutan_dan_berhenti_saat_gagal() {
         .start_with_progress("rec1", &target, None, |_| {})
         .await
         .unwrap();
+    st.agent.last().done();
+    eventually(|| !st.runs.only().state.is_busy()).await;
     let run = st.runs.only().id;
     running(&st, &run).await;
     let calls: Vec<String> = st
@@ -238,6 +242,7 @@ async fn app_run_lain_menghentikan_app_sebelumnya() {
     let (st, run_a) = single(&lark, &clock).await;
     running(&st, &run_a).await;
     st.svc.start("rec2", "repo1", None).await.unwrap();
+    st.agent.last().done();
     let run_b = st
         .runs
         .all()
@@ -245,6 +250,13 @@ async fn app_run_lain_menghentikan_app_sebelumnya() {
         .find(|r| r.record_id == "rec2")
         .unwrap()
         .id;
+    eventually(|| {
+        st.runs
+            .all()
+            .iter()
+            .any(|r| r.id == run_b && !r.state.is_busy())
+    })
+    .await;
     running(&st, &run_b).await;
     assert_eq!(
         st.apps.record(&run_a).unwrap().state,
@@ -280,4 +292,39 @@ async fn repo_tanpa_perintah_start_tidak_bisa_dinyalakan() {
         st.svc.app_changes(&run).await,
         Err(RunError::Port(PortError::Rejected(_)))
     ));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn app_ditolak_saat_agent_bekerja_dan_dibatalkan_bila_kode_berubah() {
+    let (lark, clock) = setup();
+    let st = station(&lark, &clock, "ou_me");
+    st.repos.repos.lock().unwrap().clear();
+    st.repos.add(repo("repo1", web(5173, None)));
+    st.svc.start("rec1", "repo1", None).await.unwrap();
+    let run = st.runs.only().id;
+    // Agent masih bekerja (giliran Start belum selesai).
+    let snap = confirmed(&st, &run);
+    assert!(matches!(
+        st.svc.app_run(&run, &snap).await,
+        Err(RunError::InvalidState(_))
+    ));
+    st.agent.last().done();
+    eventually(|| !st.runs.only().state.is_busy()).await;
+
+    // Kode berubah setelah konfirmasi tetapi sebelum spawn: dibatalkan.
+    let wt = st.runs.only().worktree.unwrap();
+    st.apps.st.lock().unwrap().change_tree_on_setup =
+        Some((st.git.state.clone(), wt, "tree-baru".to_owned()));
+    st.repos.repos.lock().unwrap()[0].app.setup_command = Some("bun install".to_owned());
+    running(&st, &run).await;
+    let rec = st.apps.record(&run).unwrap();
+    assert_eq!(rec.state, AppRunState::Failed);
+    assert!(
+        rec.error
+            .as_deref()
+            .unwrap()
+            .contains("changed after you confirmed"),
+        "{rec:?}"
+    );
+    assert!(!st.apps.calls().iter().any(|c| c.starts_with("spawn:")));
 }

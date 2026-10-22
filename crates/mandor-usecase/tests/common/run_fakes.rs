@@ -695,6 +695,8 @@ pub struct AppsState {
     /// Urutan panggilan: `setup:<repo>`, `spawn:<repo>`, `ready:<repo>`, `stop:<run>`.
     pub calls: Vec<String>,
     pub reaped: Vec<(String, u32)>,
+    /// Setup yang mengubah tree worktree (meniru kode berubah saat start).
+    pub change_tree_on_setup: Option<(Arc<Mutex<GitState>>, PathBuf, String)>,
     next_pgid: u32,
 }
 
@@ -726,6 +728,9 @@ impl mandor_usecase::run_ports::AppProcesses for FakeApps {
     ) -> Result<(), PortError> {
         let mut st = self.st.lock().unwrap();
         st.calls.push(format!("setup:{}", m.repo_id));
+        if let Some((git, wt, tree)) = &st.change_tree_on_setup {
+            git.lock().unwrap().trees.insert(wt.clone(), tree.clone());
+        }
         if st.fail_setup.contains(&m.repo_id) {
             return Err(PortError::Rejected("setup failed: exit 1".to_owned()));
         }

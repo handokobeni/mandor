@@ -12,6 +12,14 @@ pub struct ToolCall {
     pub command: Option<String>,
     /// `file_path`, `path`, atau `notebook_path`.
     pub paths: Vec<String>,
+    /// `tool_input.url` (tool browser `navigate`).
+    pub url: Option<String>,
+    /// `tool_input.tabId` (tool browser).
+    pub tab_id: Option<u64>,
+    /// `tool_input.action` (tool browser `computer`).
+    pub action: Option<String>,
+    /// Teks respons tool, hanya untuk `PostToolUse`.
+    pub response: Option<String>,
 }
 
 /// Keputusan hook.
@@ -290,6 +298,7 @@ mod tests {
             tool_name: "Bash".to_owned(),
             command: Some(cmd.to_owned()),
             paths: vec![],
+            ..ToolCall::default()
         })
     }
 
@@ -298,6 +307,7 @@ mod tests {
             tool_name: name.to_owned(),
             command: None,
             paths: vec![path.to_owned()],
+            ..ToolCall::default()
         })
     }
 
@@ -307,6 +317,7 @@ mod tests {
             tool_name: name.to_owned(),
             command: None,
             paths: vec![path.to_owned()],
+            ..ToolCall::default()
         };
         for tool in ["Edit", "Write", "MultiEdit", "NotebookEdit"] {
             assert!(
@@ -334,6 +345,7 @@ mod tests {
             tool_name: name.to_owned(),
             command: None,
             paths: vec![],
+            ..ToolCall::default()
         };
         let allowed = ["graft".to_owned()];
         assert_eq!(
@@ -359,6 +371,7 @@ mod tests {
             tool_name: "mcp__graft__read".to_owned(),
             command: None,
             paths: vec!["/home/u/.ssh/id_rsa".to_owned()],
+            ..ToolCall::default()
         };
         assert!(matches!(
             classify_with_mcp(&with_path, &allowed),

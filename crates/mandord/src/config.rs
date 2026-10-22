@@ -121,6 +121,7 @@ fn agent_may_read(path: &Path) -> bool {
         tool_name: "Read".to_owned(),
         command: None,
         paths: vec![path.display().to_string()],
+        ..mandor_domain::hook::ToolCall::default()
     };
     mandor_domain::hook::classify(&call) == mandor_domain::hook::Verdict::Allow
 }

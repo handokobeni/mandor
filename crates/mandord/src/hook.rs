@@ -6,11 +6,20 @@
 //! MCP server yang diizinkan untuk run datang dari argumen `--mcp a,b`, yang
 //! ditulis daemon di `--settings` agent dan tidak bisa diubah agent. Akar
 //! sumber desain datang dari `--design <path>` (boleh berulang).
+//!
+//! Sesi reviewer memakai `--review <berkas state>` (KTD-31): `PreToolUse`
+//! memutuskan dengan state pagar, dan `--post` (`PostToolUse`) mencatat tab
+//! serta alamatnya. State hilang, rusak, atau terkunci menolak.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use mandor_agent::claude::guardrails::run_hook;
-use mandor_domain::hook::{Verdict, check_design_path, classify_planning, classify_with_mcp};
+use mandor_domain::hook::{
+    ToolCall, Verdict, check_design_path, classify_planning, classify_with_mcp,
+};
+use mandor_domain::hook_review::{classify_review, mark_before, record_post};
+
+use crate::review_state;
 
 /// MCP server yang diizinkan dari argumen hook; tanpa `--mcp`, tidak ada.
 fn allowed_mcp(args: &[String]) -> Vec<String> {
@@ -30,6 +39,34 @@ fn allowed_mcp(args: &[String]) -> Vec<String> {
 /// `--plan`: giliran plan, tool penulis berkas ditolak.
 fn planning(args: &[String]) -> bool {
     args.iter().any(|a| a == "--plan")
+}
+
+/// `--review <berkas>`: berkas state pagar sesi reviewer.
+fn review_state_path(args: &[String]) -> Option<PathBuf> {
+    args.windows(2)
+        .find(|w| w[0] == "--review")
+        .map(|w| PathBuf::from(&w[1]))
+}
+
+/// Keputusan `PreToolUse` sesi reviewer; tool yang diizinkan dan bisa
+/// memindah halaman menandai tab belum terkonfirmasi sebelum berjalan.
+fn review_pre(path: &Path, call: &ToolCall, allowed: &[String]) -> Verdict {
+    let outcome = review_state::with_locked(path, |state| {
+        let verdict = classify_review(call, state, allowed);
+        if verdict == Verdict::Allow {
+            mark_before(call, state);
+        }
+        verdict
+    });
+    outcome.unwrap_or_else(|e| Verdict::Deny(format!("mandor: {e}; tool call denied")))
+}
+
+/// `PostToolUse` sesi reviewer: mencatat hasil tool browser.
+fn review_post(path: &Path, call: &ToolCall) -> Verdict {
+    match review_state::with_locked(path, |state| record_post(call, state)) {
+        Ok(()) => Verdict::Allow,
+        Err(e) => Verdict::Deny(format!("mandor: {e}")),
+    }
 }
 
 /// Akar sumber desain dari argumen `--design`, sudah dikanonisasi.
@@ -56,9 +93,17 @@ pub fn run(args: &[String]) -> u8 {
     let allowed = allowed_mcp(args);
     let plan = planning(args);
     let roots = design_roots(args);
+    let review = review_state_path(args);
+    let post = args.iter().any(|a| a == "--post");
     let stdin = std::io::stdin();
     let mut stderr = std::io::stderr();
     run_hook(stdin.lock(), &mut stderr, |call| {
+        if post {
+            return match &review {
+                Some(path) => review_post(path, call),
+                None => Verdict::Deny("mandor: --post needs --review".to_owned()),
+            };
+        }
         if !roots.is_empty() {
             let denied = call
                 .paths
@@ -68,10 +113,10 @@ pub fn run(args: &[String]) -> u8 {
                 return Verdict::Deny(reason);
             }
         }
-        if plan {
-            classify_planning(call, &allowed)
-        } else {
-            classify_with_mcp(call, &allowed)
+        match &review {
+            Some(path) => review_pre(path, call, &allowed),
+            None if plan => classify_planning(call, &allowed),
+            None => classify_with_mcp(call, &allowed),
         }
     })
 }

@@ -90,3 +90,64 @@ fn akar_desain_hanya_baca_dan_symlink_keluar_ditolak() {
     // Tanpa akar desain, path di luar worktree diatur oleh aturan lain.
     assert_eq!(hook_with(&read, false, &[]).0, 0);
 }
+
+fn browser(tool: &str, input: &serde_json::Value, response: Option<&str>) -> String {
+    let mut v = serde_json::json!({
+        "hook_event_name": if response.is_some() { "PostToolUse" } else { "PreToolUse" },
+        "tool_name": format!("mcp__claude-in-chrome__{tool}"),
+        "tool_input": input,
+    });
+    if let Some(text) = response {
+        v["tool_response"] = serde_json::json!([{"type": "text", "text": text}]);
+    }
+    v.to_string()
+}
+
+#[test]
+fn mode_review_memakai_state_dan_gagal_tertutup_tanpa_state() {
+    let dir = tempfile::tempdir().unwrap();
+    let state = dir.path().join("r1.json");
+    let state_s = state.to_str().unwrap();
+    let pre = ["--review", state_s];
+    let post = ["--review", state_s, "--post"];
+    let nav_app = browser(
+        "navigate",
+        &serde_json::json!({"url": "http://localhost:5173/orders", "tabId": 7}),
+        None,
+    );
+    // Berkas state hilang: ditolak.
+    assert_eq!(hook_with(&nav_app, false, &pre).0, 2);
+
+    std::fs::write(&state, r#"{"origins":["http://localhost:5173"],"tabs":{}}"#).unwrap();
+    // Tab belum dibuat reviewer.
+    assert_eq!(hook_with(&nav_app, false, &pre).0, 2);
+    let create = browser("tabs_create_mcp", &serde_json::json!({}), None);
+    assert_eq!(hook_with(&create, false, &pre).0, 0);
+    let created = browser(
+        "tabs_create_mcp",
+        &serde_json::json!({}),
+        Some("Created new tab. Tab ID: 7"),
+    );
+    assert_eq!(hook_with(&created, false, &post).0, 0);
+    assert_eq!(hook_with(&nav_app, false, &pre).0, 0);
+    let nav_out = browser(
+        "navigate",
+        &serde_json::json!({"url": "https://example.com", "tabId": 7}),
+        None,
+    );
+    let (code, err) = hook_with(&nav_out, false, &pre);
+    assert_eq!(code, 2);
+    assert!(err.contains("outside the app"), "{err}");
+    // Tulis berkas ditolak; test dari allowlist diizinkan.
+    let write = serde_json::json!({"tool_name": "Write", "tool_input": {"file_path": "/wt/a.rs"}})
+        .to_string();
+    assert_eq!(hook_with(&write, false, &pre).0, 2);
+    assert_eq!(hook_with(&bash("git stash"), false, &pre).0, 2);
+    assert_eq!(hook_with(&bash("cargo test"), false, &pre).0, 0);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mode = std::fs::metadata(&state).unwrap().permissions().mode();
+        assert_eq!(mode & 0o777, 0o600, "state ditulis ulang 0600");
+    }
+}

@@ -136,6 +136,26 @@ pub fn settings_json(hook_command: &str) -> String {
     .to_string()
 }
 
+/// Settings sesi reviewer: `PreToolUse` seperti biasa ditambah `PostToolUse`
+/// untuk tool browser, yang mencatat tab dan alamat terakhirnya (KTD-31).
+#[must_use]
+pub fn review_settings_json(hook_command: &str, post_command: &str) -> String {
+    json!({
+        "disableAllHooks": false,
+        "hooks": {
+            "PreToolUse": [{
+                "matcher": "*",
+                "hooks": [{"type": "command", "command": hook_command, "timeout": 30}]
+            }],
+            "PostToolUse": [{
+                "matcher": "mcp__claude-in-chrome__.*",
+                "hooks": [{"type": "command", "command": post_command, "timeout": 30}]
+            }]
+        }
+    })
+    .to_string()
+}
+
 /// Variabel yang selalu dibuang dari environment agent.
 fn is_secret_var(name: &str) -> bool {
     let upper = name.to_ascii_uppercase();
@@ -226,11 +246,30 @@ pub fn parse_hook_input(raw: &[u8]) -> Result<ToolCall, String> {
         .iter()
         .filter_map(|k| input.get(*k).and_then(Value::as_str).map(str::to_owned))
         .collect();
+    let text = |k: &str| input.get(k).and_then(Value::as_str).map(str::to_owned);
     Ok(ToolCall {
         tool_name,
         command,
         paths,
+        url: text("url"),
+        tab_id: input.get("tabId").and_then(Value::as_u64),
+        action: text("action"),
+        response: v.get("tool_response").map(response_text),
     })
+}
+
+/// Teks respons tool untuk `PostToolUse`: bagian `text` digabung; gambar dan
+/// bagian lain dibuang.
+fn response_text(v: &Value) -> String {
+    match v {
+        Value::String(s) => s.clone(),
+        Value::Array(parts) => parts
+            .iter()
+            .filter_map(|p| p.get("text").and_then(Value::as_str))
+            .collect::<Vec<_>>()
+            .join("\n"),
+        other => other.get("content").map_or_else(String::new, response_text),
+    }
 }
 
 /// Menjalankan hook secara fail-closed: input rusak, error baca, atau panic
@@ -288,6 +327,43 @@ mod tests {
         assert_eq!(hook(&bash("cargo test")).0, 0);
         let write = json!({"tool_name": "Write", "tool_input": {"file_path": "/w/.claude/settings.local.json"}});
         assert_eq!(hook(&write.to_string()).0, HOOK_BLOCK);
+    }
+
+    #[test]
+    fn settings_review_mendaftarkan_post_hook_untuk_tool_browser() {
+        let v: Value = serde_json::from_str(&review_settings_json(
+            "/opt/mandord hook --review /s.json",
+            "/opt/mandord hook --review /s.json --post",
+        ))
+        .unwrap();
+        assert_eq!(
+            v["hooks"]["PostToolUse"][0]["matcher"],
+            "mcp__claude-in-chrome__.*"
+        );
+        assert_eq!(
+            v["hooks"]["PostToolUse"][0]["hooks"][0]["command"],
+            "/opt/mandord hook --review /s.json --post"
+        );
+        assert_eq!(v["hooks"]["PreToolUse"][0]["matcher"], "*");
+        let plain: Value = serde_json::from_str(&settings_json("/opt/mandord hook")).unwrap();
+        assert!(plain["hooks"].get("PostToolUse").is_none());
+    }
+
+    #[test]
+    fn respons_tool_digabung_tanpa_gambar() {
+        let raw = json!({
+            "tool_name": "mcp__claude-in-chrome__computer",
+            "tool_input": {"action": "screenshot", "tabId": 7},
+            "tool_response": [
+                {"type": "text", "text": "Captured"},
+                {"type": "image", "source": {"data": "AAAA"}},
+                {"type": "text", "text": "Tab Context"}
+            ]
+        });
+        let call = parse_hook_input(raw.to_string().as_bytes()).unwrap();
+        assert_eq!(call.response.as_deref(), Some("Captured\nTab Context"));
+        assert_eq!(call.tab_id, Some(7));
+        assert_eq!(call.action.as_deref(), Some("screenshot"));
     }
 
     #[test]

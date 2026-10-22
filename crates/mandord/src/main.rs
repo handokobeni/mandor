@@ -17,6 +17,7 @@ mod hook;
 mod mcp;
 mod prereq;
 mod prod;
+mod review_state;
 mod serve;
 mod session;
 mod settings;

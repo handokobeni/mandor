@@ -138,7 +138,10 @@ pub(crate) fn readonly_violation(cmd: &str) -> Option<String> {
         return Some(format!("`{prog}` runs commands that cannot be checked"));
     }
     if runs_preprocessor(cmd) {
-        return Some("`rg --pre` runs another program".to_owned());
+        return Some("This `rg` option runs another program".to_owned());
+    }
+    if let Some(first) = changes_env(cmd) {
+        return Some(format!("`{first}` changes the environment of a command"));
     }
     if let Some(reason) = mutating_git(cmd) {
         return Some(reason);
@@ -146,13 +149,30 @@ pub(crate) fn readonly_violation(cmd: &str) -> Option<String> {
     writes_files(cmd).map(|what| format!("{what} writes files"))
 }
 
-/// `rg --pre`/`--pre-glob`: ripgrep menjalankan program untuk setiap berkas.
+/// Opsi `rg` yang menjalankan program lain: `--pre`/`--pre-glob` per berkas,
+/// `--hostname-bin`, dan `-z`/`--search-zip` (program dekompresi).
 fn runs_preprocessor(cmd: &str) -> bool {
     let words = shell_words(cmd);
     words.iter().enumerate().any(|(i, w)| {
         crate::hook::program_name(w) == "rg"
-            && words[i + 1..].iter().any(|a| a.starts_with("--pre"))
+            && words[i + 1..].iter().any(|a| {
+                a.starts_with("--pre")
+                    || a.starts_with("--hostname-bin")
+                    || a == "--search-zip"
+                    || (a.starts_with('-') && !a.starts_with("--") && a.contains('z'))
+            })
     })
+}
+
+/// Awal perintah yang mengubah environment (`NAME=value cmd`, `env`, `export`
+/// …): bisa mengarahkan program ke config atau biner lain
+/// (`RIPGREP_CONFIG_PATH`, `PATH`).
+fn changes_env(cmd: &str) -> Option<String> {
+    cmd.split([';', '&', '|', '(', ')'])
+        .filter_map(|segment| shell_words(segment).into_iter().next())
+        .find(|first| {
+            assigns_env(first) || GIT_PRECEDERS.contains(&crate::hook::program_name(first))
+        })
 }
 
 fn deny(reason: &str) -> Verdict {
@@ -772,6 +792,13 @@ mod tests {
             "ls | xargs cat",
             "rg --pre ./x.sh foo",
             "rg --pre=./x.sh foo",
+            "rg --hostname-bin=./x.sh foo",
+            "rg -nz foo",
+            "rg --search-zip foo",
+            "RIPGREP_CONFIG_PATH=x rg foo",
+            "cargo test; FOO=1 cargo test",
+            "env -i cargo test",
+            "export PATH=/tmp; cargo test",
             "g$()it stash",
             "g`true`it stash",
             "g${X}it stash",
@@ -805,6 +832,8 @@ mod tests {
             "grep -rn 'fn {' src",
             "grep -rn 'a#b' src",
             "cargo test --features a#b",
+            "rg -n 'a=b' src",
+            "git log --grep=fix",
         ] {
             let call = ToolCall {
                 tool_name: "Bash".to_owned(),

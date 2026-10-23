@@ -1,5 +1,6 @@
 <script lang="ts">
   import Bolt from '@lucide/svelte/icons/bolt';
+  import MoonStar from '@lucide/svelte/icons/moon-star';
   import FolderGit2 from '@lucide/svelte/icons/folder-git-2';
   import Info from '@lucide/svelte/icons/info';
   import Layers from '@lucide/svelte/icons/layers';
@@ -9,6 +10,7 @@
   import type { Rpc } from '#lib/rpc.ts';
   import { nav, type SettingsSection } from '#lib/stores/nav.svelte.ts';
   import AboutSettings from './AboutSettings.svelte';
+  import BackgroundSettings from './BackgroundSettings.svelte';
   import GeneralSettings from './GeneralSettings.svelte';
   import LarkSettings from './LarkSettings.svelte';
   import RepoSettings from './RepoSettings.svelte';
@@ -22,6 +24,7 @@
     { id: 'workspaces', label: 'Workspaces', icon: Layers },
     { id: 'design-sources', label: 'Design sources', icon: Frame },
     { id: 'general', label: 'General', icon: Bolt },
+    { id: 'background', label: 'Background work', icon: MoonStar },
     { id: 'about', label: 'About', icon: Info }
   ];
 </script>
@@ -51,6 +54,8 @@
       <DesignSourceSettings {rpc} />
     {:else if nav.section === 'general'}
       <GeneralSettings {rpc} />
+    {:else if nav.section === 'background'}
+      <BackgroundSettings />
     {:else}
       <AboutSettings {rpc} />
     {/if}

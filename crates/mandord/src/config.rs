@@ -33,6 +33,10 @@ pub struct Config {
     /// Pengelola proses daemon, dari `INVOCATION_ID` yang di-set systemd.
     pub managed_by: ManagedBy,
     /// `mandord install`: direktori biner terpasang (`~/.local/bin`).
+    #[cfg_attr(
+        not(target_os = "linux"),
+        allow(dead_code, reason = "hanya dipakai `mandord install` (Linux)")
+    )]
     pub bin_dir: PathBuf,
     /// `mandord install`: direktori unit systemd user
     /// (`$XDG_CONFIG_HOME/systemd/user`, default `~/.config/systemd/user`).
@@ -40,9 +44,41 @@ pub struct Config {
     /// Program `systemctl` (`MANDOR_SYSTEMCTL`, default `systemctl`).
     pub systemctl: PathBuf,
     /// Program `loginctl` (`MANDOR_LOGINCTL`, default `loginctl`).
+    #[cfg_attr(
+        not(target_os = "linux"),
+        allow(dead_code, reason = "hanya dipakai `mandord install` (Linux)")
+    )]
     pub loginctl: PathBuf,
     /// Nama pengguna untuk status linger (`USER`).
+    #[cfg_attr(
+        not(target_os = "linux"),
+        allow(dead_code, reason = "hanya dipakai `mandord install` (Linux)")
+    )]
     pub user: Option<String>,
+    /// Penjaga keep-awake (`MANDOR_KEEP_AWAKE_CMD`, array JSON argv).
+    /// `Err` bila nilainya tidak valid; daemon tetap start dan melaporkan
+    /// `keep_awake: failing`.
+    pub keep_awake_cmd: Option<Result<Vec<String>, String>>,
+}
+
+/// Parse `MANDOR_KEEP_AWAKE_CMD`: array JSON argv tanpa shell, program berupa
+/// jalur absolut, tanpa karakter kontrol.
+///
+/// # Errors
+/// Pesan untuk pengguna bila nilainya tidak valid.
+pub fn parse_keep_awake_cmd(raw: &str) -> Result<Vec<String>, String> {
+    let argv: Vec<String> = serde_json::from_str(raw)
+        .map_err(|_| "MANDOR_KEEP_AWAKE_CMD must be a JSON array of strings".to_owned())?;
+    let program = argv
+        .first()
+        .ok_or_else(|| "MANDOR_KEEP_AWAKE_CMD is empty".to_owned())?;
+    if !program.starts_with('/') {
+        return Err("the keep-awake program must be an absolute path".to_owned());
+    }
+    if argv.iter().any(|a| a.chars().any(char::is_control)) {
+        return Err("MANDOR_KEEP_AWAKE_CMD contains a control character".to_owned());
+    }
+    Ok(argv)
 }
 
 /// Siapa yang mengelola siklus hidup proses daemon (KTD-44).
@@ -125,6 +161,10 @@ impl Config {
         let systemctl = program("MANDOR_SYSTEMCTL", "systemctl");
         let loginctl = program("MANDOR_LOGINCTL", "loginctl");
         let user = std::env::var("USER").ok().filter(|u| !u.is_empty());
+        let keep_awake_cmd = std::env::var("MANDOR_KEEP_AWAKE_CMD")
+            .ok()
+            .filter(|v| !v.trim().is_empty())
+            .map(|v| parse_keep_awake_cmd(&v));
         Ok(Self {
             home,
             user_home,
@@ -143,6 +183,7 @@ impl Config {
             systemctl,
             loginctl,
             user,
+            keep_awake_cmd,
         })
     }
 
@@ -228,6 +269,22 @@ fn shell_quote(path: &str) -> String {
 #[cfg(test)]
 mod tests {
     #[test]
+    fn perintah_keep_awake_argv_json() {
+        assert_eq!(
+            parse_keep_awake_cmd(r#"["/mnt/c/Users/A B/100%/k.exe","--keep-awake"]"#),
+            Ok(vec![
+                "/mnt/c/Users/A B/100%/k.exe".to_owned(),
+                "--keep-awake".to_owned()
+            ])
+        );
+        assert!(parse_keep_awake_cmd("/mnt/c/k.exe --keep-awake").is_err());
+        assert!(parse_keep_awake_cmd("[]").is_err());
+        assert!(parse_keep_awake_cmd(r#"["k.exe"]"#).is_err());
+        assert!(parse_keep_awake_cmd(r#"["/k.exe","a\nb"]"#).is_err());
+        assert!(parse_keep_awake_cmd("[1, 2]").is_err());
+    }
+
+    #[test]
     fn pengelola_daemon_dari_invocation_id() {
         assert_eq!(
             ManagedBy::from_invocation_id(Some("abc")),
@@ -239,7 +296,7 @@ mod tests {
         assert_eq!(ManagedBy::Detached.as_str(), "detached");
     }
 
-    use super::{ManagedBy, agent_may_read, shell_quote, workspaces_dir_for};
+    use super::{ManagedBy, agent_may_read, parse_keep_awake_cmd, shell_quote, workspaces_dir_for};
     use std::path::Path;
 
     #[test]

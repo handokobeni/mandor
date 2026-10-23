@@ -14,7 +14,9 @@ deny:
 	cargo deny check
 
 # .sqlx/ offline metadata harus cocok dengan query (SQLX_OFFLINE di CI)
-SQLX_DB := sqlite://$(CURDIR)/target/sqlx-check.db
+# Tanpa `//`: `sqlite://D:/...` dibaca sebagai host `D:` di Windows, sedangkan
+# `sqlite:<jalur absolut>` sah di Linux, macOS, dan Windows.
+SQLX_DB := sqlite:$(CURDIR)/target/sqlx-check.db
 
 sqlx-check:
 	mkdir -p target
@@ -35,8 +37,8 @@ test:
 # agar target/llvm-cov-target tidak terus membesar di setiap run.
 cover-check:
 	cargo llvm-cov clean --workspace
-	CARGO_INCREMENTAL=0 cargo llvm-cov --workspace --locked --summary-only \
-		--ignore-filename-regex 'crates/mandord/' \
+	CARGO_INCREMENTAL=0 cargo llvm-cov --workspace --locked --no-fail-fast --summary-only \
+		--ignore-filename-regex 'crates[/\\]mandord[/\\]' \
 		--fail-under-lines $(COVER_MIN)
 
 build:

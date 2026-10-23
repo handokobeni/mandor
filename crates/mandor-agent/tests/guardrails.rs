@@ -28,8 +28,11 @@ async fn credential_helper_global_tidak_terlihat_dari_environment_agent() {
     login.insert("PATH".to_owned(), std::env::var("PATH").unwrap());
     login.insert("GH_TOKEN".to_owned(), "ghp_rahasia".to_owned());
 
-    // Pembanding: dengan env login biasa, helper global terlihat.
-    let plain: Vec<(String, String)> = login.clone().into_iter().collect();
+    // Pembanding: dengan env login biasa, helper global terlihat. Config sistem
+    // diabaikan agar pembanding tidak bergantung pada mesin (mis. macOS
+    // membawa `credential.helper=osxkeychain` dari Xcode).
+    let mut plain: Vec<(String, String)> = login.clone().into_iter().collect();
+    plain.push(("GIT_CONFIG_NOSYSTEM".to_owned(), "1".to_owned()));
     let out = run(&Cmd::new("git")
         .args(["config", "--get-all", "credential.helper"])
         .env_policy(EnvPolicy::Explicit(plain)))

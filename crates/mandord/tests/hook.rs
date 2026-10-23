@@ -61,6 +61,7 @@ fn input_rusak_menolak_dan_tanpa_konfigurasi_tetap_bekerja() {
     assert_eq!(hook(&bash("cargo test"), true).0, 0);
 }
 
+#[cfg(unix)]
 fn file_tool(tool: &str, path: &std::path::Path) -> String {
     serde_json::json!({"hook_event_name": "PreToolUse", "tool_name": tool, "tool_input": {"file_path": path}}).to_string()
 }
@@ -89,6 +90,30 @@ fn akar_desain_hanya_baca_dan_symlink_keluar_ditolak() {
     assert_eq!(hook_with(&dotdot, false, &args).0, 2);
     // Tanpa akar desain, path di luar worktree diatur oleh aturan lain.
     assert_eq!(hook_with(&read, false, &[]).0, 0);
+}
+
+/// Akar disebut lewat direktori symlink (seperti `/var` → `/private/var` di
+/// macOS): symlink keluar dari akar tetap ditolak.
+#[cfg(unix)]
+#[test]
+fn akar_desain_lewat_symlink_tetap_menolak_jalan_keluar() {
+    let dir = tempfile::tempdir().unwrap();
+    let target = dir.path().join("asli");
+    std::fs::create_dir_all(target.join("mock/src")).unwrap();
+    std::fs::write(target.join("mock/src/page.tsx"), "x").unwrap();
+    std::fs::write(target.join("secret.txt"), "s").unwrap();
+    std::os::unix::fs::symlink(target.join("secret.txt"), target.join("mock/link")).unwrap();
+    let alias = dir.path().join("alias");
+    std::os::unix::fs::symlink(&target, &alias).unwrap();
+    let root = alias.join("mock");
+    let args = ["--design", root.to_str().unwrap()];
+
+    let read = file_tool("Read", &root.join("src/page.tsx"));
+    assert_eq!(hook_with(&read, false, &args).0, 0);
+    let escape = file_tool("Read", &root.join("link"));
+    assert_eq!(hook_with(&escape, false, &args).0, 2);
+    let write = file_tool("Write", &root.join("src/new.tsx"));
+    assert_eq!(hook_with(&write, false, &args).0, 2);
 }
 
 fn browser(tool: &str, input: &serde_json::Value, response: Option<&str>) -> String {

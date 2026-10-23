@@ -2,8 +2,12 @@
 //! jembatan ke daemon `mandord`.
 
 mod daemon_link;
+pub mod keep_awake;
 mod oauth_callback;
+mod provision;
 mod tray;
+pub mod uninstall;
+mod wslconfig;
 
 use std::path::PathBuf;
 use std::process::ExitCode;
@@ -19,6 +23,10 @@ use tauri_plugin_opener::OpenerExt;
 #[derive(Debug, Clone)]
 struct ClientConfig {
     mode: LinkMode,
+    /// `%LOCALAPPDATA%` (salinan penjaga keep-awake).
+    local_app_data: Option<PathBuf>,
+    /// `%UserProfile%` (berkas `.wslconfig`).
+    user_profile: Option<PathBuf>,
 }
 
 impl ClientConfig {
@@ -41,8 +49,143 @@ impl ClientConfig {
                 bin: PathBuf::from("mandord"),
             },
         };
-        Self { mode }
+        let dir = |key: &str| {
+            std::env::var_os(key)
+                .filter(|v| !v.is_empty())
+                .map(PathBuf::from)
+        };
+        Self {
+            mode,
+            local_app_data: dir("LOCALAPPDATA"),
+            user_profile: dir("USERPROFILE"),
+        }
     }
+}
+
+/// State provisioning: satu proses pada satu waktu, hasil terakhir disimpan.
+struct Provisioner {
+    cfg: ClientConfig,
+    last: tokio::sync::Mutex<Option<provision::ProvisionState>>,
+}
+
+/// Memasang atau memperbarui daemon di WSL lalu menyiapkan penjaga
+/// keep-awake (KTD-49). Dipanggil UI sebelum tersambung dan saat mencoba
+/// ulang pembaruan yang tertunda.
+#[tauri::command]
+async fn provision_run(
+    app: AppHandle,
+    link: State<'_, Arc<DaemonLink>>,
+    prov: State<'_, Arc<Provisioner>>,
+) -> Result<provision::ProvisionState, String> {
+    let mut last = prov.last.lock().await;
+    let LinkMode::Wsl { distro } = link.mode().clone() else {
+        return Ok(provision::ProvisionState::NotNeeded);
+    };
+    let resource = app
+        .path()
+        .resolve("resources/mandord", tauri::path::BaseDirectory::Resource)
+        .map_err(|e| e.to_string())?;
+    let current_exe = std::env::current_exe().map_err(|e| e.to_string())?;
+    let inputs = provision::Inputs {
+        distro,
+        resource,
+        current_exe,
+        local_app_data: prov.cfg.local_app_data.clone(),
+        version: app.package_info().version.to_string(),
+    };
+    let keep_awake = if provision::DAEMON_SHA256.len() == 64 {
+        match provision::keep_awake_command(&inputs).await {
+            Ok(json) => Some(json),
+            Err(e) => {
+                tracing::warn!(error = %e, "penjaga keep-awake tidak bisa disiapkan");
+                None
+            }
+        }
+    } else {
+        None
+    };
+    link.set_keep_awake(keep_awake.clone());
+    let state = provision::provision(&inputs, keep_awake.as_deref().unwrap_or("")).await;
+    *last = Some(state.clone());
+    Ok(state)
+}
+
+/// Keep-awake milik app saat daemon yang tersambung belum mendukungnya.
+#[tauri::command]
+#[allow(
+    clippy::needless_pass_by_value,
+    reason = "argumen command Tauri harus owned"
+)]
+fn power_app_hold(hold: bool, power: State<'_, keep_awake::AppHold>) {
+    power.set(hold);
+}
+
+/// Status keep-alive WSL untuk UI.
+#[derive(Debug, serde::Serialize)]
+struct KeepAliveView {
+    status: wslconfig::KeepAliveStatus,
+    windows_build: Option<u32>,
+}
+
+fn wslconfig_path(prov: &Provisioner) -> Result<PathBuf, String> {
+    prov.cfg
+        .user_profile
+        .as_ref()
+        .map(|p| p.join(".wslconfig"))
+        .ok_or_else(|| "USERPROFILE is not set".to_owned())
+}
+
+async fn windows_build() -> Option<u32> {
+    if !cfg!(windows) {
+        return None;
+    }
+    let mut cmd = tokio::process::Command::new("cmd");
+    cmd.args(["/c", "ver"]).kill_on_drop(true);
+    daemon_link::hide_console(&mut cmd);
+    let out = tokio::time::timeout(Duration::from_secs(10), cmd.output())
+        .await
+        .ok()?
+        .ok()?;
+    wslconfig::windows_build(&String::from_utf8_lossy(&out.stdout))
+}
+
+#[tauri::command]
+async fn wsl_keepalive_status(prov: State<'_, Arc<Provisioner>>) -> Result<KeepAliveView, String> {
+    let build = windows_build().await;
+    if build.is_some_and(|b| !wslconfig::supports_vm_idle_timeout(b)) {
+        return Ok(KeepAliveView {
+            status: wslconfig::KeepAliveStatus::Unsupported,
+            windows_build: build,
+        });
+    }
+    let path = wslconfig_path(&prov)?;
+    let enabled = tokio::task::spawn_blocking(move || wslconfig::status_at(&path))
+        .await
+        .map_err(|e| e.to_string())?
+        .map_err(|e| e.to_string())?;
+    Ok(KeepAliveView {
+        status: if enabled {
+            wslconfig::KeepAliveStatus::Enabled
+        } else {
+            wslconfig::KeepAliveStatus::Disabled
+        },
+        windows_build: build,
+    })
+}
+
+#[tauri::command]
+async fn wsl_keepalive_set(enabled: bool, prov: State<'_, Arc<Provisioner>>) -> Result<(), String> {
+    let path = wslconfig_path(&prov)?;
+    tokio::task::spawn_blocking(move || {
+        if enabled {
+            wslconfig::enable_at(&path)
+        } else {
+            wslconfig::disable_at(&path)
+        }
+    })
+    .await
+    .map_err(|e| e.to_string())?
+    .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -89,6 +232,17 @@ fn tray_update(app: AppHandle, waiting: Vec<tray::WaitingRun>) -> Result<(), Str
     tray::update(&app, &waiting).map_err(|e| e.to_string())
 }
 
+/// Mode pembersihan uninstall (`--uninstall-cleanup`), dipanggil hook NSIS.
+#[must_use]
+pub fn run_uninstall_cleanup() -> ExitCode {
+    let cfg = ClientConfig::from_env();
+    let distro = match &cfg.mode {
+        LinkMode::Wsl { distro } => distro.clone(),
+        LinkMode::Local { .. } => return ExitCode::SUCCESS,
+    };
+    uninstall::run(distro.as_deref(), cfg.user_profile.as_deref())
+}
+
 /// Menjalankan aplikasi desktop.
 #[must_use]
 pub fn run() -> ExitCode {
@@ -96,18 +250,28 @@ pub fn run() -> ExitCode {
         .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
         .init();
     let cfg = ClientConfig::from_env();
-    let link = Arc::new(DaemonLink::new(cfg.mode));
+    let link = Arc::new(DaemonLink::new(cfg.mode.clone()));
+    let prov = Arc::new(Provisioner {
+        cfg,
+        last: tokio::sync::Mutex::new(None),
+    });
 
     let app = tauri::Builder::default()
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_opener::init())
         .manage(Arc::clone(&link))
+        .manage(prov)
+        .manage(keep_awake::AppHold::start())
         .invoke_handler(tauri::generate_handler![
             daemon_token,
             daemon_open,
             daemon_send,
             oauth_login,
-            tray_update
+            tray_update,
+            provision_run,
+            power_app_hold,
+            wsl_keepalive_status,
+            wsl_keepalive_set
         ])
         .setup(move |app| {
             tray::setup(app)?;

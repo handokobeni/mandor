@@ -21,4 +21,8 @@ draining?: boolean,
 /**
  * Keadaan keep-awake: `not_configured`, `off`, `held`, atau `failing`.
  */
-keep_awake?: string, };
+keep_awake?: string, 
+/**
+ * Pesan error penjaga keep-awake terakhir (untuk `failing`).
+ */
+keep_awake_error?: string, };

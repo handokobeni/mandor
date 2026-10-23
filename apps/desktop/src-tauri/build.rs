@@ -1,3 +1,46 @@
-fn main() {
+//! Build script app desktop: Tauri, ditambah SHA-256 biner daemon yang dibawa
+//! installer Windows (KTD-48 plan service OS) sebagai `MANDOR_DAEMON_SHA256`.
+//!
+//! Biner diambil dari `resources/mandord` (diunduh workflow `release` dari job
+//! daemon). Berkas placeholder (dipakai CI dan dev lokal) menghasilkan hash
+//! kosong sehingga app tidak pernah memasangnya. Build release Windows tanpa
+//! biner asli gagal.
+
+use std::path::Path;
+
+use sha2::{Digest, Sha256};
+
+/// Isi placeholder yang dipakai saat biner daemon tidak tersedia.
+const PLACEHOLDER: &[u8] = b"placeholder\n";
+
+fn hex(bytes: &[u8]) -> String {
+    use std::fmt::Write as _;
+    bytes.iter().fold(String::with_capacity(64), |mut out, b| {
+        let _ = write!(out, "{b:02x}");
+        out
+    })
+}
+
+fn main() -> Result<(), String> {
+    let resource = Path::new("resources").join("mandord");
+    println!("cargo:rerun-if-changed={}", resource.display());
+    let bytes = std::fs::read(&resource).unwrap_or_default();
+    let real = !bytes.is_empty() && bytes != PLACEHOLDER;
+    let windows = std::env::var("CARGO_CFG_TARGET_OS").is_ok_and(|os| os == "windows");
+    let release = std::env::var("PROFILE").is_ok_and(|p| p == "release");
+    if windows && release && !real {
+        return Err(format!(
+            "{} must contain the Linux mandord binary for a Windows release build \
+             (the release workflow downloads it from the daemon job)",
+            resource.display()
+        ));
+    }
+    let hash = if real {
+        hex(&Sha256::digest(&bytes))
+    } else {
+        String::new()
+    };
+    println!("cargo:rustc-env=MANDOR_DAEMON_SHA256={hash}");
     tauri_build::build();
+    Ok(())
 }

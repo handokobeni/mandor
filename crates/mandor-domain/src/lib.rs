@@ -12,6 +12,7 @@ pub mod gate;
 pub mod hook;
 pub mod hook_review;
 pub mod kanban;
+pub mod power;
 pub mod push_gate;
 pub mod run;
 pub mod service;

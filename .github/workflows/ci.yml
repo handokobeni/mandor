@@ -32,9 +32,25 @@ jobs:
       - uses: taiki-e/install-action@v2
         with:
           tool: cargo-deny,cargo-llvm-cov,sqlx-cli
+      # Drive C: runner Windows lambat; database SQLite test di sana melewati
+      # batas acquire 5 detik. Direktori sementara dipindah ke D:.
+      - name: "Direktori sementara di D:"
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          echo "TMP=$RUNNER_TEMP" >> "$GITHUB_ENV"
+          echo "TEMP=$RUNNER_TEMP" >> "$GITHUB_ENV"
+      # Batas coverage berlaku di Linux dan macOS, tempat daemon berjalan. Di Windows
+      # test adapter git/gh/proses (skrip shell palsu) hanya untuk Unix, jadi gerbang
+      # dijalankan tanpa batas coverage; fmt, clippy, deny, sqlx, dan semua test tetap.
       - name: make check
         shell: bash
-        run: make check
+        env:
+          COVER_FLOOR: ${{ runner.os == 'Windows' && 'COVER_MIN=0' || '' }}
+        run: make check $COVER_FLOOR
+      - name: Versi app dan daemon sama
+        if: runner.os == 'Linux'
+        run: ./scripts/check-versions.sh
       - name: Pembuktian lapisan (dependensi terlarang membuat gerbang merah)
         if: runner.os == 'Linux'
         run: make red-check
@@ -63,6 +79,10 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y libwebkit2gtk-4.1-dev librsvg2-dev libayatana-appindicator3-dev
       - run: bun install --frozen-lockfile
         working-directory: apps/desktop
+      - name: Placeholder biner daemon (resource installer Windows)
+        if: runner.os == 'Windows'
+        shell: bash
+        run: printf 'placeholder\n' > apps/desktop/src-tauri/resources/mandord
       - run: bun run check
         working-directory: apps/desktop
       - run: bun run test

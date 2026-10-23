@@ -385,7 +385,11 @@ function handle(method: string, params: Record<string, unknown>): unknown {
         version: '0.1.0-mock',
         uptime_ms: 1000,
         repos: 1,
-        lark: larkStatus()
+        lark: larkStatus(),
+        busy: true,
+        managed_by: 'systemd',
+        draining: false,
+        keep_awake: 'held'
       };
     case 'lark.settings.get':
       return {

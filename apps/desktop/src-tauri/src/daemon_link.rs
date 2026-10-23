@@ -31,25 +31,23 @@ pub enum LinkMode {
 }
 
 impl LinkMode {
-    /// Program dan argumen untuk menjalankan subcommand `mandord`.
+    /// Program dan argumen untuk menjalankan subcommand `mandord` (`token`
+    /// atau `connect`). `keep_awake`: perintah penjaga keep-awake (JSON) yang
+    /// diteruskan ke daemon yang dijalankan `connect`.
     #[must_use]
-    pub fn command(&self, sub: &str) -> (String, Vec<String>) {
+    pub fn command(&self, sub: &str, keep_awake: Option<&str>) -> (String, Vec<String>) {
         match self {
             Self::Local { bin } => (bin.to_string_lossy().into_owned(), vec![sub.to_owned()]),
             Self::Wsl { distro } => {
-                let mut args = Vec::new();
-                if let Some(d) = distro {
-                    args.push("-d".to_owned());
-                    args.push(d.clone());
-                }
-                // Lewat shell login agar PATH dari ~/.profile (mis. ~/.local/bin) terbaca;
-                // `wsl.exe -- <cmd>` tanpa shell tidak memuatnya.
-                args.extend([
-                    "--".to_owned(),
-                    "sh".to_owned(),
-                    "-lc".to_owned(),
-                    format!("exec mandord {sub}"),
-                ]);
+                // Shell login agar PATH dari ~/.profile terbaca untuk daemon yang
+                // dinyalakan `connect`. Biner terpasang di ~/.local/bin dipakai
+                // dengan jalur absolut (KTD-49); setup lama memakai PATH.
+                let script = format!(
+                    "b=\"$HOME/.local/bin/mandord\"; [ -x \"$b\" ] || b=mandord; \
+                     [ -n \"$1\" ] && export MANDOR_KEEP_AWAKE_CMD=\"$1\"; exec \"$b\" {sub}"
+                );
+                let shell = ["sh", "-lc", script.as_str(), "sh", keep_awake.unwrap_or("")];
+                let args = crate::provision::wsl_args(distro.as_deref(), &shell);
                 ("wsl.exe".to_owned(), args)
             }
         }
@@ -66,7 +64,7 @@ impl LinkMode {
                     args.push("-d".to_owned());
                     args.push(d.clone());
                 }
-                args.extend(["--".to_owned(), "sleep".to_owned(), "infinity".to_owned()]);
+                args.extend(["-e".to_owned(), "sleep".to_owned(), "infinity".to_owned()]);
                 Some(("wsl.exe".to_owned(), args))
             }
         }
@@ -98,6 +96,8 @@ impl Serialize for LinkError {
 #[derive(Debug)]
 pub struct DaemonLink {
     mode: LinkMode,
+    /// Perintah penjaga keep-awake dari provisioning (JSON argv).
+    keep_awake: std::sync::Mutex<Option<String>>,
     conn: Mutex<Option<Connection>>,
     keeper: Mutex<Option<Child>>,
 }
@@ -119,13 +119,33 @@ impl DaemonLink {
     pub fn new(mode: LinkMode) -> Self {
         Self {
             mode,
+            keep_awake: std::sync::Mutex::new(None),
             conn: Mutex::new(None),
             keeper: Mutex::new(None),
         }
     }
 
+    /// Cara menjangkau daemon.
+    #[must_use]
+    pub fn mode(&self) -> &LinkMode {
+        &self.mode
+    }
+
+    /// Menyimpan perintah penjaga keep-awake untuk `connect` berikutnya.
+    pub fn set_keep_awake(&self, json: Option<String>) {
+        *self
+            .keep_awake
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = json;
+    }
+
     fn spawn(&self, sub: &str) -> Result<Child, LinkError> {
-        let (program, args) = self.mode.command(sub);
+        let keep_awake = self
+            .keep_awake
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone();
+        let (program, args) = self.mode.command(sub, keep_awake.as_deref());
         let mut cmd = Command::new(&program);
         cmd.args(&args)
             .stdin(Stdio::piped())
@@ -232,14 +252,14 @@ impl DaemonLink {
 }
 
 #[cfg(windows)]
-fn hide_console(cmd: &mut Command) {
+pub(crate) fn hide_console(cmd: &mut Command) {
     const CREATE_NO_WINDOW: u32 = 0x0800_0000;
     cmd.creation_flags(CREATE_NO_WINDOW);
     cmd.env("WSL_UTF8", "1");
 }
 
 #[cfg(not(windows))]
-fn hide_console(_cmd: &mut Command) {}
+pub(crate) fn hide_console(_cmd: &mut Command) {}
 
 #[cfg(test)]
 mod tests {
@@ -251,40 +271,66 @@ mod tests {
             bin: PathBuf::from("/opt/mandord"),
         };
         assert_eq!(
-            mode.command("connect"),
+            mode.command("connect", Some("[]")),
             ("/opt/mandord".to_owned(), vec!["connect".to_owned()])
         );
         assert_eq!(mode.keeper(), None);
     }
 
     #[test]
-    fn perintah_wsl_memakai_distro_bila_ada() {
+    fn perintah_wsl_tanpa_shell_windows_dan_jalur_absolut() {
         let mode = LinkMode::Wsl {
             distro: Some("Ubuntu-24.04".to_owned()),
         };
-        let (program, args) = mode.command("token");
+        let json = r#"["/mnt/c/Users/A B/k.exe","--keep-awake"]"#;
+        let (program, args) = mode.command("connect", Some(json));
         assert_eq!(program, "wsl.exe");
+        assert_eq!(&args[..5], ["-d", "Ubuntu-24.04", "-e", "sh", "-lc"]);
+        assert!(args[5].contains(r#"b="$HOME/.local/bin/mandord""#));
+        assert!(args[5].contains("MANDOR_KEEP_AWAKE_CMD=\"$1\""));
+        assert!(args[5].ends_with(r#"exec "$b" connect"#));
         assert_eq!(
-            args,
-            [
-                "-d",
-                "Ubuntu-24.04",
-                "--",
-                "sh",
-                "-lc",
-                "exec mandord token"
-            ]
+            &args[6..],
+            ["sh", json],
+            "JSON satu argumen, bukan bagian skrip"
         );
         let (_, keeper) = mode.keeper().unwrap();
-        assert_eq!(keeper, ["-d", "Ubuntu-24.04", "--", "sleep", "infinity"]);
+        assert_eq!(keeper, ["-d", "Ubuntu-24.04", "-e", "sleep", "infinity"]);
     }
 
     #[test]
-    fn perintah_wsl_tanpa_distro_memakai_default() {
+    fn perintah_wsl_tanpa_distro_dan_tanpa_keep_awake() {
         let mode = LinkMode::Wsl { distro: None };
+        let (_, args) = mode.command("token", None);
+        assert_eq!(&args[..3], ["-e", "sh", "-lc"]);
+        assert!(args[3].ends_with(r#"exec "$b" token"#));
+        assert_eq!(&args[4..], ["sh", ""]);
+    }
+
+    /// Skrip relay dijalankan sungguhan oleh `sh`: biner di ~/.local/bin
+    /// dipakai dan perintah keep-awake sampai ke environment-nya.
+    #[cfg(unix)]
+    #[test]
+    fn skrip_relay_memakai_biner_terpasang_dan_meneruskan_keep_awake() {
+        use std::os::unix::fs::PermissionsExt;
+        let home = tempfile::tempdir().unwrap();
+        let bin = home.path().join(".local/bin");
+        std::fs::create_dir_all(&bin).unwrap();
+        let fake = bin.join("mandord");
+        std::fs::write(&fake, "#!/bin/sh\necho \"$1|$MANDOR_KEEP_AWAKE_CMD\"\n").unwrap();
+        std::fs::set_permissions(&fake, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let mode = LinkMode::Wsl { distro: None };
+        let json = r#"["/mnt/c/A B/k.exe","--keep-awake"]"#;
+        let (_, args) = mode.command("token", Some(json));
+        // Lewati `-e`; jalankan argv yang akan dieksekusi wsl.exe.
+        let out = std::process::Command::new(&args[1])
+            .args(["-c", &args[3], &args[4], &args[5]])
+            .env("HOME", home.path())
+            .output()
+            .unwrap();
         assert_eq!(
-            mode.command("connect").1,
-            ["--", "sh", "-lc", "exec mandord connect"]
+            String::from_utf8_lossy(&out.stdout).trim(),
+            format!("token|{json}")
         );
     }
 }

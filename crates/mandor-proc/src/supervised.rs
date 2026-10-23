@@ -81,6 +81,12 @@ impl Supervised {
         Ok(status.code())
     }
 
+    /// Proses sudah selesai (tanpa menunggu).
+    #[must_use]
+    pub fn has_exited(&mut self) -> bool {
+        matches!(self.child.try_wait(), Ok(Some(_)))
+    }
+
     /// Menghentikan proses secara bertahap, masing-masing tahap menunggu `grace`.
     pub async fn stop(&mut self, grace: Duration) -> StopOutcome {
         if matches!(self.child.try_wait(), Ok(Some(_))) {

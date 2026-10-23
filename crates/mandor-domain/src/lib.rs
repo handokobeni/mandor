@@ -9,6 +9,7 @@ pub mod app_run;
 pub mod claim;
 pub mod cursor;
 pub mod gate;
+pub mod group;
 pub mod hook;
 pub mod hook_review;
 pub mod kanban;

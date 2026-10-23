@@ -299,6 +299,26 @@ pub fn reset_for_review(rows: &mut [AcRow]) {
     }
 }
 
+/// Memulihkan keputusan dev dari review sebelumnya (R18 plan run grup): baris
+/// yang dulu di-Push anyway (Skipped) dan kini tetap Fail, atau dulu
+/// dikonfirmasi manual (Checked manually) dan kini tetap Can't verify, kembali
+/// ke keputusan itu. Baris yang verdict-nya berubah tidak disentuh.
+pub fn restore_decisions(rows: &mut [AcRow], previous: &[AcRow]) {
+    for r in rows.iter_mut().filter(|r| r.in_gate() && !r.stale) {
+        let Some(p) = previous.iter().find(|p| p.ac_id == r.ac_id) else {
+            continue;
+        };
+        let restored = match (&p.verdict, &r.verdict) {
+            (Verdict::Skipped, Verdict::Fail) => Verdict::Skipped,
+            (Verdict::CheckedManually, Verdict::CantVerify) => Verdict::CheckedManually,
+            _ => continue,
+        };
+        r.verdict = restored;
+        r.reason.clone_from(&p.reason);
+        r.decided_by.clone_from(&p.decided_by);
+    }
+}
+
 /// Review selesai normal: baris di gerbang yang tidak dilaporkan menjadi
 /// Can't verify dengan alasan [`NOT_REPORTED`].
 pub fn fill_unreported(rows: &mut [AcRow]) {
@@ -400,6 +420,46 @@ pub fn design_gaps_text(rows: &[AcRow], limit: usize) -> String {
 #[cfg(test)]
 mod tests {
     use pretty_assertions::assert_eq;
+
+    #[test]
+    fn keputusan_lama_dipulihkan_bila_verdict_tidak_berubah() {
+        let mut skipped = AcRow::new("a", None, "A", RowStatus::Active);
+        skipped.verdict = Verdict::Skipped;
+        skipped.reason = Some("bug lama".to_owned());
+        skipped.decided_by = Some("Beni".to_owned());
+        let mut manual = AcRow::new("b", None, "B", RowStatus::Active);
+        manual.verdict = Verdict::CheckedManually;
+        manual.decided_by = Some("Beni".to_owned());
+        let mut was_skipped_now_pass = skipped.clone();
+        was_skipped_now_pass.ac_id = "c".to_owned();
+        let previous = vec![skipped, manual, was_skipped_now_pass];
+
+        let mut rows = vec![
+            AcRow::new("a", None, "A", RowStatus::Active),
+            AcRow::new("b", None, "B", RowStatus::Active),
+            AcRow::new("c", None, "C", RowStatus::Active),
+            AcRow::new("d", None, "D", RowStatus::Active),
+        ];
+        rows[0].verdict = Verdict::Fail;
+        rows[1].verdict = Verdict::CantVerify;
+        rows[2].verdict = Verdict::Pass;
+        rows[3].verdict = Verdict::Fail;
+        restore_decisions(&mut rows, &previous);
+        assert_eq!(rows[0].verdict, Verdict::Skipped);
+        assert_eq!(rows[0].reason.as_deref(), Some("bug lama"));
+        assert_eq!(rows[1].verdict, Verdict::CheckedManually);
+        assert_eq!(rows[1].decided_by.as_deref(), Some("Beni"));
+        assert_eq!(
+            rows[2].verdict,
+            Verdict::Pass,
+            "verdict berubah: tidak disentuh"
+        );
+        assert_eq!(
+            rows[3].verdict,
+            Verdict::Fail,
+            "tanpa keputusan lama tetap menahan"
+        );
+    }
 
     #[test]
     fn review_mereset_lalu_melengkapi_ac_yang_tidak_dilaporkan() {

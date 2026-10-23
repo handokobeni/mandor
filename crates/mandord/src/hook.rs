@@ -15,7 +15,7 @@ use std::path::{Path, PathBuf};
 
 use mandor_agent::claude::guardrails::run_hook;
 use mandor_domain::hook::{
-    ToolCall, Verdict, check_design_path, classify_planning, classify_with_mcp,
+    DesignRoot, ToolCall, Verdict, check_design_path, classify_planning, classify_with_mcp,
 };
 use mandor_domain::hook_review::{classify_review, mark_before, record_post};
 
@@ -69,11 +69,15 @@ fn review_post(path: &Path, call: &ToolCall) -> Verdict {
     }
 }
 
-/// Akar sumber desain dari argumen `--design`, sudah dikanonisasi.
-fn design_roots(args: &[String]) -> Vec<String> {
+/// Akar sumber desain dari argumen `--design`: jalur yang diberikan dan
+/// hasil kanonisasinya.
+fn design_roots(args: &[String]) -> Vec<DesignRoot> {
     args.windows(2)
         .filter(|w| w[0] == "--design")
-        .map(|w| canonical(&w[1]))
+        .map(|w| DesignRoot {
+            given: w[1].trim_end_matches('/').to_owned(),
+            canonical: canonical(&w[1]),
+        })
         .collect()
 }
 
@@ -146,6 +150,12 @@ mod tests {
             "/tidak/ada",
         ]));
         assert_eq!(roots.len(), 2);
-        assert_eq!(roots[1], "/tidak/ada");
+        assert_eq!(roots[0].given, root);
+        assert_eq!(
+            roots[0].canonical,
+            std::fs::canonicalize(&root).unwrap().to_string_lossy()
+        );
+        assert_eq!(roots[1].given, "/tidak/ada");
+        assert_eq!(roots[1].canonical, "/tidak/ada");
     }
 }

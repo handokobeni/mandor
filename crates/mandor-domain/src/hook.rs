@@ -121,27 +121,39 @@ pub fn is_credential_path(path: &str) -> bool {
     CREDENTIAL_MARKERS.iter().any(|m| p.contains(m))
 }
 
+/// Akar sumber desain: jalur seperti yang diberikan dan hasil kanonisasinya.
+/// Keduanya dipakai karena agent bisa menyebut akar lewat jalur yang memuat
+/// symlink (mis. `/var` → `/private/var` di macOS).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DesignRoot {
+    pub given: String,
+    pub canonical: String,
+}
+
 /// Aturan akar sumber desain (KTD-33, R7a). `raw` adalah path dari tool call,
-/// `canonical` hasil kanonisasi (`realpath`) oleh pemanggil, dan `roots` akar
-/// terdaftar yang sudah dikanonisasi. Path yang disebut di dalam akar harus
-/// tetap di dalam akar setelah kanonisasi (symlink atau `../` tidak bisa
+/// `canonical` hasil kanonisasi (`realpath`) oleh pemanggil. Path yang disebut
+/// di dalam akar (lewat jalur yang diberikan maupun kanoniknya) harus tetap di
+/// dalam akar kanonik setelah kanonisasi (symlink atau `../` tidak bisa
 /// keluar), dan tidak ada tool penulis berkas di dalam akar.
 #[must_use]
 pub fn check_design_path(
     tool: &str,
     raw: &str,
     canonical: &str,
-    roots: &[String],
+    roots: &[DesignRoot],
 ) -> Option<String> {
-    let named = roots.iter().find(|r| under(raw, r));
+    let named = roots
+        .iter()
+        .find(|r| under(raw, &r.given) || under(raw, &r.canonical));
     if let Some(root) = named {
-        if !under(canonical, root) {
+        if !under(canonical, &root.canonical) {
             return Some(format!(
-                "mandor: {raw} resolves outside the design source {root}"
+                "mandor: {raw} resolves outside the design source {}",
+                root.given
             ));
         }
     }
-    let inside = named.is_some() || roots.iter().any(|r| under(canonical, r));
+    let inside = named.is_some() || roots.iter().any(|r| under(canonical, &r.canonical));
     if inside && WRITE_TOOLS.contains(&tool) {
         return Some(format!("mandor: design sources are read-only ({raw})"));
     }
@@ -245,8 +257,49 @@ fn check_command(cmd: &str) -> Option<String> {
 mod tests {
     use super::*;
 
-    fn roots() -> Vec<String> {
-        vec!["/design/mock".to_owned()]
+    fn roots() -> Vec<DesignRoot> {
+        vec![DesignRoot {
+            given: "/design/mock".to_owned(),
+            canonical: "/design/mock".to_owned(),
+        }]
+    }
+
+    #[test]
+    fn akar_lewat_symlink_tetap_dikenali() {
+        // macOS: tempdir `/var/...` dikanonisasi menjadi `/private/var/...`.
+        let r = vec![DesignRoot {
+            given: "/var/t/mock".to_owned(),
+            canonical: "/private/var/t/mock".to_owned(),
+        }];
+        assert_eq!(
+            check_design_path("Read", "/var/t/mock/a.tsx", "/private/var/t/mock/a.tsx", &r),
+            None
+        );
+        assert!(
+            check_design_path("Read", "/var/t/mock/link", "/private/var/t/secret.txt", &r)
+                .is_some(),
+            "symlink keluar dari akar ditolak"
+        );
+        assert!(
+            check_design_path(
+                "Read",
+                "/var/t/mock/../secret.txt",
+                "/private/var/t/secret.txt",
+                &r
+            )
+            .is_some(),
+            "../ keluar dari akar ditolak"
+        );
+        assert!(
+            check_design_path(
+                "Write",
+                "/var/t/mock/a.tsx",
+                "/private/var/t/mock/a.tsx",
+                &r
+            )
+            .is_some(),
+            "tetap hanya baca"
+        );
     }
 
     #[test]

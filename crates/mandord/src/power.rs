@@ -166,7 +166,7 @@ impl Monitor {
     }
 
     /// PID penjaga yang berjalan (untuk test).
-    #[cfg(test)]
+    #[cfg(all(test, unix))]
     fn guard_pid(&self) -> Option<u32> {
         self.guard.as_ref().and_then(|g| g.proc.pid())
     }

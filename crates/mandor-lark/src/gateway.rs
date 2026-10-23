@@ -33,6 +33,8 @@ pub mod field {
     pub const OWNER: &str = "mandor_owner";
     pub const CURSOR: &str = "mandor_comment_cursor";
     pub const MODIFIED: &str = "mandor_modified";
+    /// Selisih desain per AC untuk view tim (KTD-34).
+    pub const DESIGN_GAPS: &str = "mandor_design_gaps";
     /// Field tampilan milik app yang sudah ada di Base.
     pub const REPO_ID: &str = "repo_id";
     pub const FIX_NOTES: &str = "Fix Notes";
@@ -187,6 +189,9 @@ pub fn write_body(status: Option<&TaskStatus>, fields: &[AppField]) -> Value {
             AppField::CommentCursor(c) => (field::CURSOR, json!(c)),
             AppField::KanbanMirror(m) => (field::KANBAN, json!(m)),
             AppField::RepoId(r) => (field::REPO_ID, json!(r)),
+            // Kosong mengosongkan field, sama seperti klaim yang dilepas.
+            AppField::DesignGaps(g) if g.is_empty() => (field::DESIGN_GAPS, Value::Null),
+            AppField::DesignGaps(g) => (field::DESIGN_GAPS, json!(g)),
         };
         out.insert(name.to_owned(), value);
     }

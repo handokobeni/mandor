@@ -1,10 +1,37 @@
 // Transport tiruan untuk melihat UI di browser tanpa daemon dan Lark (`bun run dev`, buka `/?mock`).
 // Hanya dimuat lewat dynamic import di mode dev; tidak masuk build produksi.
 
+import type { DesignSourceView } from '#lib/protocol/DesignSourceView.ts';
+import type { ReviewerSettingsView } from '#lib/protocol/ReviewerSettingsView.ts';
 import type { CardView } from '#lib/protocol/CardView.ts';
 import type { MessageView } from '#lib/protocol/MessageView.ts';
 import type { RunView } from '#lib/protocol/RunView.ts';
 import type { Transport } from '#lib/api/client.ts';
+import type { AcRowView } from '#lib/protocol/AcRowView.ts';
+import type { AppRunView } from '#lib/protocol/AppRunView.ts';
+import { activeRows, gate } from '#lib/ac-review.ts';
+import { history, ledger, scenarioFor, scenarioRows } from './mock-ac.ts';
+
+/** State Run app tiruan per run. */
+const APP = new Map<string, AppRunView>();
+let chromeConnected = false;
+function appView(runId: string, state: string): AppRunView {
+  return {
+    run_id: runId,
+    state,
+    members: [{ repo_id: 'pegasus-web', url: 'http://localhost:5173', state }],
+    database_confirmed: false,
+    login_confirmed: false,
+    error: state === 'failed' ? 'pegasus-web: the app exited (code 1) before opening its port' : null
+  };
+}
+
+/** Buku AC tiruan per run; berubah saat review atau Push & PR. */
+const AC = new Map<string, AcRowView[]>();
+function acRows(runId: string): AcRowView[] {
+  if (!AC.has(runId)) AC.set(runId, scenarioRows(scenarioFor(runId)));
+  return AC.get(runId) ?? [];
+}
 
 function run(id: string, key: string, title: string, state: string, extra: Partial<RunView> = {}): RunView {
   return {
@@ -27,18 +54,22 @@ function run(id: string, key: string, title: string, state: string, extra: Parti
     quiet_until_ms: state === 'wf_quiet' ? Date.now() + 95_000 : null,
     started_at_ms: Date.now() - 42 * 60_000,
     updated_at_ms: Date.now() - 60_000,
+    ac: null,
     ...extra
   };
 }
 
 const RUNS: RunView[] = [
-  run('1', 'PGS-1402', 'Filter invoices by status and date range', 'awaiting_dev'),
+  run('1', 'PGS-1402', 'Filter invoices by status and date range', 'awaiting_dev', {
+    ac: { total: 5, ok: 3, failed: 1, unverified: 1, not_reviewed: 0, stale: false, design_gaps: 1 }
+  }),
   run('2', 'PGS-1388', 'Map cluster markers for branch offices', 'running', { queued: ['Also run the e2e tests'] }),
   run('3', 'PGS-1379', 'Export payroll report to XLSX', 'failed', {
     last_error: 'claude exited with code 1: session limit reached'
   }),
   run('4', 'PGS-1371', 'Policy limit error message on claims form', 'wf_quiet'),
   run('5', 'PGS-1365', 'Add audit log to approval flow', 'in_review_loop', {
+    ac: { total: 5, ok: 5, failed: 0, unverified: 0, not_reviewed: 0, stale: false, design_gaps: 0 },
     pr_url: 'https://github.com/pegasus/pegasus-web/pull/482'
   }),
   run('6', 'PGS-1360', 'Retry webhook delivery with backoff', 'orphaned', {
@@ -91,6 +122,7 @@ const RUNS: RunView[] = [
   run('9', 'PGS-1344', 'Show payroll cut-off on web and API', 'in_review_loop', {
     repo_id: 'pegasus-api',
     workspace_id: 'pegasus',
+    ac: { total: 5, ok: 3, failed: 0, unverified: 0, not_reviewed: 2, stale: true, design_gaps: 0 },
     pr_url: 'https://github.com/pegasus/pegasus-api/pull/77\nhttps://github.com/pegasus/pegasus-web/pull/483',
     repos: [
       { repo_id: 'pegasus-api', pr_url: 'https://github.com/pegasus/pegasus-api/pull/77' },
@@ -99,6 +131,13 @@ const RUNS: RunView[] = [
   }),
   run('10', 'PGS-1347', 'Overtime approval reminders', 'awaiting_dev', { phase: 'brainstorm' })
 ];
+
+// Sumber desain dan setelan reviewer tiruan (Rilis 2 U14).
+let designSources: DesignSourceView[] = [
+  { id: 'ds1', name: 'pegasus-mock', kind: 'folder', path: '/home/beni/work/pegasus-mock', ready: true, status: 'Ready' },
+  { id: 'ds2', name: 'old-figma-export', kind: 'folder', path: '/home/beni/old/figma', ready: false, status: 'Path missing' }
+];
+let reviewer: ReviewerSettingsView = { model: null, budget_cents: 200, timeout_secs: 900 };
 
 function card(r: RunView | null, extra: Partial<CardView>): CardView {
   return {
@@ -221,6 +260,40 @@ const MESSAGES: Record<string, MessageView[]> = {
       created_at_ms: 0
     },
     { id: 10, role: 'agent', body: { type: 'done', is_error: false, result: 'ok' }, created_at_ms: 0 }
+  ],
+  // Giliran plan: chat tetap berisi aktivitas walau run terbuka di tab Plan.
+  '8': [
+    { id: 1, role: 'dev', body: { type: 'text', text: 'Started: plan with Mandor built-in.' }, created_at_ms: 0 },
+    { id: 2, role: 'agent', body: { type: 'tool_use', id: 'p1', name: 'Read', preview: 'src/lib/api/search.ts' }, created_at_ms: 0 },
+    { id: 3, role: 'agent', body: { type: 'tool_result', tool_use_id: 'p1', is_error: false, preview: 'export async function searchEmployees(…' }, created_at_ms: 0 },
+    {
+      id: 4,
+      role: 'agent',
+      body: {
+        type: 'assistant_message',
+        text: [
+          '# PGS-1350 — Cache employee search results',
+          '',
+          '## Pendekatan',
+          '',
+          'Tambahkan cache per tenant selama 60 detik di `searchEmployees`.',
+          '',
+          '- **`src/lib/api/search.ts`** — bungkus `searchEmployees` dengan cache',
+          '- **`src/lib/api/search.test.ts`** — uji hit, kedaluwarsa, dan invalidasi',
+          '',
+          '**Nilai Design per AC** sudah dicatat lewat `ac_set_design`:',
+          '',
+          '| AC | Design | Catatan |',
+          '| --- | --- | --- |',
+          '| AC-8807 (AC-1) | `in_design` | Frame 01: F(10)=55; frame 02: pesan "n harus 0 atau lebih" |',
+          '| AC-8811 (AC-5) | `conflicts` | Desain memakai 3 tab (`nav.tabs`), bukan dropdown |',
+          '',
+          '> Plan ada di tab Plan. Balas di sini untuk merevisi.'
+        ].join('\n')
+      },
+      created_at_ms: 0
+    },
+    { id: 5, role: 'agent', body: { type: 'done', is_error: false, result: 'ok' }, created_at_ms: 0 }
   ]
 };
 
@@ -251,7 +324,17 @@ const repos: unknown[] = setup
         gh_profile: null,
         companions: [],
         trusted_reviewers: ['ou_51aa6c'],
-        extra_allowed: ['Bash(pnpm test *)']
+        extra_allowed: ['Bash(pnpm test *)'],
+        gate_mode: null,
+        app: {
+          test_mode: 'web',
+          setup_command: 'pnpm install',
+          start_command: 'pnpm dev',
+          port: 5173,
+          app_url: null,
+          env_keys: ['VITE_API_URL'],
+          browser_tests: true
+        }
       },
       {
         id: 'pegasus-api',
@@ -260,7 +343,17 @@ const repos: unknown[] = setup
         gh_profile: null,
         companions: [],
         trusted_reviewers: [],
-        extra_allowed: ['Bash(cargo *)']
+        extra_allowed: ['Bash(cargo *)'],
+        gate_mode: null,
+        app: {
+          test_mode: 'no_app',
+          setup_command: null,
+          start_command: null,
+          port: null,
+          app_url: null,
+          env_keys: [],
+          browser_tests: true
+        }
       }
     ];
 const workspaces: Record<string, unknown>[] = setup
@@ -271,7 +364,9 @@ const workspaces: Record<string, unknown>[] = setup
         name: 'pegasus',
         root: '/home/beni/work',
         repo_ids: ['pegasus-api', 'pegasus-web'],
-        mcp_servers: ['graft']
+        mcp_servers: ['graft'],
+        browser_tests: true,
+        gate_mode: 'block'
       }
     ];
 
@@ -312,7 +407,17 @@ function handle(method: string, params: Record<string, unknown>): unknown {
         gh_profile: null,
         companions: [],
         trusted_reviewers: [],
-        extra_allowed: []
+        extra_allowed: [],
+        gate_mode: null,
+        app: {
+          test_mode: 'no_app',
+          setup_command: null,
+          start_command: null,
+          port: null,
+          app_url: null,
+          env_keys: [],
+          browser_tests: true
+        }
       });
       return repos.at(-1);
     case 'lark.settings.set':
@@ -332,6 +437,7 @@ function handle(method: string, params: Record<string, unknown>): unknown {
         sync_error: null
       };
     case 'runs.list':
+      if (scenarioFor('1') === 'reviewing') RUNS[0].state = 'reviewing';
       return RUNS;
     case 'runs.messages': {
       const all = MESSAGES[String(params.run_id)] ?? [];
@@ -348,7 +454,7 @@ function handle(method: string, params: Record<string, unknown>): unknown {
     case 'workspaces.list':
       return workspaces;
     case 'workspaces.add': {
-      const ws = { id: String(params.name).toLowerCase().replace(/[^a-z0-9]+/g, '-'), ...params };
+      const ws = { id: String(params.name).toLowerCase().replace(/[^a-z0-9]+/g, '-'), browser_tests: true, gate_mode: 'block', ...params };
       workspaces.push(ws);
       return ws;
     }
@@ -460,6 +566,107 @@ function handle(method: string, params: Record<string, unknown>): unknown {
     case 'runs.start':
     case 'runs.takeover':
       return RUNS[0];
+    case 'app.run':
+      return appView(String(params.run_id), 'starting');
+    case 'app.status':
+      return APP.get(String(params.run_id)) ?? appView(String(params.run_id), 'off');
+    case 'app.owner':
+      return [...APP.values()].find((a) => a.state !== 'off' && a.state !== 'stopped_by_other_run') ?? null;
+    case 'app.changes':
+      return [
+        {
+          repo_id: 'pegasus-web',
+          snapshot: 'tree-mock',
+          files: ['src/routes/invoices/Filters.svelte', 'package.json', 'src/lib/api/invoices.ts'],
+          flagged: ['package.json']
+        }
+      ];
+    case 'app.stop': {
+      const a = appView(String(params.run_id), 'off');
+      APP.set(a.run_id, a);
+      return a;
+    }
+    case 'app.confirm': {
+      const a = APP.get(String(params.run_id)) ?? appView(String(params.run_id), 'off');
+      if (typeof params.database === 'boolean') a.database_confirmed = params.database;
+      if (typeof params.login === 'boolean') a.login_confirmed = params.login;
+      return a;
+    }
+    case 'app.logs':
+      return [{ repo_id: 'pegasus-web', text: '$ pnpm dev\n  VITE v6 ready in 412 ms\n  ➜  Local: http://localhost:5173/' }];
+    case 'review.readiness': {
+      const a = APP.get(String(params.run_id));
+      const running = a?.state === 'running';
+      const ready = params.run_id === '1';
+      return {
+        needs_dialog: ready,
+        browser_tests: true,
+        app: running ? 'current' : 'not_running',
+        other_owner: null,
+        confirmed: { database: a?.database_confirmed ?? false, login: a?.login_confirmed ?? false },
+        app_urls: running ? ['http://localhost:5173'] : [],
+        chrome_connected: chromeConnected,
+        cant_verify_reason: running ? null : 'The app is not running'
+      };
+    }
+    case 'design_sources.list':
+      return designSources;
+    case 'design_sources.test':
+      return { ready: true, status: 'Ready' };
+    case 'design_sources.add': {
+      const p = params as { name: string; path: string };
+      const s = { id: `ds${designSources.length + 1}`, name: p.name, kind: 'folder', path: p.path, ready: true, status: 'Ready' };
+      designSources = [...designSources, s];
+      return s;
+    }
+    case 'design_sources.update': {
+      const p = params as { id: string; name: string; path: string };
+      designSources = designSources.map((s) => (s.id === p.id ? { ...s, name: p.name, path: p.path } : s));
+      return designSources.find((s) => s.id === p.id) ?? null;
+    }
+    case 'design_sources.remove':
+      designSources = designSources.filter((s) => s.id !== String(params.id));
+      return {};
+    case 'settings.reviewer.get':
+      return reviewer;
+    case 'settings.reviewer.set':
+      reviewer = params as unknown as ReviewerSettingsView;
+      return reviewer;
+    case 'system.chrome_check':
+      chromeConnected = true;
+      return { connected: true, detail: '', checked_at_ms: Date.now() };
+    case 'ledger.get': {
+      const id = String(params.run_id);
+      return ledger(id, acRows(id), scenarioFor(id));
+    }
+    case 'review.history':
+      return history(String(params.run_id), scenarioFor(String(params.run_id)));
+    case 'review.start':
+    case 'review.cancel':
+    case 'review.send_findings':
+      return {};
+    case 'runs.publish': {
+      const id = String(params.run_id);
+      const rows = activeRows(acRows(id));
+      const reason = typeof params.push_anyway_reason === 'string' ? params.push_anyway_reason : null;
+      const confirmed = Array.isArray(params.confirmed) ? (params.confirmed as string[]) : [];
+      const g = gate(
+        rows.map((r) =>
+          r.verdict === 'fail' && reason
+            ? { ...r, verdict: 'skipped' }
+            : r.verdict === 'cant_verify' && confirmed.includes(r.ac_id)
+              ? { ...r, verdict: 'checked_manually' }
+              : r
+        ),
+        scenarioFor(id) === 'warn' ? 'warn' : 'block',
+        false
+      );
+      const base = { pr_url: null, failed: [], unverified: [], warnings: [], sync_warning: null, review_id: null };
+      if (g.state === 'review_needed') return { ...base, outcome: 'review_started', review_id: 'rv-mock' };
+      if (g.state === 'blocked') return { ...base, outcome: 'blocked', failed: ['AC-3'] };
+      if (g.state === 'needs_confirmation') return { ...base, outcome: 'needs_confirmation', unverified: ['AC-4'] };
+      return { ...base, outcome: 'published', pr_url: 'https://github.com/pegasus/pegasus-web/pull/490' };
+    }
     default:
       return null;
   }
@@ -467,6 +674,45 @@ function handle(method: string, params: Record<string, unknown>): unknown {
 
 export class MockTransport implements Transport {
   private onLine: ((line: string) => void) | null = null;
+
+  private emit(method: string, params: unknown): void {
+    this.onLine?.(JSON.stringify({ jsonrpc: '2.0', method, params }));
+  }
+
+  /** Run app tiruan: setup, start, tunggu port, lalu Running. */
+  private playApp(runId: string): void {
+    ['setting_up', 'starting', 'waiting_for_port', 'running'].forEach((state, i) =>
+      setTimeout(() => {
+        APP.set(runId, appView(runId, state));
+        this.emit('app.updated', { run_id: runId });
+      }, 600 * i)
+    );
+  }
+
+  /** Review tiruan: run menjadi Reviewing, baris terisi satu per satu, lalu kembali ke dev. */
+  private playReview(runId: string): void {
+    const r = RUNS.find((x) => x.id === runId);
+    if (!r) return;
+    const done = scenarioRows('current');
+    let rows = acRows(runId).map((x) => (x.in_gate ? { ...x, verdict: 'not_reviewed', evidence: null, stale: false } : x));
+    AC.set(runId, rows);
+    r.state = 'reviewing';
+    this.emit('run.updated', { run_id: runId });
+    this.emit('ledger.updated', { run_id: runId, rows });
+    rows.forEach((row, i) =>
+      setTimeout(() => {
+        const result = done.find((d) => d.ac_id === row.ac_id) ?? { ...row, verdict: 'pass' };
+        rows = rows.map((x) => (x.ac_id === row.ac_id && x.in_gate ? { ...result, status: x.status } : x));
+        AC.set(runId, rows);
+        this.emit('ledger.updated', { run_id: runId, rows });
+        if (i === rows.length - 1) {
+          r.state = 'awaiting_dev';
+          this.emit('run.updated', { run_id: runId });
+          this.emit('review.progress', { run_id: runId });
+        }
+      }, 700 * (i + 1))
+    );
+  }
 
   async token(): Promise<{ token: string; protocol: string }> {
     return { token: 'mock', protocol: '1.0' };
@@ -505,6 +751,8 @@ export class MockTransport implements Transport {
       if (req.method === 'runs.send') {
         this.onLine?.(JSON.stringify({ jsonrpc: '2.0', method: 'run.message', params: { run_id: req.params?.run_id } }));
       }
+      if (req.method === 'review.start') this.playReview(String(req.params?.run_id));
+      if (req.method === 'app.run') this.playApp(String(req.params?.run_id));
     }, delay);
   }
 }

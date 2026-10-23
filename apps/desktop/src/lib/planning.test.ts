@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { DEFAULT_PLANNING, planningParams, restorePlanning } from '#lib/planning.ts';
+import { DEFAULT_PLANNING, planningParams, restorePlanning, restoreReview } from '#lib/planning.ts';
 
 describe('pilihan planning', () => {
   it('bawaan: brainstorm lalu plan dengan prompt Mandor', () => {
@@ -18,5 +18,18 @@ describe('pilihan planning', () => {
     expect(restorePlanning(saved, ['ce:plan'])).toEqual({ mode: 'plan', brainstormSkill: '', planSkill: 'ce:plan' });
     expect(restorePlanning('rusak', ['ce:plan'])).toEqual(DEFAULT_PLANNING);
     expect(restorePlanning({ mode: 'aneh' }, [])).toEqual(DEFAULT_PLANNING);
+  });
+});
+
+describe('pilihan review di Start', () => {
+  it('sumber desain yang dihapus dibuang dengan peringatan', () => {
+    const sources = [
+      { id: 'a', name: 'kelola-mock', ready: true },
+      { id: 'b', name: 'old-mock', ready: false }
+    ];
+    const r = restoreReview({ designSources: ['a', 'b', 'gone'], reviewerSkill: 'qa:review' }, sources, ['qa:review']);
+    expect(r.choice).toEqual({ designSources: ['a'], reviewerSkill: 'qa:review' });
+    expect(r.dropped).toEqual(['old-mock', 'A removed design source']);
+    expect(restoreReview(null, sources, []).choice).toEqual({ designSources: [], reviewerSkill: '' });
   });
 });

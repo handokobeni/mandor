@@ -43,6 +43,10 @@ pub const APP_FIELDS: &[FieldDef] = &[
         name: "Fix Notes",
         kind: 1,
     },
+    FieldDef {
+        name: "mandor_design_gaps",
+        kind: 1,
+    },
 ];
 
 /// Memastikan `option` adalah opsi yang sudah ada pada field `SingleSelect`

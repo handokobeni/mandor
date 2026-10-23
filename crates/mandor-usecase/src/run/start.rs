@@ -9,6 +9,7 @@ use mandor_domain::{AppField, TaskStatus, WriteOp};
 use super::members::group_name;
 use super::{RunError, RunService};
 use crate::ports::{Deps, Ids, LarkTasks};
+use crate::review::DesignRoot;
 use crate::run_ports::{
     GitPort, Prompts, RepoInfo, Repos, RunMember, RunPhase, RunRecord, RunStore, RunWorkspace,
     SessionRef, WorkspaceInfo,
@@ -61,6 +62,7 @@ fn start_summary(planning: &Planning, dev_note: Option<&str>) -> String {
 struct Plan {
     repos: Vec<RepoInfo>,
     workspace: Option<WorkspaceInfo>,
+    design: Vec<DesignRoot>,
 }
 
 /// Langkah Start yang dilaporkan ke client (dialog Start).
@@ -114,13 +116,14 @@ impl<D: Deps> RunService<D> {
         dev_note: Option<&str>,
         progress: impl Fn(StartStep) + Send + Sync,
     ) -> Result<RunRecord, RunError> {
-        self.start_planned(record_id, target, dev_note, &Planning::Skip, progress)
+        self.start_planned(record_id, target, dev_note, &Planning::Skip, &[], progress)
             .await
     }
 
     /// [`Self::start_with_progress`] dengan fase plan: selain [`Planning::Skip`],
     /// giliran pertama hanya membaca kode dan menyusun plan, lalu run menunggu
-    /// persetujuan dev ([`Self::approve_plan`]).
+    /// persetujuan dev ([`Self::approve_plan`]). `design`: sumber desain yang
+    /// sudah diperiksa adapter; disimpan di run untuk semua giliran.
     ///
     /// # Errors
     /// Target tidak valid, gerbang, klaim, git, atau agent gagal.
@@ -130,9 +133,11 @@ impl<D: Deps> RunService<D> {
         target: &StartTarget,
         dev_note: Option<&str>,
         planning: &Planning,
+        design: &[DesignRoot],
         progress: impl Fn(StartStep) + Send + Sync,
     ) -> Result<RunRecord, RunError> {
-        let plan = self.resolve(target).await?;
+        let mut plan = self.resolve(target).await?;
+        plan.design = design.to_vec();
         // Gerbang dan klaim dari baca segar; kalah klaim berhenti sebelum worktree.
         progress(StartStep::Claiming);
         self.sync.claim(record_id, false).await?;
@@ -184,7 +189,20 @@ impl<D: Deps> RunService<D> {
                     .ok_or(RunError::NotFound("repo"))?,
             );
         }
-        Ok(Plan { repos, workspace })
+        Ok(Plan {
+            repos,
+            workspace,
+            design: Vec::new(),
+        })
+    }
+
+    /// Pesan brainstorm/plan ditambah instruksi kolom Design bila run punya
+    /// sumber desain.
+    pub(crate) fn with_design(&self, run: &RunRecord, message: String) -> String {
+        if run.design.is_empty() {
+            return message;
+        }
+        format!("{message}\n\n{}", self.prompts.design_message(&run.design))
     }
 
     async fn prepare_and_spawn(
@@ -196,16 +214,13 @@ impl<D: Deps> RunService<D> {
         progress: &(impl Fn(StartStep) + Send + Sync),
     ) -> Result<RunRecord, RunError> {
         let task = self.task_of(record_id).await?;
-        let acs: Vec<String> = self
-            .sync
-            .lark
-            .acceptance_criteria(&task.ac_ids)
-            .await?
-            .into_iter()
+        let ac_items = self.sync.lark.acceptance_criteria(&task.ac_ids).await?;
+        let acs: Vec<String> = ac_items
+            .iter()
             .filter(|ac| !ac.dropped)
-            .map(|ac| match ac.label {
+            .map(|ac| match &ac.label {
                 Some(l) => format!("{l}: {}", ac.text),
-                None => ac.text,
+                None => ac.text.clone(),
             })
             .collect();
         let branch = branch_name(task.key.as_deref(), &task.record_id, &task.title);
@@ -241,25 +256,31 @@ impl<D: Deps> RunService<D> {
                 })
                 .collect();
         }
+        run.design.clone_from(&plan.design);
         let now = self.now();
         if let Err(e) = self.runs.create(&run, now).await {
             self.discard_members(&prepared, &branch, root.as_deref())
                 .await;
             return Err(e.into());
         }
+        self.init_ledger(&run.id, &ac_items).await;
 
         let message = match planning {
             Planning::Skip => self.prompts.task_message(&task, &acs, dev_note),
             Planning::Plan { skill } => {
                 run.phase = RunPhase::Plan;
-                self.prompts
-                    .plan_message(&task, &acs, dev_note, skill.as_deref())
+                let msg = self
+                    .prompts
+                    .plan_message(&task, &acs, dev_note, skill.as_deref());
+                self.with_design(&run, msg)
             }
             Planning::Brainstorm { brainstorm, plan } => {
                 run.phase = RunPhase::Brainstorm;
                 run.plan_skill.clone_from(plan);
-                self.prompts
-                    .brainstorm_message(&task, &acs, dev_note, brainstorm.as_deref())
+                let msg =
+                    self.prompts
+                        .brainstorm_message(&task, &acs, dev_note, brainstorm.as_deref());
+                self.with_design(&run, msg)
             }
         };
         let session = SessionRef::New(run.session_id.clone().unwrap_or_default());

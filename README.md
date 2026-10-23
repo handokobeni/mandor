@@ -99,6 +99,7 @@ Agent yang sedang berjalan ikut berhenti saat daemon di-restart. Run-nya ditanda
 ```bash
 make check        # fmt, clippy pedantic, cargo deny, cek sqlx offline, test + coverage
 make red-check    # bukti lapisan crate ditegakkan
+make clean-build  # bersihkan folder build daemon dan Tauri bila sudah menumpuk
 cd apps/desktop && bun run check && bun run test
 cd apps/desktop/src-tauri && cargo clippy --all-targets -- -D warnings && cargo test
 ```
@@ -111,7 +112,11 @@ git config core.hooksPath .githooks
 
 CI di `.github/workflows/ci.yml` menjalankan gerbang yang sama di Linux untuk setiap push ke `main` dan setiap pull request, serta pengecekan advisory harian. Linux, macOS, dan Windows berjalan seminggu sekali dan bisa dipicu manual dari tab Actions (**Run workflow**), karena menit macOS dan Windows di repo private memakan kuota lebih banyak.
 
-Smoke test terhadap Lark, GitHub, dan Claude sungguhan: lihat `crates/mandor-e2e/README.md`.
+Smoke test terhadap Lark, GitHub, dan Claude sungguhan (Rilis 1 dan Rilis 2): lihat `crates/mandor-e2e/README.md`.
+
+## Review AC (Rilis 2)
+
+Sumber desain, app web untuk diuji di Chrome, gerbang Push & PR, view "Design gaps" di Lark, dan biaya review: lihat `docs/runbook/ac-review.md`.
 
 ## Build rilis
 

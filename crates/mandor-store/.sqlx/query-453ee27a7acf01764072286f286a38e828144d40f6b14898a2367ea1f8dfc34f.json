@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "UPDATE design_sources SET name = ?, config_json = ? WHERE id = ?",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 3
+    },
+    "nullable": []
+  },
+  "hash": "453ee27a7acf01764072286f286a38e828144d40f6b14898a2367ea1f8dfc34f"
+}

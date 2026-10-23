@@ -34,3 +34,31 @@ export function restorePlanning(saved: unknown, installed: string[]): PlanningCh
   const skill = (v: unknown) => (typeof v === 'string' && installed.includes(v) ? v : '');
   return { mode: s.mode, brainstormSkill: skill(s.brainstormSkill), planSkill: skill(s.planSkill) };
 }
+
+/** Pilihan review di dialog Start: sumber desain dan skill reviewer (R5, R14). */
+export interface ReviewChoice {
+  designSources: string[];
+  reviewerSkill: string;
+}
+
+export const REVIEW_KEY = 'mandor.review';
+
+/**
+ * Pilihan review tersimpan yang masih valid. Sumber desain yang sudah dihapus
+ * dibuang dan disebut di `dropped` untuk peringatan; skill yang tidak terpasang
+ * menjadi bawaan.
+ */
+export function restoreReview(
+  saved: unknown,
+  sources: { id: string; name: string; ready: boolean }[],
+  installed: string[]
+): { choice: ReviewChoice; dropped: string[] } {
+  const s = (saved && typeof saved === 'object' ? saved : {}) as Partial<Record<keyof ReviewChoice, unknown>>;
+  const ids = Array.isArray(s.designSources) ? s.designSources.filter((x): x is string => typeof x === 'string') : [];
+  const kept = ids.filter((id) => sources.some((src) => src.id === id && src.ready));
+  const dropped = ids
+    .filter((id) => !kept.includes(id))
+    .map((id) => sources.find((src) => src.id === id)?.name ?? 'A removed design source');
+  const skill = typeof s.reviewerSkill === 'string' && installed.includes(s.reviewerSkill) ? s.reviewerSkill : '';
+  return { choice: { designSources: kept, reviewerSkill: skill }, dropped };
+}

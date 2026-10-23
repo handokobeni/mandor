@@ -8,17 +8,19 @@ use std::collections::HashSet;
 use std::sync::{Arc, PoisonError};
 
 use mandor_domain::cursor::newer_than;
+use mandor_domain::push_gate::evaluate;
 use mandor_domain::run::touches_sensitive_path;
 use mandor_domain::trust::is_trusted;
 use mandor_domain::{AppField, Cursor, Reply, RunState, Task, TaskStatus, WriteOp};
+use mandor_domain::{GateDecision, GateOutcome};
 
 use super::feedback_qa::feedback_qa_replies;
 use crate::notify::notice;
 use crate::ports::{Clock, Deps, LarkTasks, TaskCache};
 use crate::run::{RunError, RunService, TurnEnd};
 use crate::run_ports::{
-    FixContext, GitPort, Journal, NoticeKind, Notifier, Prompts, RepoInfo, RunRecord, RunStore,
-    SessionRef,
+    FixContext, GitPort, Journal, LedgerStore, NoticeKind, Notifier, Prompts, RepoInfo,
+    ReviewTrigger, RunRecord, RunStore, SessionRef,
 };
 
 /// Jeda tenang default sejak komentar tepercaya pertama.
@@ -43,6 +45,10 @@ pub struct CommentView {
     /// Sudah diteruskan ke agent (journal `delivered`).
     pub sent: bool,
 }
+
+/// Jendela komentar yang dimuat untuk tab komentar setelah restart; paging
+/// berhenti di halaman yang seluruhnya lebih lama dari ini.
+const REPLIES_WINDOW_SECS: i64 = 90 * 24 * 60 * 60;
 
 impl<D: Deps> RunService<D> {
     /// Satu putaran (setiap poll komentar 20 detik).
@@ -72,10 +78,7 @@ impl<D: Deps> RunService<D> {
             }
         };
         replies.extend(self.feedback_qa_of(&candidates).await);
-        self.replies
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .clone_from(&replies);
+        self.remember_replies(&replies);
 
         for task in candidates {
             let record_id = task.record_id.clone();
@@ -158,6 +161,7 @@ impl<D: Deps> RunService<D> {
         task: &Task,
         reviewers: &[String],
     ) -> Result<Vec<CommentView>, RunError> {
+        self.load_replies_once().await;
         let known: Vec<Reply> = {
             let replies = self.replies.lock().unwrap_or_else(PoisonError::into_inner);
             newer_than(&replies, &task.record_id, None)
@@ -176,6 +180,37 @@ impl<D: Deps> RunService<D> {
             .collect();
         out.reverse();
         Ok(out)
+    }
+
+    /// Menggabungkan balasan baru ke cache tanpa menghapus balasan record lain:
+    /// poll Waiting Fix hanya mengambil balasan sejak kursor tertua kandidat.
+    fn remember_replies(&self, fresh: &[Reply]) {
+        let mut known = self.replies.lock().unwrap_or_else(PoisonError::into_inner);
+        for r in fresh {
+            let same = |k: &Reply| k.record_id == r.record_id && k.reply_id == r.reply_id;
+            match known.iter_mut().find(|k| same(k)) {
+                Some(k) => k.clone_from(r),
+                None => known.push(r.clone()),
+            }
+        }
+    }
+
+    /// Memuat balasan Base (jendela [`REPLIES_WINDOW_SECS`]) sekali sejak daemon start agar tab komentar
+    /// tidak kosong setelah restart. Gagal = dicoba lagi pada permintaan
+    /// berikutnya; cache yang ada tetap dipakai.
+    async fn load_replies_once(&self) {
+        use std::sync::atomic::Ordering;
+        if self.replies_loaded.swap(true, Ordering::AcqRel) {
+            return;
+        }
+        let since = self.now() / 1000 - REPLIES_WINDOW_SECS;
+        match self.sync.lark.record_replies(Some(since)).await {
+            Ok(all) => self.remember_replies(&all),
+            Err(e) => {
+                self.replies_loaded.store(false, Ordering::Release);
+                tracing::warn!(error = %e, "komentar Lark tidak terbaca untuk tab komentar");
+            }
+        }
     }
 
     async fn process_record(
@@ -564,6 +599,73 @@ impl<D: Deps> RunService<D> {
                 )
                 .await;
         }
+        // Perbaikan dengan perubahan direview sebelum push otomatis (KTD-40).
+        let gated = self
+            .reviews
+            .ac_rows(&run.id)
+            .await?
+            .iter()
+            .any(mandor_domain::AcRow::in_gate);
+        if gated {
+            self.runs.save(&run, generation, self.now()).await?;
+            return match self
+                .start_review_boxed(&run.id, ReviewTrigger::AutomaticFix)
+                .await
+            {
+                Ok(_) => Ok(()),
+                Err(e) => {
+                    let run = self.load(&run.id).await?;
+                    self.flag_fix(
+                        run,
+                        RunState::AwaitingDev,
+                        &format!("Push held: the review could not start ({e})"),
+                    )
+                    .await
+                }
+            };
+        }
+        run.state = RunState::Publishing;
+        self.runs.save(&run, generation, self.now()).await?;
+        let url = self.publish_members(&mut run, &work).await?;
+        self.mark_waiting_review(&mut run, &url, false).await
+    }
+
+    /// Lanjutan review perbaikan otomatis (KTD-40): gerbang Ready (atau mode
+    /// peringatan) mendorong push dan Waiting Review; selain itu push ditahan,
+    /// task ditandai, dan dev diberi tahu. Status Lark tidak berubah.
+    pub(crate) async fn after_fix_review(
+        self: &Arc<Self>,
+        mut run: RunRecord,
+        finished: bool,
+        failure: Option<String>,
+    ) -> Result<(), RunError> {
+        if !finished {
+            let why = failure.unwrap_or_else(|| "the review did not finish".to_owned());
+            return self
+                .flag_fix(run, RunState::AwaitingDev, &format!("Push held: {why}"))
+                .await;
+        }
+        let rows = self.reviews.ac_rows(&run.id).await?;
+        let mode = self.gate_mode(&run).await?;
+        let held = match evaluate(&rows, mode, &GateDecision::default()) {
+            GateOutcome::Ready { .. } => None,
+            GateOutcome::Blocked { failed } => Some(format!(
+                "Push held: {} failed the review",
+                failed.join(", ")
+            )),
+            GateOutcome::NeedsConfirmation { unverified } => Some(format!(
+                "Push held: {} could not be verified; check manually before pushing",
+                unverified.join(", ")
+            )),
+            GateOutcome::NeedsReview => {
+                Some("Push held: the code changed during the review".to_owned())
+            }
+        };
+        if let Some(note) = held {
+            return self.flag_fix(run, RunState::AwaitingDev, &note).await;
+        }
+        let generation = run.generation;
+        let work = self.member_changes(&run).await?;
         run.state = RunState::Publishing;
         self.runs.save(&run, generation, self.now()).await?;
         let url = self.publish_members(&mut run, &work).await?;

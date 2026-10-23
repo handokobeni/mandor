@@ -1105,6 +1105,7 @@ name = "mandor-e2e"
 version = "0.1.0"
 dependencies = [
  "serde_json",
+ "tempfile",
 ]
 
 [[package]]
@@ -1151,6 +1152,7 @@ dependencies = [
  "pretty_assertions",
  "process-wrap",
  "secrecy",
+ "tempfile",
  "thiserror",
  "tokio",
  "tracing",
@@ -1188,6 +1190,7 @@ version = "0.1.0"
 dependencies = [
  "mandor-domain",
  "pretty_assertions",
+ "secrecy",
  "thiserror",
  "tokio",
  "tracing",

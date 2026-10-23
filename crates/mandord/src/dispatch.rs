@@ -5,14 +5,15 @@ use std::sync::Arc;
 
 use mandor_api::Dispatch;
 use mandor_protocol::{
-    BoardView, CommentView, DirEntryView, DirListingView, DirQuery, ErrorCode, FileChangeView,
-    FileDiffParams, LarkSettingsInput, LoginComplete, MessageView, MessagesQuery, NoticeView,
-    NotificationsRead, PeopleQuery, PersonView, PublishResult, QuietPeriodSet, RecordRef, RepoAdd,
-    RepoCandidateView, RepoRef, RepoUpdate, RepoView, RpcError, RunRef, SendParams, SendResult,
-    SkillView, StartFixParams, StartParams, StartPlanning, StartProgressView, StatusResult,
-    TakeoverParams, event, method,
+    ApprovePlanParams, BoardView, CommentView, DirEntryView, DirListingView, DirQuery, ErrorCode,
+    FileChangeView, FileDiffParams, LarkSettingsInput, LoginComplete, MessageView, MessagesQuery,
+    NoticeView, NotificationsRead, PeopleQuery, PersonView, PublishParams, PublishResult,
+    QuietPeriodSet, RecordRef, RepoAdd, RepoCandidateView, RepoRef, RepoUpdate, RepoView, RpcError,
+    RunRef, SendParams, SendResult, SkillView, StartFixParams, StartParams, StartPlanning,
+    StartProgressView, StatusResult, TakeoverParams, event, method,
 };
 use mandor_store::{NewRepo, StoreError};
+use mandor_usecase::run::PublishOutcome;
 use mandor_usecase::{
     Planning, PortError, RunError, SendOutcome, StartStep, StartTarget, SyncError,
 };
@@ -28,6 +29,9 @@ use crate::views::{
     card_view, notice_view, run_view, sprint_view, task_details_view, team_card_view,
 };
 
+mod app_run;
+mod design;
+mod review;
 mod workspaces;
 
 /// Method yang membutuhkan sesi Lark dan mengubah run atau kartu.
@@ -185,9 +189,17 @@ impl AppDispatch {
             .collect();
         let now = now_ms();
         let team = s.sync.team_board();
+        let summaries = self.ac_summaries().await?;
         let mut cards: Vec<_> = cached
             .iter()
-            .map(|c| card_view(c, runs.get(&c.task.record_id), &s.me, now))
+            .map(|c| {
+                let run = runs.get(&c.task.record_id);
+                let mut card = card_view(c, run, &s.me, now);
+                if let (Some(view), Some(r)) = (card.run.as_mut(), run) {
+                    view.ac = summaries.get(&r.id).cloned();
+                }
+                card
+            })
             .collect();
         cards.extend(
             team.iter()
@@ -219,12 +231,29 @@ impl AppDispatch {
 
     async fn runs_list(&self) -> Result<Value, RpcError> {
         let s = self.session().await?;
+        let summaries = self.ac_summaries().await?;
         let mut out = Vec::new();
         for r in s.runs.active_runs().await.map_err(run_error)? {
             let task = s.sync.cached(&r.record_id).await.map_err(sync_error)?;
-            out.push(run_view(&r, task.as_ref().map(|c| &c.task)));
+            let mut view = run_view(&r, task.as_ref().map(|c| &c.task));
+            view.ac = summaries.get(&r.id).cloned();
+            out.push(view);
         }
         ok(&out)
+    }
+
+    /// Ringkasan buku AC semua run aktif (satu query).
+    async fn ac_summaries(
+        &self,
+    ) -> Result<HashMap<String, mandor_protocol::AcSummaryView>, RpcError> {
+        let mut by_run: HashMap<String, Vec<mandor_domain::AcRow>> = HashMap::new();
+        for (run_id, row) in self.app.store.active_ac_rows().await.map_err(store_error)? {
+            by_run.entry(run_id).or_default().push(row);
+        }
+        Ok(by_run
+            .into_iter()
+            .filter_map(|(id, rows)| crate::views::ac_summary(&rows).map(|s| (id, s)))
+            .collect())
     }
 
     async fn messages(&self, q: MessagesQuery) -> Result<Value, RpcError> {
@@ -428,10 +457,27 @@ impl AppDispatch {
     }
 
     async fn repos_update(&self, p: RepoUpdate) -> Result<Value, RpcError> {
+        let current = self.app.store.get_repo(&p.id).await.map_err(store_error)?;
+        let app = match &p.app {
+            Some(view) => app_run::app_settings_from(view)?,
+            None => mandor_store::app_settings_of(&current.settings),
+        };
+        let gate_mode = match p.gate_mode.as_deref() {
+            None => current
+                .settings
+                .get("gate_mode")
+                .and_then(Value::as_str)
+                .map(str::to_owned),
+            Some("inherit") => None,
+            Some(m) if mandor_domain::GateMode::parse(m).is_some() => Some(m.to_owned()),
+            Some(_) => return Err(rejected("gate mode must be block, warn, or inherit")),
+        };
         let settings = json!({
             "companions": p.companions,
             "trusted_reviewers": p.trusted_reviewers,
             "extra_allowed": p.extra_allowed,
+            "app": mandor_store::app_settings_json(&app),
+            "gate_mode": gate_mode,
         });
         self.app
             .store
@@ -540,6 +586,56 @@ impl AppDispatch {
     }
 
     /// Start dengan event `start.progress` per langkah untuk dialog Start.
+    /// Push & PR dengan gerbang AC; keputusan dev dicatat atas nama akun Lark
+    /// yang login (KTD-35).
+    async fn publish(&self, s: &LarkSession, p: PublishParams) -> Result<Value, RpcError> {
+        let decision = mandor_domain::GateDecision {
+            confirmed: p.confirmed.unwrap_or_default(),
+            push_anyway_reason: p.push_anyway_reason.filter(|r| !r.trim().is_empty()),
+            decided_by: self.app.lark_status().await.name,
+        };
+        let out = s
+            .runs
+            .publish_gated(&p.run_id, &decision)
+            .await
+            .map_err(run_error)?;
+        let mut view = PublishResult {
+            outcome: String::new(),
+            pr_url: None,
+            failed: Vec::new(),
+            unverified: Vec::new(),
+            warnings: Vec::new(),
+            sync_warning: None,
+            review_id: None,
+        };
+        match out {
+            PublishOutcome::Published {
+                url,
+                warnings,
+                sync_warning,
+            } => {
+                s.poke.notify_one();
+                "published".clone_into(&mut view.outcome);
+                view.pr_url = Some(url);
+                view.warnings = warnings;
+                view.sync_warning = sync_warning;
+            }
+            PublishOutcome::ReviewStarted { review_id } => {
+                "review_started".clone_into(&mut view.outcome);
+                view.review_id = Some(review_id);
+            }
+            PublishOutcome::Blocked { failed } => {
+                "blocked".clone_into(&mut view.outcome);
+                view.failed = failed;
+            }
+            PublishOutcome::NeedsConfirmation { unverified } => {
+                "needs_confirmation".clone_into(&mut view.outcome);
+                view.unverified = unverified;
+            }
+        }
+        ok(&view)
+    }
+
     async fn start(&self, s: &LarkSession, p: StartParams) -> Result<Value, RpcError> {
         let events = self.app.events.clone();
         let record_id = p.record_id.clone();
@@ -562,6 +658,9 @@ impl AppDispatch {
             None => StartTarget::Repo(p.repo_id.clone()),
         };
         let planning = planning_of(p.planning.as_ref())?;
+        let design = self
+            .design_roots(p.design_sources.as_deref().unwrap_or_default())
+            .await?;
         let run = s
             .runs
             .start_planned(
@@ -569,10 +668,17 @@ impl AppDispatch {
                 &target,
                 p.note.as_deref(),
                 &planning,
+                &design,
                 progress,
             )
             .await
             .map_err(run_error)?;
+        if let Some(skill) = p.reviewer_skill.as_deref().filter(|k| !k.trim().is_empty()) {
+            s.runs
+                .set_reviewer_skill(&run.id, Some(skill))
+                .await
+                .map_err(run_error)?;
+        }
         s.poke.notify_one();
         ok(&run_view(&run, None))
     }
@@ -599,6 +705,9 @@ impl AppDispatch {
                 ok(&skills)
             }
             other if Self::is_workspaces_method(other) => self.workspaces_call(other, v).await,
+            other if Self::is_design_method(other) => self.design_call(other, v).await,
+            other if Self::is_app_method(other) => self.app_call(other, v).await,
+            other if Self::is_review_method(other) => self.review_call(other, v).await,
             other => self.run_action(other, v).await,
         }
     }
@@ -635,12 +744,7 @@ impl AppDispatch {
                 runs.stop(&p.run_id).await.map_err(run_error)?;
                 ok(&json!({}))
             }
-            method::RUNS_PUBLISH => {
-                let p: RunRef = params(v)?;
-                let url = runs.publish(&p.run_id).await.map_err(run_error)?;
-                s.poke.notify_one();
-                ok(&PublishResult { pr_url: url })
-            }
+            method::RUNS_PUBLISH => self.publish(&s, params(v)?).await,
             method::RUNS_RESUME => {
                 let p: SendParams = params(v)?;
                 let text = Some(p.text.as_str()).filter(|t| !t.trim().is_empty());
@@ -673,9 +777,8 @@ impl AppDispatch {
                 ok(&json!({}))
             }
             method::RUNS_APPROVE_PLAN => {
-                let p: RunRef = params(v)?;
-                runs.approve_plan(&p.run_id).await.map_err(run_error)?;
-                ok(&json!({}))
+                let p: ApprovePlanParams = params(v)?;
+                approve(runs, &p).await
             }
             method::RUNS_CONTINUE_TO_PLAN => {
                 let p: RunRef = params(v)?;
@@ -729,6 +832,7 @@ fn repo_settings(repo: Option<&mandor_store::Repo>) -> (Vec<String>, Vec<String>
 
 fn repo_view(r: mandor_store::Repo) -> RepoView {
     let (companions, trusted_reviewers, extra_allowed) = repo_settings(Some(&r));
+    let app = mandor_store::app_settings_of(&r.settings);
     RepoView {
         id: r.id,
         path: r.path,
@@ -737,6 +841,12 @@ fn repo_view(r: mandor_store::Repo) -> RepoView {
         companions,
         trusted_reviewers,
         extra_allowed,
+        app: app_run::repo_app_view(&app),
+        gate_mode: r
+            .settings
+            .get("gate_mode")
+            .and_then(Value::as_str)
+            .map(str::to_owned),
     }
 }
 
@@ -758,7 +868,31 @@ impl AppDispatch {
     }
 }
 
+async fn approve<D: mandor_usecase::Deps>(
+    runs: &Arc<mandor_usecase::RunService<D>>,
+    p: &ApprovePlanParams,
+) -> Result<Value, RpcError> {
+    let follow = p.follow_design.as_deref().unwrap_or_default();
+    runs.approve_plan(&p.run_id, follow)
+        .await
+        .map_err(run_error)?;
+    ok(&json!({}))
+}
+
 impl Dispatch for AppDispatch {
+    async fn verify_capability(&self, token: &str) -> Option<mandor_api::CapabilityScope> {
+        self.capability(token).await
+    }
+
+    async fn call_scoped(
+        &self,
+        scope: &mandor_api::CapabilityScope,
+        name: &str,
+        v: Value,
+    ) -> Result<Value, RpcError> {
+        self.ledger_tool_call(scope, name, v).await
+    }
+
     async fn call(&self, name: &str, v: Value) -> Result<Value, RpcError> {
         match name {
             method::STATUS => self.status().await,

@@ -10,12 +10,13 @@ use std::sync::Arc;
 use super::{RunError, RunService};
 use crate::ports::Deps;
 use mandor_domain::Task;
+use mandor_domain::push_gate::pr_summary;
 
 use crate::hash::fnv1a_hex;
 
 use crate::run_ports::{
-    AgentPort, AgentRequest, AgentWorkspace, ChatItem, GitPort, PrContext, RepoInfo, Repos,
-    RunPhase, RunRecord, RunStore, SessionRef, WorkChanges,
+    AgentPort, AgentRequest, AgentWorkspace, ChatItem, GitPort, LedgerStore, PrContext, RepoInfo,
+    Repos, RunPhase, RunRecord, RunStore, SessionRef, WorkChanges,
 };
 
 /// Batas diff untuk pembuat pesan commit.
@@ -181,6 +182,13 @@ impl<D: Deps> RunService<D> {
                 (ws.root.clone(), Some(ctx))
             }
         };
+        let plan_mode = run.phase != RunPhase::Implement;
+        // Giliran brainstorm/plan mengisi kolom Design lewat tool ledger bila
+        // ada sumber desain; tanpa sumber, Design tidak diisi (U6).
+        let ledger = (plan_mode && !run.design.is_empty()).then(|| crate::review::LedgerAccess {
+            role: crate::review::CapabilityRole::Design,
+            token: self.issue_capability(&run.id, crate::review::CapabilityRole::Design),
+        });
         Ok(AgentRequest {
             repo: primary.repo,
             worktree,
@@ -188,7 +196,10 @@ impl<D: Deps> RunService<D> {
             session,
             message,
             workspace,
-            plan_mode: run.phase != RunPhase::Implement,
+            plan_mode,
+            ledger,
+            design: run.design.clone(),
+            review: None,
         })
     }
 
@@ -371,25 +382,43 @@ impl<D: Deps> RunService<D> {
                 .take(PR_DIFF_MAX)
                 .collect();
             let acs = self.ac_texts(task).await.unwrap_or_default();
+            let decided = mandor_domain::push_gate::pr_decisions(
+                &self.reviews.ac_rows(&run.id).await.unwrap_or_default(),
+            );
             let ctx = PrContext {
                 title,
                 description: &task.description,
                 acs: &acs,
                 plan: run.plan.as_deref(),
                 diff: &diff,
+                decided: &decided,
             };
             self.agent.pr_description(&m.worktree, &ctx).await
         }
         .await;
+        // Ringkasan per AC (R31): label, status, alasan, dan pemutus saja (R33).
+        let summary = match self.reviews.ac_rows(&run.id).await {
+            Ok(rows) if !rows.is_empty() => {
+                let at = self
+                    .synced_at(&run.id)
+                    .map(crate::review::settings::utc_minutes);
+                format!("\n\n{}", pr_summary(&rows, at.as_deref()).trim_end())
+            }
+            Ok(_) => String::new(),
+            Err(e) => {
+                tracing::warn!(error = %e, "buku AC tidak terbaca; PR tanpa ringkasan AC");
+                String::new()
+            }
+        };
         match generated {
             Ok(text) if !text.trim().is_empty() => {
                 let text: String = text.trim().chars().take(PR_BODY_MAX).collect();
-                format!("{header}\n\n{text}\n\n---\n{footer}")
+                format!("{header}\n\n{text}{summary}\n\n---\n{footer}")
             }
-            Ok(_) => format!("{header}\n\n{footer}"),
+            Ok(_) => format!("{header}{summary}\n\n{footer}"),
             Err(e) => {
                 tracing::warn!(error = %e, "deskripsi PR otomatis gagal; memakai badan minimal");
-                format!("{header}\n\n{footer}")
+                format!("{header}{summary}\n\n{footer}")
             }
         }
     }

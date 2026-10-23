@@ -11,6 +11,7 @@
   import { lark } from '#lib/stores/lark.svelte.ts';
   import AddWorkspaceDialog from './AddWorkspaceDialog.svelte';
   import CheckList from './CheckList.svelte';
+  import { Switch } from '#lib/components/ui/switch/index.ts';
 
   let { rpc }: { rpc: Rpc } = $props();
 
@@ -18,14 +19,19 @@
   const ws = $derived(lark.workspaces.find((w) => w.id === selectedId) ?? lark.workspaces[0]);
 
   // Salinan yang bisa diedit; diganti setiap workspace terpilih berubah.
-  let edit = $state<{ repos: string[]; mcp: string[] } | null>(null);
+  let edit = $state<{ repos: string[]; mcp: string[]; browserTests: boolean; gate: string } | null>(null);
   let editFor = $state<string | null>(null);
   let available = $state<string[] | null>(null);
   $effect(() => {
     if (ws && editFor !== ws.id) {
       const current = ws;
       editFor = current.id;
-      edit = { repos: [...current.repo_ids], mcp: [...current.mcp_servers] };
+      edit = {
+        repos: [...current.repo_ids],
+        mcp: [...current.mcp_servers],
+        browserTests: current.browser_tests,
+        gate: current.gate_mode
+      };
       available = null;
       rpc
         .request<string[]>('workspaces.mcp_servers', { root: current.root })
@@ -37,7 +43,10 @@
   const dirty = $derived(
     !!ws &&
       !!edit &&
-      (edit.repos.join() !== ws.repo_ids.join() || [...edit.mcp].sort().join() !== [...ws.mcp_servers].sort().join())
+      (edit.repos.join() !== ws.repo_ids.join() ||
+        [...edit.mcp].sort().join() !== [...ws.mcp_servers].sort().join() ||
+        edit.browserTests !== ws.browser_tests ||
+        edit.gate !== ws.gate_mode)
   );
 
   let adding = $state(false);
@@ -53,7 +62,13 @@
     const order = lark.repos.map((r) => r.id);
     const repoIds = order.filter((id) => edit?.repos.includes(id));
     try {
-      await rpc.request('workspaces.update', { id: w.id, repo_ids: repoIds, mcp_servers: edit.mcp });
+      await rpc.request('workspaces.update', {
+        id: w.id,
+        repo_ids: repoIds,
+        mcp_servers: edit.mcp,
+        browser_tests: edit.browserTests,
+        gate_mode: edit.gate
+      });
       await lark.refresh();
       editFor = null;
       toast.success('Workspace saved', { description: `${w.name} · used on the next start` });
@@ -152,6 +167,24 @@
                 empty="No .mcp.json in the parent folder."
               />
             {/if}
+          </div>
+          <div class="row-setting">
+            <div class="txt">
+              Browser testing
+              <span>The AC reviewer tests UI criteria in your Chrome. Page content is read by the AI model.</span>
+            </div>
+            <Switch bind:checked={edit.browserTests} aria-label="Browser testing" />
+          </div>
+          <div class="field">
+            <span class="text-sm font-medium">Push &amp; PR gate</span>
+            <p class="field-help">
+              Block: failed AC stop the push until fixed or pushed anyway with a reason. Warn: they are listed in the PR.
+              A repo override wins; a multi-repo run uses the strictest member.
+            </p>
+            <div class="radio-row" role="radiogroup" aria-label="Gate">
+              <label class="radio-card"><input type="radio" name="w-gate" value="block" bind:group={edit.gate} />Block</label>
+              <label class="radio-card"><input type="radio" name="w-gate" value="warn" bind:group={edit.gate} />Warn</label>
+            </div>
           </div>
         </div>
         <footer style="justify-content:space-between">

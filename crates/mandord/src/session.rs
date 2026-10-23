@@ -7,11 +7,11 @@ use std::time::{Duration, Instant};
 
 use anyhow::Context;
 use mandor_agent::claude::guardrails::{agent_env, prepare_agent_home};
-use mandor_agent::{ClaudeAgent, ClaudeConfig, ClaudePrompts};
+use mandor_agent::{ClaudeAgent, ClaudeConfig, ClaudePrompts, LedgerServer};
 use mandor_git::{Git, GitAdapter, GitConfig};
 use mandor_lark::{FileTokenStore, LarkClient, LarkConfig, LarkGateway, TableRef};
 use mandor_protocol::{Notification, SyncStatusView, event};
-use mandor_store::{ReposStore, RunsStore, Store, TaskStore};
+use mandor_store::{ReposStore, ReviewsStore, RunsStore, Store, TaskStore};
 use mandor_usecase::{PortError, RunPorts, RunService, SyncError, SyncService};
 use tokio::sync::{Notify, broadcast};
 use tokio_util::sync::CancellationToken;
@@ -19,7 +19,8 @@ use tokio_util::task::TaskTracker;
 
 use crate::config::Config;
 use crate::prod::{
-    BroadcastRuns, BroadcastTasks, DaemonNotifier, Prod, SystemClock, TrackerSpawner, UuidIds,
+    BroadcastReviews, BroadcastRuns, BroadcastTasks, DaemonNotifier, Prod, SystemClock,
+    TrackerSpawner, UuidIds,
 };
 use crate::settings::LarkSettings;
 use crate::sync_status::SyncStatus;
@@ -41,6 +42,8 @@ pub struct LarkSession {
     pub sync: Arc<SyncService<Prod>>,
     pub runs: Arc<RunService<Prod>>,
     pub git: Git,
+    /// Adapter agent untuk pemeriksaan ekstensi Claude in Chrome.
+    pub agent: ClaudeAgent,
     /// Jeda tenang Waiting Fix (detik); bisa diubah tanpa memulai ulang sesi.
     pub quiet_secs: AtomicI64,
     pub reauth: AtomicBool,
@@ -66,6 +69,10 @@ pub struct SessionEnv<'a> {
     pub events: &'a broadcast::Sender<Notification>,
     pub tracker: &'a TaskTracker,
     pub parent: &'a CancellationToken,
+    /// Port WebSocket daemon untuk server MCP ledger (`mandord mcp`).
+    pub rpc_port: u16,
+    /// Proses run app milik daemon.
+    pub apps: &'a Arc<crate::apps::ProcApps>,
 }
 
 /// Klien Lark dari pengaturan.
@@ -108,7 +115,7 @@ pub async fn start(
     }
     let scope = format!("{}/{}", settings.app_token, settings.table_id);
     let tasks = TaskStore::new(env.store.clone(), scope);
-    let agent = build_agent(env.cfg).await?;
+    let agent = build_agent(env.cfg, env.rpc_port).await?;
     let git = Git::new(GitConfig::new(env.cfg.workspaces_dir()));
 
     let sync = Arc::new(SyncService::<Prod>::new(
@@ -123,14 +130,24 @@ pub async fn start(
         Arc::clone(&sync),
         RunPorts {
             git: GitAdapter::new(git.clone()),
-            agent,
+            agent: agent.clone(),
             runs: BroadcastRuns::new(RunsStore::new(env.store.clone()), env.events.clone()),
             notifier: DaemonNotifier::new(env.store.clone(), env.events.clone()),
             spawner: TrackerSpawner::new(env.tracker.clone()),
             repos: ReposStore::new(env.store.clone()),
             prompts: ClaudePrompts,
+            reviews: BroadcastReviews::new(
+                ReviewsStore::new(env.store.clone()),
+                env.events.clone(),
+            ),
+            apps: crate::apps::BroadcastApps::new(
+                Arc::clone(env.apps),
+                mandor_store::AppStateStore::new(env.store.clone()),
+                env.events.clone(),
+            ),
         },
     ));
+    warn_err(runs.reap_apps().await, "pembersihan app yatim gagal");
     if let Some(marked) = warn_err(runs.reconcile().await, "rekonsiliasi run gagal") {
         if !marked.is_empty() {
             tracing::info!(?marked, "run terputus ditandai gagal");
@@ -140,6 +157,7 @@ pub async fn start(
         me,
         sync,
         runs,
+        agent,
         git,
         quiet_secs: AtomicI64::new(settings.quiet_secs),
         reauth: AtomicBool::new(false),
@@ -164,7 +182,7 @@ fn warn_err<T, E: std::fmt::Display>(r: Result<T, E>, msg: &str) -> Option<T> {
 }
 
 /// Adapter agent dengan environment tanpa secret dan config git/gh terisolasi.
-async fn build_agent(cfg: &Config) -> anyhow::Result<ClaudeAgent> {
+async fn build_agent(cfg: &Config, rpc_port: u16) -> anyhow::Result<ClaudeAgent> {
     let login_env = login_env(cfg).await;
     let agent_home = prepare_agent_home(&cfg.home)
         .await
@@ -176,6 +194,11 @@ async fn build_agent(cfg: &Config) -> anyhow::Result<ClaudeAgent> {
         model: None,
         commit_model: "haiku".to_owned(),
         mcp_dir: cfg.home.join("agent").join("mcp"),
+        review_dir: cfg.home.join("agent").join("review"),
+        ledger_server: Some(LedgerServer {
+            command: cfg.exe.clone(),
+            port: rpc_port,
+        }),
     }))
 }
 
@@ -241,6 +264,10 @@ impl Schedule {
         if poked || self.poll.take(now) {
             let is_full = self.full.take(now);
             comments_needed = poll_once(s, is_full).await;
+            if is_full {
+                // AC di tabel tertaut tidak mengubah waktu ubah task (KTD-27).
+                s.runs.refresh_active_ledgers().await;
+            }
         }
         if comments_needed && self.comments.take(now) {
             let report = warn_err(

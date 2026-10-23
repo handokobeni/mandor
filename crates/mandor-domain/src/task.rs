@@ -94,6 +94,8 @@ impl Task {
                 AppField::CommentCursor(c) => self.comment_cursor = Some(c.clone()),
                 AppField::KanbanMirror(m) => self.kanban_mirror = Some(m.clone()),
                 AppField::RepoId(r) => self.repo_id = Some(r.clone()),
+                // Hanya untuk tim di tracker; tidak dibaca kembali oleh app.
+                AppField::DesignGaps(_) => {}
             }
         }
     }
@@ -109,6 +111,8 @@ pub enum AppField {
     CommentCursor(String),
     KanbanMirror(String),
     RepoId(String),
+    /// Selisih desain per AC (`mandor_design_gaps`, KTD-34); kosong = tidak ada.
+    DesignGaps(String),
 }
 
 /// Operasi tulis di outbox.

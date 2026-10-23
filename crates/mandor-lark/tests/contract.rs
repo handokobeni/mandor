@@ -192,7 +192,8 @@ async fn bootstrap_field_hanya_membuat_yang_belum_ada() {
             "mandor_pr",
             "mandor_owner",
             "mandor_comment_cursor",
-            "mandor_modified"
+            "mandor_modified",
+            "mandor_design_gaps"
         ]
     );
     let posts: Vec<_> = mock
@@ -200,7 +201,12 @@ async fn bootstrap_field_hanya_membuat_yang_belum_ada() {
         .into_iter()
         .filter(|r| r.method == "POST")
         .collect();
-    assert_eq!(posts.len(), 4);
+    assert_eq!(posts.len(), 5);
+    let gaps = posts
+        .iter()
+        .find(|r| r.body["field_name"] == "mandor_design_gaps")
+        .unwrap();
+    assert_eq!(gaps.body["type"], json!(1), "field teks");
     // Lark menolak client_token yang bukan UUIDv4 (code 1254037).
     let tokens: Vec<String> = posts
         .iter()
@@ -233,6 +239,32 @@ async fn bootstrap_field_hanya_membuat_yang_belum_ada() {
         .find(|r| r.body["field_name"] == "mandor_modified")
         .unwrap();
     assert_eq!(modified.body["type"], json!(1002));
+}
+
+#[tokio::test]
+async fn bootstrap_field_idempoten_bila_semua_sudah_ada() {
+    let mock = Mock::start(Arc::new(|r: &Req| {
+        if r.method == "GET" {
+            let items: Vec<Value> = mandor_lark::APP_FIELDS
+                .iter()
+                .map(|f| json!({"field_name": f.name, "type": f.kind}))
+                .collect();
+            (
+                200,
+                json!({"code":0,"data":{"has_more":false,"items": items}}).to_string(),
+            )
+        } else {
+            (500, "{}".to_owned())
+        }
+    }))
+    .await;
+    let created = mock
+        .client()
+        .ensure_app_fields(&access(), "app", "tbl1")
+        .await
+        .unwrap();
+    assert!(created.is_empty());
+    assert!(mock.requests().iter().all(|r| r.method == "GET"));
 }
 
 #[tokio::test]

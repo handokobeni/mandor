@@ -9,6 +9,50 @@
   import { lark } from '#lib/stores/lark.svelte.ts';
   import { notifyPrefs } from '#lib/stores/notify-prefs.svelte.ts';
   import { type ThemePreference, theme } from '#lib/stores/theme.svelte.ts';
+  import { Button } from '#lib/components/ui/button/index.ts';
+  import { Input } from '#lib/components/ui/input/index.ts';
+  import type { ReviewerSettingsView } from '#lib/protocol/ReviewerSettingsView.ts';
+  import type { Rpc } from '#lib/rpc.ts';
+  import Field from './Field.svelte';
+
+  let { rpc }: { rpc: Rpc } = $props();
+
+  // Setelan reviewer AC (global, disimpan daemon; KTD-30).
+  let reviewer = $state<{ model: string; budget: string; minutes: string } | null>(null);
+  let reviewerError = $state<string | null>(null);
+  $effect(() => {
+    rpc
+      .request<ReviewerSettingsView>('settings.reviewer.get')
+      .then((s) => {
+        reviewer = { model: s.model ?? '', budget: (s.budget_cents / 100).toFixed(2), minutes: String(Math.round(s.timeout_secs / 60)) };
+      })
+      .catch(() => (reviewer = null));
+  });
+
+  async function saveReviewer(): Promise<void> {
+    if (!reviewer) return;
+    const budget = Number(reviewer.budget);
+    const minutes = Number(reviewer.minutes);
+    if (!Number.isFinite(budget) || budget < 0.1 || budget > 50) {
+      reviewerError = 'Use a cost limit between $0.10 and $50.';
+      return;
+    }
+    if (!Number.isInteger(minutes) || minutes < 1 || minutes > 120) {
+      reviewerError = 'Use a time limit between 1 and 120 minutes.';
+      return;
+    }
+    reviewerError = null;
+    try {
+      await rpc.request('settings.reviewer.set', {
+        model: reviewer.model.trim() || null,
+        budget_cents: Math.round(budget * 100),
+        timeout_secs: minutes * 60
+      });
+      toast.success('Reviewer settings saved', { description: 'Used by the next review.' });
+    } catch (err) {
+      reviewerError = err instanceof Error ? err.message : String(err);
+    }
+  }
 
   const OPTIONS: { value: ThemePreference; label: string; icon: typeof Sun }[] = [
     { value: 'system', label: 'System', icon: Monitor },
@@ -118,6 +162,28 @@
       <span class="muted">sec</span>
     </div>
   </div>
+</section>
+
+<section>
+  <h2>AC reviewer</h2>
+  <p class="lede">Global settings for every review. Each review stops at the cost or time limit and is marked Failed.</p>
+  {#if reviewer}
+    <div class="grid gap-3" style="grid-template-columns:repeat(auto-fill,minmax(200px,1fr));margin-top:8px">
+      <Field id="g-rv-model" label="Model">
+        <Input id="g-rv-model" placeholder="Same as the agent" bind:value={reviewer.model} />
+      </Field>
+      <Field id="g-rv-budget" label="Cost limit per review (USD)">
+        <Input id="g-rv-budget" class="mono" inputmode="decimal" bind:value={reviewer.budget} />
+      </Field>
+      <Field id="g-rv-time" label="Time limit (minutes)">
+        <Input id="g-rv-time" class="mono" inputmode="numeric" bind:value={reviewer.minutes} />
+      </Field>
+    </div>
+    {#if reviewerError}<p class="field-error"><CircleAlert class="icon-sm" aria-hidden="true" />{reviewerError}</p>{/if}
+    <div style="margin-top:8px"><Button size="sm" onclick={saveReviewer}>Save reviewer settings</Button></div>
+  {:else}
+    <p class="muted">Log in to Lark to change reviewer settings.</p>
+  {/if}
 </section>
 
 <style>

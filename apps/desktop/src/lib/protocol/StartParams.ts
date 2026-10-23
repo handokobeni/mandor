@@ -17,4 +17,12 @@ workspace?: StartWorkspace,
 /**
  * Planning sebelum implementasi; tidak diisi = langsung implementasi.
  */
-planning?: StartPlanning, };
+planning?: StartPlanning, 
+/**
+ * Id sumber desain yang dipilih (R5); kosong = tanpa sumber desain.
+ */
+design_sources?: Array<string>, 
+/**
+ * Skill reviewer (`plugin:skill`); tidak diisi = prompt bawaan (R14).
+ */
+reviewer_skill?: string, };

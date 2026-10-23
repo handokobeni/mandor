@@ -3,6 +3,7 @@
 mod members;
 mod ownership;
 mod publish;
+pub use publish::PublishOutcome;
 mod reconcile;
 mod session;
 mod start;
@@ -53,8 +54,18 @@ pub struct RunService<D: Deps> {
     pub(crate) spawner: D::Spawner,
     pub(crate) repos: D::Repos,
     pub(crate) prompts: D::Prompts,
-    /// Balasan komentar terakhir yang diambil (dibangun ulang tiap poll).
+    pub(crate) reviews: D::Reviews,
+    pub(crate) apps: D::Apps,
+    /// Waktu sinkron AC terakhir yang berhasil per run (dibangun ulang saat
+    /// refresh berikutnya setelah restart).
+    pub(crate) ledger_synced: Mutex<HashMap<String, i64>>,
+    /// Token kapabilitas tool ledger yang berlaku (KTD-26).
+    pub(crate) capabilities: Arc<Mutex<crate::review::capability::Issued>>,
+    /// Balasan komentar yang dikenal (digabung tiap poll, tanpa duplikat).
     pub(crate) replies: Mutex<Vec<mandor_domain::Reply>>,
+    /// Semua komentar Base sudah dimuat sekali sejak start; cache di atas
+    /// dibangun ulang dari Lark setelah restart.
+    pub(crate) replies_loaded: std::sync::atomic::AtomicBool,
     /// Kursor yang terakhir diantrekan per record, agar tidak diantrekan berulang.
     pub(crate) cursor_sent: Mutex<HashMap<String, String>>,
     /// Penghenti run aktif per run ID beserta generasinya.
@@ -76,6 +87,8 @@ pub struct RunPorts<D: Deps> {
     pub spawner: D::Spawner,
     pub repos: D::Repos,
     pub prompts: D::Prompts,
+    pub reviews: D::Reviews,
+    pub apps: D::Apps,
 }
 
 impl<D: Deps> std::fmt::Debug for RunPorts<D> {
@@ -96,7 +109,12 @@ impl<D: Deps> RunService<D> {
             spawner: ports.spawner,
             repos: ports.repos,
             prompts: ports.prompts,
+            reviews: ports.reviews,
+            apps: ports.apps,
+            ledger_synced: Mutex::new(HashMap::new()),
+            capabilities: crate::review::capability::empty(),
             replies: Mutex::new(Vec::new()),
+            replies_loaded: std::sync::atomic::AtomicBool::new(false),
             cursor_sent: Mutex::new(HashMap::new()),
             stoppers: Mutex::new(HashMap::new()),
         }

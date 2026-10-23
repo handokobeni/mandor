@@ -1,5 +1,7 @@
 <script lang="ts">
-  import { runLabel } from '#lib/board.ts';
+  import { acChip, runLabel } from '#lib/board.ts';
+  import ListChecks from '@lucide/svelte/icons/list-checks';
+  import Palette from '@lucide/svelte/icons/palette';
   import ArrowLeftRight from '@lucide/svelte/icons/arrow-left-right';
   import ArrowRight from '@lucide/svelte/icons/arrow-right';
   import CircleCheck from '@lucide/svelte/icons/circle-check';
@@ -113,6 +115,19 @@
         <span class="tc-owner" title="Assignee in Lark"><UserRound class="icon-sm" aria-hidden="true" />{assignees}</span>
       {/if}
       {#if card.run && !card.flag}<RunStatusBadge state={card.run.state} label={runLabel(card.run)} />{/if}
+      {#if card.run}
+        {@const chip = acChip(card.run.ac)}
+        {#if chip}
+          <span class="tc-ac" data-tone={chip.tone} title="Acceptance criteria review">
+            <ListChecks class="icon-sm" aria-hidden="true" />{chip.text}
+          </span>
+        {/if}
+        {#if card.run.ac && card.run.ac.design_gaps > 0}
+          <span class="tc-ac" title="AC that differ from the design">
+            <Palette class="icon-sm" aria-hidden="true" />{card.run.ac.design_gaps} design {card.run.ac.design_gaps === 1 ? 'gap' : 'gaps'}
+          </span>
+        {/if}
+      {/if}
       {#if owner}
         <span class="tc-owner"><UserRound class="icon-sm" aria-hidden="true" />{owner}</span>
       {/if}

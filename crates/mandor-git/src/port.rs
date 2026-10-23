@@ -192,6 +192,19 @@ impl GitPort for GitAdapter {
         }))
     }
 
+    async fn snapshot(&self, worktree: &Path) -> Result<String, PortError> {
+        Ok(self.git.snapshot_tree(worktree).await?)
+    }
+
+    async fn changed_between(
+        &self,
+        worktree: &Path,
+        from: &str,
+        to: &str,
+    ) -> Result<Vec<String>, PortError> {
+        Ok(self.git.changed_between(worktree, from, to).await?)
+    }
+
     async fn pr_body(&self, repo: &RepoInfo, url: &str) -> Result<Option<String>, PortError> {
         let token = self.token(repo).await?;
         Ok(self.git.pr_body(&repo.path, url, token.as_ref()).await?)

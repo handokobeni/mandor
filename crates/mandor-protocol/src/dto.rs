@@ -121,6 +121,24 @@ pub struct RunView {
     pub started_at_ms: i64,
     #[ts(type = "number")]
     pub updated_at_ms: i64,
+    /// Ringkasan buku AC (Rilis 2); `None` bila task tanpa AC.
+    pub ac: Option<AcSummaryView>,
+}
+
+/// Ringkasan buku AC untuk kartu dan sidebar.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+pub struct AcSummaryView {
+    /// Baris aktif (tanpa Removed).
+    pub total: u32,
+    /// Pass, Checked manually, Skipped, atau Follows design.
+    pub ok: u32,
+    pub failed: u32,
+    pub unverified: u32,
+    pub not_reviewed: u32,
+    /// Ada verdict yang usang.
+    pub stale: bool,
+    /// Baris Missing, Partly, atau Conflicts di kolom Design.
+    pub design_gaps: u32,
 }
 
 /// Satu repo dalam run.
@@ -230,6 +248,14 @@ pub struct StartParams {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub planning: Option<StartPlanning>,
+    /// Id sumber desain yang dipilih (R5); kosong = tanpa sumber desain.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub design_sources: Option<Vec<String>>,
+    /// Skill reviewer (`plugin:skill`); tidak diisi = prompt bawaan (R14).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub reviewer_skill: Option<String>,
 }
 
 /// Pilihan planning saat Start.
@@ -301,7 +327,33 @@ pub struct StartFixParams {
 /// Hasil `runs.publish`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
 pub struct PublishResult {
-    pub pr_url: String,
+    /// `published`, `review_started`, `blocked`, atau `needs_confirmation`.
+    pub outcome: String,
+    pub pr_url: Option<String>,
+    /// Label AC gagal (Blocked).
+    pub failed: Vec<String>,
+    /// Label AC Can't verify yang butuh konfirmasi (`needs_confirmation`).
+    pub unverified: Vec<String>,
+    /// Label AC Fail/Can't verify yang dibiarkan (mode peringatan).
+    pub warnings: Vec<String>,
+    /// AC tidak bisa disegarkan dari tracker.
+    pub sync_warning: Option<String>,
+    /// Review yang dimulai (`review_started`).
+    pub review_id: Option<String>,
+}
+
+/// Parameter `runs.publish` dengan keputusan dev (KTD-35).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+pub struct PublishParams {
+    pub run_id: String,
+    /// `ac_id` baris Can't verify yang dicek manual oleh dev.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub confirmed: Option<Vec<String>>,
+    /// Alasan Push anyway untuk baris Fail (mode blokir).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub push_anyway_reason: Option<String>,
 }
 
 /// Satu berkas yang berubah di worktree.
@@ -370,6 +422,24 @@ pub struct RepoView {
     pub companions: Vec<String>,
     pub trusted_reviewers: Vec<String>,
     pub extra_allowed: Vec<String>,
+    /// Run app dan cara uji reviewer (KTD-37).
+    pub app: RepoAppView,
+    /// Override mode gerbang: `block`, `warn`, atau `null` (ikut workspace).
+    pub gate_mode: Option<String>,
+}
+
+/// Pengaturan run app per repo.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+pub struct RepoAppView {
+    /// `web` atau `no_app`.
+    pub test_mode: String,
+    pub setup_command: Option<String>,
+    pub start_command: Option<String>,
+    pub port: Option<u16>,
+    pub app_url: Option<String>,
+    /// Kunci `.env` yang diteruskan ke app (nilai tidak pernah dikirim).
+    pub env_keys: Vec<String>,
+    pub browser_tests: bool,
 }
 
 /// Parameter `repos.add`.
@@ -387,6 +457,74 @@ pub struct RepoUpdate {
     pub companions: Vec<String>,
     pub trusted_reviewers: Vec<String>,
     pub extra_allowed: Vec<String>,
+    /// Pengaturan run app; tidak diisi = tidak berubah.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub app: Option<RepoAppView>,
+    /// `block`, `warn`, atau `inherit` (hapus override); tidak diisi = tidak berubah.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub gate_mode: Option<String>,
+}
+
+/// State app satu repo anggota run.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+pub struct AppMemberView {
+    pub repo_id: String,
+    /// URL app kanonik: alamat login dev dan origin reviewer.
+    pub url: Option<String>,
+    pub state: String,
+}
+
+/// State app milik run.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+pub struct AppRunView {
+    pub run_id: String,
+    /// `off`, `setting_up`, `starting`, `waiting_for_port`, `running`,
+    /// `failed`, atau `stopped_by_other_run`.
+    pub state: String,
+    pub members: Vec<AppMemberView>,
+    pub database_confirmed: bool,
+    pub login_confirmed: bool,
+    pub error: Option<String>,
+}
+
+/// Berkas berubah di satu repo untuk konfirmasi sebelum app dijalankan.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+pub struct AppChangesView {
+    pub repo_id: String,
+    /// Dikirim balik di `AppRunParams.snapshots`.
+    pub snapshot: String,
+    pub files: Vec<String>,
+    /// Manifest paket, lockfile, skrip, dan berkas perintah start.
+    pub flagged: Vec<String>,
+}
+
+/// Parameter `app.run`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+pub struct AppRunParams {
+    pub run_id: String,
+    /// Snapshot per repo yang ditampilkan ke dev (`AppChangesView.snapshot`).
+    pub snapshots: std::collections::BTreeMap<String, String>,
+}
+
+/// Parameter `app.confirm`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+pub struct AppConfirm {
+    pub run_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub database: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub login: Option<bool>,
+}
+
+/// Log app satu repo.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+pub struct AppLogView {
+    pub repo_id: String,
+    pub text: String,
 }
 
 /// Workspace multi-repo: folder induk dan repo terdaftar di dalamnya.
@@ -398,6 +536,10 @@ pub struct WorkspaceView {
     pub repo_ids: Vec<String>,
     /// MCP server dari `.mcp.json` folder induk yang boleh dipakai agent.
     pub mcp_servers: Vec<String>,
+    /// Uji browser oleh reviewer (KTD-37).
+    pub browser_tests: bool,
+    /// `block` atau `warn`.
+    pub gate_mode: String,
 }
 
 /// Parameter `workspaces.add`.
@@ -415,6 +557,14 @@ pub struct WorkspaceUpdate {
     pub id: String,
     pub repo_ids: Vec<String>,
     pub mcp_servers: Vec<String>,
+    /// Tidak diisi = tidak berubah.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub browser_tests: Option<bool>,
+    /// `block` atau `warn`; tidak diisi = tidak berubah.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub gate_mode: Option<String>,
 }
 
 /// Parameter `workspaces.mcp_servers`: folder induk (path absolut).
@@ -531,4 +681,248 @@ pub struct StartProgressView {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
 pub struct RunEventView {
     pub run_id: String,
+}
+
+/// Satu baris buku AC (Rilis 2).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+pub struct AcRowView {
+    pub ac_id: String,
+    pub label: Option<String>,
+    pub text: String,
+    /// `not_checked`, `in_design`, `partly`, `missing`, `conflicts`, `follow_design`.
+    pub design: String,
+    pub design_note: Option<String>,
+    /// `not_reviewed`, `pass`, `fail`, `cant_verify`, `checked_manually`, `skipped`,
+    /// `fix_in_progress`.
+    pub verdict: String,
+    /// Bukti reviewer sebagai teks biasa.
+    pub evidence: Option<String>,
+    pub stale: bool,
+    /// `active`, `new`, `changed`, `removed`.
+    pub status: String,
+    pub reason: Option<String>,
+    pub decided_by: Option<String>,
+    /// Ikut gerbang dan review (bukan Removed, bukan Follow design).
+    pub in_gate: bool,
+    /// Boleh dipilih untuk Send to agent.
+    pub selectable: bool,
+}
+
+/// Hasil `ledger.get`: buku AC run setelah refresh dari tracker.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+pub struct AcLedgerView {
+    pub run_id: String,
+    pub rows: Vec<AcRowView>,
+    /// Waktu sinkron AC terakhir yang berhasil (ms epoch).
+    #[ts(type = "number | null")]
+    pub synced_at_ms: Option<i64>,
+    /// Alasan refresh dari tracker gagal; `rows` adalah data terakhir.
+    pub sync_error: Option<String>,
+    /// Nama sumber desain run; kosong = "No design source".
+    pub design_sources: Vec<String>,
+    /// Mode gerbang run: `block` atau `warn`.
+    pub gate_mode: String,
+}
+
+/// Event `ledger.updated`: baris buku AC terbaru (progres review per baris).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+pub struct LedgerRowsEvent {
+    pub run_id: String,
+    pub rows: Vec<AcRowView>,
+}
+
+/// Verdict satu AC dalam riwayat review.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+pub struct ReviewVerdictView {
+    pub ac_id: String,
+    pub label: Option<String>,
+    pub verdict: String,
+    pub evidence: Option<String>,
+}
+
+/// Satu review AC (riwayat dan progres).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+pub struct ReviewView {
+    pub id: String,
+    pub run_id: String,
+    /// `manual`, `push_and_pr`, atau `automatic_fix`.
+    pub trigger: String,
+    /// `running`, `finished`, `failed`, atau `cancelled`.
+    pub status: String,
+    pub browser_used: bool,
+    /// Alasan tanpa browser, mis. "app running older code".
+    pub browser_reason: Option<String>,
+    pub error: Option<String>,
+    pub cost_usd: Option<f64>,
+    #[ts(type = "number")]
+    pub input_tokens: u64,
+    #[ts(type = "number")]
+    pub output_tokens: u64,
+    /// Kode berubah selama review.
+    pub stale: bool,
+    pub skill: Option<String>,
+    #[ts(type = "number")]
+    pub started_at_ms: i64,
+    #[ts(type = "number | null")]
+    pub finished_at_ms: Option<i64>,
+    pub verdicts: Vec<ReviewVerdictView>,
+}
+
+/// Parameter `review.start`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+pub struct ReviewStart {
+    pub run_id: String,
+    /// `manual` (bawaan) atau `push_and_pr`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub trigger: Option<String>,
+    /// Skill reviewer (`plugin:skill`); tidak diisi = prompt bawaan.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub skill: Option<String>,
+}
+
+/// Parameter `review.send_findings`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+pub struct ReviewFindings {
+    pub run_id: String,
+    pub ac_ids: Vec<String>,
+}
+
+/// Setelan reviewer (Settings › General, KTD-30).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+pub struct ReviewerSettingsView {
+    /// `None` = model agent pelaksana.
+    pub model: Option<String>,
+    /// Batas biaya per review dalam sen USD.
+    pub budget_cents: u32,
+    #[ts(type = "number")]
+    pub timeout_secs: u64,
+}
+
+/// Kesiapan uji browser per item (dialog kesiapan, KTD-39).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+pub struct ReviewReadinessView {
+    /// Dialog hanya untuk run dengan repo Web dan uji browser aktif.
+    pub needs_dialog: bool,
+    pub browser_tests: bool,
+    /// `not_running`, `older_code`, atau `current`.
+    pub app: String,
+    /// Run lain yang app-nya sedang menyala.
+    pub other_owner: Option<String>,
+    pub confirmed: ReadinessConfirmations,
+    pub app_urls: Vec<String>,
+    pub chrome_connected: bool,
+    /// Alasan Can't verify untuk AC tampilan bila review jalan sekarang.
+    pub cant_verify_reason: Option<String>,
+}
+
+/// Konfirmasi dev untuk app run (database menyala, sudah login).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+pub struct ReadinessConfirmations {
+    pub database: bool,
+    pub login: bool,
+}
+
+/// Hasil `system.chrome_check`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+pub struct ChromeCheckView {
+    pub connected: bool,
+    pub detail: String,
+    #[ts(type = "number")]
+    pub checked_at_ms: i64,
+}
+
+/// Parameter `system.chrome_check`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+pub struct ChromeCheckParams {
+    /// Abaikan cache 60 detik.
+    #[serde(default)]
+    pub force: bool,
+}
+
+/// Parameter `runs.approve_plan`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+pub struct ApprovePlanParams {
+    pub run_id: String,
+    /// `ac_id` baris Missing, Partly, atau Conflicts yang mengikuti desain (R8a).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub follow_design: Option<Vec<String>>,
+}
+
+/// Sumber desain terdaftar (Settings → Design sources).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+pub struct DesignSourceView {
+    pub id: String,
+    pub name: String,
+    /// `folder` di 2.0.
+    pub kind: String,
+    pub path: String,
+    /// Bisa dipakai saat ini.
+    pub ready: bool,
+    /// `Ready`, `Path missing`, `Not a folder`, atau alasan penolakan.
+    pub status: String,
+}
+
+/// Parameter `design_sources.add`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+pub struct DesignSourceAdd {
+    pub name: String,
+    pub path: String,
+}
+
+/// Parameter `design_sources.update`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+pub struct DesignSourceUpdate {
+    pub id: String,
+    pub name: String,
+    pub path: String,
+}
+
+/// Parameter `design_sources.remove`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+pub struct DesignSourceRef {
+    pub id: String,
+}
+
+/// Parameter `design_sources.test`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+pub struct DesignSourceTest {
+    pub path: String,
+}
+
+/// Hasil `design_sources.test`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+pub struct DesignSourceCheckView {
+    pub ready: bool,
+    pub status: String,
+}
+
+/// Lingkup koneksi kapabilitas.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct LedgerToolInfo {
+    pub run_id: String,
+    /// `design` atau `verdict`.
+    pub role: String,
+}
+
+/// Parameter `ledger.tool.set_design`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct LedgerToolSetDesign {
+    pub ac_id: String,
+    /// `in_design`, `partly`, `missing`, `conflicts`, atau `not_checked`.
+    pub design: String,
+    #[serde(default)]
+    pub note: Option<String>,
+}
+
+/// Parameter `ledger.tool.set_verdict`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct LedgerToolSetVerdict {
+    pub ac_id: String,
+    /// `pass`, `fail`, atau `cant_verify`.
+    pub verdict: String,
+    #[serde(default)]
+    pub evidence: Option<String>,
 }

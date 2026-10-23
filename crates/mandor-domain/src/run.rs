@@ -12,6 +12,8 @@ pub enum RunState {
     WfAwaitingComment,
     WfQuiet,
     WfRunning,
+    /// Sesi reviewer AC berjalan; agent pelaksana dikunci (KTD-29).
+    Reviewing,
     Failed,
     Orphaned,
     /// Record dihapus atau tidak lagi di-assign: agent dihentikan, dev menutup run.
@@ -30,6 +32,7 @@ impl RunState {
             Self::WfAwaitingComment => "wf_awaiting_comment",
             Self::WfQuiet => "wf_quiet",
             Self::WfRunning => "wf_running",
+            Self::Reviewing => "reviewing",
             Self::Failed => "failed",
             Self::Orphaned => "orphaned",
             Self::Stopped => "stopped",
@@ -47,6 +50,7 @@ impl RunState {
             "wf_awaiting_comment" => Self::WfAwaitingComment,
             "wf_quiet" => Self::WfQuiet,
             "wf_running" => Self::WfRunning,
+            "reviewing" => Self::Reviewing,
             "failed" => Self::Failed,
             "orphaned" => Self::Orphaned,
             "stopped" => Self::Stopped,
@@ -57,7 +61,7 @@ impl RunState {
     /// Agent sedang memproses giliran.
     #[must_use]
     pub fn is_busy(self) -> bool {
-        matches!(self, Self::Running | Self::WfRunning)
+        matches!(self, Self::Running | Self::WfRunning | Self::Reviewing)
     }
 
     /// Run diparkir (klaim hilang atau record hilang): tidak menerima pesan,

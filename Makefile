@@ -1,4 +1,4 @@
-.PHONY: check fmt lint deny test cover-check sqlx-check sqlx-prepare build run setup red-check
+.PHONY: check fmt lint deny test cover-check sqlx-check sqlx-prepare build run setup red-check clean-build
 
 COVER_MIN ?= 85
 
@@ -31,8 +31,11 @@ test:
 	cargo test --workspace --locked
 
 # mandord (wiring) dikecualikan dari floor, seperti crates/app di skill.
+# Artefak workspace dan .profraw lama dibersihkan dulu, dan incremental dimatikan,
+# agar target/llvm-cov-target tidak terus membesar di setiap run.
 cover-check:
-	cargo llvm-cov --workspace --locked --summary-only \
+	cargo llvm-cov clean --workspace
+	CARGO_INCREMENTAL=0 cargo llvm-cov --workspace --locked --summary-only \
 		--ignore-filename-regex 'crates/mandord/' \
 		--fail-under-lines $(COVER_MIN)
 
@@ -41,6 +44,14 @@ build:
 
 run:
 	cargo run --bin mandord
+
+# Membersihkan folder build daemon dan app desktop (Tauri) bila sudah menumpuk,
+# mis. sebulan sekali atau setelah memperbarui dependensi. Build berikutnya
+# sekitar 1-2 menit lebih lama.
+clean-build:
+	@du -sh target apps/desktop/src-tauri/target 2>/dev/null || true
+	cargo clean
+	cd apps/desktop/src-tauri && cargo clean
 
 red-check:
 	./scripts/red-check.sh

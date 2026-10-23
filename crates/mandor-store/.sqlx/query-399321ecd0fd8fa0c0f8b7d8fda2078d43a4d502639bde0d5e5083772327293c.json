@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO ac_rows (run_id, ac_id, position, label, text, design, design_note,\n                                      verdict, evidence, stale, status, reason, decided_by)\n                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 13
+    },
+    "nullable": []
+  },
+  "hash": "399321ecd0fd8fa0c0f8b7d8fda2078d43a4d502639bde0d5e5083772327293c"
+}

@@ -41,6 +41,13 @@ pub struct GitState {
     pub bodies: HashMap<String, String>,
     /// Jumlah `gh pr edit --body` yang dijalankan.
     pub body_edits: usize,
+    /// Tree id snapshot per worktree; default `tree0`.
+    pub trees: HashMap<PathBuf, String>,
+    pub snapshot_fails: bool,
+    /// Berkas berubah yang dikembalikan `changed_between` bila tree berbeda.
+    pub diff_files: Vec<String>,
+    /// Pasangan `(from, to)` yang diminta ke `changed_between`.
+    pub calls_between: Arc<Mutex<Vec<(String, String)>>>,
 }
 
 /// Kunci PR palsu: repo dan branch (run workspace memakai branch yang sama).
@@ -200,6 +207,36 @@ impl GitPort for FakeGit {
         st.bodies.insert(url.clone(), body.to_owned());
         Ok(url)
     }
+    async fn snapshot(&self, wt: &Path) -> Result<String, PortError> {
+        let st = self.state.lock().unwrap();
+        if st.snapshot_fails {
+            return Err(PortError::Transient("git write-tree".to_owned()));
+        }
+        Ok(st
+            .trees
+            .get(wt)
+            .cloned()
+            .unwrap_or_else(|| "tree0".to_owned()))
+    }
+    async fn changed_between(
+        &self,
+        _wt: &Path,
+        a: &str,
+        b: &str,
+    ) -> Result<Vec<String>, PortError> {
+        let st = self.state.lock().unwrap();
+        st.calls_between
+            .lock()
+            .unwrap()
+            .push((a.to_owned(), b.to_owned()));
+        Ok(if a == b {
+            vec![]
+        } else if st.diff_files.is_empty() {
+            vec!["src/changed.rs".to_owned()]
+        } else {
+            st.diff_files.clone()
+        })
+    }
     async fn pr_body(&self, _r: &RepoInfo, url: &str) -> Result<Option<String>, PortError> {
         Ok(self.state.lock().unwrap().bodies.get(url).cloned())
     }
@@ -233,6 +270,23 @@ impl RunCtl {
             let _ = tx.send(e);
         }
     }
+    /// Sesi berhenti karena batas biaya (event `result` A4).
+    pub fn budget_stop(&self) {
+        self.emit(AgentEvent::Usage(mandor_domain::Usage {
+            input_tokens: 10,
+            output_tokens: 5,
+            ..mandor_domain::Usage::default()
+        }));
+        self.emit(AgentEvent::Done {
+            is_error: true,
+            result: "Reached maximum budget ($2)".to_owned(),
+            num_turns: 3,
+            denials: 0,
+            cost_usd: Some(2.01),
+            limit: Some("budget".to_owned()),
+        });
+        self.tx.lock().unwrap().take();
+    }
     /// Giliran selesai normal dengan pesan akhir `result`.
     pub fn finish(&self, result: &str) {
         self.emit(AgentEvent::Done {
@@ -240,6 +294,8 @@ impl RunCtl {
             result: result.to_owned(),
             num_turns: 1,
             denials: 0,
+            cost_usd: None,
+            limit: None,
         });
         self.tx.lock().unwrap().take();
     }
@@ -250,6 +306,8 @@ impl RunCtl {
             result: "selesai".to_owned(),
             num_turns: 1,
             denials: 0,
+            cost_usd: None,
+            limit: None,
         });
         self.tx.lock().unwrap().take();
     }
@@ -308,6 +366,8 @@ pub struct FakeAgent {
     pub reaped: Arc<Mutex<Vec<u32>>>,
     pub pr_contexts: Arc<Mutex<Vec<OwnedPrContext>>>,
     pub fail_pr_description: Arc<Mutex<bool>>,
+    /// Review yang berkasnya dibersihkan (`end_review`).
+    pub ended_reviews: Arc<Mutex<Vec<String>>>,
 }
 
 /// Salinan [`PrContext`] yang diterima fake agent.
@@ -317,6 +377,7 @@ pub struct OwnedPrContext {
     pub acs: Vec<String>,
     pub plan: Option<String>,
     pub diff: String,
+    pub decided: Vec<String>,
 }
 
 impl FakeAgent {
@@ -360,6 +421,7 @@ impl AgentPort for FakeAgent {
             acs: ctx.acs.to_vec(),
             plan: ctx.plan.map(str::to_owned),
             diff: ctx.diff.to_owned(),
+            decided: ctx.decided.to_vec(),
         });
         if *self.fail_pr_description.lock().unwrap() {
             return Err(PortError::Transient("claude timeout".to_owned()));
@@ -368,6 +430,12 @@ impl AgentPort for FakeAgent {
     }
     async fn reap(&self, pid: u32) {
         self.reaped.lock().unwrap().push(pid);
+    }
+    async fn end_review(&self, review_id: &str) {
+        self.ended_reviews
+            .lock()
+            .unwrap()
+            .push(review_id.to_owned());
     }
 }
 
@@ -571,6 +639,8 @@ impl Default for FakeRepos {
                 companions: vec![],
                 trusted_reviewers: vec!["ou_qa".to_owned()],
                 extra_allowed: vec![],
+                app: mandor_domain::app_run::AppSettings::default(),
+                gate_mode: None,
             }])),
         }
     }
@@ -606,4 +676,199 @@ pub async fn eventually(mut cond: impl FnMut() -> bool) {
         tokio::time::sleep(Duration::from_millis(5)).await;
     }
     assert!(cond(), "kondisi tidak terpenuhi");
+}
+
+/// Penyimpanan Rilis 2 di memori.
+#[derive(Clone, Default)]
+pub struct FakeReviews {
+    pub ledgers: Arc<Mutex<HashMap<String, Vec<mandor_domain::AcRow>>>>,
+    pub history: Arc<Mutex<Vec<mandor_usecase::run_ports::ReviewRecord>>>,
+    pub settings: Arc<Mutex<mandor_usecase::run_ports::ReviewerSettings>>,
+    pub chrome: Arc<Mutex<bool>>,
+}
+
+impl FakeReviews {
+    /// Menghapus buku AC run (meniru run lama sebelum Rilis 2).
+    pub fn clear(&self, run_id: &str) {
+        self.ledgers.lock().unwrap().remove(run_id);
+    }
+}
+
+impl mandor_usecase::run_ports::LedgerStore for FakeReviews {
+    async fn ac_rows(&self, run_id: &str) -> Result<Vec<mandor_domain::AcRow>, PortError> {
+        Ok(self
+            .ledgers
+            .lock()
+            .unwrap()
+            .get(run_id)
+            .cloned()
+            .unwrap_or_default())
+    }
+    async fn save_ac_rows(
+        &self,
+        run_id: &str,
+        rows: &[mandor_domain::AcRow],
+    ) -> Result<(), PortError> {
+        self.ledgers
+            .lock()
+            .unwrap()
+            .insert(run_id.to_owned(), rows.to_vec());
+        Ok(())
+    }
+}
+
+/// State proses app palsu dan penyimpanannya.
+#[derive(Default)]
+pub struct AppsState {
+    pub records: HashMap<String, mandor_usecase::run_ports::AppRecord>,
+    pub owner: Option<String>,
+    /// Port yang sudah dipakai program lain sebelum app dinyalakan.
+    pub foreign_ports: HashSet<u16>,
+    pub fail_setup: HashSet<String>,
+    pub fail_ready: HashSet<String>,
+    pub lockfile: Option<String>,
+    /// Urutan panggilan: `setup:<repo>`, `spawn:<repo>`, `ready:<repo>`, `stop:<run>`.
+    pub calls: Vec<String>,
+    pub reaped: Vec<(String, u32)>,
+    /// Setup yang mengubah tree worktree (meniru kode berubah saat start).
+    pub change_tree_on_setup: Option<(Arc<Mutex<GitState>>, PathBuf, String)>,
+    next_pgid: u32,
+}
+
+#[derive(Clone, Default)]
+pub struct FakeApps {
+    pub st: Arc<Mutex<AppsState>>,
+}
+
+impl FakeApps {
+    pub fn calls(&self) -> Vec<String> {
+        self.st.lock().unwrap().calls.clone()
+    }
+    pub fn record(&self, run_id: &str) -> Option<mandor_usecase::run_ports::AppRecord> {
+        self.st.lock().unwrap().records.get(run_id).cloned()
+    }
+}
+
+impl mandor_usecase::run_ports::AppProcesses for FakeApps {
+    async fn port_open(&self, port: u16) -> bool {
+        self.st.lock().unwrap().foreign_ports.contains(&port)
+    }
+    async fn lockfile_hash(&self, _wt: &Path) -> Option<String> {
+        self.st.lock().unwrap().lockfile.clone()
+    }
+    async fn setup(
+        &self,
+        _run_id: &str,
+        m: &mandor_usecase::run_ports::AppMember,
+    ) -> Result<(), PortError> {
+        let mut st = self.st.lock().unwrap();
+        st.calls.push(format!("setup:{}", m.repo_id));
+        if let Some((git, wt, tree)) = &st.change_tree_on_setup {
+            git.lock().unwrap().trees.insert(wt.clone(), tree.clone());
+        }
+        if st.fail_setup.contains(&m.repo_id) {
+            return Err(PortError::Rejected("setup failed: exit 1".to_owned()));
+        }
+        Ok(())
+    }
+    async fn spawn(
+        &self,
+        _run_id: &str,
+        m: &mandor_usecase::run_ports::AppMember,
+    ) -> Result<u32, PortError> {
+        let mut st = self.st.lock().unwrap();
+        st.calls.push(format!("spawn:{}", m.repo_id));
+        st.next_pgid += 1;
+        Ok(1000 + st.next_pgid)
+    }
+    async fn wait_ready(&self, _run_id: &str, repo_id: &str, _port: u16) -> Result<(), PortError> {
+        let mut st = self.st.lock().unwrap();
+        st.calls.push(format!("ready:{repo_id}"));
+        if st.fail_ready.contains(repo_id) {
+            return Err(PortError::Rejected(
+                "the app did not open its port".to_owned(),
+            ));
+        }
+        Ok(())
+    }
+    async fn stop(&self, run_id: &str) {
+        self.st.lock().unwrap().calls.push(format!("stop:{run_id}"));
+    }
+    async fn logs(&self, run_id: &str) -> Vec<(String, String)> {
+        vec![("repo1".to_owned(), format!("log {run_id}"))]
+    }
+    async fn reap(&self, run_id: &str, pgid: u32) {
+        self.st
+            .lock()
+            .unwrap()
+            .reaped
+            .push((run_id.to_owned(), pgid));
+    }
+}
+
+impl mandor_usecase::run_ports::AppRecords for FakeApps {
+    async fn app_record(
+        &self,
+        run_id: &str,
+    ) -> Result<Option<mandor_usecase::run_ports::AppRecord>, PortError> {
+        Ok(self.record(run_id))
+    }
+    async fn save_app_record(
+        &self,
+        rec: &mandor_usecase::run_ports::AppRecord,
+    ) -> Result<(), PortError> {
+        self.st
+            .lock()
+            .unwrap()
+            .records
+            .insert(rec.run_id.clone(), rec.clone());
+        Ok(())
+    }
+    async fn app_owner(&self) -> Result<Option<String>, PortError> {
+        Ok(self.st.lock().unwrap().owner.clone())
+    }
+    async fn set_app_owner(&self, run_id: Option<&str>) -> Result<(), PortError> {
+        self.st.lock().unwrap().owner = run_id.map(str::to_owned);
+        Ok(())
+    }
+}
+
+impl mandor_usecase::run_ports::ReviewHistory for FakeReviews {
+    async fn save_review(
+        &self,
+        r: &mandor_usecase::run_ports::ReviewRecord,
+    ) -> Result<(), PortError> {
+        let mut h = self.history.lock().unwrap();
+        h.retain(|x| x.id != r.id);
+        h.push(r.clone());
+        Ok(())
+    }
+    async fn reviews(
+        &self,
+        run_id: &str,
+    ) -> Result<Vec<mandor_usecase::run_ports::ReviewRecord>, PortError> {
+        let mut out: Vec<_> = self
+            .history
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|r| r.run_id == run_id)
+            .cloned()
+            .collect();
+        out.sort_by_key(|r| std::cmp::Reverse(r.started_at_ms));
+        Ok(out)
+    }
+    async fn reviewer_settings(&self) -> mandor_usecase::run_ports::ReviewerSettings {
+        self.settings.lock().unwrap().clone()
+    }
+    async fn set_reviewer_settings(
+        &self,
+        s: &mandor_usecase::run_ports::ReviewerSettings,
+    ) -> Result<(), PortError> {
+        *self.settings.lock().unwrap() = s.clone();
+        Ok(())
+    }
+    async fn chrome_connected(&self) -> bool {
+        *self.chrome.lock().unwrap()
+    }
 }

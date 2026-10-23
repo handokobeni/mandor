@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "DELETE FROM reviews WHERE run_id IN\n               (SELECT id FROM runs WHERE closed = 1 AND updated_at_ms < ?)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": []
+  },
+  "hash": "79f2e7b2a92a1827913bf4425fc4909b17008f311a22172f922c20576d4a3c8b"
+}

@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "DELETE FROM ac_rows WHERE run_id = ?",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": []
+  },
+  "hash": "23cb65cbcb23fc4011f78db6e64a0fa680ab0e24d8ebf4888f422bf09043163b"
+}

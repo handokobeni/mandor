@@ -7,9 +7,9 @@ use mandor_domain::{CardFlag, Task};
 use mandor_git::GitAdapter;
 use mandor_lark::LarkGateway;
 use mandor_protocol::{NoticeView, Notification, RunEventView, event};
-use mandor_store::{ReposStore, RunsStore, Store, TaskStore};
+use mandor_store::{ReposStore, ReviewsStore, RunsStore, Store, TaskStore};
 use mandor_usecase::run_ports::{
-    ChatItem, Journal, Notice, Notifier, RunRecord, RunStore, Spawner,
+    ChatItem, Journal, LedgerStore, Notice, Notifier, RunRecord, RunStore, Spawner,
 };
 use mandor_usecase::{CachedTask, Clock, Deps, Ids, PortError, TaskCache};
 use serde_json::{Value, json};
@@ -28,6 +28,8 @@ impl Deps for Prod {
     type Ids = UuidIds;
     type Git = GitAdapter;
     type Agent = ClaudeAgent;
+    type Reviews = BroadcastReviews;
+    type Apps = crate::apps::BroadcastApps;
     type Runs = BroadcastRuns;
     type Notifier = DaemonNotifier;
     type Spawner = TrackerSpawner;
@@ -261,5 +263,78 @@ impl Journal for BroadcastRuns {
 
     async fn journal_delivered_list(&self, record_id: &str) -> Result<Vec<String>, PortError> {
         self.inner.journal_delivered_list(record_id).await
+    }
+}
+
+/// Penyimpanan Rilis 2 yang memancarkan `ledger.updated` setiap buku AC berubah.
+#[derive(Debug, Clone)]
+pub struct BroadcastReviews {
+    inner: ReviewsStore,
+    events: broadcast::Sender<Notification>,
+}
+
+impl BroadcastReviews {
+    pub fn new(inner: ReviewsStore, events: broadcast::Sender<Notification>) -> Self {
+        Self { inner, events }
+    }
+}
+
+impl LedgerStore for BroadcastReviews {
+    async fn ac_rows(&self, run_id: &str) -> Result<Vec<mandor_domain::AcRow>, PortError> {
+        self.inner.ac_rows(run_id).await
+    }
+
+    async fn save_ac_rows(
+        &self,
+        run_id: &str,
+        rows: &[mandor_domain::AcRow],
+    ) -> Result<(), PortError> {
+        self.inner.save_ac_rows(run_id, rows).await?;
+        let view = mandor_protocol::LedgerRowsEvent {
+            run_id: run_id.to_owned(),
+            rows: rows.iter().map(crate::views::ac_row_view).collect(),
+        };
+        emit(
+            &self.events,
+            event::LEDGER_UPDATED,
+            serde_json::to_value(view).unwrap_or(Value::Null),
+        );
+        Ok(())
+    }
+}
+
+impl mandor_usecase::run_ports::ReviewHistory for BroadcastReviews {
+    async fn save_review(
+        &self,
+        r: &mandor_usecase::run_ports::ReviewRecord,
+    ) -> Result<(), PortError> {
+        self.inner.save_review(r).await?;
+        let view = RunEventView {
+            run_id: r.run_id.clone(),
+        };
+        emit(
+            &self.events,
+            event::REVIEW_PROGRESS,
+            serde_json::to_value(view).unwrap_or(Value::Null),
+        );
+        Ok(())
+    }
+    async fn reviews(
+        &self,
+        run_id: &str,
+    ) -> Result<Vec<mandor_usecase::run_ports::ReviewRecord>, PortError> {
+        self.inner.reviews(run_id).await
+    }
+    async fn reviewer_settings(&self) -> mandor_usecase::run_ports::ReviewerSettings {
+        self.inner.reviewer_settings().await
+    }
+    async fn set_reviewer_settings(
+        &self,
+        s: &mandor_usecase::run_ports::ReviewerSettings,
+    ) -> Result<(), PortError> {
+        self.inner.set_reviewer_settings(s).await
+    }
+    async fn chrome_connected(&self) -> bool {
+        self.inner.chrome_connected().await
     }
 }

@@ -1,0 +1,62 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT ac_id, label, verdict, evidence FROM review_verdicts\n             WHERE review_id = ? ORDER BY rowid",
+  "describe": {
+    "columns": [
+      {
+        "name": "ac_id",
+        "ordinal": 0,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "review_verdicts",
+            "name": "ac_id"
+          }
+        }
+      },
+      {
+        "name": "label",
+        "ordinal": 1,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "review_verdicts",
+            "name": "label"
+          }
+        }
+      },
+      {
+        "name": "verdict",
+        "ordinal": 2,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "review_verdicts",
+            "name": "verdict"
+          }
+        }
+      },
+      {
+        "name": "evidence",
+        "ordinal": 3,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "review_verdicts",
+            "name": "evidence"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false,
+      true,
+      false,
+      true
+    ]
+  },
+  "hash": "1d7b8c94a1ad49b270412178a38c00a6bce6582f7686e365b1576089fd462515"
+}

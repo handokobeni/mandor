@@ -27,6 +27,9 @@
   import { DEFAULT_PLANNING, PLANNING_KEY, planningParams, restorePlanning, type PlanningChoice } from '#lib/planning.ts';
   import { startParams } from '#lib/workspaces.ts';
   import PlanningPicker from './PlanningPicker.svelte';
+  import ReviewPicker from './ReviewPicker.svelte';
+  import { REVIEW_KEY, restoreReview, type ReviewChoice } from '#lib/planning.ts';
+  import type { DesignSourceView } from '#lib/protocol/DesignSourceView.ts';
 
   interface Props {
     rpc: Rpc;
@@ -72,28 +75,36 @@
   // Pilihan planning terakhir diingat per mesin; skill yang tidak terpasang lagi kembali ke bawaan.
   let planning = $state<PlanningChoice>({ ...DEFAULT_PLANNING });
   let skills = $state<SkillView[] | null>(null);
+  // Sumber desain dan skill reviewer juga diingat; sumber yang hilang dibuang dengan peringatan.
+  let review = $state<ReviewChoice>({ designSources: [], reviewerSkill: '' });
+  let sources = $state<DesignSourceView[] | null>(null);
+  let dropped = $state<string[]>([]);
   $effect(() => {
     if (action !== 'start') return;
-    rpc
-      .request<SkillView[]>('agent.skills')
-      .catch(() => [] as SkillView[])
-      .then((list) => {
-        skills = list;
-        planning = restorePlanning(readSaved(), list.map((k) => k.name));
-      });
+    Promise.all([
+      rpc.request<SkillView[]>('agent.skills').catch(() => [] as SkillView[]),
+      rpc.request<DesignSourceView[]>('design_sources.list').catch(() => [] as DesignSourceView[])
+    ]).then(([list, srcs]) => {
+      skills = list;
+      sources = srcs;
+      planning = restorePlanning(readSaved(PLANNING_KEY), list.map((k) => k.name));
+      const r = restoreReview(readSaved(REVIEW_KEY), srcs, list.map((k) => k.name));
+      review = r.choice;
+      dropped = r.dropped;
+    });
   });
 
-  function readSaved(): unknown {
+  function readSaved(key: string): unknown {
     try {
-      return JSON.parse(localStorage.getItem(PLANNING_KEY) ?? 'null');
+      return JSON.parse(localStorage.getItem(key) ?? 'null');
     } catch {
       return null;
     }
   }
 
-  function remember(c: PlanningChoice): void {
+  function remember(key: string, value: unknown): void {
     try {
-      localStorage.setItem(PLANNING_KEY, JSON.stringify(c));
+      localStorage.setItem(key, JSON.stringify(value));
     } catch {
       // Penyimpanan tidak tersedia: pilihan hanya tidak diingat.
     }
@@ -118,17 +129,24 @@
       current = ev.step;
       steps = stepsAt(defs, current);
     });
-    if (action === 'start') remember(planning);
+    if (action === 'start') {
+      remember(PLANNING_KEY, planning);
+      remember(REVIEW_KEY, review);
+    }
     try {
       const params =
         action === 'start'
-          ? startParams({
-              recordId: card.record_id,
-              note,
-              planning: planningParams(planning),
-              target:
-                multi && ws ? { kind: 'workspace', workspace: ws, repoIds: wsRepos } : { kind: 'repo', repoId }
-            })
+          ? {
+              ...startParams({
+                recordId: card.record_id,
+                note,
+                planning: planningParams(planning),
+                target:
+                  multi && ws ? { kind: 'workspace', workspace: ws, repoIds: wsRepos } : { kind: 'repo', repoId }
+              }),
+              design_sources: review.designSources,
+              reviewer_skill: review.reviewerSkill || null
+            }
           : { record_id: card.record_id, repo_id: repoId };
       const run = await rpc.request<{ id: string }>(action === 'start' ? 'runs.start' : 'runs.takeover', params);
       steps = stepsAt(defs, 'done');
@@ -246,6 +264,7 @@
         {/if}
         {#if action === 'start'}
           <PlanningPicker {skills} bind:choice={planning} />
+          <ReviewPicker {sources} {skills} {dropped} bind:choice={review} />
           <div class="grid gap-1.5">
             <Label for="start-note">Note to the agent <span class="muted font-normal">(optional)</span></Label>
             <Textarea

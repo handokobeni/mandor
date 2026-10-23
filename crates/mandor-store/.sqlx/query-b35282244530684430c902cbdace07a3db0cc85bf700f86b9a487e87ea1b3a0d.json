@@ -1,0 +1,134 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT id, run_id, trigger, status, browser_used, error, cost_usd, usage_json,\n                      started_at_ms, finished_at_ms\n               FROM reviews WHERE run_id = ? ORDER BY started_at_ms DESC, id DESC",
+  "describe": {
+    "columns": [
+      {
+        "name": "id",
+        "ordinal": 0,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "reviews",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "name": "run_id",
+        "ordinal": 1,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "reviews",
+            "name": "run_id"
+          }
+        }
+      },
+      {
+        "name": "trigger",
+        "ordinal": 2,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "reviews",
+            "name": "trigger"
+          }
+        }
+      },
+      {
+        "name": "status",
+        "ordinal": 3,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "reviews",
+            "name": "status"
+          }
+        }
+      },
+      {
+        "name": "browser_used",
+        "ordinal": 4,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "reviews",
+            "name": "browser_used"
+          }
+        }
+      },
+      {
+        "name": "error",
+        "ordinal": 5,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "reviews",
+            "name": "error"
+          }
+        }
+      },
+      {
+        "name": "cost_usd",
+        "ordinal": 6,
+        "type_info": "Float",
+        "origin": {
+          "Table": {
+            "table": "reviews",
+            "name": "cost_usd"
+          }
+        }
+      },
+      {
+        "name": "usage_json",
+        "ordinal": 7,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "reviews",
+            "name": "usage_json"
+          }
+        }
+      },
+      {
+        "name": "started_at_ms",
+        "ordinal": 8,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "reviews",
+            "name": "started_at_ms"
+          }
+        }
+      },
+      {
+        "name": "finished_at_ms",
+        "ordinal": 9,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "reviews",
+            "name": "finished_at_ms"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      true,
+      false,
+      false,
+      true
+    ]
+  },
+  "hash": "b35282244530684430c902cbdace07a3db0cc85bf700f86b9a487e87ea1b3a0d"
+}

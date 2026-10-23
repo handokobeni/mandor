@@ -11,13 +11,38 @@ use serde_json::{Value, json};
 use super::{AppDispatch, ok, rejected, store_error};
 use crate::prod::now_ms;
 
-fn workspace_view(w: mandor_store::Workspace) -> WorkspaceView {
+/// Setelan workspace (KTD-37): uji browser (bawaan aktif) dan mode gerbang.
+#[derive(Debug, serde::Serialize, serde::Deserialize)]
+struct WorkspaceSettings {
+    #[serde(default = "browser_default")]
+    browser_tests: bool,
+    #[serde(default)]
+    gate_mode: Option<String>,
+}
+
+fn browser_default() -> bool {
+    true
+}
+
+fn parse_settings(raw: &str) -> WorkspaceSettings {
+    serde_json::from_str(raw).unwrap_or(WorkspaceSettings {
+        browser_tests: true,
+        gate_mode: None,
+    })
+}
+
+fn workspace_view(w: mandor_store::Workspace, settings: &WorkspaceSettings) -> WorkspaceView {
     WorkspaceView {
         id: w.id,
         name: w.name,
         root: w.root_path,
         repo_ids: w.repo_ids,
         mcp_servers: w.mcp_servers,
+        browser_tests: settings.browser_tests,
+        gate_mode: settings
+            .gate_mode
+            .clone()
+            .unwrap_or_else(|| "block".to_owned()),
     }
 }
 
@@ -83,8 +108,21 @@ impl AppDispatch {
             .list_workspaces()
             .await
             .map_err(store_error)?;
-        let out: Vec<WorkspaceView> = all.into_iter().map(workspace_view).collect();
+        let mut out: Vec<WorkspaceView> = Vec::with_capacity(all.len());
+        for w in all {
+            out.push(self.view_of(w).await?);
+        }
         ok(&out)
+    }
+
+    async fn view_of(&self, w: mandor_store::Workspace) -> Result<WorkspaceView, RpcError> {
+        let raw = self
+            .app
+            .store
+            .workspace_settings(&w.id)
+            .await
+            .map_err(store_error)?;
+        Ok(workspace_view(w, &parse_settings(&raw)))
     }
 
     /// Folder induk: path absolut ke folder yang ada.
@@ -154,13 +192,13 @@ impl AppDispatch {
             })
             .await
             .map_err(store_error)?;
-        ok(&workspace_view(
-            self.app
-                .store
-                .get_workspace(&id)
-                .await
-                .map_err(store_error)?,
-        ))
+        let w = self
+            .app
+            .store
+            .get_workspace(&id)
+            .await
+            .map_err(store_error)?;
+        ok(&self.view_of(w).await?)
     }
 
     async fn workspaces_update(&self, p: WorkspaceUpdate) -> Result<Value, RpcError> {
@@ -178,13 +216,37 @@ impl AppDispatch {
             .update_workspace(&p.id, &p.repo_ids, &p.mcp_servers)
             .await
             .map_err(store_error)?;
-        ok(&workspace_view(
+        if p.browser_tests.is_some() || p.gate_mode.is_some() {
+            let raw = self
+                .app
+                .store
+                .workspace_settings(&p.id)
+                .await
+                .map_err(store_error)?;
+            let mut settings = parse_settings(&raw);
+            if let Some(b) = p.browser_tests {
+                settings.browser_tests = b;
+            }
+            if let Some(mode) = &p.gate_mode {
+                if mandor_domain::GateMode::parse(mode).is_none() {
+                    return Err(rejected("gate mode must be block or warn"));
+                }
+                settings.gate_mode = Some(mode.clone());
+            }
+            let json = serde_json::to_string(&settings).map_err(rejected)?;
             self.app
                 .store
-                .get_workspace(&p.id)
+                .set_workspace_settings(&p.id, &json)
                 .await
-                .map_err(store_error)?,
-        ))
+                .map_err(store_error)?;
+        }
+        let w = self
+            .app
+            .store
+            .get_workspace(&p.id)
+            .await
+            .map_err(store_error)?;
+        ok(&self.view_of(w).await?)
     }
 }
 

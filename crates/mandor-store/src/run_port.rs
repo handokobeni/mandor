@@ -2,8 +2,11 @@
 
 use std::path::PathBuf;
 
+use mandor_domain::GateMode;
 use mandor_domain::RunState;
+use mandor_domain::app_run::{AppSettings, TestMode};
 use mandor_usecase::PortError;
+use mandor_usecase::review::DesignRoot;
 use mandor_usecase::run_ports::{
     ChatItem, Journal, RepoInfo, Repos, RunMember, RunPhase, RunRecord, RunStore, RunWorkspace,
     WorkspaceInfo,
@@ -33,6 +36,14 @@ struct RunExtra {
     #[serde(default)]
     pr_body_hashes: std::collections::BTreeMap<String, String>,
     #[serde(default)]
+    review_snapshot: std::collections::BTreeMap<String, String>,
+    #[serde(default)]
+    design: Vec<StoredDesign>,
+    #[serde(default)]
+    review_id: Option<String>,
+    #[serde(default)]
+    reviewer_skill: Option<String>,
+    #[serde(default)]
     workspace: Option<StoredWorkspace>,
     #[serde(default)]
     extra: Vec<StoredMember>,
@@ -49,6 +60,13 @@ struct RunExtra {
 }
 
 /// Bentuk simpan [`RunWorkspace`].
+#[derive(Serialize, Deserialize)]
+struct StoredDesign {
+    id: String,
+    name: String,
+    path: PathBuf,
+}
+
 #[derive(Serialize, Deserialize)]
 struct StoredWorkspace {
     id: String,
@@ -72,6 +90,86 @@ struct RepoSettings {
     trusted_reviewers: Vec<String>,
     #[serde(default)]
     extra_allowed: Vec<String>,
+    #[serde(default)]
+    app: StoredApp,
+    /// Override mode gerbang (`block` | `warn`).
+    #[serde(default)]
+    gate_mode: Option<String>,
+}
+
+/// Bentuk simpan [`AppSettings`] di `settings_json.app` (KTD-37).
+#[derive(Serialize, Deserialize)]
+struct StoredApp {
+    #[serde(default)]
+    test_mode: Option<String>,
+    #[serde(default)]
+    setup_command: Option<String>,
+    #[serde(default)]
+    start_command: Option<String>,
+    #[serde(default)]
+    port: Option<u16>,
+    #[serde(default)]
+    app_url: Option<String>,
+    #[serde(default)]
+    env_keys: Vec<String>,
+    #[serde(default = "browser_tests_default")]
+    browser_tests: bool,
+}
+
+fn browser_tests_default() -> bool {
+    true
+}
+
+impl Default for StoredApp {
+    fn default() -> Self {
+        Self {
+            test_mode: None,
+            setup_command: None,
+            start_command: None,
+            port: None,
+            app_url: None,
+            env_keys: Vec::new(),
+            browser_tests: true,
+        }
+    }
+}
+
+/// Pengaturan app dari `settings_json` repo; bawaan: No app, uji browser aktif.
+#[must_use]
+pub fn app_settings_of(settings: &serde_json::Value) -> AppSettings {
+    let stored: StoredApp = settings
+        .get("app")
+        .cloned()
+        .and_then(|v| serde_json::from_value(v).ok())
+        .unwrap_or_default();
+    AppSettings {
+        test_mode: stored
+            .test_mode
+            .as_deref()
+            .and_then(TestMode::parse)
+            .unwrap_or_default(),
+        setup_command: stored.setup_command.filter(|c| !c.trim().is_empty()),
+        start_command: stored.start_command.filter(|c| !c.trim().is_empty()),
+        port: stored.port,
+        app_url: stored.app_url.filter(|u| !u.trim().is_empty()),
+        env_keys: stored.env_keys,
+        browser_tests: stored.browser_tests,
+    }
+}
+
+/// `settings_json.app` untuk disimpan.
+#[must_use]
+pub fn app_settings_json(app: &AppSettings) -> serde_json::Value {
+    serde_json::to_value(StoredApp {
+        test_mode: Some(app.test_mode.as_str().to_owned()),
+        setup_command: app.setup_command.clone(),
+        start_command: app.start_command.clone(),
+        port: app.port,
+        app_url: app.app_url.clone(),
+        env_keys: app.env_keys.clone(),
+        browser_tests: app.browser_tests,
+    })
+    .unwrap_or(serde_json::Value::Null)
 }
 
 fn extra_of(r: &RunRecord) -> Result<String, StoreError> {
@@ -84,6 +182,18 @@ fn extra_of(r: &RunRecord) -> Result<String, StoreError> {
         quiet_until_ms: r.quiet_until_ms,
         fix_requested_by: r.fix_requested_by.clone(),
         pr_body_hashes: r.pr_body_hashes.clone(),
+        review_snapshot: r.review_snapshot.clone(),
+        design: r
+            .design
+            .iter()
+            .map(|d| StoredDesign {
+                id: d.id.clone(),
+                name: d.name.clone(),
+                path: d.path.clone(),
+            })
+            .collect(),
+        review_id: r.review_id.clone(),
+        reviewer_skill: r.reviewer_skill.clone(),
         workspace: r.workspace.as_ref().map(|w| StoredWorkspace {
             id: w.id.clone(),
             root: w.root.clone(),
@@ -156,6 +266,18 @@ fn to_record(row: Row) -> Result<RunRecord, StoreError> {
         quiet_until_ms: extra.quiet_until_ms,
         fix_requested_by: extra.fix_requested_by,
         pr_body_hashes: extra.pr_body_hashes,
+        review_snapshot: extra.review_snapshot,
+        design: extra
+            .design
+            .into_iter()
+            .map(|d| DesignRoot {
+                id: d.id,
+                name: d.name,
+                path: d.path,
+            })
+            .collect(),
+        review_id: extra.review_id,
+        reviewer_skill: extra.reviewer_skill,
         workspace: extra.workspace.map(|w| RunWorkspace {
             id: w.id,
             root: w.root,
@@ -343,13 +465,27 @@ impl ReposStore {
 impl Repos for ReposStore {
     async fn workspace(&self, id: &str) -> Result<Option<WorkspaceInfo>, PortError> {
         match self.store.get_workspace(id).await {
-            Ok(w) => Ok(Some(WorkspaceInfo {
-                id: w.id,
-                name: w.name,
-                root: PathBuf::from(w.root_path),
-                repo_ids: w.repo_ids,
-                mcp_servers: w.mcp_servers,
-            })),
+            Ok(w) => {
+                let settings = self.store.workspace_settings(&w.id).await?;
+                let parsed = serde_json::from_str::<serde_json::Value>(&settings).ok();
+                let browser_tests = parsed
+                    .as_ref()
+                    .and_then(|v| v.get("browser_tests").and_then(serde_json::Value::as_bool))
+                    .unwrap_or(true);
+                let gate_mode = parsed
+                    .as_ref()
+                    .and_then(|v| v.get("gate_mode").and_then(serde_json::Value::as_str))
+                    .and_then(GateMode::parse);
+                Ok(Some(WorkspaceInfo {
+                    id: w.id,
+                    name: w.name,
+                    root: PathBuf::from(w.root_path),
+                    repo_ids: w.repo_ids,
+                    mcp_servers: w.mcp_servers,
+                    browser_tests,
+                    gate_mode,
+                }))
+            }
             Err(StoreError::NotFound) => Ok(None),
             Err(e) => Err(e.into()),
         }
@@ -361,6 +497,7 @@ impl Repos for ReposStore {
             Err(StoreError::NotFound) => return Ok(None),
             Err(e) => return Err(e.into()),
         };
+        let app = app_settings_of(&repo.settings);
         let settings: RepoSettings = serde_json::from_value(repo.settings).unwrap_or_default();
         Ok(Some(RepoInfo {
             id: repo.id,
@@ -370,6 +507,8 @@ impl Repos for ReposStore {
             companions: settings.companions,
             trusted_reviewers: settings.trusted_reviewers,
             extra_allowed: settings.extra_allowed,
+            app,
+            gate_mode: settings.gate_mode.as_deref().and_then(GateMode::parse),
         }))
     }
 }

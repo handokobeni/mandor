@@ -15,6 +15,79 @@ const HOOK_INPUT_MAX: u64 = 1024 * 1024;
 /// Kode keluar hook yang memblokir tool call.
 pub const HOOK_BLOCK: u8 = 2;
 
+/// Allowlist sesi reviewer: membaca, git baca, dan perintah test; tanpa
+/// interpreter umum maupun alat yang menulis berkas (KTD-29). Perintah test
+/// khusus repo datang dari allowlist repo.
+#[must_use]
+pub fn review_allowed() -> Vec<String> {
+    [
+        "Read",
+        "Glob",
+        "Grep",
+        "TodoWrite",
+        "Skill",
+        "ToolSearch",
+        "Bash(git status*)",
+        "Bash(git diff*)",
+        "Bash(git log*)",
+        "Bash(git show*)",
+        "Bash(git rev-parse*)",
+        "Bash(cargo test*)",
+        "Bash(cargo nextest*)",
+        "Bash(make test*)",
+        "Bash(npm test*)",
+        "Bash(npm run test*)",
+        "Bash(bun test*)",
+        "Bash(bun run test*)",
+        "Bash(pnpm test*)",
+        "Bash(pnpm run test*)",
+        "Bash(yarn test*)",
+        "Bash(go test*)",
+        "Bash(pytest*)",
+        "Bash(python3 -m pytest*)",
+        // Hook review membatasi `node` ke `node --test <path…>` tanpa opsi lain.
+        "Bash(node --test)",
+        "Bash(node --test *)",
+        "Bash(ls*)",
+        "Bash(cd *)",
+        "Bash(pwd)",
+    ]
+    .into_iter()
+    .map(str::to_owned)
+    .collect()
+}
+
+/// Allowlist giliran plan: hanya membaca. Tanpa tool penulis berkas dan tanpa
+/// perintah build, install, atau test yang bisa menulis worktree; allowlist
+/// tambahan repo juga tidak dipakai. Hook `--plan` tetap menolak penulisan.
+#[must_use]
+pub fn plan_allowed() -> Vec<String> {
+    [
+        "Read",
+        "Glob",
+        "Grep",
+        "TodoWrite",
+        "Skill",
+        "ToolSearch",
+        "Bash(git status*)",
+        "Bash(git diff*)",
+        "Bash(git log*)",
+        "Bash(git show*)",
+        "Bash(git branch --show-current)",
+        "Bash(git rev-parse*)",
+        "Bash(ls*)",
+        "Bash(cat *)",
+        "Bash(head *)",
+        "Bash(tail *)",
+        "Bash(wc *)",
+        "Bash(grep *)",
+        "Bash(rg *)",
+    ]
+    .into_iter()
+    .map(str::to_owned)
+    .collect()
+}
+
 /// Allowlist default per repo: test, build, lint, dan git baca.
 #[must_use]
 pub fn default_allowed() -> Vec<String> {
@@ -30,6 +103,8 @@ pub fn default_allowed() -> Vec<String> {
         // Skill plugin hanya memuat instruksi; tool yang dipakai skill tetap
         // melewati allowlist dan hook.
         "Skill",
+        // Memuat skema tool MCP yang ditunda; hanya baca (spike A1).
+        "ToolSearch",
         "Bash(git status*)",
         "Bash(git diff*)",
         "Bash(git log*)",
@@ -134,6 +209,26 @@ pub fn settings_json(hook_command: &str) -> String {
     .to_string()
 }
 
+/// Settings sesi reviewer: `PreToolUse` seperti biasa ditambah `PostToolUse`
+/// untuk tool browser, yang mencatat tab dan alamat terakhirnya (KTD-31).
+#[must_use]
+pub fn review_settings_json(hook_command: &str, post_command: &str) -> String {
+    json!({
+        "disableAllHooks": false,
+        "hooks": {
+            "PreToolUse": [{
+                "matcher": "*",
+                "hooks": [{"type": "command", "command": hook_command, "timeout": 30}]
+            }],
+            "PostToolUse": [{
+                "matcher": "mcp__claude-in-chrome__.*",
+                "hooks": [{"type": "command", "command": post_command, "timeout": 30}]
+            }]
+        }
+    })
+    .to_string()
+}
+
 /// Variabel yang selalu dibuang dari environment agent.
 fn is_secret_var(name: &str) -> bool {
     let upper = name.to_ascii_uppercase();
@@ -180,15 +275,22 @@ pub async fn prepare_agent_home(base: &Path) -> Result<AgentHome, AgentError> {
     Ok(AgentHome { gitconfig, gh_dir })
 }
 
+/// Env login shell tanpa secret: token, kunci API, SSH agent, dan variabel
+/// Lark/Mandor dibuang. Basis env agent dan proses app (KTD-36).
+#[must_use]
+pub fn clean_env(login_env: &BTreeMap<String, String>) -> Vec<(String, String)> {
+    login_env
+        .iter()
+        .filter(|(k, _)| !is_secret_var(k))
+        .map(|(k, v)| (k.clone(), v.clone()))
+        .collect()
+}
+
 /// Environment agent: env login shell tanpa secret, ditambah config git/gh
 /// terisolasi sehingga credential helper global dan kunci SSH tidak terpakai.
 #[must_use]
 pub fn agent_env(login_env: &BTreeMap<String, String>, home: &AgentHome) -> Vec<(String, String)> {
-    let mut env: Vec<(String, String)> = login_env
-        .iter()
-        .filter(|(k, _)| !is_secret_var(k))
-        .map(|(k, v)| (k.clone(), v.clone()))
-        .collect();
+    let mut env = clean_env(login_env);
     let set = [
         ("GIT_CONFIG_NOSYSTEM", "1".to_owned()),
         ("GIT_CONFIG_GLOBAL", home.gitconfig.display().to_string()),
@@ -224,11 +326,30 @@ pub fn parse_hook_input(raw: &[u8]) -> Result<ToolCall, String> {
         .iter()
         .filter_map(|k| input.get(*k).and_then(Value::as_str).map(str::to_owned))
         .collect();
+    let text = |k: &str| input.get(k).and_then(Value::as_str).map(str::to_owned);
     Ok(ToolCall {
         tool_name,
         command,
         paths,
+        url: text("url"),
+        tab_id: input.get("tabId").and_then(Value::as_u64),
+        action: text("action"),
+        response: v.get("tool_response").map(response_text),
     })
+}
+
+/// Teks respons tool untuk `PostToolUse`: bagian `text` digabung; gambar dan
+/// bagian lain dibuang.
+fn response_text(v: &Value) -> String {
+    match v {
+        Value::String(s) => s.clone(),
+        Value::Array(parts) => parts
+            .iter()
+            .filter_map(|p| p.get("text").and_then(Value::as_str))
+            .collect::<Vec<_>>()
+            .join("\n"),
+        other => other.get("content").map_or_else(String::new, response_text),
+    }
 }
 
 /// Menjalankan hook secara fail-closed: input rusak, error baca, atau panic
@@ -260,6 +381,19 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn reviewer_boleh_menjalankan_test_runner_bawaan_node() {
+        let allowed = review_allowed();
+        assert!(allowed.contains(&"Bash(node --test)".to_owned()));
+        assert!(allowed.contains(&"Bash(node --test *)".to_owned()));
+        assert!(!allowed.contains(&"Bash(node --test*)".to_owned()));
+        assert!(
+            !allowed.iter().any(|a| a == "Bash(node *)"),
+            "hanya --test, bukan node bebas"
+        );
+    }
+
     use mandor_domain::hook::classify;
 
     fn hook(input: &str) -> (u8, String) {
@@ -286,6 +420,43 @@ mod tests {
         assert_eq!(hook(&bash("cargo test")).0, 0);
         let write = json!({"tool_name": "Write", "tool_input": {"file_path": "/w/.claude/settings.local.json"}});
         assert_eq!(hook(&write.to_string()).0, HOOK_BLOCK);
+    }
+
+    #[test]
+    fn settings_review_mendaftarkan_post_hook_untuk_tool_browser() {
+        let v: Value = serde_json::from_str(&review_settings_json(
+            "/opt/mandord hook --review /s.json",
+            "/opt/mandord hook --review /s.json --post",
+        ))
+        .unwrap();
+        assert_eq!(
+            v["hooks"]["PostToolUse"][0]["matcher"],
+            "mcp__claude-in-chrome__.*"
+        );
+        assert_eq!(
+            v["hooks"]["PostToolUse"][0]["hooks"][0]["command"],
+            "/opt/mandord hook --review /s.json --post"
+        );
+        assert_eq!(v["hooks"]["PreToolUse"][0]["matcher"], "*");
+        let plain: Value = serde_json::from_str(&settings_json("/opt/mandord hook")).unwrap();
+        assert!(plain["hooks"].get("PostToolUse").is_none());
+    }
+
+    #[test]
+    fn respons_tool_digabung_tanpa_gambar() {
+        let raw = json!({
+            "tool_name": "mcp__claude-in-chrome__computer",
+            "tool_input": {"action": "screenshot", "tabId": 7},
+            "tool_response": [
+                {"type": "text", "text": "Captured"},
+                {"type": "image", "source": {"data": "AAAA"}},
+                {"type": "text", "text": "Tab Context"}
+            ]
+        });
+        let call = parse_hook_input(raw.to_string().as_bytes()).unwrap();
+        assert_eq!(call.response.as_deref(), Some("Captured\nTab Context"));
+        assert_eq!(call.tab_id, Some(7));
+        assert_eq!(call.action.as_deref(), Some("screenshot"));
     }
 
     #[test]

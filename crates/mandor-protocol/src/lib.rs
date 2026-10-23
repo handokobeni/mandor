@@ -24,6 +24,56 @@ pub mod method {
     pub const LARK_SETTINGS_SET: &str = "lark.settings.set";
     /// Mengubah jeda tenang Waiting Fix tanpa menyentuh pengaturan Lark lain.
     pub const WAITING_FIX_QUIET_SET: &str = "waiting_fix.quiet.set";
+    /// Buku AC run (`RunRef` → `AcLedgerView`), di-refresh dari tracker dulu.
+    pub const LEDGER_GET: &str = "ledger.get";
+    /// Koneksi kapabilitas (`mandord mcp`): lingkup token (`LedgerToolInfo`).
+    pub const LEDGER_TOOL_INFO: &str = "ledger.tool.info";
+    /// Koneksi kapabilitas: buku AC (`Vec<AcRowView>`).
+    pub const LEDGER_TOOL_READ: &str = "ledger.tool.read";
+    /// Koneksi kapabilitas, peran design: `LedgerToolSetDesign`.
+    pub const LEDGER_TOOL_SET_DESIGN: &str = "ledger.tool.set_design";
+    /// Koneksi kapabilitas, peran verdict: `LedgerToolSetVerdict`.
+    pub const LEDGER_TOOL_SET_VERDICT: &str = "ledger.tool.set_verdict";
+    /// Kesiapan uji browser (`RunRef` → `ReviewReadinessView`).
+    pub const REVIEW_READINESS: &str = "review.readiness";
+    /// Cek ekstensi Claude in Chrome (`ChromeCheckParams` → `ChromeCheckView`).
+    pub const SYSTEM_CHROME_CHECK: &str = "system.chrome_check";
+    /// App yang sedang menyala (`AppRunView` atau `null`).
+    pub const APP_OWNER: &str = "app.owner";
+    /// Memulai review AC (`ReviewStart` → `ReviewView`).
+    pub const REVIEW_START: &str = "review.start";
+    /// Membatalkan review yang berjalan (`RunRef` → `{}`).
+    pub const REVIEW_CANCEL: &str = "review.cancel";
+    /// Riwayat review run (`RunRef` → `Vec<ReviewView>`).
+    pub const REVIEW_HISTORY: &str = "review.history";
+    /// Mengirim baris Fail ke agent (`ReviewFindings` → `{}`).
+    pub const REVIEW_SEND_FINDINGS: &str = "review.send_findings";
+    /// Setelan reviewer (`ReviewerSettingsView`).
+    pub const SETTINGS_REVIEWER_GET: &str = "settings.reviewer.get";
+    /// Menyimpan setelan reviewer (`ReviewerSettingsView` → `ReviewerSettingsView`).
+    pub const SETTINGS_REVIEWER_SET: &str = "settings.reviewer.set";
+    /// State app run (`RunRef` → `AppRunView`).
+    pub const APP_STATUS: &str = "app.status";
+    /// Berkas berubah per repo untuk konfirmasi (`RunRef` → `Vec<AppChangesView>`).
+    pub const APP_CHANGES: &str = "app.changes";
+    /// Menyalakan app (`AppRunParams` → `AppRunView`).
+    pub const APP_RUN: &str = "app.run";
+    /// Menghentikan app (`RunRef` → `AppRunView`).
+    pub const APP_STOP: &str = "app.stop";
+    /// Konfirmasi database dan login (`AppConfirm` → `AppRunView`).
+    pub const APP_CONFIRM: &str = "app.confirm";
+    /// Log app per repo (`RunRef` → `Vec<AppLogView>`).
+    pub const APP_LOGS: &str = "app.logs";
+    /// Sumber desain terdaftar (`Vec<DesignSourceView>`).
+    pub const DESIGN_SOURCES_LIST: &str = "design_sources.list";
+    /// `DesignSourceAdd` → `DesignSourceView`.
+    pub const DESIGN_SOURCES_ADD: &str = "design_sources.add";
+    /// `DesignSourceUpdate` → `DesignSourceView`.
+    pub const DESIGN_SOURCES_UPDATE: &str = "design_sources.update";
+    /// `DesignSourceRef` → `{}`.
+    pub const DESIGN_SOURCES_REMOVE: &str = "design_sources.remove";
+    /// `DesignSourceTest` → `DesignSourceCheckView`.
+    pub const DESIGN_SOURCES_TEST: &str = "design_sources.test";
     pub const LARK_LOGIN_BEGIN: &str = "lark.login.begin";
     pub const LARK_LOGIN_COMPLETE: &str = "lark.login.complete";
     pub const LARK_LOGOUT: &str = "lark.logout";
@@ -39,6 +89,7 @@ pub mod method {
     pub const RUNS_SEND: &str = "runs.send";
     pub const RUNS_SEND_NOW: &str = "runs.send_now";
     pub const RUNS_STOP: &str = "runs.stop";
+    /// `PublishParams` → `PublishResult` (gerbang AC, KTD-35).
     pub const RUNS_PUBLISH: &str = "runs.publish";
     pub const RUNS_RESUME: &str = "runs.resume";
     pub const RUNS_START_FIX: &str = "runs.start_fix";
@@ -48,6 +99,7 @@ pub mod method {
     pub const RUNS_FILE_DIFF: &str = "runs.file_diff";
     pub const RUNS_DISCARD_FILE: &str = "runs.discard_file";
     /// Menyetujui plan agent dan memulai implementasi.
+    /// `ApprovePlanParams` → `{}`.
     pub const RUNS_APPROVE_PLAN: &str = "runs.approve_plan";
     /// Mengakhiri brainstorm dan meminta agent menulis plan.
     pub const RUNS_CONTINUE_TO_PLAN: &str = "runs.continue_to_plan";
@@ -76,6 +128,12 @@ pub mod event {
     pub const BOARD_UPDATED: &str = "board.updated";
     /// State run berubah (`RunEventView`).
     pub const RUN_UPDATED: &str = "run.updated";
+    /// Buku AC run berubah (`LedgerRowsEvent`, baris terbaru).
+    pub const LEDGER_UPDATED: &str = "ledger.updated";
+    /// Review run berubah (`RunEventView`); client memuat ulang `review.history`.
+    pub const REVIEW_PROGRESS: &str = "review.progress";
+    /// State run app berubah (`RunEventView`); client memuat ulang `app.status`.
+    pub const APP_UPDATED: &str = "app.updated";
     /// Pesan chat baru di run (`RunEventView`).
     pub const RUN_MESSAGE: &str = "run.message";
     /// Langkah Start yang sedang berjalan (`StartProgressView`).
@@ -98,7 +156,7 @@ pub fn ts_bindings() -> Result<Vec<(&'static str, String)>, String> {
     let one = |name: &'static str, s: Result<String, ts_rs::ExportError>| {
         s.map(|body| (name, body)).map_err(|e| e.to_string())
     };
-    Ok(vec![
+    Ok([
         one("Hello.ts", Hello::export_to_string(&cfg))?,
         one("HelloOk.ts", HelloOk::export_to_string(&cfg))?,
         one("RpcError.ts", RpcError::export_to_string(&cfg))?,
@@ -181,5 +239,89 @@ pub fn ts_bindings() -> Result<Vec<(&'static str, String)>, String> {
         )?,
         one("StartPlanning.ts", StartPlanning::export_to_string(&cfg))?,
         one("SkillView.ts", SkillView::export_to_string(&cfg))?,
+    ]
+    .into_iter()
+    .chain(review_bindings()?)
+    .collect())
+}
+
+/// Tipe Rilis 2: buku AC dan sumber desain.
+fn review_bindings() -> Result<Vec<(&'static str, String)>, String> {
+    use ts_rs::{Config, TS};
+    let cfg = Config::new();
+    let one = |name: &'static str, s: Result<String, ts_rs::ExportError>| {
+        s.map(|body| (name, body)).map_err(|e| e.to_string())
+    };
+    Ok(vec![
+        one("AcRowView.ts", AcRowView::export_to_string(&cfg))?,
+        one("AcLedgerView.ts", AcLedgerView::export_to_string(&cfg))?,
+        one(
+            "ApprovePlanParams.ts",
+            ApprovePlanParams::export_to_string(&cfg),
+        )?,
+        one("PublishParams.ts", PublishParams::export_to_string(&cfg))?,
+        one(
+            "DesignSourceView.ts",
+            DesignSourceView::export_to_string(&cfg),
+        )?,
+        one(
+            "DesignSourceAdd.ts",
+            DesignSourceAdd::export_to_string(&cfg),
+        )?,
+        one("AppRunView.ts", AppRunView::export_to_string(&cfg))?,
+        one("ReviewView.ts", ReviewView::export_to_string(&cfg))?,
+        one("AcSummaryView.ts", AcSummaryView::export_to_string(&cfg))?,
+        one(
+            "ReviewReadinessView.ts",
+            ReviewReadinessView::export_to_string(&cfg),
+        )?,
+        one(
+            "ChromeCheckView.ts",
+            ChromeCheckView::export_to_string(&cfg),
+        )?,
+        one(
+            "ReadinessConfirmations.ts",
+            ReadinessConfirmations::export_to_string(&cfg),
+        )?,
+        one(
+            "ChromeCheckParams.ts",
+            ChromeCheckParams::export_to_string(&cfg),
+        )?,
+        one(
+            "LedgerRowsEvent.ts",
+            LedgerRowsEvent::export_to_string(&cfg),
+        )?,
+        one(
+            "ReviewVerdictView.ts",
+            ReviewVerdictView::export_to_string(&cfg),
+        )?,
+        one("ReviewStart.ts", ReviewStart::export_to_string(&cfg))?,
+        one("ReviewFindings.ts", ReviewFindings::export_to_string(&cfg))?,
+        one(
+            "ReviewerSettingsView.ts",
+            ReviewerSettingsView::export_to_string(&cfg),
+        )?,
+        one("AppMemberView.ts", AppMemberView::export_to_string(&cfg))?,
+        one("AppChangesView.ts", AppChangesView::export_to_string(&cfg))?,
+        one("AppRunParams.ts", AppRunParams::export_to_string(&cfg))?,
+        one("AppConfirm.ts", AppConfirm::export_to_string(&cfg))?,
+        one("AppLogView.ts", AppLogView::export_to_string(&cfg))?,
+        one("RepoAppView.ts", RepoAppView::export_to_string(&cfg))?,
+        one(
+            "DesignSourceUpdate.ts",
+            DesignSourceUpdate::export_to_string(&cfg),
+        )?,
+        one(
+            "DesignSourceRef.ts",
+            DesignSourceRef::export_to_string(&cfg),
+        )?,
+        one(
+            "DesignSourceTest.ts",
+            DesignSourceTest::export_to_string(&cfg),
+        )?,
+        one(
+            "DesignSourceCheckView.ts",
+            DesignSourceCheckView::export_to_string(&cfg),
+        )?,
     ])
 }

@@ -40,7 +40,7 @@ export function validateLark(form: LarkForm, secretSaved: boolean): LarkErrors {
   return Object.fromEntries(Object.entries(errors).filter(([, v]) => v !== undefined)) as LarkErrors;
 }
 
-export type RepoList = 'companions' | 'reviewers' | 'allowed';
+export type RepoList = 'companions' | 'reviewers' | 'allowed' | 'env';
 
 /** Error untuk satu item baru di daftar pengaturan repo; `null` bila boleh ditambahkan. */
 export function validateListItem(list: RepoList, raw: string, existing: string[]): string | null {
@@ -49,6 +49,7 @@ export function validateListItem(list: RepoList, raw: string, existing: string[]
   if (list === 'companions' && !v.startsWith('/')) return 'Use an absolute path on the daemon machine.';
   if (list === 'reviewers' && !/^ou_[a-z0-9]{6,}$/.test(v)) return 'Lark open_ids start with ou_, e.g. ou_51aa6c.';
   if (list === 'allowed' && !/^[A-Z][A-Za-z]+(\(.+\))?$/.test(v)) return 'Use a tool pattern such as Bash(pnpm test *).';
+  if (list === 'env' && !ENV_KEY.test(v)) return 'Use a variable name such as VITE_API_URL (no value).';
   if (existing.includes(v)) return 'Already in the list.';
   return null;
 }
@@ -77,7 +78,9 @@ export const NOTIFY_KINDS = [
   { kind: 'failed', label: 'Run failed' },
   { kind: 'waiting_fix', label: 'Reviewer requested fixes (Waiting Fix)' },
   { kind: 'pr_created', label: 'PR created' },
-  { kind: 'needs_attention', label: 'Needs attention: claim lost, task deleted or reassigned' }
+  { kind: 'needs_attention', label: 'Needs attention: claim lost, task deleted or reassigned, push held' },
+  { kind: 'review_finished', label: 'AC review finished' },
+  { kind: 'app_failed', label: 'App failed to start' }
 ] as const;
 
 export type NotifyPrefs = Record<string, boolean>;
@@ -87,7 +90,9 @@ export const DEFAULT_NOTIFY: NotifyPrefs = {
   failed: true,
   waiting_fix: true,
   pr_created: false,
-  needs_attention: true
+  needs_attention: true,
+  review_finished: true,
+  app_failed: true
 };
 
 /** Notifikasi desktop untuk jenis ini; jenis yang belum dikenal tetap ditampilkan. */
@@ -122,4 +127,37 @@ export function validateQuiet(raw: string): string | null {
   const n = Number(v);
   if (n < QUIET_MIN || n > QUIET_MAX) return `Use ${QUIET_MIN} to ${QUIET_MAX} seconds.`;
   return null;
+}
+
+/** Form Run app per repo (KTD-37). */
+export interface RepoAppForm {
+  testMode: 'web' | 'no_app';
+  setupCommand: string;
+  startCommand: string;
+  port: string;
+  appUrl: string;
+  envKeys: string[];
+}
+
+export type RepoAppErrors = Partial<Record<keyof RepoAppForm, string>>;
+
+const ENV_KEY = /^[A-Za-z_][A-Za-z0-9_]*$/;
+
+/** Validasi form app repo; objek kosong berarti valid. Daemon tetap memvalidasi ulang. */
+export function validateRepoApp(f: RepoAppForm): RepoAppErrors {
+  const errors: RepoAppErrors = {};
+  if (f.testMode === 'no_app') return errors;
+  if (!f.startCommand.trim()) errors.startCommand = 'Web repos need a start command, e.g. bun run dev.';
+  const port = Number(f.port.trim());
+  const portOk = /^\d{4,5}$/.test(f.port.trim()) && port >= 1024 && port <= 65535;
+  if (!portOk) errors.port = 'Use a port between 1024 and 65535.';
+  const url = f.appUrl.trim();
+  if (url) {
+    const m = /^https?:\/\/(localhost|127\.0\.0\.1)(?::(\d+))?\/?$/.exec(url);
+    if (!m) errors.appUrl = 'Use http://localhost:<port> or http://127.0.0.1:<port>.';
+    else if (portOk && m[2] && Number(m[2]) !== port) errors.appUrl = 'The app URL must use the same port.';
+  }
+  const bad = f.envKeys.find((k) => !ENV_KEY.test(k));
+  if (bad) errors.envKeys = `${bad} is not a valid variable name.`;
+  return errors;
 }

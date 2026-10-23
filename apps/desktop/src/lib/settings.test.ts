@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { validateLark, validateListItem } from '#lib/settings.ts';
+import { validateLark, validateListItem, validateRepoApp } from '#lib/settings.ts';
 
 const ok = {
   appId: 'cli_a6f2c81d93b8d00e',
@@ -103,5 +103,26 @@ describe('jeda tenang Waiting Fix', () => {
     expect(validateQuiet('12.5')).toBe('Use whole seconds.');
     expect(validateQuiet('')).toBe('Type a number of seconds.');
     expect(validateQuiet('abc')).toBe('Use whole seconds.');
+  });
+});
+
+describe('validasi app repo', () => {
+  const base = {
+    testMode: 'web' as const,
+    setupCommand: '',
+    startCommand: 'bun run dev',
+    port: '5173',
+    appUrl: '',
+    envKeys: ['API_URL']
+  };
+  it('Web tanpa perintah start, port 80, host lain, dan kunci .env tidak valid ditolak', () => {
+    expect(validateRepoApp(base)).toEqual({});
+    expect(validateRepoApp({ ...base, startCommand: ' ' }).startCommand).toBeDefined();
+    expect(validateRepoApp({ ...base, port: '80' }).port).toBeDefined();
+    expect(validateRepoApp({ ...base, appUrl: 'http://example.com:5173' }).appUrl).toBeDefined();
+    expect(validateRepoApp({ ...base, appUrl: 'http://localhost:3000' }).appUrl).toBe('The app URL must use the same port.');
+    expect(validateRepoApp({ ...base, appUrl: 'http://127.0.0.1:5173' })).toEqual({});
+    expect(validateRepoApp({ ...base, envKeys: ['MY-KEY'] }).envKeys).toContain('MY-KEY');
+    expect(validateRepoApp({ ...base, testMode: 'no_app', startCommand: '' })).toEqual({});
   });
 });

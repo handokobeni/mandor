@@ -159,23 +159,64 @@ fn u64_at(v: Option<&Value>, key: &str) -> u64 {
 
 fn result(v: &Value) -> Vec<AgentEvent> {
     let u = v.get("usage");
-    let usage = Usage {
+    let mut usage = Usage {
         input_tokens: u64_at(u, "input_tokens"),
         output_tokens: u64_at(u, "output_tokens"),
         cache_creation_input_tokens: u64_at(u, "cache_creation_input_tokens"),
         cache_read_input_tokens: u64_at(u, "cache_read_input_tokens"),
     };
+    // Sesi yang dihentikan batas biaya melaporkan `usage` kosong; angka
+    // sebenarnya ada di `modelUsage` per model (A4).
+    if usage == Usage::default() {
+        usage = model_usage(v);
+    }
     let denials = v
         .get("permission_denials")
         .and_then(Value::as_array)
         .map_or(0, Vec::len);
+    let mut text = str_at(v, "result").to_owned();
+    if text.is_empty() {
+        text = v
+            .get("errors")
+            .and_then(Value::as_array)
+            .map(|e| {
+                e.iter()
+                    .filter_map(Value::as_str)
+                    .collect::<Vec<_>>()
+                    .join("; ")
+            })
+            .unwrap_or_default();
+    }
+    let limit = match str_at(v, "subtype") {
+        "error_max_budget_usd" => Some("budget".to_owned()),
+        "error_max_turns" => Some("turns".to_owned()),
+        _ => None,
+    };
     vec![
         AgentEvent::Usage(usage),
         AgentEvent::Done {
             is_error: v.get("is_error").and_then(Value::as_bool).unwrap_or(false),
-            result: str_at(v, "result").to_owned(),
+            result: text,
             num_turns: u32::try_from(u64_at(Some(v), "num_turns")).unwrap_or(u32::MAX),
             denials: u32::try_from(denials).unwrap_or(u32::MAX),
+            cost_usd: v.get("total_cost_usd").and_then(Value::as_f64),
+            limit,
         },
     ]
+}
+
+/// Jumlah token dari `modelUsage` (semua model).
+fn model_usage(v: &Value) -> Usage {
+    let mut usage = Usage::default();
+    let Some(models) = v.get("modelUsage").and_then(Value::as_object) else {
+        return usage;
+    };
+    for m in models.values() {
+        let m = Some(m);
+        usage.input_tokens += u64_at(m, "inputTokens");
+        usage.output_tokens += u64_at(m, "outputTokens");
+        usage.cache_creation_input_tokens += u64_at(m, "cacheCreationInputTokens");
+        usage.cache_read_input_tokens += u64_at(m, "cacheReadInputTokens");
+    }
+    usage
 }

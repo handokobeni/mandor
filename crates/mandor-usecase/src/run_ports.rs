@@ -4,7 +4,7 @@ use std::collections::BTreeMap;
 use std::future::Future;
 use std::path::{Path, PathBuf};
 
-use mandor_domain::{AgentEvent, Reply, RunState, Task};
+use mandor_domain::{AcRow, AgentEvent, Reply, RunState, Task};
 
 use crate::ports::PortError;
 
@@ -21,6 +21,10 @@ pub struct RepoInfo {
     pub trusted_reviewers: Vec<String>,
     /// Allowlist tool tambahan per repo untuk agent.
     pub extra_allowed: Vec<String>,
+    /// Run app dan cara uji reviewer (KTD-36, KTD-37).
+    pub app: mandor_domain::app_run::AppSettings,
+    /// Override mode gerbang repo (KTD-37); `None` = ikut workspace/bawaan.
+    pub gate_mode: Option<mandor_domain::GateMode>,
 }
 
 /// Daftar repo yang terhubung.
@@ -43,6 +47,10 @@ pub struct WorkspaceInfo {
     pub repo_ids: Vec<String>,
     /// MCP server dari `.mcp.json` folder induk yang diizinkan dev.
     pub mcp_servers: Vec<String>,
+    /// Uji browser oleh reviewer untuk run workspace ini (KTD-37).
+    pub browser_tests: bool,
+    /// Mode gerbang workspace; `None` = bawaan Block.
+    pub gate_mode: Option<mandor_domain::GateMode>,
 }
 
 /// Perubahan di worktree terhadap branch remote.
@@ -70,6 +78,16 @@ impl WorkChanges {
 pub struct PrRef {
     pub url: String,
     pub open: bool,
+}
+
+/// Buku AC per run (KTD-25).
+pub trait LedgerStore: Send + Sync {
+    fn ac_rows(&self, run_id: &str) -> impl Future<Output = Result<Vec<AcRow>, PortError>> + Send;
+    fn save_ac_rows(
+        &self,
+        run_id: &str,
+        rows: &[AcRow],
+    ) -> impl Future<Output = Result<(), PortError>> + Send;
 }
 
 /// Operasi git dan gh milik daemon (KTD-11).
@@ -143,6 +161,15 @@ pub trait GitPort: Send + Sync {
         title: &str,
         body: &str,
     ) -> impl Future<Output = Result<String, PortError>> + Send;
+    /// Tree id isi worktree saat ini (KTD-28), tanpa mengubah index.
+    fn snapshot(&self, worktree: &Path) -> impl Future<Output = Result<String, PortError>> + Send;
+    /// Berkas yang berbeda antara dua tree.
+    fn changed_between(
+        &self,
+        worktree: &Path,
+        from: &str,
+        to: &str,
+    ) -> impl Future<Output = Result<Vec<String>, PortError>> + Send;
     /// Badan PR saat ini; `None` bila PR tidak ditemukan.
     fn pr_body(
         &self,
@@ -180,6 +207,26 @@ pub struct AgentRequest {
     pub workspace: Option<AgentWorkspace>,
     /// Giliran plan: agent hanya membaca dan menulis plan di pesan akhirnya.
     pub plan_mode: bool,
+    /// Tool ledger milik daemon untuk giliran ini (KTD-26).
+    pub ledger: Option<crate::review::LedgerAccess>,
+    /// Sumber desain hanya baca untuk agent (KTD-33).
+    pub design: Vec<crate::review::DesignRoot>,
+    /// Sesi reviewer AC: hanya baca, hook mode review, batas biaya dan waktu.
+    pub review: Option<ReviewRequest>,
+}
+
+/// Bagian permintaan agent untuk sesi reviewer (KTD-29–KTD-31).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ReviewRequest {
+    pub review_id: String,
+    /// Origin app yang boleh dibuka browser reviewer.
+    pub origins: Vec<String>,
+    /// `--chrome` hanya bila semua syarat kesiapan terpenuhi.
+    pub chrome: bool,
+    pub model: Option<String>,
+    /// Batas biaya `--max-budget-usd`, dalam sen.
+    pub budget_cents: u32,
+    pub timeout: std::time::Duration,
 }
 
 /// Konteks agent untuk run workspace.
@@ -228,6 +275,8 @@ pub trait AgentPort: Send + Sync {
     ) -> impl Future<Output = Result<String, PortError>> + Send;
     /// Menghentikan process group yatim dari daemon sebelumnya (KTD-13).
     fn reap(&self, pid: u32) -> impl Future<Output = ()> + Send;
+    /// Membersihkan berkas milik sesi reviewer (state pagar browser).
+    fn end_review(&self, review_id: &str) -> impl Future<Output = ()> + Send;
 }
 
 /// Bahan deskripsi PR. Semua teks berasal dari Lark atau diff dan diperlakukan
@@ -243,6 +292,10 @@ pub struct PrContext<'a> {
     pub plan: Option<&'a str>,
     /// Diff branch terhadap base, sudah dipotong.
     pub diff: &'a str,
+    /// AC yang sudah punya keputusan dev (Follows design, Skipped dengan
+    /// alasan, Checked manually) sebagai baris ringkasan PR; bukan AC yang
+    /// belum terpenuhi.
+    pub decided: &'a [String],
 }
 
 /// Run untuk satu record di laptop pemilik.
@@ -287,6 +340,16 @@ pub struct RunRecord {
     /// Hash badan PR yang terakhir ditulis Mandor, per URL PR. Badan yang hash-nya
     /// berbeda sudah disunting manusia dan tidak ditimpa.
     pub pr_body_hashes: BTreeMap<String, String>,
+    /// Snapshot kode (repo → tree id) saat review terakhir dimulai; kosong bila
+    /// belum pernah direview (KTD-28).
+    pub review_snapshot: BTreeMap<String, String>,
+    /// Sumber desain yang dipilih saat Start; dipakai semua giliran dan
+    /// reviewer (KTD-33). Kosong = run tanpa sumber desain.
+    pub design: Vec<crate::review::DesignRoot>,
+    /// Review yang sedang berjalan (state `Reviewing`).
+    pub review_id: Option<String>,
+    /// Skill reviewer pilihan dev saat Start; `None` = prompt bawaan.
+    pub reviewer_skill: Option<String>,
     /// Diisi store saat membaca; diabaikan saat menyimpan.
     pub created_at_ms: i64,
     /// Diisi store saat membaca; diabaikan saat menyimpan.
@@ -320,6 +383,10 @@ impl RunRecord {
             quiet_until_ms: None,
             fix_requested_by: None,
             pr_body_hashes: BTreeMap::new(),
+            review_snapshot: BTreeMap::new(),
+            design: Vec::new(),
+            review_id: None,
+            reviewer_skill: None,
             created_at_ms: 0,
             updated_at_ms: 0,
         }
@@ -438,6 +505,8 @@ pub enum NoticeKind {
     WaitingFix,
     NeedsAttention,
     PrCreated,
+    ReviewFinished,
+    AppFailed,
 }
 
 impl NoticeKind {
@@ -449,6 +518,8 @@ impl NoticeKind {
             Self::WaitingFix => "waiting_fix",
             Self::NeedsAttention => "needs_attention",
             Self::PrCreated => "pr_created",
+            Self::ReviewFinished => "review_finished",
+            Self::AppFailed => "app_failed",
         }
     }
 }
@@ -502,8 +573,9 @@ pub trait Prompts: Send + Sync {
         dev_note: Option<&str>,
         skill: Option<&str>,
     ) -> String;
-    /// Pesan setelah dev menyetujui plan: kerjakan plan itu.
-    fn approve_message(&self) -> String;
+    /// Pesan setelah dev menyetujui plan: kerjakan plan itu. `follow_design`:
+    /// teks AC (dengan label) yang mengikuti desain, bukan AC (R8a).
+    fn approve_message(&self, follow_design: &[String]) -> String;
     /// Pesan giliran brainstorm: baca kode, tanyakan hal yang belum jelas satu
     /// per satu, lalu ringkas requirements yang disepakati.
     fn brainstorm_message(
@@ -517,4 +589,242 @@ pub trait Prompts: Send + Sync {
     fn command_message(&self, name: &str, args: &str) -> String;
     /// Pesan dari brainstorm ke plan, di sesi yang sama.
     fn continue_plan_message(&self, skill: Option<&str>) -> String;
+    /// Tambahan pesan brainstorm/plan bila run punya sumber desain: baca
+    /// sumber dan isi kolom Design per AC lewat tool ledger.
+    fn design_message(&self, sources: &[crate::review::DesignRoot]) -> String;
+    /// Pesan pertama sesi reviewer: AC sebagai data, fakta kesiapan, dan
+    /// instruksi melapor lewat `ac_set_verdict` (KTD-38).
+    fn review_message(&self, brief: &ReviewBrief<'_>) -> String;
+    /// Pesan ke agent pelaksana berisi temuan reviewer sebagai data.
+    fn findings_message(&self, rows: &[AcRow]) -> String;
+}
+
+/// Repo anggota yang app-nya dinyalakan.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AppMember {
+    pub repo_id: String,
+    pub worktree: PathBuf,
+    /// Folder repo asli: sumber `.env` (tidak pernah disalin ke worktree).
+    pub repo_path: PathBuf,
+    pub settings: mandor_domain::app_run::AppSettings,
+}
+
+/// Proses app milik daemon (KTD-36). Satu langkah per panggilan sehingga
+/// usecase yang menggerakkan state.
+pub trait AppProcesses: Send + Sync {
+    /// Port lokal sudah menerima koneksi.
+    fn port_open(&self, port: u16) -> impl Future<Output = bool> + Send;
+    /// Hash lockfile di worktree; `None` bila tidak ada lockfile.
+    fn lockfile_hash(&self, worktree: &Path) -> impl Future<Output = Option<String>> + Send;
+    /// Menjalankan perintah setup sampai selesai (batas 10 menit).
+    fn setup(
+        &self,
+        run_id: &str,
+        member: &AppMember,
+    ) -> impl Future<Output = Result<(), PortError>> + Send;
+    /// Menyalakan perintah start; mengembalikan pgid.
+    fn spawn(
+        &self,
+        run_id: &str,
+        member: &AppMember,
+    ) -> impl Future<Output = Result<u32, PortError>> + Send;
+    /// Menunggu port app terbuka (interval 1 detik, batas 180 detik).
+    fn wait_ready(
+        &self,
+        run_id: &str,
+        repo_id: &str,
+        port: u16,
+    ) -> impl Future<Output = Result<(), PortError>> + Send;
+    /// Menghentikan semua proses app run itu.
+    fn stop(&self, run_id: &str) -> impl Future<Output = ()> + Send;
+    /// Log per repo: `(repo_id, teks)`.
+    fn logs(&self, run_id: &str) -> impl Future<Output = Vec<(String, String)>> + Send;
+    /// Menghentikan group app yatim dari daemon sebelumnya.
+    fn reap(&self, run_id: &str, pgid: u32) -> impl Future<Output = ()> + Send;
+}
+
+/// State app satu repo anggota.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct AppMemberRecord {
+    pub repo_id: String,
+    pub url: Option<String>,
+    pub pgid: Option<u32>,
+    pub state: mandor_domain::app_run::AppRunState,
+}
+
+/// State app milik satu run.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct AppRecord {
+    pub run_id: String,
+    pub state: mandor_domain::app_run::AppRunState,
+    pub members: Vec<AppMemberRecord>,
+    /// Snapshot kode (repo → tree) saat app terakhir dijalankan.
+    pub snapshot: BTreeMap<String, String>,
+    /// Hash lockfile saat setup terakhir berhasil, per repo.
+    pub setup_hashes: BTreeMap<String, String>,
+    pub database_confirmed: bool,
+    pub login_confirmed: bool,
+    pub error: Option<String>,
+}
+
+/// Penyimpanan state app dan run pemiliknya.
+pub trait AppRecords: Send + Sync {
+    fn app_record(
+        &self,
+        run_id: &str,
+    ) -> impl Future<Output = Result<Option<AppRecord>, PortError>> + Send;
+    fn save_app_record(
+        &self,
+        rec: &AppRecord,
+    ) -> impl Future<Output = Result<(), PortError>> + Send;
+    /// Run yang app-nya terakhir dinyalakan.
+    fn app_owner(&self) -> impl Future<Output = Result<Option<String>, PortError>> + Send;
+    fn set_app_owner(
+        &self,
+        run_id: Option<&str>,
+    ) -> impl Future<Output = Result<(), PortError>> + Send;
+}
+
+/// Fakta kesiapan uji browser untuk reviewer (R13, KTD-38).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ReviewFacts {
+    /// Reviewer boleh memakai browser.
+    pub browser: bool,
+    /// Alasan tanpa browser, mis. "app running older code".
+    pub reason: Option<String>,
+    /// URL app kanonik yang boleh dibuka.
+    pub app_urls: Vec<String>,
+}
+
+/// Bahan pesan pertama reviewer.
+#[derive(Debug, Clone, Copy)]
+pub struct ReviewBrief<'a> {
+    pub task: &'a Task,
+    /// Baris buku AC di gerbang yang dinilai.
+    pub rows: &'a [AcRow],
+    pub facts: &'a ReviewFacts,
+    /// Skill reviewer pilihan dev (`plugin:skill`).
+    pub skill: Option<&'a str>,
+    /// Run workspace: folder repo anggota.
+    pub repos: &'a [String],
+}
+
+/// Pemicu review.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ReviewTrigger {
+    Manual,
+    PushAndPr,
+    AutomaticFix,
+}
+
+impl ReviewTrigger {
+    #[must_use]
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Manual => "manual",
+            Self::PushAndPr => "push_and_pr",
+            Self::AutomaticFix => "automatic_fix",
+        }
+    }
+
+    #[must_use]
+    pub fn parse(s: &str) -> Option<Self> {
+        match s {
+            "manual" => Some(Self::Manual),
+            "push_and_pr" => Some(Self::PushAndPr),
+            "automatic_fix" => Some(Self::AutomaticFix),
+            _ => None,
+        }
+    }
+}
+
+/// Status satu review.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ReviewStatus {
+    Running,
+    Finished,
+    Failed,
+    Cancelled,
+}
+
+impl ReviewStatus {
+    #[must_use]
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Running => "running",
+            Self::Finished => "finished",
+            Self::Failed => "failed",
+            Self::Cancelled => "cancelled",
+        }
+    }
+
+    #[must_use]
+    pub fn parse(s: &str) -> Option<Self> {
+        match s {
+            "running" => Some(Self::Running),
+            "finished" => Some(Self::Finished),
+            "failed" => Some(Self::Failed),
+            "cancelled" => Some(Self::Cancelled),
+            _ => None,
+        }
+    }
+}
+
+/// Catatan satu review (riwayat).
+#[derive(Debug, Clone, PartialEq)]
+pub struct ReviewRecord {
+    pub id: String,
+    pub run_id: String,
+    pub trigger: ReviewTrigger,
+    pub status: ReviewStatus,
+    pub browser_used: bool,
+    /// Alasan reviewer tanpa browser.
+    pub browser_reason: Option<String>,
+    pub error: Option<String>,
+    pub cost_usd: Option<f64>,
+    pub usage: mandor_domain::Usage,
+    /// Kode berubah selama review (KTD-28).
+    pub stale: bool,
+    pub skill: Option<String>,
+    pub started_at_ms: i64,
+    pub finished_at_ms: Option<i64>,
+    /// Verdict per AC saat review berakhir.
+    pub verdicts: Vec<AcRow>,
+}
+
+/// Setelan reviewer global (KTD-30).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ReviewerSettings {
+    /// `None` = model agent pelaksana.
+    pub model: Option<String>,
+    /// Batas biaya per review, dalam sen USD (bawaan 2 USD).
+    pub budget_cents: u32,
+    pub timeout_secs: u64,
+}
+
+impl Default for ReviewerSettings {
+    fn default() -> Self {
+        Self {
+            model: None,
+            budget_cents: 200,
+            timeout_secs: 15 * 60,
+        }
+    }
+}
+
+/// Riwayat review dan setelan reviewer.
+pub trait ReviewHistory: Send + Sync {
+    fn save_review(&self, r: &ReviewRecord) -> impl Future<Output = Result<(), PortError>> + Send;
+    /// Review run, terbaru dulu.
+    fn reviews(
+        &self,
+        run_id: &str,
+    ) -> impl Future<Output = Result<Vec<ReviewRecord>, PortError>> + Send;
+    fn reviewer_settings(&self) -> impl Future<Output = ReviewerSettings> + Send;
+    fn set_reviewer_settings(
+        &self,
+        s: &ReviewerSettings,
+    ) -> impl Future<Output = Result<(), PortError>> + Send;
+    /// Ekstensi Claude in Chrome terakhir terdeteksi tersambung (U13).
+    fn chrome_connected(&self) -> impl Future<Output = bool> + Send;
 }

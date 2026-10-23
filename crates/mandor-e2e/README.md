@@ -1,6 +1,6 @@
 # mandor-e2e
 
-Smoke test Rilis 1 terhadap salinan uji Base Sprint Tasks, repo GitHub uji, dan
+Smoke test Rilis 1 dan Rilis 2 terhadap salinan uji Base Sprint Tasks, repo GitHub uji, dan
 login Claude Code milik pengguna. Tidak berjalan di CI.
 
 ## Persiapan
@@ -34,3 +34,29 @@ Skenario manual tambahan (dicatat di laporan rilis):
 - Windows + WSL: tutup UI saat agent berjalan, tunggu melebihi `vmIdleTimeout`,
   buka lagi; agent masih berjalan dan chat berlanjut.
 - Restart daemon di tengah perbaikan Waiting Fix: komentar tidak terkirim dua kali.
+
+## Rilis 2: review AC
+
+Persiapan tambahan (lihat `docs/runbook/ac-review.md`):
+
+- Kartu uji punya beberapa AC di tabel Acceptance Criteria, dan record uji kembali
+  *To Do* / *Ready To Dev*.
+- Folder desain uji (mis. prototipe HTML) untuk `MANDOR_E2E_DESIGN`.
+- Untuk uji browser: repo uji bertest mode Web dengan start command dan port
+  (`handokobeni/mandor-smoke` punya `web/`: start `python3 -m http.server 5173 --directory web`, port `5173`),
+  ekstensi Claude in Chrome tersambung, dan app dinyalakan dari tab run lalu
+  login dikonfirmasi lewat UI.
+
+```bash
+export MANDOR_E2E_DESIGN=/path/ke/folder-desain
+cargo test -p mandor-e2e --test rilis2_smoke -- --ignored --test-threads 1 --nocapture
+```
+
+| Test | Skenario | Langkah manual |
+|---|---|---|
+| `f1_sumber_desain_dan_follow_design_saat_approve` | F1: kolom Design terisi, Follow design saat approve | cek `mandor_design_gaps` di Lark |
+| `f2_review_kirim_temuan_konfirmasi_lalu_pr` | F2: review, Send to agent, review lagi, konfirmasi Can't verify, PR | jalankan setelah f1; cek ringkasan AC di PR |
+| `f3_waiting_fix_dengan_review_otomatis` | F3: Waiting Fix, review otomatis, push ditahan bila AC gagal | reviewer tepercaya berkomentar di kartu uji |
+| `ae8_hook_reviewer_menolak_situs_luar` | AE8: hook menolak situs di luar origin app | tidak ada (tanpa Lark/Claude) |
+
+Biaya dan token setiap review dicetak ke stderr; catat di `docs/progress/rilis-2.md`.

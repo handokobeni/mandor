@@ -25,6 +25,8 @@ pub struct FakeLark {
     pub write_errors: Arc<Mutex<Vec<PortError>>>,
     pub clock: Arc<AtomicI64>,
     pub acs: Arc<Mutex<HashMap<String, AcItem>>>,
+    /// `true`: tabel AC tidak bisa dibaca.
+    pub acs_fail: Arc<Mutex<bool>>,
     pub replies: Arc<Mutex<Vec<mandor_domain::Reply>>>,
     /// `true`: API komentar gagal (fallback Fix Notes).
     pub replies_fail: Arc<Mutex<bool>>,
@@ -92,6 +94,9 @@ impl LarkTasks for FakeLark {
         Ok(self.replies.lock().unwrap().clone())
     }
     async fn acceptance_criteria(&self, ids: &[String]) -> Result<Vec<AcItem>, PortError> {
+        if *self.acs_fail.lock().unwrap() {
+            return Err(PortError::Transient("AC table timeout".to_owned()));
+        }
         let acs = self.acs.lock().unwrap();
         Ok(ids.iter().filter_map(|i| acs.get(i).cloned()).collect())
     }
@@ -378,6 +383,8 @@ impl Deps for FakeDeps {
     type Spawner = run_fakes::TokioSpawner;
     type Repos = run_fakes::FakeRepos;
     type Prompts = PlainMessage;
+    type Reviews = run_fakes::FakeReviews;
+    type Apps = run_fakes::FakeApps;
 }
 
 pub mod run_fakes;
@@ -423,6 +430,8 @@ pub struct Station {
     pub runs: run_fakes::FakeRuns,
     pub notifier: run_fakes::FakeNotifier,
     pub repos: run_fakes::FakeRepos,
+    pub reviews: run_fakes::FakeReviews,
+    pub apps: run_fakes::FakeApps,
 }
 
 pub fn station(lark: &FakeLark, clock: &FakeClock, me: &str) -> Station {
@@ -432,6 +441,8 @@ pub fn station(lark: &FakeLark, clock: &FakeClock, me: &str) -> Station {
     let runs = run_fakes::FakeRuns::default();
     let notifier = run_fakes::FakeNotifier::default();
     let repos = run_fakes::FakeRepos::default();
+    let reviews = run_fakes::FakeReviews::default();
+    let apps = run_fakes::FakeApps::default();
     let ports = mandor_usecase::RunPorts::<FakeDeps> {
         git: git.clone(),
         agent: agent.clone(),
@@ -440,6 +451,8 @@ pub fn station(lark: &FakeLark, clock: &FakeClock, me: &str) -> Station {
         spawner: run_fakes::TokioSpawner::default(),
         repos: repos.clone(),
         prompts: PlainMessage,
+        reviews: reviews.clone(),
+        apps: apps.clone(),
     };
     let svc = Arc::new(mandor_usecase::RunService::new(Arc::new(svc), ports));
     Station {
@@ -451,6 +464,8 @@ pub fn station(lark: &FakeLark, clock: &FakeClock, me: &str) -> Station {
         runs,
         notifier,
         repos,
+        reviews,
+        apps,
     }
 }
 
@@ -483,8 +498,12 @@ impl mandor_usecase::run_ports::Prompts for PlainMessage {
         )
     }
 
-    fn approve_message(&self) -> String {
-        "APPROVED".to_owned()
+    fn approve_message(&self, follow_design: &[String]) -> String {
+        if follow_design.is_empty() {
+            "APPROVED".to_owned()
+        } else {
+            format!("APPROVED FOLLOW {}", follow_design.join("|"))
+        }
     }
 
     fn brainstorm_message(
@@ -508,6 +527,28 @@ impl mandor_usecase::run_ports::Prompts for PlainMessage {
 
     fn continue_plan_message(&self, skill: Option<&str>) -> String {
         format!("CONTINUE SKILL:{}", skill.unwrap_or("-"))
+    }
+
+    fn review_message(&self, b: &mandor_usecase::run_ports::ReviewBrief<'_>) -> String {
+        let acs: Vec<String> = b.rows.iter().map(|r| r.ac_id.clone()).collect();
+        format!(
+            "REVIEW {} AC:{} BROWSER:{} REASON:{} SKILL:{}",
+            b.task.title,
+            acs.join("|"),
+            b.facts.browser,
+            b.facts.reason.as_deref().unwrap_or("-"),
+            b.skill.unwrap_or("-")
+        )
+    }
+
+    fn findings_message(&self, rows: &[mandor_domain::AcRow]) -> String {
+        let ids: Vec<&str> = rows.iter().map(|r| r.ac_id.as_str()).collect();
+        format!("FINDINGS {}", ids.join("|"))
+    }
+
+    fn design_message(&self, sources: &[mandor_usecase::review::DesignRoot]) -> String {
+        let names: Vec<&str> = sources.iter().map(|s| s.name.as_str()).collect();
+        format!("DESIGN {}", names.join(","))
     }
 
     fn fix_message(&self, ctx: &mandor_usecase::run_ports::FixContext<'_>) -> String {

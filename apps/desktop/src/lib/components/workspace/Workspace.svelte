@@ -21,6 +21,11 @@
   import SquareKanban from '@lucide/svelte/icons/square-kanban';
   import Wrench from '@lucide/svelte/icons/wrench';
   import X from '@lucide/svelte/icons/x';
+  import ClipboardCheck from '@lucide/svelte/icons/clipboard-check';
+  import CircleQuestionMark from '@lucide/svelte/icons/circle-question-mark';
+  import Lock from '@lucide/svelte/icons/lock';
+  import ScanSearch from '@lucide/svelte/icons/scan-search';
+  import TriangleAlert from '@lucide/svelte/icons/triangle-alert';
   import { untrack } from 'svelte';
   import { toast } from 'svelte-sonner';
   import { flagMeta, isWorking, quietLeft } from '#lib/board.ts';
@@ -48,6 +53,25 @@
   import Composer from './Composer.svelte';
   import DiffViewer from './DiffViewer.svelte';
   import StartFixDialog from './StartFixDialog.svelte';
+  import AcReviewTab from './AcReviewTab.svelte';
+  import PlanApproval from './PlanApproval.svelte';
+  import GateDialogs from './GateDialogs.svelte';
+  import { activeRows, gate as acGate, gateButtonLabel, label as acLabel, tabCount } from '#lib/ac-review.ts';
+  import * as Popover from '#lib/components/ui/popover/index.ts';
+  import type { PublishParams } from '#lib/protocol/PublishParams.ts';
+  import type { PublishResult } from '#lib/protocol/PublishResult.ts';
+  import { LedgerStore } from '#lib/stores/ledger.svelte.ts';
+  import { appRun } from '#lib/stores/app-run.svelte.ts';
+  import { runs } from '#lib/stores/runs.svelte.ts';
+  import { snapshots } from '#lib/app-run.ts';
+  import type { AppChangesView } from '#lib/protocol/AppChangesView.ts';
+  import type { AppLogView } from '#lib/protocol/AppLogView.ts';
+  import type { RepoView } from '#lib/protocol/RepoView.ts';
+  import type { ReviewReadinessView } from '#lib/protocol/ReviewReadinessView.ts';
+  import AppLogsDrawer from './AppLogsDrawer.svelte';
+  import ReadinessDialog from './ReadinessDialog.svelte';
+  import RunAppConfirm from './RunAppConfirm.svelte';
+  import RunAppControl from './RunAppControl.svelte';
   import TaskDetails from './TaskDetails.svelte';
   import TaskTab from './TaskTab.svelte';
 
@@ -66,6 +90,47 @@
   let fixOpen = $state(false);
   let closeOpen = $state(false);
   let now = $state(Date.now());
+  let gateDialog = $state<'manual' | 'anyway' | 'warn' | null>(null);
+  let blockedOpen = $state(false);
+  let syncWarning = $state<string | null>(null);
+
+  // Buku AC run (Rilis 2): dimuat ulang saat run berganti.
+  const ledger = new LedgerStore();
+  $effect(() => {
+    const id = run.id;
+    return untrack(() => ledger.attach(rpc, id));
+  });
+  const reviewing = $derived(run.state === 'reviewing');
+  const acRows = $derived(ledger.ledger ? activeRows(ledger.ledger.rows) : []);
+  const gateNow = $derived(acGate(acRows, ledger.ledger?.gate_mode ?? 'block', reviewing));
+  const acCount = $derived(tabCount(acRows));
+  const failing = $derived(acRows.filter((r) => r.in_gate && !r.stale && r.verdict === 'fail'));
+
+  // Run app (Rilis 2 U13).
+  let repos = $state<RepoView[]>([]);
+  let appChanges = $state<AppChangesView[] | null>(null);
+  let appLogs = $state<AppLogView[] | null>(null);
+  let readiness = $state<{ view: ReviewReadinessView; trigger: 'manual' | 'push' } | null>(null);
+  let checking = $state(false);
+  $effect(() => {
+    const id = run.id;
+    untrack(() => appRun.watch(id));
+  });
+  $effect(() => {
+    untrack(() => {
+      void rpc
+        .request<RepoView[]>('repos.list')
+        .then((r) => (repos = r))
+        .catch(() => (repos = []));
+    });
+  });
+  const memberIds = $derived(run.repos.map((r) => r.repo_id));
+  const runnable = $derived(
+    repos.some((r) => memberIds.includes(r.id) && !!r.app.start_command && r.app.port !== null)
+  );
+  const envKeys = $derived(Object.fromEntries(repos.filter((r) => memberIds.includes(r.id)).map((r) => [r.id, r.app.env_keys])));
+  const ownerRun = $derived(appRun.otherOwner(run.id));
+  const ownerKey = $derived(ownerRun ? (runs.byId(ownerRun.run_id)?.key ?? 'another run') : null);
 
   // Detak per detik hanya selama jeda tenang (hitung mundur).
   $effect(() => {
@@ -93,9 +158,13 @@
     void act(() => rpc.request('runs.continue_to_plan', { run_id: run.id }), 'The agent is writing the plan');
   }
 
+  // AC yang ditandai Follow design di tab Plan; dikirim saat approve.
+  let follow = $state<string[]>([]);
+
   function approvePlan(): void {
     void act(async () => {
-      await rpc.request('runs.approve_plan', { run_id: run.id });
+      await rpc.request('runs.approve_plan', { run_id: run.id, follow_design: follow });
+      follow = [];
       tab = 'chat';
     }, 'Plan approved; the agent is coding');
   }
@@ -178,8 +247,126 @@
     }, 'Changes discarded');
   }
 
+  /** Push & PR mengikuti state gerbang AC (brief §4.3). */
   function publish(): void {
-    void act(() => rpc.request('runs.publish', { run_id: run.id }), 'Pushed and opened the PR');
+    switch (gateNow.state) {
+      case 'blocked':
+        blockedOpen = true;
+        return;
+      case 'needs_confirmation':
+        gateDialog = 'manual';
+        return;
+      case 'warn':
+        gateDialog = 'warn';
+        return;
+      case 'review_needed':
+        void requestReview('push');
+        return;
+      default:
+        void push({ run_id: run.id });
+    }
+  }
+
+  async function push(params: PublishParams): Promise<void> {
+    gateDialog = null;
+    await act(async () => {
+      const res = await rpc.request<PublishResult>('runs.publish', params);
+      syncWarning = res.sync_warning;
+      switch (res.outcome) {
+        case 'published':
+          toast.success('Pushed and opened the PR', res.sync_warning ? { description: res.sync_warning } : undefined);
+          break;
+        case 'review_started':
+          toast.info('Review started', { description: 'Nothing was pushed yet. Press Push & create PR again when it finishes.' });
+          break;
+        case 'blocked':
+          toast.error(`Push blocked by ${res.failed.join(', ')}`);
+          await ledger.load();
+          break;
+        default:
+          toast.warning(`Needs your check: ${res.unverified.join(', ')}`);
+          await ledger.load();
+      }
+    });
+  }
+
+  /** Review dimulai lewat checklist kesiapan bila run punya repo Web (KTD-39). */
+  async function requestReview(trigger: 'manual' | 'push'): Promise<void> {
+    try {
+      const view = await rpc.request<ReviewReadinessView>('review.readiness', { run_id: run.id });
+      if (view.needs_dialog) readiness = { view, trigger };
+      else await beginReview(trigger);
+    } catch (err) {
+      toast.error('Something went wrong', { description: message(err) });
+    }
+  }
+
+  async function beginReview(trigger: 'manual' | 'push'): Promise<void> {
+    readiness = null;
+    if (trigger === 'push') await push({ run_id: run.id });
+    else await act(() => rpc.request('review.start', { run_id: run.id }), 'Review started');
+  }
+
+  async function startFromReadiness(confirmed: { database: boolean; login: boolean }, trigger: 'manual' | 'push'): Promise<void> {
+    try {
+      await rpc.request('app.confirm', { run_id: run.id, database: confirmed.database, login: confirmed.login });
+    } catch (err) {
+      toast.error('Could not save your confirmation', { description: message(err) });
+      return;
+    }
+    await beginReview(trigger);
+  }
+
+  async function recheckChrome(): Promise<void> {
+    if (!readiness) return;
+    checking = true;
+    try {
+      await rpc.request('system.chrome_check', { force: true });
+      const view = await rpc.request<ReviewReadinessView>('review.readiness', { run_id: run.id });
+      readiness = { ...readiness, view };
+    } catch (err) {
+      toast.error('Could not check the extension', { description: message(err) });
+    } finally {
+      checking = false;
+    }
+  }
+
+  async function openRunApp(): Promise<void> {
+    readiness = null;
+    try {
+      appChanges = await rpc.request<AppChangesView[]>('app.changes', { run_id: run.id });
+    } catch (err) {
+      toast.error('Could not prepare the app', { description: message(err) });
+    }
+  }
+
+  function confirmRunApp(): void {
+    const changes = appChanges ?? [];
+    appChanges = null;
+    void act(() => rpc.request('app.run', { run_id: run.id, snapshots: snapshots(changes) }), 'Starting the app');
+  }
+
+  async function openLogs(): Promise<void> {
+    try {
+      appLogs = await rpc.request<AppLogView[]>('app.logs', { run_id: run.id });
+    } catch (err) {
+      toast.error('Could not load the logs', { description: message(err) });
+    }
+  }
+
+  function sendFindings(acIds: string[]): void {
+    void act(async () => {
+      await rpc.request('review.send_findings', { run_id: run.id, ac_ids: acIds });
+      tab = 'chat';
+    }, `Sent ${acIds.length} finding${acIds.length === 1 ? '' : 's'} to the agent`);
+  }
+
+  async function openFile(path: string): Promise<void> {
+    tab = 'changes';
+    await loadChanges();
+    const hit = files?.find((f) => f.path === path || path.endsWith(`/${f.path}`) || f.path.endsWith(`/${path}`));
+    if (hit) await selectFile(hit.path);
+    else toast.info(`${path} has no changes in this run`);
   }
 
   function closeRun(): void {
@@ -247,6 +434,8 @@
     <span class="muted">Plan ready. Read it in the Plan tab, reply in chat to revise it, or approve to start coding.</span>
   {:else if run.state === 'wf_running'}
     <span class="muted">Applying review feedback. Mandor pushes and moves Lark back to Waiting Review when done.</span>
+  {:else if reviewing}
+    <span class="run" data-tone="working"><LoaderCircle class="spin" aria-hidden="true" /><span class="lbl">Reviewing the AC. Messages you send now are queued.</span></span>
   {:else if working}
     <span class="muted">Agent is working. Messages you send now are queued.</span>
   {:else if run.state === 'awaiting_dev'}
@@ -267,7 +456,21 @@
       </span></span>
   {/if}
   <span class="right">
-    {#if working}
+    {#if runnable && run.phase === 'implement' && !['orphaned', 'stopped', 'failed'].includes(run.state)}
+      <RunAppControl
+        app={appRun.current}
+        disabled={busy || working}
+        onrun={() => void openRunApp()}
+        onstop={() => act(() => rpc.request('app.stop', { run_id: run.id }), 'App stopped')}
+        onlogs={() => void openLogs()}
+      />
+    {/if}
+    {#if reviewing}
+      <Button variant="outline" size="sm" disabled={busy} onclick={() => act(() => rpc.request('review.cancel', { run_id: run.id }), 'Review cancelled')}>
+        <Square />Stop review
+      </Button>
+      <Button size="sm" disabled><LoaderCircle class="spin" />Reviewing AC…</Button>
+    {:else if working}
       <Button variant="outline" size="sm" disabled={busy} onclick={() => act(() => rpc.request('runs.stop', { run_id: run.id }))}>
         <Square />Stop
       </Button>
@@ -277,9 +480,40 @@
       <Button size="sm" disabled={busy || !run.plan} onclick={approvePlan}><ListChecks />Approve plan &amp; implement</Button>
     {:else if run.state === 'awaiting_dev'}
       {#if files !== null && files.length === 0}<span class="muted" style="font-size:12px">No changes to push yet</span>{/if}
-      <Button size="sm" disabled={busy || files === null || files.length === 0} onclick={publish}>
-        <GitPullRequestArrow />Push &amp; create PR
-      </Button>
+      <Popover.Root bind:open={blockedOpen}>
+        <Popover.Trigger>
+          {#snippet child({ props })}
+            <Button
+              {...props}
+              size="sm"
+              variant={gateNow.state === 'blocked' ? 'outline' : 'default'}
+              disabled={busy || files === null || files.length === 0}
+              title={gateNow.state === 'review_needed' ? 'Starts a review first. Push again when it finishes.' : undefined}
+              onclick={(e: MouseEvent) => {
+                e.preventDefault();
+                publish();
+              }}
+            >
+              {#if gateNow.state === 'blocked'}<Lock />{:else if gateNow.state === 'warn'}<TriangleAlert />{:else if gateNow.state === 'needs_confirmation'}<CircleQuestionMark />{:else if gateNow.state === 'review_needed'}<ScanSearch />{:else}<GitPullRequestArrow />{/if}
+              {gateButtonLabel(gateNow)}
+              {#if gateNow.state === 'review_needed'}<span class="gate-tag">Review needed</span>{/if}
+              {#if gateNow.state === 'needs_confirmation'}<span class="gate-tag">Needs confirmation</span>{/if}
+              {#if gateNow.state === 'blocked'}<span class="gate-tag" data-tone="failed">{failing.length} AC failed</span>{/if}
+            </Button>
+          {/snippet}
+        </Popover.Trigger>
+        <Popover.Content align="end" class="gate-pop w-[360px]">
+          <div class="gp-head"><Lock aria-hidden="true" /><b>Push blocked by {failing.length} AC</b></div>
+          {#each failing as r (r.ac_id)}
+            <div class="gp-row"><span class="mono">{acLabel(r)}</span><span>{r.evidence ?? r.text}</span></div>
+          {/each}
+          <div class="gp-act">
+            <Button variant="ghost" size="sm" onclick={() => ((blockedOpen = false), (tab = 'ac'))}>View in AC review</Button>
+            <Button variant="outline" size="sm" onclick={() => ((blockedOpen = false), (gateDialog = 'anyway'))}>Push anyway…</Button>
+            <Button size="sm" onclick={() => ((blockedOpen = false), sendFindings(failing.filter((r) => r.selectable).map((r) => r.ac_id)))}>Send to agent</Button>
+          </div>
+        </Popover.Content>
+      </Popover.Root>
     {:else if run.state === 'wf_awaiting_comment'}
       <Button size="sm" disabled={busy} onclick={openFix}><Wrench />Start fix</Button>
     {:else if run.state === 'wf_quiet'}
@@ -363,6 +597,17 @@
       <MessageSquareText />Review comments
       {#if comments && comments.length > 0}<span class="count mono">{comments.length}</span>{/if}
     </Tabs.Trigger>
+    <Tabs.Trigger value="ac">
+      <ClipboardCheck />AC review
+      {#if reviewing}
+        <LoaderCircle class="spin icon-sm" aria-hidden="true" /><span class="sr-only">reviewing</span>
+      {:else if acCount}
+        <span class="count mono">{acCount.text}</span>
+        {#if acCount.failed > 0}
+          <span class="tab-fail" title="{acCount.failed} failed"><CircleX class="icon-sm" aria-hidden="true" /><span class="sr-only">{acCount.failed} failed</span></span>
+        {/if}
+      {/if}
+    </Tabs.Trigger>
   </Tabs.List>
 </Tabs.Root>
 
@@ -387,6 +632,9 @@
               <Copy />Copy Markdown
             </Button>
           </div>
+          {#if planning && run.state === 'awaiting_dev' && ledger.ledger}
+            <PlanApproval ledger={ledger.ledger} bind:follow />
+          {/if}
           <MarkdownDoc source={plan} />
         {:else}
           <div class="task-doc">
@@ -414,6 +662,19 @@
       <section class="ws-pane scroll-area" aria-label="Review comments">
         <CommentsTab {run} {comments} error={commentsError} {now} />
       </section>
+    {:else if tab === 'ac'}
+      <section class="ws-pane scroll-area" aria-label="AC review">
+        <AcReviewTab
+          taskKey={key}
+          store={ledger}
+          {reviewing}
+          agentBusy={(working && !reviewing) || run.phase !== 'implement' || run.state !== 'awaiting_dev'}
+          {now}
+          onreview={() => void requestReview('manual')}
+          onsend={sendFindings}
+          onfile={(p) => void openFile(p)}
+        />
+      </section>
     {/if}
   </div>
   {#if panelOpen}
@@ -440,6 +701,52 @@
         await rpc.request('runs.start_fix', params);
         fixOpen = false;
       }, 'Fix started')}
+  />
+{/if}
+
+{#if appChanges}
+  <RunAppConfirm
+    taskKey={key}
+    changes={appChanges}
+    {envKeys}
+    otherRun={ownerKey}
+    oncancel={() => (appChanges = null)}
+    onconfirm={confirmRunApp}
+    onfile={(p) => {
+      appChanges = null;
+      void openFile(p);
+    }}
+  />
+{/if}
+
+{#if appLogs}
+  <AppLogsDrawer logs={appLogs} error={appRun.current?.error ?? null} onclose={() => (appLogs = null)} />
+{/if}
+
+{#if readiness}
+  {@const r = readiness}
+  <ReadinessDialog
+    taskKey={key}
+    trigger={r.trigger === 'push' ? 'Push & create PR' : 'Run review'}
+    readiness={r.view}
+    ownerLabel={ownerKey}
+    {checking}
+    oncancel={() => (readiness = null)}
+    onstart={(c) => void startFromReadiness(c, r.trigger)}
+    onanyway={() => void beginReview(r.trigger)}
+    onrunapp={() => void openRunApp()}
+    onrecheck={() => void recheckChrome()}
+  />
+{/if}
+
+{#if gateDialog}
+  <GateDialogs
+    mode={gateDialog}
+    runId={run.id}
+    rows={acRows}
+    {syncWarning}
+    oncancel={() => (gateDialog = null)}
+    onconfirm={(p) => void push(p)}
   />
 {/if}
 

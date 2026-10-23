@@ -2,12 +2,34 @@
 
 use std::sync::Arc;
 
-use mandor_domain::{AppField, RunState, TaskStatus, WriteOp};
+use mandor_domain::push_gate::{apply_decision, evaluate};
+use mandor_domain::{AppField, GateDecision, GateMode, GateOutcome, RunState, TaskStatus, WriteOp};
 
 use super::{RunError, RunService};
 use crate::notify::notice;
 use crate::ports::{Clock, Deps};
-use crate::run_ports::{GitPort, NoticeKind, Notifier, RunPhase, RunRecord, RunStore};
+use crate::review::settings::{resolve_gate_mode, utc_minutes};
+use crate::run_ports::{
+    GitPort, LedgerStore, NoticeKind, Notifier, Repos, ReviewTrigger, RunPhase, RunRecord, RunStore,
+};
+
+/// Hasil Push & PR setelah gerbang AC (KTD-35).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PublishOutcome {
+    Published {
+        url: String,
+        /// Label AC Fail/Can't verify yang dibiarkan (mode peringatan).
+        warnings: Vec<String>,
+        /// AC tidak bisa disegarkan dari tracker; dipakai salinan terakhir.
+        sync_warning: Option<String>,
+    },
+    /// Belum ada review yang berlaku: review dimulai, push tidak berlanjut.
+    ReviewStarted { review_id: String },
+    /// Mode blokir: AC gagal tanpa alasan Push anyway.
+    Blocked { failed: Vec<String> },
+    /// Mode blokir: AC Can't verify belum dikonfirmasi.
+    NeedsConfirmation { unverified: Vec<String> },
+}
 
 /// Kursor komentar yang menandai "sejak sekarang" (detik epoch, tanpa reply).
 pub(crate) fn cursor_now(now_ms: i64) -> String {
@@ -21,6 +43,28 @@ impl<D: Deps> RunService<D> {
     /// # Errors
     /// Tidak ada perubahan, atau git/gh/agent gagal (run ditandai gagal).
     pub async fn publish(self: &Arc<Self>, run_id: &str) -> Result<String, RunError> {
+        match self.publish_gated(run_id, &GateDecision::default()).await? {
+            PublishOutcome::Published { url, .. } => Ok(url),
+            PublishOutcome::ReviewStarted { .. } => Err(RunError::InvalidState(
+                "the acceptance criteria review started; push after it finishes",
+            )),
+            PublishOutcome::Blocked { .. } | PublishOutcome::NeedsConfirmation { .. } => Err(
+                RunError::InvalidState("the acceptance criteria gate holds the push"),
+            ),
+        }
+    }
+
+    /// Push & PR dengan gerbang AC: refresh AC, tanda usang, evaluasi gerbang
+    /// dengan keputusan dev, lalu push hanya bila Ready. Keputusan dev disimpan
+    /// di buku AC sebelum push agar Retry memakai keputusan yang sama.
+    ///
+    /// # Errors
+    /// Run tidak bisa di-push, review gagal dimulai, atau git/gh gagal.
+    pub async fn publish_gated(
+        self: &Arc<Self>,
+        run_id: &str,
+        decision: &GateDecision,
+    ) -> Result<PublishOutcome, RunError> {
         let mut run = self.load(run_id).await?;
         if run.phase != RunPhase::Implement {
             return Err(RunError::InvalidState("plan not approved"));
@@ -28,10 +72,76 @@ impl<D: Deps> RunService<D> {
         if run.state.is_busy() || run.state.is_parked() || run.state == RunState::Preparing {
             return Err(RunError::InvalidState(run.state.as_str()));
         }
+        let refresh = self.refresh_ledger(run_id).await?;
+        let sync_warning = refresh.error.as_ref().map(|_| {
+            let at = refresh
+                .synced_at_ms
+                .map_or_else(|| "never".to_owned(), utc_minutes);
+            format!("Acceptance criteria could not be refreshed from Lark; using the copy synced at {at}")
+        });
+        self.mark_stale_if_changed(&run).await;
+        let mut rows = self.reviews.ac_rows(run_id).await?;
+        let mode = self.gate_mode(&run).await?;
+        let warnings = match evaluate(&rows, mode, decision) {
+            GateOutcome::NeedsReview => {
+                let rec = self
+                    .start_review(run_id, ReviewTrigger::PushAndPr, None)
+                    .await?;
+                return Ok(PublishOutcome::ReviewStarted { review_id: rec.id });
+            }
+            GateOutcome::Blocked { failed } => return Ok(PublishOutcome::Blocked { failed }),
+            GateOutcome::NeedsConfirmation { unverified } => {
+                return Ok(PublishOutcome::NeedsConfirmation { unverified });
+            }
+            GateOutcome::Ready { warnings } => warnings,
+        };
+        let before = rows.clone();
+        apply_decision(&mut rows, decision);
+        if rows != before {
+            self.reviews.save_ac_rows(run_id, &rows).await?;
+        }
+        let url = self.push_and_mark(&mut run).await?;
+        Ok(PublishOutcome::Published {
+            url,
+            warnings,
+            sync_warning,
+        })
+    }
+
+    /// Mode gerbang run untuk tampilan.
+    ///
+    /// # Errors
+    /// Run tidak ada atau repo/workspace tidak terbaca.
+    pub async fn gate_mode_for(&self, run_id: &str) -> Result<GateMode, RunError> {
+        let run = self.load(run_id).await?;
+        self.gate_mode(&run).await
+    }
+
+    /// Mode gerbang run (KTD-37).
+    pub(crate) async fn gate_mode(&self, run: &RunRecord) -> Result<GateMode, RunError> {
+        let overrides: Vec<_> = self
+            .members(run)
+            .await?
+            .iter()
+            .map(|m| m.repo.gate_mode)
+            .collect();
+        let workspace = match &run.workspace {
+            Some(ws) => self
+                .repos
+                .workspace(&ws.id)
+                .await?
+                .and_then(|w| w.gate_mode),
+            None => None,
+        };
+        Ok(resolve_gate_mode(&overrides, workspace))
+    }
+
+    /// Publishing → commit, push, PR → Waiting Review; gagal = Failed.
+    async fn push_and_mark(self: &Arc<Self>, run: &mut RunRecord) -> Result<String, RunError> {
         let previous = run.state;
         run.state = RunState::Publishing;
-        self.runs.save(&run, run.generation, self.now()).await?;
-        match self.publish_inner(&mut run).await {
+        self.runs.save(run, run.generation, self.now()).await?;
+        match self.publish_inner(run).await {
             Ok(url) => Ok(url),
             Err(e) => {
                 run.state = if matches!(e, RunError::NoChanges) {
@@ -40,7 +150,7 @@ impl<D: Deps> RunService<D> {
                     RunState::Failed
                 };
                 run.last_error = Some(e.to_string());
-                self.runs.save(&run, run.generation, self.now()).await?;
+                self.runs.save(run, run.generation, self.now()).await?;
                 Err(e)
             }
         }
@@ -90,6 +200,8 @@ impl<D: Deps> RunService<D> {
         }
         run.state = RunState::InReviewLoop;
         run.last_error = None;
+        // Catatan seperti "Push held" sudah selesai begitu PR terbuat.
+        run.note = None;
         self.runs.save(run, run.generation, self.now()).await?;
         self.notifier
             .notify(notice(self, NoticeKind::PrCreated, run, url).await)

@@ -734,6 +734,7 @@ async fn restrict(path: &Path) -> std::io::Result<()> {
 }
 
 #[cfg(not(unix))]
+#[allow(clippy::unused_async, reason = "tanda tangan sama dengan versi Unix")]
 async fn restrict(_path: &Path) -> std::io::Result<()> {
     Ok(())
 }

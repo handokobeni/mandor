@@ -17,6 +17,7 @@ mod connect;
 mod discovery;
 mod dispatch;
 mod hook;
+#[cfg(unix)]
 mod install;
 mod mcp;
 mod power;
@@ -63,7 +64,10 @@ async fn run(args: Vec<String>) -> ExitCode {
         Some("token") => connect::print_token(&cfg).await,
         Some("mcp") => mcp::run(&cfg).await,
         Some("--version") => print_version().await,
+        // Pemasangan sebagai service hanya untuk daemon Linux (WSL, tahap 2).
+        #[cfg(unix)]
         Some("install") => return exit(install::run_install(&cfg, &args[1..]).await),
+        #[cfg(unix)]
         Some("uninstall") => return exit(install::run_uninstall(&cfg, &args[1..]).await),
         Some(other) => Err(anyhow::anyhow!(
             "unknown subcommand: {other} (use serve, connect, token, mcp, install, uninstall, or hook)"
@@ -77,6 +81,7 @@ async fn run(args: Vec<String>) -> ExitCode {
 
 /// Kode keluar `install`/`uninstall`: hasilnya sudah tercetak sebagai JSON;
 /// hasil `error` keluar dengan kode 1.
+#[cfg(unix)]
 fn exit(result: anyhow::Result<bool>) -> ExitCode {
     match result {
         Ok(true) => ExitCode::SUCCESS,

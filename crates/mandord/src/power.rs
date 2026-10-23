@@ -216,7 +216,7 @@ pub fn start(
     status
 }
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 mod tests {
     use super::*;
 

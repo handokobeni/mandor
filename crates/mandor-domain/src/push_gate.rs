@@ -164,8 +164,16 @@ pub fn pr_decisions(rows: &[AcRow]) -> Vec<String> {
             r.design == Design::FollowDesign
                 || matches!(r.verdict, Verdict::Skipped | Verdict::CheckedManually)
         })
-        .map(|r| format!("{}: {}", r.display_label(), row_result(r)))
+        .map(|r| match ac_title(&r.text) {
+            Some(title) => format!("{} ({title}): {}", r.display_label(), row_result(r)),
+            None => format!("{}: {}", r.display_label(), row_result(r)),
+        })
         .collect()
+}
+
+/// Baris pertama yang tidak kosong dari teks AC (judul sebelum skenario).
+fn ac_title(text: &str) -> Option<&str> {
+    text.lines().map(str::trim).find(|l| !l.is_empty())
 }
 
 fn row_result(r: &AcRow) -> String {
@@ -234,10 +242,18 @@ mod tests {
         assert_eq!(
             pr_decisions(&rows),
             [
-                "AC-1: Checked manually by Beni",
-                "AC-5: Follows design (the PM was asked to update this AC)",
-                "AC-6: Skipped by Beni: PM setuju 3 item",
+                "AC-1 (teks): Checked manually by Beni",
+                "AC-5 (teks): Follows design (the PM was asked to update this AC)",
+                "AC-6 (teks): Skipped by Beni: PM setuju 3 item",
             ]
+        );
+        // Judul = baris pertama teks AC (sebelum skenario Gherkin), agar
+        // penulis PR bisa mencocokkan label dengan AC yang ia kenal.
+        let mut gherkin = row("AC-8812", Verdict::Skipped);
+        gherkin.text = "\nAC-6 — Riwayat 5 terakhir\nGiven pengguna …".to_owned();
+        assert_eq!(
+            pr_decisions(&[gherkin]),
+            ["AC-8812 (AC-6 — Riwayat 5 terakhir): Skipped: no reason given"]
         );
     }
 

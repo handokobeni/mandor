@@ -18,6 +18,8 @@ pub struct Task {
     pub reporter: Option<String>,
     pub ac_ids: Vec<String>,
     pub sprint_ids: Vec<String>,
+    /// Epic tertaut di field Epic (record di tabel epic).
+    pub epic_ids: Vec<String>,
     pub branch: Option<String>,
     pub pr_url: Option<String>,
     pub claim: Option<Claim>,
@@ -45,6 +47,7 @@ impl Task {
             reporter: None,
             ac_ids: Vec::new(),
             sprint_ids: Vec::new(),
+            epic_ids: Vec::new(),
             branch: None,
             pr_url: None,
             claim: None,

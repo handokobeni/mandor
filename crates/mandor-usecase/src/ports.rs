@@ -70,6 +70,12 @@ pub trait LarkTasks: Send + Sync {
         ids: &[String],
     ) -> impl Future<Output = Result<Vec<SprintItem>, PortError>> + Send;
 
+    /// Epic tertaut di field Epic, urut sesuai `ids`; ID yang tidak ada dilewati.
+    fn epics(
+        &self,
+        ids: &[String],
+    ) -> impl Future<Output = Result<Vec<EpicItem>, PortError>> + Send;
+
     /// Nama tampilan per `open_id`; ID yang tidak dikenal tidak ada di hasil.
     fn user_names(
         &self,
@@ -86,6 +92,15 @@ pub struct SprintItem {
     pub end_ms: Option<i64>,
     /// Status sprint, mis. "In Progress", "Done".
     pub status: Option<String>,
+}
+
+/// Satu epic dari tabel tertaut field Epic (mis. "Epic Pegasus").
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EpicItem {
+    pub record_id: String,
+    /// Kunci epic, mis. `E-PGS43`.
+    pub key: Option<String>,
+    pub name: String,
 }
 
 /// Satu Acceptance Criteria.

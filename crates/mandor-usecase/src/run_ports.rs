@@ -78,6 +78,8 @@ impl WorkChanges {
 pub struct PrRef {
     pub url: String,
     pub open: bool,
+    /// PR sudah di-merge (bukan sekadar ditutup).
+    pub merged: bool,
 }
 
 /// Buku AC per run (KTD-25).

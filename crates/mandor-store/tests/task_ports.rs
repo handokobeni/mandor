@@ -18,6 +18,7 @@ fn task(id: &str) -> Task {
     "Judul".clone_into(&mut t.title);
     t.assignees = vec!["ou_a".to_owned()];
     t.ac_ids = vec!["ac1".to_owned()];
+    t.epic_ids = vec!["ep1".to_owned()];
     t.claim = Some(Claim {
         open_id: "ou_a".to_owned(),
         ts_ms: 5,

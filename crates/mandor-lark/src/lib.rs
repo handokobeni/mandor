@@ -24,7 +24,7 @@ pub use comments::{RecordReply, map_record_replies};
 pub use error::LarkError;
 pub use fields::{link_ids, select_text, text_of, user_ids};
 pub use fields_bootstrap::{APP_FIELDS, FieldDef, validate_select};
-pub use gateway::{LarkGateway, TableRef, field, to_ac, to_sprint, to_task, write_body};
+pub use gateway::{LarkGateway, TableRef, field, to_ac, to_epic, to_sprint, to_task, write_body};
 pub use oauth::{Pkce, SCOPES, TokenSet, UserIdentity, authorize_url, new_state};
 pub use rate_limit::{RetryPolicy, with_retry};
 pub use token_store::FileTokenStore;

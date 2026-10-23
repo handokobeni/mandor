@@ -6,7 +6,16 @@ use mandor_usecase::PortError;
 use mandor_usecase::run_ports::{GitPort, PrRef, RepoInfo, WorkChanges};
 use secrecy::SecretString;
 
-use crate::{Git, GitError, PrState};
+use crate::{Git, GitError, PrInfo, PrState};
+
+/// PR dari gh menjadi [`PrRef`] untuk usecase.
+fn pr_ref(p: PrInfo) -> PrRef {
+    PrRef {
+        open: p.state == PrState::Open,
+        merged: p.state == PrState::Merged,
+        url: p.url,
+    }
+}
 
 /// Batas diff yang dikumpulkan untuk pembuat pesan commit.
 const DIFF_MAX: usize = 50_000;
@@ -186,10 +195,7 @@ impl GitPort for GitAdapter {
             .git
             .pr_for_branch(&repo.path, branch, token.as_ref())
             .await?;
-        Ok(pr.map(|p| PrRef {
-            url: p.url,
-            open: p.state == PrState::Open,
-        }))
+        Ok(pr.map(pr_ref))
     }
 
     async fn snapshot(&self, worktree: &Path) -> Result<String, PortError> {
@@ -244,5 +250,30 @@ impl GitPort for GitAdapter {
                 token.as_ref(),
             )
             .await?)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::ChecksState;
+
+    fn info(state: PrState) -> PrInfo {
+        PrInfo {
+            number: 1,
+            url: "https://github.com/o/r/pull/1".to_owned(),
+            state,
+            checks: ChecksState::None,
+        }
+    }
+
+    #[test]
+    fn status_pr_dari_gh() {
+        let open = pr_ref(info(PrState::Open));
+        assert!(open.open && !open.merged);
+        let merged = pr_ref(info(PrState::Merged));
+        assert!(!merged.open && merged.merged);
+        let closed = pr_ref(info(PrState::Closed));
+        assert!(!closed.open && !closed.merged);
     }
 }

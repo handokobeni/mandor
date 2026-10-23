@@ -35,6 +35,8 @@ pub struct GitState {
     pub commits: Vec<(PathBuf, String)>,
     pub pushes: Vec<String>,
     pub prs: HashMap<String, String>,
+    /// URL PR yang sudah di-merge.
+    pub merged_prs: Vec<String>,
     pub created_prs: Vec<(String, String)>,
     pub pr_bodies: Vec<String>,
     /// Badan PR saat ini per URL, seperti yang dikembalikan `gh pr view`.
@@ -173,16 +175,15 @@ impl GitPort for FakeGit {
             .unwrap_or_else(|| "+diff pr".to_owned()))
     }
     async fn find_pr(&self, r: &RepoInfo, branch: &str) -> Result<Option<PrRef>, PortError> {
-        Ok(self
-            .state
-            .lock()
-            .unwrap()
-            .prs
-            .get(&pr_key(r, branch))
-            .map(|u| PrRef {
+        let state = self.state.lock().unwrap();
+        Ok(state.prs.get(&pr_key(r, branch)).map(|u| {
+            let merged = state.merged_prs.contains(u);
+            PrRef {
                 url: u.clone(),
-                open: true,
-            }))
+                open: !merged,
+                merged,
+            }
+        }))
     }
     async fn create_pr(
         &self,

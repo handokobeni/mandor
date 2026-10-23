@@ -376,9 +376,10 @@ fn uninstall_menghentikan_service_menghapus_unit_dan_biner() {
     std::fs::write(e.data.join("lark.json"), b"{}").unwrap();
     e.clear_calls();
 
-    let (out, raw) = e.run(&["uninstall"], &[]);
+    let (out, raw) = e.run(&["uninstall"], &[("FAKE_LINGER", "yes")]);
     assert!(raw.status.success());
     assert_eq!(out["result"], "uninstalled");
+    assert_eq!(out["linger"], true, "linger tidak diubah uninstall");
     assert!(!e.installed().exists());
     assert!(!e.unit().exists());
     assert!(e.data.join("lark.json").exists(), "data pengguna tetap");

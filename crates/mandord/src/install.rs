@@ -322,10 +322,11 @@ async fn uninstall(cfg: &Config, paths: &Paths, force: bool) -> anyhow::Result<R
         systemctl(cfg, &["daemon-reload"], PROC_TIMEOUT).await?;
     }
     remove_if_regular(&paths.target).await?;
+    let linger = systemd && linger_enabled(cfg).await;
     Ok(report(
         InstallResult::Uninstalled,
         if systemd { "systemd" } else { "none" },
-        false,
+        linger,
         live.running != Running::No,
         &mut warnings,
     ))

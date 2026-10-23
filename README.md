@@ -118,6 +118,10 @@ Smoke test terhadap Lark, GitHub, dan Claude sungguhan (Rilis 1 dan Rilis 2): li
 
 Sumber desain, app web untuk diuji di Chrome, gerbang Push & PR, view "Design gaps" di Lark, dan biaya review: lihat `docs/runbook/ac-review.md`.
 
+## Run grup kartu satu flow
+
+Beberapa kartu satu epic milik Anda dikerjakan sebagai satu run, satu branch, dan satu PR ("Start together" di dialog Start): lihat `docs/runbook/grouped-runs.md`.
+
 ## Build rilis
 
 ```bash

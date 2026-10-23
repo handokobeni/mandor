@@ -20,7 +20,7 @@ use crate::run_ports::{
 };
 
 /// Batas diff untuk pembuat pesan commit.
-const COMMIT_DIFF_MAX: usize = 50_000;
+pub(crate) const COMMIT_DIFF_MAX: usize = 50_000;
 /// Judul PR: `KEY: judul task`.
 fn pr_title(task: &Task) -> String {
     match &task.key {

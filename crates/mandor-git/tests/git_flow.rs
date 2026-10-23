@@ -538,3 +538,49 @@ async fn snapshot_tree_stabil_berubah_karena_berkas_baru_dan_tidak_mengubah_inde
         "index sementara dibersihkan"
     );
 }
+
+/// Revert commit satu kartu run grup (R13): bersih bila tidak ada commit lain
+/// yang bergantung, konflik dibatalkan tanpa mengubah worktree.
+#[tokio::test]
+async fn revert_commit_bersih_atau_konflik_dibatalkan() {
+    let f = fixture();
+    let wt = f
+        .git
+        .create_worktree(&f.repo, "ws-rv", "mandor/pgs-rv", "main", None)
+        .await
+        .unwrap();
+    std::fs::write(wt.path.join("satu.txt"), "satu\n").unwrap();
+    let first = f
+        .git
+        .commit_all(&wt.path, "kartu 1")
+        .await
+        .unwrap()
+        .unwrap();
+    std::fs::write(wt.path.join("dua.txt"), "dua\n").unwrap();
+    let second = f
+        .git
+        .commit_all(&wt.path, "kartu 2")
+        .await
+        .unwrap()
+        .unwrap();
+
+    assert!(f.git.revert_commit(&wt.path, &first).await.unwrap());
+    assert!(!wt.path.join("satu.txt").exists());
+    assert!(wt.path.join("dua.txt").exists());
+    assert!(!f.git.is_dirty(&wt.path).await.unwrap());
+
+    // Kartu 3 mengubah berkas kartu 2: revert kartu 2 konflik.
+    std::fs::write(wt.path.join("dua.txt"), "dua diubah kartu 3\n").unwrap();
+    f.git.commit_all(&wt.path, "kartu 3").await.unwrap();
+    let head = sh(&wt.path, &["rev-parse", "HEAD"]);
+    assert!(!f.git.revert_commit(&wt.path, &second).await.unwrap());
+    assert_eq!(
+        sh(&wt.path, &["rev-parse", "HEAD"]),
+        head,
+        "tidak ada commit revert"
+    );
+    assert!(
+        !f.git.is_dirty(&wt.path).await.unwrap(),
+        "revert dibatalkan bersih"
+    );
+}

@@ -35,6 +35,10 @@ pub struct GitState {
     pub commits: Vec<(PathBuf, String)>,
     pub pushes: Vec<String>,
     pub prs: HashMap<String, String>,
+    /// Commit yang di-revert (run grup).
+    pub reverts: Vec<String>,
+    /// Commit yang revert-nya konflik.
+    pub revert_conflicts: Vec<String>,
     /// URL PR yang sudah di-merge.
     pub merged_prs: Vec<String>,
     pub created_prs: Vec<(String, String)>,
@@ -146,14 +150,22 @@ impl GitPort for FakeGit {
         self.state.lock().unwrap().reverted.push(path.to_owned());
         Ok(())
     }
-    async fn commit_all(&self, wt: &Path, message: &str) -> Result<(), PortError> {
+    async fn commit_all(&self, wt: &Path, message: &str) -> Result<Option<String>, PortError> {
         let mut st = self.state.lock().unwrap();
         st.commits.push((wt.to_path_buf(), message.to_owned()));
         if let Some(c) = st.changes.get_mut(wt) {
             c.dirty = false;
             c.unpushed += 1;
         }
-        Ok(())
+        Ok(Some(format!("sha{}", st.commits.len())))
+    }
+    async fn revert_commit(&self, _wt: &Path, sha: &str) -> Result<bool, PortError> {
+        let mut st = self.state.lock().unwrap();
+        if st.revert_conflicts.iter().any(|s| s == sha) {
+            return Ok(false);
+        }
+        st.reverts.push(sha.to_owned());
+        Ok(true)
     }
     async fn push(&self, _r: &RepoInfo, wt: &Path, branch: &str) -> Result<(), PortError> {
         let mut st = self.state.lock().unwrap();

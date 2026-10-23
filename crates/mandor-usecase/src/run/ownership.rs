@@ -2,7 +2,7 @@
 
 use std::sync::Arc;
 
-use mandor_domain::RunState;
+use mandor_domain::{ClaimLoss, RunState};
 
 use super::{RunError, RunService};
 use crate::notify::notice;
@@ -23,21 +23,16 @@ impl<D: Deps> RunService<D> {
             if matches!(run.state, RunState::Orphaned | RunState::Stopped) {
                 continue;
             }
+            let cards = self.runs.cards(&run.id).await?;
+            if !cards.is_empty() {
+                if let Some(id) = self.heartbeat_group(&mut run, cards).await? {
+                    orphaned.push(id);
+                }
+                continue;
+            }
             match self.sync.heartbeat(&run.record_id).await {
                 Ok(Heartbeat::Lost(loss)) => {
-                    if let Some(stopper) = self.take_stopper(&run.id) {
-                        crate::run_ports::Stopper::stop(&stopper).await;
-                    }
-                    let expected = run.generation;
-                    run.generation += 1;
-                    run.state = loss.run_state();
-                    run.pid = None;
-                    self.runs.save(&run, expected, self.now()).await?;
-                    self.notifier
-                        .notify(
-                            notice(self, NoticeKind::NeedsAttention, &run, loss.describe()).await,
-                        )
-                        .await;
+                    self.stop_for_loss(&mut run, loss).await?;
                     orphaned.push(run.id);
                 }
                 Ok(_) => {}
@@ -47,6 +42,82 @@ impl<D: Deps> RunService<D> {
             }
         }
         Ok(orphaned)
+    }
+
+    /// Heartbeat setiap kartu terbuka run grup (KTD-G5). Kehilangan klaim
+    /// kartu aktif menghentikan run seperti run tunggal; kartu selesai ditandai
+    /// berubah di Lark (diputuskan di gerbang); kartu yang belum dimulai
+    /// diperiksa ulang sebelum gilirannya (R9).
+    async fn heartbeat_group(
+        &self,
+        run: &mut RunRecord,
+        mut cards: Vec<crate::run_ports::GroupCardRow>,
+    ) -> Result<Option<String>, RunError> {
+        use mandor_domain::group::{CardState, LossAction, on_claim_loss};
+        let mut marked = false;
+        for card in &mut cards {
+            if matches!(card.state, CardState::Removed(_)) {
+                continue;
+            }
+            let loss = match self.sync.heartbeat(&card.record_id).await {
+                Ok(Heartbeat::Lost(loss)) => loss,
+                Ok(_) => continue,
+                Err(e) => {
+                    tracing::warn!(record_id = %card.record_id, error = %e, "heartbeat klaim kartu grup gagal");
+                    continue;
+                }
+            };
+            match on_claim_loss(&card.state) {
+                LossAction::StopRun => {
+                    self.stop_for_loss(run, loss).await?;
+                    return Ok(Some(run.id.clone()));
+                }
+                LossAction::MarkCard => {
+                    if card.state == CardState::Done && !card.changed_in_lark {
+                        card.changed_in_lark = true;
+                        marked = true;
+                    }
+                }
+            }
+        }
+        if marked {
+            self.runs.save_cards(&run.id, &cards, None).await?;
+        }
+        Ok(None)
+    }
+
+    /// Melepas klaim kartu utama dan semua kartu grup yang masih terbuka.
+    async fn release_run_claims(&self, run: &RunRecord) -> Result<(), RunError> {
+        let mut claimed = vec![run.record_id.clone()];
+        for card in self.runs.cards(&run.id).await? {
+            if !matches!(card.state, mandor_domain::group::CardState::Removed(_))
+                && !claimed.contains(&card.record_id)
+            {
+                claimed.push(card.record_id);
+            }
+        }
+        for record_id in &claimed {
+            if let Err(e) = self.sync.release_claim(record_id).await {
+                tracing::warn!(record_id = %record_id, error = %e, "gagal melepas klaim saat menutup run");
+            }
+        }
+        Ok(())
+    }
+
+    /// Menghentikan run karena klaim hilang dan memberi tahu dev.
+    async fn stop_for_loss(&self, run: &mut RunRecord, loss: ClaimLoss) -> Result<(), RunError> {
+        if let Some(stopper) = self.take_stopper(&run.id) {
+            crate::run_ports::Stopper::stop(&stopper).await;
+        }
+        let expected = run.generation;
+        run.generation += 1;
+        run.state = loss.run_state();
+        run.pid = None;
+        self.runs.save(run, expected, self.now()).await?;
+        self.notifier
+            .notify(notice(self, NoticeKind::NeedsAttention, run, loss.describe()).await)
+            .await;
+        Ok(())
     }
 
     /// "Ambil alih" task yang klaimnya tidak aktif 30 menit: klaim dengan baca
@@ -138,9 +209,7 @@ impl<D: Deps> RunService<D> {
         if let Some(stopper) = self.take_stopper(run_id) {
             crate::run_ports::Stopper::stop(&stopper).await;
         }
-        if let Err(e) = self.sync.release_claim(&run.record_id).await {
-            tracing::warn!(record_id = %run.record_id, error = %e, "gagal melepas klaim saat menutup run");
-        }
+        self.release_run_claims(&run).await?;
         if let (Some(_), Some(branch)) = (&run.worktree, &run.branch) {
             let mut removable = Vec::new();
             let mut kept = false;

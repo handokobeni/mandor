@@ -5,16 +5,16 @@
 use std::sync::Arc;
 
 use mandor_domain::group::{self, Candidate, CardState, Unselectable};
-use mandor_domain::{AcRow, AppField, Task, TaskStatus, WriteOp};
+use mandor_domain::{AcRow, AppField, RunState, Task, TaskStatus, WriteOp};
 
-use super::members::group_name;
+use super::members::{COMMIT_DIFF_MAX, group_name};
 use super::start::{Plan, start_summary};
 use super::{RunError, RunService};
 use crate::ports::{AcItem, Deps, Ids, LarkTasks, TaskCache};
 use crate::review::DesignRoot;
 use crate::run_ports::{
-    GroupCardRow, LedgerStore, Prompts, RunMember, RunPhase, RunRecord, RunStore, RunWorkspace,
-    SessionRef,
+    AgentPort, CardCommit, ChatItem, GitPort, GroupCardRow, LedgerStore, Prompts, RunMember,
+    RunPhase, RunRecord, RunStore, RunWorkspace, SessionRef,
 };
 use crate::{Planning, StartStep, StartTarget};
 
@@ -281,6 +281,10 @@ impl<D: Deps> RunService<D> {
         }
         self.save_group_ledger(&run.id, &input.per_card).await;
 
+        run.group_plan = !matches!(planning, Planning::Skip);
+        if let Planning::Plan { skill } = planning {
+            run.plan_skill.clone_from(skill);
+        }
         let message = self.card_message(&mut run, &input, 0, dev_note, planning);
         let session = SessionRef::New(run.session_id.clone().unwrap_or_default());
         progress(StartStep::StartingAgent);
@@ -308,6 +312,214 @@ impl<D: Deps> RunService<D> {
         self.group_in_progress(record_ids, &branch, &prepared[0].0.id)
             .await?;
         Ok(run)
+    }
+
+    /// "Next card" (R5): commit lokal kartu aktif dengan kunci kartu di pesan
+    /// commit, tandai selesai, lalu mulai kartu berikutnya, atau tunggu Push &
+    /// PR bila semua kartu selesai.
+    ///
+    /// # Errors
+    /// Bukan run grup, agent masih bekerja, plan belum disetujui, atau git/agent gagal.
+    pub async fn next_card(self: &Arc<Self>, run_id: &str) -> Result<(), RunError> {
+        let _work = self.enter_work()?;
+        let mut run = self.load(run_id).await?;
+        if run.state != RunState::AwaitingDev || run.phase != RunPhase::Implement {
+            return Err(RunError::InvalidState("the card is not finished yet"));
+        }
+        let mut cards = self.group_of(run_id).await?;
+        let idx = cards
+            .iter()
+            .position(|c| c.state == CardState::Active)
+            .ok_or(RunError::InvalidState("no active card"))?;
+        let task = self.task_of(&cards[idx].record_id).await?;
+        cards[idx].commits = self.commit_card(&run, key_of(&task)).await?;
+        cards[idx].state = CardState::Done;
+        cards[idx].plan = run.plan.take();
+        self.advance(&mut run, &mut cards).await
+    }
+
+    /// Melanjutkan grup setelah kartu dikeluarkan (R9): mulai kartu berikutnya.
+    ///
+    /// # Errors
+    /// Bukan run grup, masih ada kartu aktif, agent bekerja, atau agent gagal.
+    pub async fn continue_group(self: &Arc<Self>, run_id: &str) -> Result<(), RunError> {
+        let _work = self.enter_work()?;
+        let mut run = self.load(run_id).await?;
+        if run.state != RunState::AwaitingDev {
+            return Err(RunError::InvalidState(run.state.as_str()));
+        }
+        let mut cards = self.group_of(run_id).await?;
+        if group::active_card(&group_cards_domain(&cards)).is_some() {
+            return Err(RunError::InvalidState("a card is still active"));
+        }
+        self.advance(&mut run, &mut cards).await
+    }
+
+    /// Mengeluarkan kartu yang belum dimulai (R10): klaim dilepas, dev diminta
+    /// mengembalikannya ke To Do.
+    ///
+    /// # Errors
+    /// Bukan run grup, kartu tidak ada atau sudah dimulai.
+    pub async fn remove_card(&self, run_id: &str, record_id: &str) -> Result<(), RunError> {
+        let mut run = self.load(run_id).await?;
+        let mut cards = self.group_of(run_id).await?;
+        let card = cards
+            .iter_mut()
+            .find(|c| c.record_id == record_id)
+            .ok_or(RunError::NotFound("card"))?;
+        if card.state != CardState::Pending {
+            return Err(RunError::InvalidState(
+                "only cards not started can be removed",
+            ));
+        }
+        card.state = CardState::Removed(group::RemovedReason::ByDev);
+        self.release_quietly(record_id).await;
+        let key = self.key_or_id(record_id).await;
+        run.note = Some(format!(
+            "{key} was removed from the group; move it back to To Do in Lark."
+        ));
+        self.save_group(&mut run, &cards).await
+    }
+
+    /// Menghentikan grup (R10): commit kartu yang selesai di-push tanpa PR,
+    /// klaim semua kartu dilepas, run ditutup.
+    ///
+    /// # Errors
+    /// Bukan run grup, agent masih bekerja, atau git gagal.
+    pub async fn stop_group(self: &Arc<Self>, run_id: &str) -> Result<(), RunError> {
+        let run = self.load(run_id).await?;
+        if run.state.is_working() {
+            return Err(RunError::InvalidState(run.state.as_str()));
+        }
+        self.group_of(run_id).await?;
+        let branch = run
+            .branch
+            .clone()
+            .ok_or(RunError::InvalidState("no branch"))?;
+        for (m, changes) in self.member_changes(&run).await? {
+            if changes.unpushed > 0 {
+                self.git.push(&m.repo, &m.worktree, &branch).await?;
+            }
+        }
+        self.close_run(run_id).await
+    }
+
+    /// Kartu run grup; `InvalidState` untuk run tunggal.
+    async fn group_of(&self, run_id: &str) -> Result<Vec<GroupCardRow>, RunError> {
+        let cards = self.runs.cards(run_id).await?;
+        if cards.is_empty() {
+            return Err(RunError::InvalidState("not a group run"));
+        }
+        Ok(cards)
+    }
+
+    /// Commit lokal perubahan setiap repo run untuk kartu `key` (KTD-G3).
+    async fn commit_card(&self, run: &RunRecord, key: &str) -> Result<Vec<CardCommit>, RunError> {
+        let mut out = Vec::new();
+        for (m, changes) in self.member_changes(run).await? {
+            if !changes.dirty {
+                continue;
+            }
+            let diff: String = changes.diff.chars().take(COMMIT_DIFF_MAX).collect();
+            let summary = self.agent.commit_message(&m.worktree, &diff).await?;
+            let message = format!("{key}: {summary}");
+            if let Some(sha) = self.git.commit_all(&m.worktree, &message).await? {
+                self.runs
+                    .append(
+                        &run.id,
+                        &ChatItem::System(format!("Commit: {message}")),
+                        self.now(),
+                    )
+                    .await?;
+                out.push(CardCommit {
+                    repo_id: m.repo.id.clone(),
+                    sha,
+                });
+            }
+        }
+        Ok(out)
+    }
+
+    /// Memulai kartu berikutnya setelah memeriksa ulang kartu itu di Lark (R9),
+    /// atau menunggu Push & PR bila tidak ada kartu lagi.
+    async fn advance(
+        self: &Arc<Self>,
+        run: &mut RunRecord,
+        cards: &mut [GroupCardRow],
+    ) -> Result<(), RunError> {
+        let Some(next) = cards.iter().position(|c| c.state == CardState::Pending) else {
+            run.note = Some("All cards are done. Review the AC, then Push & PR.".to_owned());
+            return self.save_group(run, cards).await;
+        };
+        let id = cards[next].record_id.clone();
+        let fresh = self.sync.lark.fetch(std::slice::from_ref(&id)).await?;
+        let task = fresh.into_iter().find(|t| t.record_id == id);
+        if !group::still_ours(task.as_ref(), self.sync.me()) {
+            cards[next].state = CardState::Removed(group::RemovedReason::ChangedInLark);
+            self.release_quietly(&id).await;
+            let key = task.as_ref().map_or(id.clone(), |t| key_of(t).to_owned());
+            run.note = Some(format!(
+                "{key} changed in Lark and was removed from the group. Continue without it, or stop the group."
+            ));
+            return self.save_group(run, cards).await;
+        }
+        cards[next].state = CardState::Active;
+        let active: Vec<String> = cards
+            .iter()
+            .filter(|c| !matches!(c.state, CardState::Removed(_)))
+            .map(|c| c.record_id.clone())
+            .collect();
+        let input = self.load_group(&active).await?;
+        let index = active.iter().position(|a| *a == id).unwrap_or_default();
+        let planning = if run.group_plan {
+            Planning::Plan {
+                skill: run.plan_skill.clone(),
+            }
+        } else {
+            Planning::Skip
+        };
+        run.note = None;
+        run.phase = RunPhase::Implement;
+        let message = self.card_message(run, &input, index, None, &planning);
+        self.save_group(run, cards).await?;
+        let req = self.resume_request(run, message).await?;
+        let summary = format!("Next card: {}", key_of(&input.tasks[index]));
+        self.spawn_turn(run, req, Some(summary)).await
+    }
+
+    /// Menyimpan kartu (dengan pindah kartu utama bila perlu) lalu run.
+    async fn save_group(
+        &self,
+        run: &mut RunRecord,
+        cards: &[GroupCardRow],
+    ) -> Result<(), RunError> {
+        let primary = new_primary(run, cards);
+        self.runs
+            .save_cards(&run.id, cards, primary.as_deref())
+            .await?;
+        if let Some(p) = primary {
+            run.record_id = p;
+        }
+        let expected = run.generation;
+        run.generation += 1;
+        self.runs.save(run, expected, self.now()).await?;
+        Ok(())
+    }
+
+    /// Melepas klaim tanpa menggagalkan pemanggil.
+    async fn release_quietly(&self, record_id: &str) {
+        if let Err(e) = self.sync.release_claim(record_id).await {
+            tracing::warn!(record_id, error = %e, "gagal melepas klaim kartu grup");
+        }
+    }
+
+    /// Kunci kartu dari cache, atau ID record.
+    async fn key_or_id(&self, record_id: &str) -> String {
+        self.task_of(record_id)
+            .await
+            .ok()
+            .and_then(|t| t.key)
+            .unwrap_or_else(|| record_id.to_owned())
     }
 
     /// Buku AC awal grup; kegagalan hanya dicatat (refresh membangunnya ulang).
@@ -349,6 +561,32 @@ impl<D: Deps> RunService<D> {
         }
         Ok(())
     }
+}
+
+/// Kartu tersimpan sebagai kartu domain.
+fn group_cards_domain(cards: &[GroupCardRow]) -> Vec<group::GroupCard> {
+    cards
+        .iter()
+        .map(|c| group::GroupCard {
+            record_id: c.record_id.clone(),
+            state: c.state.clone(),
+            changed_in_lark: c.changed_in_lark,
+        })
+        .collect()
+}
+
+/// Kartu utama baru bila kartu utama run sudah dikeluarkan.
+fn new_primary(run: &RunRecord, cards: &[GroupCardRow]) -> Option<String> {
+    let primary_removed = cards
+        .iter()
+        .any(|c| c.record_id == run.record_id && matches!(c.state, CardState::Removed(_)));
+    if !primary_removed {
+        return None;
+    }
+    cards
+        .iter()
+        .find(|c| !matches!(c.state, CardState::Removed(_)))
+        .map(|c| c.record_id.clone())
 }
 
 /// Task dan AC kartu grup.

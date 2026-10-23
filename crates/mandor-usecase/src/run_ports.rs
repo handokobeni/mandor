@@ -133,11 +133,20 @@ pub trait GitPort: Send + Sync {
         worktree: &Path,
         path: &str,
     ) -> impl Future<Output = Result<(), PortError>> + Send;
+    /// Commit semua perubahan; hash commit, atau `None` bila tidak ada yang
+    /// di-commit.
     fn commit_all(
         &self,
         worktree: &Path,
         message: &str,
-    ) -> impl Future<Output = Result<(), PortError>> + Send;
+    ) -> impl Future<Output = Result<Option<String>, PortError>> + Send;
+    /// Revert satu commit; `false` bila konflik (revert dibatalkan, worktree
+    /// tidak berubah).
+    fn revert_commit(
+        &self,
+        worktree: &Path,
+        sha: &str,
+    ) -> impl Future<Output = Result<bool, PortError>> + Send;
     fn push(
         &self,
         repo: &RepoInfo,
@@ -333,6 +342,9 @@ pub struct RunRecord {
     pub plan: Option<String>,
     /// Skill plan yang dipakai setelah brainstorm; `None` = prompt bawaan.
     pub plan_skill: Option<String>,
+    /// Run grup: setiap kartu berikutnya diawali giliran plan yang menunggu
+    /// persetujuan (Planning dipilih sekali saat mulai).
+    pub group_plan: bool,
     /// Akhir jeda tenang (ms epoch); hanya bermakna saat state `WfQuiet`.
     pub quiet_until_ms: Option<i64>,
     /// `open_id` yang memindahkan task ke Waiting Fix pada siklus ini (pengubah
@@ -382,6 +394,7 @@ impl RunRecord {
             phase: RunPhase::Implement,
             plan: None,
             plan_skill: None,
+            group_plan: false,
             quiet_until_ms: None,
             fix_requested_by: None,
             pr_body_hashes: BTreeMap::new(),

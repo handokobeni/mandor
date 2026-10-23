@@ -171,9 +171,16 @@ impl GitPort for GitAdapter {
         })
     }
 
-    async fn commit_all(&self, worktree: &Path, message: &str) -> Result<(), PortError> {
-        self.git.commit_all(worktree, message).await?;
-        Ok(())
+    async fn commit_all(
+        &self,
+        worktree: &Path,
+        message: &str,
+    ) -> Result<Option<String>, PortError> {
+        Ok(self.git.commit_all(worktree, message).await?)
+    }
+
+    async fn revert_commit(&self, worktree: &Path, sha: &str) -> Result<bool, PortError> {
+        Ok(self.git.revert_commit(worktree, sha).await?)
     }
 
     async fn push(&self, repo: &RepoInfo, worktree: &Path, branch: &str) -> Result<(), PortError> {

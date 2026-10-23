@@ -58,6 +58,9 @@ struct RunExtra {
     plan: Option<String>,
     #[serde(default)]
     plan_skill: Option<String>,
+    /// Run grup dengan plan per kartu; `None` untuk run lain.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    group_plan: Option<bool>,
 }
 
 /// Bentuk simpan [`RunWorkspace`].
@@ -217,6 +220,7 @@ fn extra_of(r: &RunRecord) -> Result<String, StoreError> {
         planning: false,
         plan: r.plan.clone(),
         plan_skill: r.plan_skill.clone(),
+        group_plan: r.group_plan.then_some(true),
     })
     .map_err(StoreError::internal)
 }
@@ -305,6 +309,7 @@ fn to_record(row: Row) -> Result<RunRecord, StoreError> {
         },
         plan: extra.plan,
         plan_skill: extra.plan_skill,
+        group_plan: extra.group_plan.unwrap_or(false),
         created_at_ms: row.created_at_ms,
         updated_at_ms: row.updated_at_ms,
     })

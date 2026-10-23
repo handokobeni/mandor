@@ -14,14 +14,14 @@ execution: code
 ## Goal Capsule
 
 - **Objective:** agent mengerjakan kartu semalaman di VM yang selalu menyala, atas nama developer masing-masing, tanpa bergantung pada laptop pribadi.
-- **Product authority:** dokumen ini, dari brainstorm dan review dokumen dengan pemilik produk (2026-10-23). Merinci ulang R19–R24 di `docs/plans/2026-10-18-001-feat-korlap-lark-lembur-plan.md` untuk mesin lembur di VM; R-ID di bawah berlaku lokal untuk dokumen ini.
+- **Product authority:** dokumen ini, dari brainstorm dan review dokumen dengan pemilik produk (2026-10-23). Merinci ulang Rilis 3 (AI Lembur, R19–R25) di `docs/plans/2026-10-18-001-feat-korlap-lark-lembur-plan.md` untuk mesin lembur di VM; R-ID di bawah berlaku lokal untuk dokumen ini.
 - **Fondasi:** U1–U4 di `docs/plans/2026-10-23-001-feat-daemon-os-service-installer-plan.md` (status `busy`, drain, `mandord install`, `connect` lewat systemd) dipakai apa adanya di VM.
 - **Open blockers:** tidak ada untuk implementasi. Konfirmasi tertulis Anthropic tentang pemakaian langganan tanpa pendampingan (Dependencies) wajib ada sebelum rollout ke tim.
 - **Execution profile:** U1–U12 di bawah, test-first di repo ini, setelah U1–U4 plan service OS selesai. Uji langsung di VM bersama pemilik produk.
 - **Authority hierarchy:** `CLAUDE.md` (standar `rust-engineering` mengikat) > Product Contract dokumen ini > Planning Contract > unit.
 - **Stop conditions:** berhenti dan tanya pemilik produk bila sebuah unit tidak bisa selesai tanpa melanggar `rust-engineering`, bila asumsi A1–A5 terbukti salah, atau bila perilaku produk harus berubah.
 - **Tail ownership:** commit per unit di branch fitur setelah gerbang hijau, PR ke `main`, tanpa merge sendiri.
-- **Product Contract preservation:** berubah: R5 dan AE7 (app dev boleh terjangkau user lain di VM bersama, dengan rentang port per user; keputusan pemilik produk saat planning). Sisanya tidak berubah.
+- **Product Contract preservation:** berubah: R5 dan AE7 (app dev boleh terjangkau user lain di VM bersama, dengan rentang port per user; keputusan pemilik produk saat planning). 2026-10-23 sesudah merge: R11, R12a, R13, R18 diubah dan R23–R25, AE13–AE15 ditambah (PR draft sampai developer mengonfirmasi, DM laporan Lark, badge Queued), menutup sisa Rilis 3 di plan Rilis 1. Sisanya tidak berubah.
 
 ---
 
@@ -29,11 +29,11 @@ execution: code
 
 ### Summary
 
-VM Linux bersama yang selalu menyala menjadi mesin lembur: tiap developer punya user Linux dan daemon sendiri di sana, atas nama dirinya. Siang hari developer bekerja dengan daemon laptop seperti biasa dan mengantrekan kartu To Do dari tab Overnight; VM mengerjakan antrean satu kartu per developer sampai Waiting Review, mengerjakan Waiting Fix-nya, dan pagi hari developer membaca laporan lalu memilih lanjut di VM atau mengambil alih ke laptop.
+VM Linux bersama yang selalu menyala menjadi mesin lembur: tiap developer punya user Linux dan daemon sendiri di sana, atas nama dirinya. Siang hari developer bekerja dengan daemon laptop seperti biasa dan mengantrekan kartu To Do dari tab Overnight; VM mengerjakan antrean satu kartu per developer sampai PR draft, mengerjakan Waiting Fix-nya, dan pagi hari developer menerima laporan (di app dan DM Lark), mengirim PR yang sudah dilihat ke review, lalu memilih lanjut di VM atau mengambil alih ke laptop.
 
 ### Problem Frame
 
-Lembur di laptop pribadi tidak realistis: laptop dibawa pulang, ditutup, kehabisan baterai, atau dipakai untuk hal lain, dan menjaga Windows serta WSL tetap terjaga semalaman rapuh. Rencana mesin lembur di Rilis 1 (R19–R24) mendefinisikan perilaku antrean, pagar, dan laporan pagi, tapi belum menentukan di mesin mana itu berjalan. Tim juga belum punya baseline seberapa banyak kartu rutin yang bisa diselesaikan agent tanpa didampingi.
+Lembur di laptop pribadi tidak realistis: laptop dibawa pulang, ditutup, kehabisan baterai, atau dipakai untuk hal lain, dan menjaga Windows serta WSL tetap terjaga semalaman rapuh. Rencana mesin lembur di Rilis 1 (Rilis 3, R19–R25) mendefinisikan perilaku antrean, pagar, dan laporan pagi, tapi belum menentukan di mesin mana itu berjalan. Tim juga belum punya baseline seberapa banyak kartu rutin yang bisa diselesaikan agent tanpa didampingi.
 
 ### Actors
 
@@ -54,7 +54,10 @@ Lembur di laptop pribadi tidak realistis: laptop dibawa pulang, ditutup, kehabis
 - **Waiting Fix kartu VM dikerjakan langsung di VM**, tanpa menunggu jam lembur, sehingga satu putaran review tidak memakan satu hari.
 - **Pagar lembur berlaku untuk semua run di VM**, termasuk "Start now" dan Waiting Fix di siang hari, karena run di VM tidak didampingi.
 - **Tab Overnight terpisah.** Board tetap untuk pekerjaan laptop; antrean, run VM, dan laporan pagi ada di tab Overnight.
-- **Satu rilis.** R1–R22 dibangun bersama; tidak ada tahap yang menunggu baseline.
+- **PR hasil VM dibuat draft sampai developer mengonfirmasi.** Kartu tetap In Progress; developer menekan "Send to review" setelah melihatnya, sehingga reviewer tidak menerima pekerjaan AI yang belum dilihat manusia (menjawab pertanyaan "Resolve Before Rilis 3" di plan Rilis 1). Perbaikan Waiting Fix pada PR yang sudah di-review kembali ke Waiting Review seperti biasa.
+- **Laporan pagi juga lewat DM Lark ke developer sendiri** (R25 Rilis 1), berisi ringkasan dan tautan ke tab Overnight, dikirim setelah jam lembur selesai.
+- **Kartu di antrean VM ditandai "Queued for VM" di board laptop** (badge antre lembur R19 Rilis 1).
+- **Satu rilis.** R1–R25 dibangun bersama; tidak ada tahap yang menunggu baseline.
 
 ### Requirements
 
@@ -76,10 +79,10 @@ Lembur di laptop pribadi tidak realistis: laptop dibawa pulang, ditutup, kehabis
 
 **Eksekusi dan pagar**
 
-- R11. Kartu lembur dikerjakan sampai PR di Waiting Review, termasuk review AC dengan browser headless terhadap app dev di VM.
+- R11. Kartu lembur dikerjakan sampai PR draft, termasuk review AC dengan browser headless terhadap app dev di VM. Status Lark kartu tetap In Progress sampai developer mengirimnya ke review (R23).
 - R12. Di VM, gerbang Push & PR selalu memblokir, apa pun setelan repo, termasuk untuk push dari Waiting Fix. Bila gerbang tidak siap (ada AC Fail atau "Can't verify" yang belum dikonfirmasi), VM tidak melakukan push; kartu diparkir dengan alasan "AC gate", dan laporan pagi menampilkan baris AC-nya untuk diputuskan developer. Push yang butuh konfirmasi developer karena alasan lain (mis. mengubah CI atau konfigurasi agent) diparkir dengan alasan "needs confirmation".
-- R12a. Setelah developer memutuskan semua baris AC yang memblokir dari tab Overnight, daemon VM pemegang klaim langsung push dan membuat PR, tanpa mengantre ulang dan tanpa menjalankan agent.
-- R13. Semua run di VM mematuhi pagar lembur Rilis 1 (R22/R22a): tidak merge ke main, tidak push ke branch lain, status Lark tidak melewati Waiting Review, tidak menyentuh database atau environment staging, dan tidak mengirim pesan.
+- R12a. Setelah developer memutuskan semua baris AC yang memblokir dari tab Overnight, daemon VM pemegang klaim langsung push dan membuat PR draft, tanpa mengantre ulang dan tanpa menjalankan agent.
+- R13. Semua run di VM mematuhi pagar lembur Rilis 1 (R22/R22a): tidak merge ke main, tidak push ke branch lain, status Lark tidak melewati Waiting Review, tidak menyentuh database atau environment staging, dan tidak mengirim pesan. Satu-satunya pesan keluar adalah DM laporan dari daemon ke developer itu sendiri setelah jam lembur berakhir (R24).
 - R14. Agent di VM tidak bisa membaca token Lark, kredensial GitHub, atau token daemon. Satu-satunya kredensial yang dipakai agent adalah login Claude Code developer. Push, pembuatan PR, dan penulisan Lark hanya dilakukan daemon, ke branch kartu itu. Git yang dijalankan daemon di worktree yang bisa diubah agent mengabaikan hook dan konfigurasi lokal repo, dan kredensial push hanya diberikan untuk push oleh daemon.
 - R15. Agent yang buntu memarkir kartu dengan catatan pertanyaan lalu lanjut ke kartu berikutnya.
 
@@ -90,18 +93,21 @@ Lembur di laptop pribadi tidak realistis: laptop dibawa pulang, ditutup, kehabis
 
 **Pagi hari dan lanjutan**
 
-- R18. Laporan pagi di tab Overnight menampilkan per kartu: hasil (Waiting Review, diparkir beserta alasan, dikeluarkan, gagal), PR, hasil review AC, pertanyaan parkir, dan pemakaian. Ringkasan per siklus mencatat jumlah tiap hasil (parkir "AC gate" terpisah dari parkir lain), pemakaian terhadap batas, dan jumlah kartu yang lolos review tanpa pernah masuk Waiting Fix.
+- R18. Laporan pagi di tab Overnight menampilkan per kartu: hasil (PR draft siap, dikirim ke review, diparkir beserta alasan, dikeluarkan, gagal), PR, hasil review AC, pertanyaan parkir, dan pemakaian. Ringkasan per siklus mencatat jumlah tiap hasil (parkir "AC gate" terpisah dari parkir lain), pemakaian terhadap batas, dan jumlah kartu yang lolos review tanpa pernah masuk Waiting Fix.
 - R19. Developer bisa menjalankan review AC ulang dengan browser di laptop terhadap app dev kartu itu di VM.
 - R20. Developer menjawab pertanyaan kartu yang diparkir lalu mengembalikannya ke antrean, yang melanjutkan branch yang sama.
 - R21. Waiting Fix kartu VM dikerjakan di VM tanpa menunggu jam lembur, dengan semua pagar lembur: begitu perbaikan siap dimulai (komentar tepercaya dan jeda tenang Waiting Fix), perbaikan itu mendapat giliran berikutnya, sebelum kartu antrean, dan langsung mulai bila VM sedang tidak mengerjakan kartu lain.
 - R22. Developer bisa memilih "Take over to laptop" untuk kartu VM di Waiting Fix atau yang diparkir. Daemon VM lebih dulu push commit yang belum di-push ke branch kartu (tanpa membuat PR), lalu klaim berpindah ke daemon laptop sebelum laptop mulai bekerja. Setelah itu kartu tidak bisa kembali ke antrean VM.
+- R23. Developer menekan "Send to review" pada kartu dengan PR draft: daemon VM menandai PR siap di-review dan memindahkan kartu ke Waiting Review. Sebelum itu reviewer tidak diberi tahu. Perbaikan Waiting Fix pada kartu yang sudah pernah dikirim ke review kembali ke Waiting Review tanpa konfirmasi ulang.
+- R24. Setelah jam lembur berakhir, daemon VM mengirim DM Lark ke developer itu sendiri berisi ringkasan siklus (jumlah per hasil, kartu yang perlu keputusan, pemakaian) dan tautan ke tab Overnight. DM tidak dikirim ke orang lain, tidak dikirim selama jam lembur, dan kegagalan kirim tidak menghentikan antrean.
+- R25. Kartu yang ada di antrean VM tampil dengan badge "Queued for VM" di board laptop, dan app tidak menawarkan Start untuk kartu itu sampai dikeluarkan dari antrean.
 
 ### Key Flows
 
 - F1. **Penyiapan:** admin membuat user Linux developer, memberi akses SSH, dan memasang daemon sebagai service. Developer login Lark, Claude Code, dan GitHub lewat terminal SSH, lalu menambahkan VM di app laptop; app tersambung lewat SSH dan menampilkan status login.
 - F2. **Mengantrekan:** siang hari developer membuka tab Overnight, menambahkan beberapa kartu To Do ke antrean VM, mengisi batas pemakaian per siklus dan jam lembur, lalu menutup laptop.
-- F3. **Malam:** pada jam lembur daemon VM mengambil kartu pertama, memeriksa ulang syaratnya, mengklaim, mengerjakan, menjalankan review AC headless, membuka PR bila gerbang AC siap, memindahkan kartu ke Waiting Review, lalu mengambil kartu berikutnya. Kartu yang buntu atau tertahan gerbang AC diparkir, lalu VM lanjut ke kartu berikutnya. Saat batas pemakaian tercapai, VM berhenti mengambil kartu sampai siklus berikutnya (jam lembur berikutnya dimulai).
-- F4. **Pagi:** developer membuka app, membaca laporan pagi, menjalankan review ulang dengan browser bila perlu, memutuskan kartu yang tertahan gerbang AC, menjawab pertanyaan kartu yang diparkir, dan mengembalikannya ke antrean atau mengambil alih ke laptop.
+- F3. **Malam:** pada jam lembur daemon VM mengambil kartu pertama, memeriksa ulang syaratnya, mengklaim, mengerjakan, menjalankan review AC headless, membuka PR draft bila gerbang AC siap, lalu mengambil kartu berikutnya. Kartu yang buntu atau tertahan gerbang AC diparkir, lalu VM lanjut ke kartu berikutnya. Saat batas pemakaian tercapai, VM berhenti mengambil kartu sampai siklus berikutnya (jam lembur berikutnya dimulai). Saat jam lembur berakhir, daemon mengirim DM laporan ke developer.
+- F4. **Pagi:** developer membuka tautan di DM laporan, membaca laporan pagi, mengirim PR draft yang sudah dilihat ke review, menjalankan review ulang dengan browser bila perlu, memutuskan kartu yang tertahan gerbang AC, menjawab pertanyaan kartu yang diparkir, dan mengembalikannya ke antrean atau mengambil alih ke laptop.
 - F5. **Perbaikan:** reviewer memindahkan kartu ke Waiting Fix dan menulis komentar. Setelah jeda tenang, daemon VM mengerjakan perbaikannya pada giliran berikutnya, kecuali developer sudah memilih "Take over to laptop".
 
 ### Acceptance Examples
@@ -117,13 +123,16 @@ Lembur di laptop pribadi tidak realistis: laptop dibawa pulang, ditutup, kehabis
 - AE9. **Covers R21.** Given kartu VM masuk Waiting Fix pukul 11:00 dengan komentar reviewer dan VM sedang tidak mengerjakan kartu lain, when jeda tenang Waiting Fix lewat, then daemon VM langsung mengerjakan perbaikannya tanpa menunggu jam lembur.
 - AE10. **Covers R8, R21.** Given VM sedang mengerjakan kartu "Start now" dan kartu lain masuk Waiting Fix, when perbaikan siap dimulai, then perbaikan menunggu sampai kartu yang berjalan selesai atau diparkir, lalu mulai sebelum kartu antrean berikutnya.
 - AE11. **Covers R22.** Given kartu VM diparkir dengan commit yang belum di-push dan developer memilih "Take over to laptop", when developer membuka kartu di laptop, then commit itu sudah ada di branch kartu, klaim sudah berpindah ke daemon laptop, run berjalan di laptop pada branch yang sama, dan opsi kirim ke VM tidak tersedia untuk kartu itu.
-- AE12. **Covers R12a.** Given kartu diparkir "AC gate" dan developer mengonfirmasi baris "Can't verify" pagi hari, when konfirmasi tersimpan, then daemon VM langsung push dan membuat PR tanpa menjalankan agent.
+- AE12. **Covers R12a.** Given kartu diparkir "AC gate" dan developer mengonfirmasi baris "Can't verify" pagi hari, when konfirmasi tersimpan, then daemon VM langsung push dan membuat PR draft tanpa menjalankan agent.
+- AE13. **Covers R11, R23.** Given kartu lembur selesai dengan gerbang AC siap, when malam berakhir, then PR berstatus draft dan kartu masih In Progress; when developer menekan "Send to review", then PR siap di-review dan kartu pindah ke Waiting Review.
+- AE14. **Covers R24.** Given jam lembur 19:00–06:00 dan tiga kartu dikerjakan, when pukul 06:00 dan kartu terakhir selesai, then developer menerima satu DM Lark berisi ringkasan dan tautan; tidak ada DM yang dikirim sebelum 06:00 atau ke orang lain.
+- AE15. **Covers R25.** Given kartu To Do ada di antrean VM, when developer melihat board di laptop, then kartu bertanda "Queued for VM" dan tombol Start tidak tersedia; setelah dikeluarkan dari antrean, Start tersedia lagi.
 
 ### Success Criteria
 
-- Developer bisa menutup laptop sore hari dan pagi hari menemukan kartu yang diantrekan sudah di Waiting Review atau diparkir dengan alasan jelas, tanpa intervensi malam hari.
-- Laporan pagi merekam angka per siklus (kartu sampai Waiting Review, diparkir per alasan, gagal, pemakaian, kartu yang lolos review tanpa pernah masuk Waiting Fix). Target ditetapkan dari angka bulan pertama.
-- Setelah bulan pertama, tim memutuskan dari porsi kartu yang sampai Waiting Review tanpa didampingi (bukan gabungan sampai-atau-diparkir), dari angka lain di atas, dan dari pengalaman developer di pagi hari: lanjut dengan VM bersama, pindah ke satu VM per developer, atau berhenti.
+- Developer bisa menutup laptop sore hari dan pagi hari menemukan kartu yang diantrekan sudah berupa PR draft siap dikirim ke review atau diparkir dengan alasan jelas, tanpa intervensi malam hari.
+- Laporan pagi merekam angka per siklus (kartu sampai PR draft, dikirim ke review, diparkir per alasan, gagal, pemakaian, kartu yang lolos review tanpa pernah masuk Waiting Fix). Target ditetapkan dari angka bulan pertama.
+- Setelah bulan pertama, tim memutuskan dari porsi kartu yang sampai PR draft tanpa didampingi (bukan gabungan sampai-atau-diparkir), dari angka lain di atas, dan dari pengalaman developer di pagi hari: lanjut dengan VM bersama, pindah ke satu VM per developer, atau berhenti.
 - Admin bisa menyiapkan developer baru di VM dari runbook saja.
 
 ### Scope Boundaries
@@ -148,11 +157,11 @@ Lembur di laptop pribadi tidak realistis: laptop dibawa pulang, ditutup, kehabis
 
 ### Outstanding Questions
 
-Pertanyaan yang ditunda ke planning sudah dijawab di Planning Contract (KTD-54 sampai KTD-67). Tidak ada pertanyaan produk yang tersisa.
+Pertanyaan yang ditunda ke planning sudah dijawab di Planning Contract (KTD-54 sampai KTD-70). Tidak ada pertanyaan produk yang tersisa.
 
 ### Sources
 
-- Plan Rilis 1, R19–R24 dan catatan ketentuan Anthropic: `docs/plans/2026-10-18-001-feat-korlap-lark-lembur-plan.md`
+- Plan Rilis 1, Rilis 3 (R19–R25) dan catatan ketentuan Anthropic: `docs/plans/2026-10-18-001-feat-korlap-lark-lembur-plan.md`
 - Plan service OS (fondasi U1–U4): `docs/plans/2026-10-23-001-feat-daemon-os-service-installer-plan.md`
 - Klaim kartu (`open_id|ts_ms|nonce`, `may_claim`): `crates/mandor-domain/src/claim.rs`, `crates/mandor-usecase/src/sync/claim.rs`
 - Gerbang Push & PR (`GateMode::Block`): `crates/mandor-domain/src/push_gate.rs`
@@ -180,6 +189,9 @@ Pertanyaan yang ditunda ke planning sudah dijawab di Planning Contract (KTD-54 s
 - **KTD-65. Git daemon tidak mempercayai konfigurasi repo yang bisa diubah agent.** Selain `core.hooksPath=/dev/null` dan `core.fsmonitor=false`, semua git daemon memakai `GIT_CONFIG_NOSYSTEM=1` dan `GIT_CONFIG_GLOBAL` milik daemon, dan sebelum setiap perintah menolak repo bila `.git/config` clone utama atau konfigurasi worktree memuat kunci yang bisa mengeksekusi atau mengalihkan (`core.sshCommand`, `credential.*`, `url.*`, `include*`, `core.pager`, `filter.*`). Kredensial push hanya disuntikkan untuk push daemon.
 - **KTD-66. Login VM lewat terminal, sebagai client daemon yang berjalan.** `mandord login lark` tersambung ke daemon lokal, memanggil `lark.login.begin`, melayani callback di loopback VM pada port milik developer, lalu meneruskan code ke `lark.login.complete`, sehingga daemon menyimpan token dan memulai sesi tanpa restart. Developer menjalankannya dengan `ssh -L` sesuai runbook; port callback tiap developer didaftarkan di konsol app Lark. `claude` login di user agent, `gh` login di user developer. RPC `status` menambah status ketiga login beserta langkah perbaikan.
 - **KTD-67. App memegang dua koneksi: laptop dan VM lewat SSH.** `LinkMode::Ssh { host }` menjalankan `ssh -o BatchMode=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile=<milik app> -o ExitOnForwardFailure=yes -o ServerAliveInterval=15 <host> '$HOME/.local/bin/mandord' connect` (dan `token`) sebagai argv tanpa shell lokal, memakai konfigurasi ssh developer untuk port dan kunci. Di Windows, ssh dijalankan di dalam WSL lewat `wsl.exe` agar kunci dan konfigurasinya sama dengan workspace developer. Host key dipin saat developer menambahkan VM, setelah fingerprint dikonfirmasi. Link disimpan per kunci (`laptop`, `vm`), event bernama per link, dan frontend membuat client RPC kedua dengan store terpisah untuk tab Overnight.
+- **KTD-68. PR draft dan "Send to review".** Di peran `vm`, `publish_members` membuat PR sebagai draft dan tidak memanggil `mark_waiting_review`; run menjadi `AwaitingDev` dengan tanda `draft_pending` di `RunExtra`. RPC baru `overnight.send_to_review` menandai PR siap lewat `gh pr ready` (dengan token daemon) lalu menulis transisi In Progress → Waiting Review lewat outbox. Push Waiting Fix pada PR yang sudah tidak draft tetap memakai jalur lama. Tidak ada gerbang AC ulang saat Send to review, karena gerbang sudah lewat saat PR dibuat.
+- **KTD-69. DM laporan lewat bot app Lark.** Daemon VM mengirim satu pesan ke `open_id` developer sendiri memakai identitas bot Custom App yang sama (butuh kapabilitas bot dan izin kirim pesan di konsol Lark), lewat adapter `mandor-lark` dengan timeout dan retry yang ada. Pesan dikirim sekali per siklus saat jam lembur berakhir dan tidak ada run VM berjalan, atau saat kartu terakhir di jendela selesai setelah jam berakhir; status kirim dicatat di `overnight_cycles` agar tidak terkirim dua kali. Isinya ringkasan dan tautan `mandor://overnight`, tanpa isi kode atau komentar.
+- **KTD-70. Badge "Queued for VM" dirangkai di app.** Daemon VM tidak menulis apa pun ke Lark untuk antrean. Frontend menggabungkan daftar antrean dari link VM ke kartu board dari link laptop (berdasarkan `record_id`), menampilkan badge, dan menyembunyikan Start. Bila kartu tetap dimulai di laptop (mis. dari perangkat lain), cek ulang R9 di VM mengeluarkannya dari antrean dengan alasan tercatat.
 
 ### High-Level Technical Design
 
@@ -227,10 +239,12 @@ stateDiagram-v2
   Antre --> Keluar: cek ulang gagal
   Antre --> Running: jendela buka atau Start now, VM kosong, kuota dan login ada
   Running --> Reviewing: selesai implementasi
-  Reviewing --> WaitingReview: gerbang AC siap, push + PR
+  Reviewing --> PRDraft: gerbang AC siap, push + PR draft
+  PRDraft --> WaitingReview: developer Send to review
+  PRDraft --> Laptop: Take over
   Reviewing --> Held: ac_gate
   Running --> Held: stuck / usage_limit / needs_confirmation
-  Held --> WaitingReview: developer putuskan AC (R12a)
+  Held --> PRDraft: developer putuskan AC (R12a)
   Held --> Antre: developer jawab dan antre ulang
   Held --> Laptop: Take over
   WaitingReview --> WaitingFix: reviewer
@@ -262,7 +276,7 @@ Keputusan "boleh mulai kartu berikutnya?" (fungsi murni, U2):
 
 ### Sequencing
 
-U1 → U2 → U4 → U3 → U5 → U6 → U7 → U8 → U11, lalu U9 setelah U8, dan U10 setelah U2, U3, U4, U5, dan U9. U12 terakhir. U6 boleh dikerjakan paralel setelah U1. Semua setelah U1–U4 plan service OS.
+U1 → U2 → U4 → U13 → U3 → U14 → U5 → U6 → U7 → U8 → U11, lalu U9 setelah U8, dan U10 setelah U2, U3, U4, U5, U9, dan U13. U12 terakhir. U6 boleh dikerjakan paralel setelah U1. Semua setelah U1–U4 plan service OS.
 
 ---
 
@@ -340,7 +354,7 @@ U1 → U2 → U4 → U3 → U5 → U6 → U7 → U8 → U11, lalu U9 setelah U8,
   - Waiting Fix dengan baris AC Fail: `Held ac_gate`.
   - Perubahan menyentuh CI atau konfigurasi agent: `Held needs_confirmation`.
   - Agent buntu: `Held stuck` dengan pertanyaan tersimpan, lalu kartu berikutnya dimulai.
-  - Covers AE12. Developer mengonfirmasi baris "Can't verify" pada run `Held`: `publish_gated` menerima, push dan PR tanpa agent, kartu ke Waiting Review.
+  - Covers AE12. Developer mengonfirmasi baris "Can't verify" pada run `Held`: `publish_gated` menerima, push dan PR draft tanpa agent, kartu tetap In Progress.
   - `Held` tidak `busy`, tidak `is_parked`, tidak memblokir drain, dan dilewati `heartbeat_all` sesuai aturan klaim.
   - Kartu yang pernah masuk Waiting Fix tercatat `entered_waiting_fix`.
 - **Verification:** test hijau; setiap jalur publish di peran `vm` punya test yang membuktikan lewat `evaluate` Block.
@@ -469,14 +483,14 @@ U1 → U2 → U4 → U3 → U5 → U6 → U7 → U8 → U11, lalu U9 setelah U8,
 ### U10. Tab Overnight dan badge On VM
 
 - **Goal:** developer mengelola antrean, membaca laporan pagi, dan bertindak atas kartu VM.
-- **Requirements:** R3 (tampilan), R6, R7, R10, R12a, R17, R18, R19, R20, R22.
-- **Dependencies:** U2, U3, U4, U5, U9.
+- **Requirements:** R3 (tampilan), R6, R7, R10, R12a, R17, R18, R19, R20, R22, R23, R25; KTD-70; AE13, AE15.
+- **Dependencies:** U2, U3, U4, U5, U9, U13.
 - **Files:**
   - `crates/mandor-protocol/src/{lib.rs,dto.rs}` (`overnight.queue.*`, `overnight.settings.*`, `overnight.report`), `crates/mandord/src/dispatch.rs`
   - `apps/desktop/src/lib/stores/nav.svelte.ts` (halaman `overnight`), `apps/desktop/src/lib/components/shell/AppSidebar.svelte`
   - `apps/desktop/src/lib/components/overnight/` (baru: antrean dengan pilihan target repo, setelan jendela/offset/batas, status login, laporan per siklus, keputusan AC, jawaban kartu tertahan, Take over, review ulang)
   - `apps/desktop/src/lib/stores/overnight.svelte.ts` dan `overnight.test.ts` (baru)
-  - `apps/desktop/src/lib/components/mandor/CardFlagBadge.svelte` (badge "On VM" dari `holder`)
+  - `apps/desktop/src/lib/components/mandor/CardFlagBadge.svelte` (badge "On VM" dari `holder` dan "Queued for VM" dari antrean link VM)
   - `apps/desktop/src/lib/dev/mock-transport.ts`
 - **Approach:** tab Overnight membaca dari link VM; board tetap dari link laptop. Teks UI dalam bahasa Inggris.
 - **Test scenarios:**
@@ -486,6 +500,8 @@ U1 → U2 → U4 → U3 → U5 → U6 → U7 → U8 → U11, lalu U9 setelah U8,
   - Laporan: kartu dikelompokkan per hasil, `ac_gate` terpisah, ringkasan pemakaian terhadap batas, dan jumlah kartu yang sampai Waiting Review tanpa pernah masuk Waiting Fix.
   - Keputusan AC memanggil `overnight.gate_decide`; jawaban kartu tertahan mengantre ulang; Take over memanggil `runs.handoff` lalu membuka kartu di board.
   - Badge "On VM" muncul untuk `holder` `own_other_daemon` dan membuka tab Overnight.
+  - Covers AE15. Kartu To Do di antrean VM tampil "Queued for VM" di board dan Start disembunyikan; setelah dikeluarkan, Start muncul lagi; link VM terputus → badge hilang dengan status "VM offline".
+  - Kartu dengan PR draft menampilkan tombol "Send to review" yang memanggil `overnight.send_to_review`.
   - VM tidak tersambung: tab menampilkan status koneksi dan langkah perbaikan.
 - **Verification:** test frontend hijau; dicek visual di mode mock dan dengan VM uji.
 
@@ -505,13 +521,55 @@ U1 → U2 → U4 → U3 → U5 → U6 → U7 → U8 → U11, lalu U9 setelah U8,
   - Agent mencoba `gh pr merge` atau push ke `main`: ditolak hook dan daemon.
 - **Verification:** test hijau.
 
+### U13. PR draft dan "Send to review"
+
+- **Goal:** pekerjaan VM baru sampai ke reviewer setelah developer melihatnya.
+- **Requirements:** R11, R12a, R23; KTD-68; AE12, AE13.
+- **Dependencies:** U4.
+- **Files:**
+  - `crates/mandor-usecase/src/run/members.rs` (PR draft di peran `vm`)
+  - `crates/mandor-usecase/src/run/publish.rs` (tanpa `mark_waiting_review` untuk PR draft; `send_to_review`)
+  - `crates/mandor-git/src/` (adapter `gh pr create --draft` dan `gh pr ready` dengan token daemon dan timeout)
+  - `crates/mandor-store/src/run_port.rs` (`RunExtra.draft_pending`)
+  - `crates/mandor-protocol/src/{lib.rs,dto.rs}` (`overnight.send_to_review`), `crates/mandord/src/dispatch.rs`
+  - test: `crates/mandor-usecase/tests/publish_gate.rs`, `crates/mandor-usecase/tests/overnight.rs`
+- **Approach:** peran laptop tidak berubah. Di VM, publish pertama berakhir di PR draft dan kartu In Progress; Send to review adalah satu-satunya jalan ke Waiting Review untuk PR draft.
+- **Test scenarios:**
+  - Covers AE13. Gerbang siap di VM: PR dibuat draft, tidak ada transisi Lark, `draft_pending` tercatat.
+  - Send to review: `gh pr ready` dipanggil, transisi In Progress → Waiting Review masuk outbox, `draft_pending` hilang.
+  - Send to review pada kartu tanpa PR draft atau yang dipegang daemon lain: ditolak.
+  - `gh pr ready` gagal atau timeout: tidak ada transisi Lark, error dikembalikan.
+  - Waiting Fix pada PR yang sudah tidak draft: kembali ke Waiting Review tanpa konfirmasi.
+  - Covers AE12. Keputusan AC pada kartu `ac_gate`: PR draft, kartu tetap In Progress.
+- **Verification:** test hijau; di VM uji, PR draft muncul di GitHub dan berpindah ke ready setelah Send to review.
+
+### U14. DM laporan pagi
+
+- **Goal:** developer tahu hasil malam tanpa membuka app lebih dulu.
+- **Requirements:** R13, R24; KTD-69; AE14.
+- **Dependencies:** U2, U3.
+- **Files:**
+  - `crates/mandor-domain/src/overnight.rs` (kapan DM siklus boleh dikirim; isi ringkasan sebagai teks)
+  - `crates/mandor-usecase/src/overnight/mod.rs` (kirim sekali per siklus, catat status)
+  - `crates/mandor-usecase/src/ports.rs` (port kirim pesan ke diri sendiri), `crates/mandor-lark/src/` (adapter kirim pesan bot dengan timeout)
+  - `crates/mandor-store/src/overnight.rs` (status DM per siklus)
+  - test: `crates/mandor-domain/src/overnight.rs` (tests), `crates/mandor-usecase/tests/overnight.rs`, `crates/mandor-lark/tests/contract.rs`
+- **Approach:** port hanya menerima penerima "developer pemilik daemon", sehingga tidak ada jalur kirim ke orang lain. Pesan hanya dari daemon, tidak pernah dari agent.
+- **Test scenarios:**
+  - Covers AE14. Jendela berakhir 06:00 dengan kartu terakhir selesai 06:20: DM terkirim sekali setelah 06:20, tidak sebelum 06:00.
+  - Siklus tanpa kartu: DM berisi "no cards ran" atau tidak dikirim, sesuai setelan default (kirim).
+  - Kirim gagal: dicatat, dicoba lagi pada tick berikutnya sampai batas percobaan, antrean tidak terhenti.
+  - Restart daemon setelah DM terkirim: tidak terkirim dua kali.
+  - Isi ringkasan memuat jumlah per hasil, kartu yang perlu keputusan, pemakaian, dan tautan; tidak memuat isi kode atau komentar.
+- **Verification:** test hijau; DM nyata diterima di Lark uji setelah jam lembur pendek berakhir.
+
 ### U12. Runbook VM dan uji langsung
 
 - **Goal:** admin menyiapkan developer baru dari runbook, dan alur lembur terbukti.
 - **Requirements:** R2, R3, R4; Success Criteria; semua AE.
-- **Dependencies:** U1–U11.
+- **Dependencies:** U1–U11, U13, U14.
 - **Files:**
-  - `docs/runbook/setup-vm.md` (baru: user developer dan agent, linger keduanya, sudoers persis, container rootless, direktori grup untuk clone/worktree/berkas run, izin eksekusi biner dengan `~/.mandor` tetap `0700`, rentang port, port callback Lark terdaftar, OpenSSH, `mandord install` peran `vm`, login lewat terminal, pencabutan token saat orang keluar)
+  - `docs/runbook/setup-vm.md` (baru: user developer dan agent, linger keduanya, sudoers persis, container rootless, direktori grup untuk clone/worktree/berkas run, izin eksekusi biner dengan `~/.mandor` tetap `0700`, rentang port, port callback Lark terdaftar, kapabilitas bot dan izin kirim pesan di app Lark, OpenSSH, `mandord install` peran `vm`, login lewat terminal, pencabutan token saat orang keluar)
   - `docs/progress/vm-overnight.md` (baru: hasil uji dan asumsi A1–A5)
   - `README.md`
 - **Approach:** uji di VM bersama dengan dua developer: antrean semalam, batas tercapai, kartu `ac_gate` diputuskan pagi, Waiting Fix siang hari, Take over, isolasi antar developer.
@@ -524,9 +582,9 @@ U1 → U2 → U4 → U3 → U5 → U6 → U7 → U8 → U11, lalu U9 setelah U8,
 
 | Gate | Perintah | Berlaku untuk |
 |---|---|---|
-| Gerbang Rust `rust-engineering` | `make check` | U1–U8, U11 |
+| Gerbang Rust `rust-engineering` | `make check` | U1–U8, U11, U13, U14 |
 | Pembuktian lapisan | `make red-check` | unit yang menambah dependensi crate |
-| Tipe protokol | `MANDOR_REGEN_TS=1 cargo test -p mandor-protocol` | U1, U4, U5, U8, U10 |
+| Tipe protokol | `MANDOR_REGEN_TS=1 cargo test -p mandor-protocol` | U1, U4, U5, U8, U10, U13 |
 | sqlx offline | `make sqlx-check` | U2 |
 | Tauri | `cd apps/desktop/src-tauri && cargo clippy --all-targets -- -D warnings && cargo test` | U9 |
 | Frontend | `cd apps/desktop && bun run check && bun run test` | U7 (setelan), U9, U10 |
@@ -537,7 +595,7 @@ U1 → U2 → U4 → U3 → U5 → U6 → U7 → U8 → U11, lalu U9 setelah U8,
 ## Definition of Done
 
 - Semua gate hijau.
-- Skenario U12 lulus dan tercatat di `docs/progress/vm-overnight.md`, termasuk AE1–AE12.
+- Skenario U12 lulus dan tercatat di `docs/progress/vm-overnight.md`, termasuk AE1–AE15.
 - Standar `rust-engineering` terpenuhi: test-first, tanpa `unwrap`/`expect`/`panic!` di jalur produksi, setiap proses dan RPC dibatasi timeout, konfigurasi hanya di `Config::from_env`, task punya pemilik, tidak ada lock `std` melewati `.await`, tanpa `unsafe`, tidak ada crate baru tanpa justifikasi di `CLAUDE.md`.
 - Mandor tidak membaca, menyimpan, atau meneruskan login Claude siapa pun.
 - Konfirmasi tertulis Anthropic tercatat sebelum rollout ke tim.
@@ -552,7 +610,6 @@ U1 → U2 → U4 → U3 → U5 → U6 → U7 → U8 → U11, lalu U9 setelah U8,
 - Isolasi jaringan app dev antar developer.
 - Login yang dipandu dari app.
 - Pembatasan jaringan agent berbasis allowlist (sandbox Claude Code `strictAllowlist` di user agent) sebagai lapisan tambahan.
-- Penanda di PR atau kartu bahwa pekerjaan berasal dari run VM.
 - Backoff adaptif polling Lark bila dua daemon per developer memicu throttle.
 
 ### Risks

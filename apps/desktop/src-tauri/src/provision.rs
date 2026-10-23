@@ -18,6 +18,17 @@ use tokio::process::Command;
 /// membawa biner asli (build dev atau OS selain Windows).
 pub const DAEMON_SHA256: &str = env!("MANDOR_DAEMON_SHA256");
 
+/// Header resource daemon di paket Linux: biner ELF yang dibungkus tidak
+/// diubah `linuxdeploy` (`AppImage` menambahkan `RUNPATH` ke setiap ELF). Sama
+/// dengan konstanta di `build.rs`.
+pub const RESOURCE_MAGIC: &[u8] = b"MANDORD-RESOURCE\n";
+
+/// Biner daemon dari isi resource: header paket Linux dilepas bila ada.
+#[must_use]
+pub fn unwrap_resource(bytes: &[u8]) -> &[u8] {
+    bytes.strip_prefix(RESOURCE_MAGIC).unwrap_or(bytes)
+}
+
 /// Batas waktu langkah provisioning.
 #[derive(Debug, Clone, Copy)]
 pub struct Timeouts {
@@ -448,6 +459,7 @@ pub async fn provision_with(
             };
         }
     };
+    let bytes = unwrap_resource(&bytes).to_vec();
     if !sha256_hex(&bytes).eq_ignore_ascii_case(expected) {
         return ProvisionState::Failed {
             message: "the bundled daemon does not match this app; reinstall Mandor".to_owned(),
@@ -765,6 +777,31 @@ mod tests {
         assert!(
             matches!(state, ProvisionState::Deferred { .. }),
             "{state:?}"
+        );
+    }
+
+    /// Paket Linux membawa daemon dengan header agar linuxdeploy (AppImage) tidak
+    /// mengubah biner ELF-nya; header dilepas sebelum verifikasi dan pemasangan.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn resource_berheader_dilepas_sebelum_dipasang() {
+        let home = tempfile::tempdir().unwrap();
+        let daemon = fake_daemon("installed", 0);
+        let mut wrapped = RESOURCE_MAGIC.to_vec();
+        wrapped.extend_from_slice(&daemon);
+        let resource = home.path().join("resource-mandord");
+        std::fs::write(&resource, &wrapped).unwrap();
+        let inputs = local_inputs(home.path(), &resource);
+        let state = provision_with(&inputs, "", &sha256_hex(&daemon), &Timeouts::default()).await;
+        assert!(
+            matches!(state, ProvisionState::Installed { .. }),
+            "{state:?}"
+        );
+        assert_eq!(unwrap_resource(&wrapped), &daemon[..]);
+        assert_eq!(
+            unwrap_resource(&daemon),
+            &daemon[..],
+            "tanpa header: apa adanya"
         );
     }
 

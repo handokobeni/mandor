@@ -86,6 +86,14 @@ jobs:
         with:
           name: mandord-linux-x86_64
           path: apps/desktop/src-tauri/resources
+      - name: Bungkus daemon dengan header resource
+        # linuxdeploy (AppImage) menambahkan RUNPATH ke setiap ELF di AppDir;
+        # header membuat daemon tidak dikenali sebagai ELF. App dan build.rs
+        # melepas header sebelum menghitung hash dan memasang.
+        working-directory: apps/desktop/src-tauri/resources
+        run: |
+          mv mandord mandord.raw
+          { printf 'MANDORD-RESOURCE\n'; cat mandord.raw; } > mandord
       - name: Dependensi sistem Tauri dan bundler
         run: |
           sudo apt-get update
@@ -98,18 +106,17 @@ jobs:
       - run: bun install --frozen-lockfile
         working-directory: apps/desktop
       - name: Build paket deb, rpm, AppImage
-        # linuxdeploy (AppImage) men-strip biner ELF di AppDir; daemon harus
-        # identik dengan hash tertanam.
-        env:
-          NO_STRIP: "true"
         run: bun run tauri build --bundles deb,rpm,appimage
         working-directory: apps/desktop
       - name: Hash daemon tertanam di app dan ikut di setiap paket
         working-directory: apps/desktop/src-tauri
         run: |
           set -euo pipefail
+          # Hash tertanam = biner daemon tanpa header; isi paket = resource berheader.
+          raw=$(sha256sum resources/mandord.raw | cut -d' ' -f1)
           hash=$(sha256sum resources/mandord | cut -d' ' -f1)
-          grep -qa "$hash" target/release/mandor-desktop || { echo "hash $hash tidak tertanam di app"; exit 1; }
+          grep -qa "$raw" target/release/mandor-desktop || { echo "hash $raw tidak tertanam di app"; exit 1; }
+          [ "$(tail -c +18 resources/mandord | sha256sum | cut -d' ' -f1)" = "$raw" ] || { echo "header resource salah"; exit 1; }
           check() {
             local found
             found=$(find "$1" -type f -path '*resources/mandord' -print -quit)

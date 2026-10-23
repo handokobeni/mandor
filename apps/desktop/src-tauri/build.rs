@@ -13,6 +13,9 @@ use sha2::{Digest, Sha256};
 
 /// Isi placeholder yang dipakai saat biner daemon tidak tersedia.
 const PLACEHOLDER: &[u8] = b"placeholder\n";
+/// Header resource daemon di paket Linux (sama dengan `provision::RESOURCE_MAGIC`);
+/// hash dihitung dari biner tanpa header.
+const RESOURCE_MAGIC: &[u8] = b"MANDORD-RESOURCE\n";
 
 fn hex(bytes: &[u8]) -> String {
     use std::fmt::Write as _;
@@ -25,7 +28,8 @@ fn hex(bytes: &[u8]) -> String {
 fn main() -> Result<(), String> {
     let resource = Path::new("resources").join("mandord");
     println!("cargo:rerun-if-changed={}", resource.display());
-    let bytes = std::fs::read(&resource).unwrap_or_default();
+    let raw = std::fs::read(&resource).unwrap_or_default();
+    let bytes = raw.strip_prefix(RESOURCE_MAGIC).unwrap_or(&raw);
     let real = !bytes.is_empty() && bytes != PLACEHOLDER;
     let bundles_daemon =
         std::env::var("CARGO_CFG_TARGET_OS").is_ok_and(|os| os == "windows" || os == "linux");
@@ -38,7 +42,7 @@ fn main() -> Result<(), String> {
         ));
     }
     let hash = if real {
-        hex(&Sha256::digest(&bytes))
+        hex(&Sha256::digest(bytes))
     } else {
         String::new()
     };

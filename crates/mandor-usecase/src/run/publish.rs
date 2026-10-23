@@ -191,11 +191,10 @@ impl<D: Deps> RunService<D> {
         url: &str,
         cursor_now_too: bool,
     ) -> Result<(), RunError> {
-        let cards = self.runs.cards(&run.id).await?;
-        if cards.is_empty() {
+        if self.runs.cards(&run.id).await?.is_empty() {
             self.mark_card(&run.record_id, url, cursor_now_too).await?;
         } else {
-            self.mark_group_cards(&cards, url, cursor_now_too).await?;
+            self.mark_group_cards(&run.id, url, cursor_now_too).await?;
         }
         // Run workspace menyimpan link per anggota (lihat `publish_members`).
         if run.workspace.is_none() {

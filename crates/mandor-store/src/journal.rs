@@ -47,6 +47,23 @@ impl Store {
         Ok(())
     }
 
+    /// Mengembalikan balasan `delivered` ke `pending` agar dikirim ulang ke run
+    /// lain (run lanjutan setelah PR grup merged).
+    ///
+    /// # Errors
+    /// [`StoreError::Internal`] bila query gagal.
+    pub async fn journal_requeue(&self, record_id: &str, reply_id: &str) -> Result<(), StoreError> {
+        sqlx::query!(
+            "UPDATE comment_journal SET status = 'pending' WHERE record_id = ? AND reply_id = ?",
+            record_id,
+            reply_id
+        )
+        .execute(&self.pool)
+        .await
+        .map_err(StoreError::internal)?;
+        Ok(())
+    }
+
     /// Balasan yang masih `pending` untuk record (dikirim ulang saat restart).
     ///
     /// # Errors

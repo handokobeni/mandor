@@ -27,6 +27,8 @@ struct CardJson {
     quiet_until_ms: Option<i64>,
     #[serde(default)]
     in_fix: bool,
+    #[serde(default)]
+    fix_replies: Vec<String>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -101,6 +103,7 @@ pub(crate) async fn write_cards(
             fix_requested_by: c.fix_requested_by.clone(),
             quiet_until_ms: c.quiet_until_ms,
             in_fix: c.in_fix,
+            fix_replies: c.fix_replies.clone(),
         })
         .map_err(StoreError::internal)?;
         sqlx::query!(
@@ -155,6 +158,7 @@ pub(crate) async fn read_cards(
                 fix_requested_by: data.fix_requested_by,
                 quiet_until_ms: data.quiet_until_ms,
                 in_fix: data.in_fix,
+                fix_replies: data.fix_replies,
             })
         })
         .collect()

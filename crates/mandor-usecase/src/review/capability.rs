@@ -228,8 +228,9 @@ impl<D: Deps> RunService<D> {
             r.verdict = verdict;
             r.evidence = evidence.map(truncate_evidence).filter(|e| !e.is_empty());
             r.stale = false;
-            r.reason = None;
-            r.decided_by = None;
+            // Keputusan dev lama tetap di baris; review run grup memulihkannya
+            // bila verdict tidak berubah (R18). Run tunggal sudah mengosongkannya
+            // saat review dimulai.
         })
         .await
     }

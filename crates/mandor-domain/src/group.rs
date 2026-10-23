@@ -33,6 +33,7 @@ impl CardState {
             Self::Removed(RemovedReason::ChangedInLark) => "removed_changed",
             Self::Removed(RemovedReason::ByDev) => "removed_by_dev",
             Self::Removed(RemovedReason::Reverted) => "removed_reverted",
+            Self::Removed(RemovedReason::FollowUp) => "removed_follow_up",
         }
     }
 
@@ -46,6 +47,7 @@ impl CardState {
             "removed_changed" => Self::Removed(RemovedReason::ChangedInLark),
             "removed_by_dev" => Self::Removed(RemovedReason::ByDev),
             "removed_reverted" => Self::Removed(RemovedReason::Reverted),
+            "removed_follow_up" => Self::Removed(RemovedReason::FollowUp),
             _ => return None,
         })
     }
@@ -60,6 +62,9 @@ pub enum RemovedReason {
     ByDev,
     /// Commit kartu di-revert di gerbang (R13).
     Reverted,
+    /// PR grup sudah merged saat kartu masuk Waiting Fix; perbaikan pindah ke
+    /// run lanjutan dari branch default (R19).
+    FollowUp,
 }
 
 /// Satu kartu di run grup, urut sesuai posisi.
@@ -448,6 +453,7 @@ mod tests {
             CardState::Removed(RemovedReason::ChangedInLark),
             CardState::Removed(RemovedReason::ByDev),
             CardState::Removed(RemovedReason::Reverted),
+            CardState::Removed(RemovedReason::FollowUp),
         ] {
             assert_eq!(CardState::parse(s.as_str()), Some(s));
         }

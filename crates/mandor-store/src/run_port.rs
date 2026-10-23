@@ -541,6 +541,10 @@ impl Journal for RunsStore {
         Ok(self.store.journal_delivered(record_id, reply_id).await?)
     }
 
+    async fn journal_requeue(&self, record_id: &str, reply_id: &str) -> Result<(), PortError> {
+        Ok(self.store.journal_requeue(record_id, reply_id).await?)
+    }
+
     async fn journal_pending_list(&self, record_id: &str) -> Result<Vec<String>, PortError> {
         Ok(self.store.journal_pending_list(record_id).await?)
     }

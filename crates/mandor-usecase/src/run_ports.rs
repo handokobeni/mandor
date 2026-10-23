@@ -480,6 +480,8 @@ pub struct GroupCardRow {
     pub quiet_until_ms: Option<i64>,
     /// Kartu sedang dalam loop perbaikan.
     pub in_fix: bool,
+    /// Balasan yang diteruskan ke agent pada siklus perbaikan kartu ini.
+    pub fix_replies: Vec<String>,
 }
 
 impl GroupCardRow {
@@ -496,6 +498,7 @@ impl GroupCardRow {
             fix_requested_by: None,
             quiet_until_ms: None,
             in_fix: false,
+            fix_replies: Vec::new(),
         }
     }
 
@@ -573,6 +576,12 @@ pub trait Journal: Send + Sync {
         record_id: &str,
         reply_id: &str,
     ) -> impl Future<Output = Result<(), PortError>> + Send;
+    /// Balasan `delivered` kembali `pending` untuk dikirim ke run lain.
+    fn journal_requeue(
+        &self,
+        record_id: &str,
+        reply_id: &str,
+    ) -> impl Future<Output = Result<(), PortError>> + Send;
     /// Balasan yang masih `pending` (terkirim belum pasti) untuk record.
     fn journal_pending_list(
         &self,
@@ -645,6 +654,9 @@ pub struct FixContext<'a> {
     pub comments: &'a [Reply],
     /// Instruksi dev (tepercaya), dari "Mulai perbaikan".
     pub instruction: Option<&'a str>,
+    /// Run grup: kartu yang diperbaiki; komentar diberi label kartunya.
+    /// Kosong untuk run tunggal.
+    pub cards: &'a [Task],
 }
 
 /// Penyusun pesan agent: instruksi operator di luar blok, data Lark di dalam

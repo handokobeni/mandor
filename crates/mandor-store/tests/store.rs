@@ -111,6 +111,12 @@ async fn jurnal_komentar_dua_tahap() {
     assert_eq!(pending, vec!["reply2".to_owned()]);
     let delivered = s.journal_delivered_list("rec1").await.unwrap();
     assert_eq!(delivered, vec!["reply1".to_owned()]);
+
+    // Run lanjutan setelah PR grup merged menerima ulang balasan itu.
+    s.journal_requeue("rec1", "reply1").await.unwrap();
+    let pending = s.journal_pending_list("rec1").await.unwrap();
+    assert_eq!(pending, vec!["reply1".to_owned(), "reply2".to_owned()]);
+    assert!(s.journal_delivered_list("rec1").await.unwrap().is_empty());
 }
 
 #[tokio::test]

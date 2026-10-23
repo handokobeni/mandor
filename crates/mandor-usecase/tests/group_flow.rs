@@ -9,9 +9,9 @@ use std::sync::atomic::Ordering;
 use common::run_fakes::eventually;
 use common::{FakeClock, FakeLark, Station, ready_task, station};
 use mandor_domain::group::{CardDecision, CardState, RemovedReason};
-use mandor_domain::{AppField, Claim, GateDecision, RunState, TaskStatus, Verdict, WriteOp};
+use mandor_domain::{AppField, Claim, GateDecision, Reply, RunState, TaskStatus, Verdict, WriteOp};
 use mandor_usecase::run::{CardOutcome, PublishOutcome};
-use mandor_usecase::run_ports::{GroupCardRow, RunPhase, SessionRef, WorkChanges};
+use mandor_usecase::run_ports::{GroupCardRow, NoticeKind, RunPhase, SessionRef, WorkChanges};
 use mandor_usecase::{AcItem, EpicItem, Planning, RunError, StartTarget};
 use pretty_assertions::assert_eq;
 
@@ -876,4 +876,324 @@ async fn grup_workspace_satu_pr_per_repo_dan_tautan_sama_di_semua_kartu() {
         assert_eq!(t.status, TaskStatus::WaitingReview, "{id}");
         assert_eq!(t.pr_url.as_deref(), Some(url.as_str()), "{id}");
     }
+}
+
+// --- Waiting Fix grup (U7) ---
+
+const QUIET: i64 = mandor_usecase::waiting_fix::DEFAULT_QUIET_SECS;
+/// Detik saat PR grup dibuat oleh [`published`]; komentar QA datang sesudahnya.
+const PUBLISHED_SECS: i64 = 10 * DAY / 1000;
+const GROUP_BRANCH: &str = "mandor/pgs-1401-1403-job-position";
+
+/// Grup tiga kartu dengan PR terbuka dan semua kartu Waiting Review, sepuluh
+/// menit setelah PR dibuat. Reporter kartu `ou_pm`. `skip` di-Push anyway.
+async fn published(lark: &FakeLark, clock: &FakeClock, skip: &[&str]) -> (Station, String) {
+    let (st, run_id) = finished(lark, clock, &["c1", "c2", "c3"]).await;
+    verdicts(&st, &run_id, skip);
+    let decision = GateDecision {
+        push_anyway_reason: (!skip.is_empty()).then(|| "Bug lama".to_owned()),
+        decided_by: Some("Beni".to_owned()),
+        ..GateDecision::default()
+    };
+    let out = st.svc.publish_gated(&run_id, &decision).await.unwrap();
+    assert!(matches!(out, PublishOutcome::Published { .. }), "{out:?}");
+    st.svc.sync().drain_outbox(20).await.unwrap();
+    for id in ["c1", "c2", "c3"] {
+        lark.edit(id, |t| t.reporter = Some("ou_pm".to_owned()));
+    }
+    clock.advance(10 * 60 * 1000);
+    lark.clock
+        .store(10 * DAY + 10 * 60 * 1000, Ordering::SeqCst);
+    (st, run_id)
+}
+
+fn to_fix(lark: &FakeLark, id: &str, by: &str) {
+    lark.edit(id, |t| {
+        t.status = TaskStatus::WaitingFix;
+        t.last_modified_by = Some(by.to_owned());
+    });
+}
+
+fn comment(id: &str, record: &str, author: &str, text: &str) -> Reply {
+    Reply {
+        record_id: record.to_owned(),
+        comment_id: format!("k-{id}"),
+        reply_id: id.to_owned(),
+        author: author.to_owned(),
+        create_time: PUBLISHED_SECS + 60,
+        text: text.to_owned(),
+    }
+}
+
+async fn fix_tick(st: &Station) -> mandor_usecase::waiting_fix::FixReport {
+    st.svc.sync().poll(true, &[]).await.unwrap();
+    st.svc.tick_waiting_fix(QUIET).await.unwrap()
+}
+
+fn report_verdict(st: &Station, ac: &str, v: Verdict) {
+    let token = st.agent.last().req.ledger.unwrap().token;
+    let scope = st.svc.verify_capability(token.expose()).unwrap();
+    let rt = tokio::runtime::Handle::current();
+    tokio::task::block_in_place(|| {
+        rt.block_on(st.svc.ledger_set_verdict(&scope, ac, v, Some("x")))
+    })
+    .unwrap();
+}
+
+/// Giliran perbaikan selesai dengan perubahan, lalu review otomatis memberi
+/// verdict `v` per AC (urut ac1..ac3). Mengembalikan pesan review.
+async fn fix_reviewed(st: &Station, v: [Verdict; 3]) -> String {
+    dirty(st, "+fix");
+    st.agent.last().done();
+    eventually(|| st.runs.all().iter().any(|r| r.state == RunState::Reviewing)).await;
+    let message = st.agent.last().req.message;
+    for (ac, v) in ["ac1", "ac2", "ac3"].into_iter().zip(v) {
+        report_verdict(st, ac, v);
+    }
+    st.agent.last().done();
+    message
+}
+
+fn group_run(st: &Station, id: &str) -> mandor_usecase::run_ports::RunRecord {
+    st.runs.all().into_iter().find(|r| r.id == id).unwrap()
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn covers_ae5_perbaikan_satu_kartu_di_branch_grup_dan_review_semua_kartu() {
+    let (lark, clock) = setup();
+    let (st, run_id) = published(&lark, &clock, &[]).await;
+    to_fix(&lark, "c2", "ou_pm");
+    *lark.replies.lock().unwrap() = vec![comment("r1", "c2", "ou_pm", "Kartu job salah warna")];
+
+    let report = fix_tick(&st).await;
+    assert_eq!(report.started, ["c2"]);
+    let req = st.agent.last().req;
+    assert!(matches!(req.session, SessionRef::Resume(_)), "sesi grup");
+    assert!(req.message.contains("Kartu job salah warna"));
+    st.svc.sync().drain_outbox(20).await.unwrap();
+    assert_eq!(lark.get("c2").unwrap().status, TaskStatus::InProgress);
+    assert_eq!(lark.get("c1").unwrap().status, TaskStatus::WaitingReview);
+
+    let review = fix_reviewed(&st, [Verdict::Pass; 3]).await;
+    assert!(
+        review.contains("ac1|ac2|ac3"),
+        "review mencakup semua kartu: {review}"
+    );
+    eventually(|| group_run(&st, &run_id).state == RunState::InReviewLoop).await;
+    assert_eq!(st.git.st().pushes.last().unwrap(), GROUP_BRANCH);
+    st.svc.sync().drain_outbox(20).await.unwrap();
+    for id in ["c1", "c2", "c3"] {
+        assert_eq!(
+            lark.get(id).unwrap().status,
+            TaskStatus::WaitingReview,
+            "{id}"
+        );
+    }
+    let cards = st.svc.group_cards(&run_id).await.unwrap();
+    assert!(cards.iter().all(|c| !c.in_fix));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn dua_kartu_waiting_fix_satu_run_perbaikan() {
+    let (lark, clock) = setup();
+    let (st, run_id) = published(&lark, &clock, &[]).await;
+    to_fix(&lark, "c2", "ou_pm");
+    to_fix(&lark, "c3", "ou_pm");
+    *lark.replies.lock().unwrap() = vec![
+        comment("r1", "c2", "ou_pm", "Warna kartu"),
+        comment("r2", "c3", "ou_pm", "Validasi form"),
+    ];
+    let before = st.agent.count();
+    let mut report = fix_tick(&st).await;
+    report.started.sort();
+    assert_eq!(report.started, ["c2", "c3"]);
+    assert_eq!(st.agent.count(), before + 1, "satu giliran");
+    let msg = st.agent.last().req.message;
+    assert!(
+        msg.contains("Warna kartu") && msg.contains("Validasi form"),
+        "{msg}"
+    );
+
+    fix_reviewed(&st, [Verdict::Pass; 3]).await;
+    eventually(|| group_run(&st, &run_id).state == RunState::InReviewLoop).await;
+    st.svc.sync().drain_outbox(20).await.unwrap();
+    for id in ["c2", "c3"] {
+        assert_eq!(
+            lark.get(id).unwrap().status,
+            TaskStatus::WaitingReview,
+            "{id}"
+        );
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn feedback_qa_dipercaya_per_kartu() {
+    let (lark, clock) = setup();
+    let (st, run_id) = published(&lark, &clock, &[]).await;
+    to_fix(&lark, "c2", "ou_qa");
+    to_fix(&lark, "c3", "ou_pm");
+    // Feedback QA kartu 3 ditulis oleh pemindah kartu 2, bukan pemindah kartu 3.
+    {
+        let mut acs = lark.acs.lock().unwrap();
+        let ac = acs.get_mut("ac3").unwrap();
+        ac.feedback_qa = Some("Tombol simpan mati".to_owned());
+        ac.last_modified_by = Some("ou_qa".to_owned());
+        ac.last_modified_ms = (PUBLISHED_SECS + 60) * 1000;
+    }
+    let report = fix_tick(&st).await;
+    assert!(report.started.is_empty(), "{report:?}");
+    assert_eq!(group_run(&st, &run_id).state, RunState::WfAwaitingComment);
+
+    lark.acs
+        .lock()
+        .unwrap()
+        .get_mut("ac3")
+        .unwrap()
+        .last_modified_by = Some("ou_pm".to_owned());
+    let report = fix_tick(&st).await;
+    assert_eq!(report.started, ["c3"]);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn keputusan_lama_tidak_menahan_bila_verdict_tetap() {
+    let (lark, clock) = setup();
+    let (st, run_id) = published(&lark, &clock, &["ac1"]).await;
+    to_fix(&lark, "c2", "ou_pm");
+    *lark.replies.lock().unwrap() = vec![comment("r1", "c2", "ou_pm", "Warna kartu")];
+    fix_tick(&st).await;
+    fix_reviewed(&st, [Verdict::Fail, Verdict::Pass, Verdict::Pass]).await;
+    eventually(|| group_run(&st, &run_id).state == RunState::InReviewLoop).await;
+    let rows = st.svc.ledger(&run_id).await.unwrap();
+    assert_eq!(rows[0].verdict, Verdict::Skipped, "Push anyway dipulihkan");
+    assert_eq!(rows[0].reason.as_deref(), Some("Bug lama"));
+
+    // Siklus berikutnya: AC kartu 2 berubah Pass → Fail menahan push.
+    st.svc.sync().drain_outbox(20).await.unwrap();
+    to_fix(&lark, "c3", "ou_pm");
+    lark.replies
+        .lock()
+        .unwrap()
+        .push(comment("r2", "c3", "ou_pm", "Validasi form"));
+    clock.advance(10 * 60 * 1000);
+    lark.edit("c3", |t| t.comment_cursor = None);
+    fix_tick(&st).await;
+    let pushes = st.git.st().pushes.len();
+    fix_reviewed(&st, [Verdict::Fail, Verdict::Fail, Verdict::Pass]).await;
+    eventually(|| group_run(&st, &run_id).state == RunState::AwaitingDev).await;
+    let note = group_run(&st, &run_id).note.unwrap();
+    assert!(note.contains("PGS-1402 AC-2"), "{note}");
+    assert!(!note.contains("AC-1"), "{note}");
+    assert_eq!(st.git.st().pushes.len(), pushes, "push ditahan");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn pr_merged_sebelum_push_perbaikan_pindah_ke_run_lanjutan() {
+    let (lark, clock) = setup();
+    let (st, run_id) = published(&lark, &clock, &[]).await;
+    to_fix(&lark, "c2", "ou_pm");
+    *lark.replies.lock().unwrap() = vec![comment("r1", "c2", "ou_pm", "Warna kartu")];
+    fix_tick(&st).await;
+    let pushes = st.git.st().pushes.len();
+    let url = group_run(&st, &run_id).pr_url.unwrap();
+    st.git.st().merged_prs.push(url);
+
+    dirty(&st, "+fix");
+    st.agent.last().done();
+    eventually(|| st.runs.all().len() == 2).await;
+    assert_eq!(
+        st.git.st().pushes.len(),
+        pushes,
+        "tidak push ke branch grup"
+    );
+    let cards = st.svc.group_cards(&run_id).await.unwrap();
+    assert_eq!(cards[1].state, CardState::Removed(RemovedReason::FollowUp));
+    let follow = st.svc.active_runs().await.unwrap();
+    let follow = follow.iter().find(|r| r.id != run_id).unwrap();
+    assert_eq!(follow.record_id, "c2");
+    assert_eq!(follow.branch.as_deref(), Some("mandor/pgs-1402-kartu-job"));
+    assert!(
+        st.git
+            .st()
+            .prepared
+            .contains(&"mandor/pgs-1402-kartu-job".to_owned())
+    );
+
+    // Run lanjutan menerima komentar QA yang sama.
+    let before = st.agent.count();
+    let report = fix_tick(&st).await;
+    assert_eq!(report.started, ["c2"]);
+    assert_eq!(st.agent.count(), before + 1);
+    assert!(st.agent.last().req.message.contains("Warna kartu"));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn pr_sudah_merged_saat_waiting_fix_langsung_run_lanjutan() {
+    let (lark, clock) = setup();
+    let (st, run_id) = published(&lark, &clock, &[]).await;
+    let url = group_run(&st, &run_id).pr_url.unwrap();
+    st.git.st().merged_prs.push(url);
+    to_fix(&lark, "c2", "ou_pm");
+    *lark.replies.lock().unwrap() = vec![comment("r1", "c2", "ou_pm", "Warna kartu")];
+
+    let before = st.agent.count();
+    fix_tick(&st).await;
+    assert_eq!(
+        group_run(&st, &run_id).state,
+        RunState::InReviewLoop,
+        "grup tidak masuk loop"
+    );
+    let follow = st.svc.active_runs().await.unwrap();
+    assert!(follow.iter().any(|r| r.id != run_id && r.record_id == "c2"));
+    let report = fix_tick(&st).await;
+    assert_eq!(report.started, ["c2"]);
+    assert_eq!(st.agent.count(), before + 1);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn kartu_kedua_waiting_fix_dua_tick_satu_notifikasi() {
+    let (lark, clock) = setup();
+    let (st, run_id) = published(&lark, &clock, &[]).await;
+    to_fix(&lark, "c2", "ou_pm");
+    let report = fix_tick(&st).await;
+    assert_eq!(report.entered, ["c2"]);
+    lark.edit("c2", |t| t.last_modified_by = Some("ou_lain".to_owned()));
+    let report = fix_tick(&st).await;
+    assert!(report.entered.is_empty());
+
+    let waiting: Vec<_> = st
+        .notifier
+        .sent
+        .lock()
+        .unwrap()
+        .iter()
+        .filter(|n| n.kind == NoticeKind::WaitingFix)
+        .cloned()
+        .collect();
+    assert_eq!(waiting.len(), 1, "{waiting:?}");
+    assert_eq!(waiting[0].record_id, "c2");
+    assert_eq!(group_run(&st, &run_id).state, RunState::WfAwaitingComment);
+    let cards = st.svc.group_cards(&run_id).await.unwrap();
+    assert_eq!(cards[1].fix_requested_by.as_deref(), Some("ou_pm"));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn deskripsi_pr_memperingatkan_selama_ada_kartu_waiting_fix() {
+    let (lark, clock) = setup();
+    let (st, run_id) = published(&lark, &clock, &[]).await;
+    let url = group_run(&st, &run_id).pr_url.unwrap();
+    to_fix(&lark, "c2", "ou_pm");
+    fix_tick(&st).await;
+    let body = st.git.st().bodies.get(&url).cloned().unwrap();
+    assert!(
+        body.contains("Do not merge: PGS-1402 is in Waiting Fix"),
+        "{body}"
+    );
+
+    *lark.replies.lock().unwrap() = vec![comment("r1", "c2", "ou_pm", "Warna kartu")];
+    fix_tick(&st).await;
+    st.svc.sync().drain_outbox(20).await.unwrap();
+    fix_reviewed(&st, [Verdict::Pass; 3]).await;
+    eventually(|| group_run(&st, &run_id).state == RunState::InReviewLoop).await;
+    let body = st.git.st().bodies.get(&url).cloned().unwrap();
+    assert!(!body.contains("Do not merge"), "{body}");
 }

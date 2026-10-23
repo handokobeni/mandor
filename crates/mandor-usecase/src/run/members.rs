@@ -59,6 +59,8 @@ pub(crate) struct PrHeading {
     pub acs: Vec<String>,
     /// Kartu run grup untuk ringkasan per kartu; `None` untuk run tunggal.
     pub cards: Option<Vec<GroupPrCard>>,
+    /// Peringatan di atas badan, mis. kartu grup yang masih Waiting Fix (R19).
+    pub warning: Option<String>,
 }
 
 /// Kartu run grup di deskripsi PR.
@@ -369,6 +371,7 @@ impl<D: Deps> RunService<D> {
             description: task.description.clone(),
             acs: self.ac_texts(&task).await.unwrap_or_default(),
             cards: None,
+            warning: None,
         })
     }
 
@@ -376,7 +379,7 @@ impl<D: Deps> RunService<D> {
     /// badan saat ini masih tulisan Mandor. Kegagalan hanya dicatat; push dan
     /// status tidak bergantung padanya. `true` bila badan diperbarui (hash baru
     /// perlu disimpan).
-    async fn refresh_pr_body(&self, run: &mut RunRecord, m: &Member, url: &str) -> bool {
+    pub(crate) async fn refresh_pr_body(&self, run: &mut RunRecord, m: &Member, url: &str) -> bool {
         if !self.pr_body_owned(run, m, url).await {
             return false;
         }
@@ -420,7 +423,10 @@ impl<D: Deps> RunService<D> {
     /// tautan task dan penanda Mandor. Bila model atau bahan gagal, PR tetap
     /// dibuat dengan badan minimal.
     async fn pr_body(&self, run: &RunRecord, m: &Member, heading: &PrHeading) -> String {
-        let header = &heading.header;
+        let header = match &heading.warning {
+            Some(w) => format!("> **{w}**\n\n{}", heading.header),
+            None => heading.header.clone(),
+        };
         let footer = "Created by Mandor.";
         let generated = async {
             let diff: String = self

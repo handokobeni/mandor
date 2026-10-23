@@ -6,7 +6,10 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use mandor_domain::RunState;
-use mandor_domain::ac_ledger::{ReviewCounts, Verdict, fill_unreported, reset_for_review};
+use mandor_domain::ac_ledger::{
+    ReviewCounts, Verdict, fill_unreported, reset_for_group_review, reset_for_review,
+    restore_decisions,
+};
 use mandor_domain::app_run::{AppRunState, TestMode};
 use mandor_domain::hook_review::origin_of;
 
@@ -65,7 +68,12 @@ impl<D: Deps> RunService<D> {
             return Err(rejected("This task has no acceptance criteria to review"));
         }
         let snapshot = self.code_snapshot(&run).await?;
-        reset_for_review(&mut rows);
+        // Run grup menyimpan keputusan dev agar pulih bila verdict tetap (R18).
+        if self.runs.cards(run_id).await?.is_empty() {
+            reset_for_review(&mut rows);
+        } else {
+            reset_for_group_review(&mut rows);
+        }
         self.reviews.save_ac_rows(run_id, &rows).await?;
 
         self.refresh_app_for_review(&run, &snapshot).await?;
@@ -279,6 +287,7 @@ impl<D: Deps> RunService<D> {
             ReviewStatus::Cancelled
         } else if end.ok {
             fill_unreported(&mut rows);
+            restore_decisions(&mut rows);
             self.reviews.save_ac_rows(&run.id, &rows).await?;
             ReviewStatus::Finished
         } else {

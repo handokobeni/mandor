@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "UPDATE comment_journal SET status = 'pending' WHERE record_id = ? AND reply_id = ?",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": []
+  },
+  "hash": "388f31c39966dcb0e550a3b2048076b6a267cca48bf7bc5a4200b01692ce9df4"
+}

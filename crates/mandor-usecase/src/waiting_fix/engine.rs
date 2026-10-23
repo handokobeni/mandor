@@ -80,6 +80,9 @@ impl<D: Deps> RunService<D> {
         replies.extend(self.feedback_qa_of(&candidates).await);
         self.remember_replies(&replies);
 
+        let (groups, candidates) = self.split_group_candidates(candidates).await?;
+        self.tick_groups(groups, &replies, quiet_secs, &mut report)
+            .await;
         for task in candidates {
             let record_id = task.record_id.clone();
             match self
@@ -95,6 +98,32 @@ impl<D: Deps> RunService<D> {
             }
         }
         Ok(report)
+    }
+
+    /// Putaran untuk setiap run grup; kegagalan per grup hanya dicatat.
+    async fn tick_groups(
+        self: &Arc<Self>,
+        groups: Vec<(RunRecord, Vec<Task>)>,
+        replies: &[Reply],
+        quiet_secs: i64,
+        report: &mut FixReport,
+    ) {
+        for (run, tasks) in groups {
+            let run_id = run.id.clone();
+            let unavailable = report.comments_unavailable;
+            match self
+                .process_group(run, tasks, replies, quiet_secs, unavailable)
+                .await
+            {
+                Ok(step) => {
+                    report.entered.extend(step.entered);
+                    report.started.extend(step.started);
+                }
+                Err(e) => {
+                    tracing::warn!(run_id, error = %e, "mesin Waiting Fix gagal untuk grup");
+                }
+            }
+        }
     }
 
     /// Feedback QA dari AC setiap kandidat sebagai balasan sintetis (R11f). AC
@@ -126,6 +155,16 @@ impl<D: Deps> RunService<D> {
     /// loop baru akan dimulai pada putaran ini.
     async fn fix_requester(&self, task: &Task) -> Result<Option<String>, RunError> {
         let run = self.runs.active_for(&task.record_id).await?;
+        if let Some(r) = &run {
+            let cards = self.runs.cards(&r.id).await?;
+            if let Some(c) = cards.iter().find(|c| c.record_id == task.record_id) {
+                return Ok(if c.in_fix {
+                    c.fix_requested_by.clone()
+                } else {
+                    task.last_modified_by.clone()
+                });
+            }
+        }
         Ok(match run {
             Some(r) if r.state.in_fix_loop() => r.fix_requested_by,
             _ => task.last_modified_by.clone(),
@@ -274,7 +313,8 @@ impl<D: Deps> RunService<D> {
             }
             return Ok(if entered { Step::Entered } else { Step::Idle });
         }
-        self.start_fix_turn(run, &task, &repo, batch, None).await?;
+        self.start_fix_turn(run, vec![(task, batch)], &repo, None)
+            .await?;
         Ok(Step::Started)
     }
 
@@ -324,7 +364,7 @@ impl<D: Deps> RunService<D> {
 
     /// Balasan tepercaya yang lebih baru dari kursor dan belum `delivered`,
     /// ditambah balasan `pending` yang harus dikirim ulang setelah crash.
-    async fn unsent_trusted(
+    pub(super) async fn unsent_trusted(
         &self,
         task: &Task,
         replies: &[Reply],
@@ -362,7 +402,11 @@ impl<D: Deps> RunService<D> {
 
     /// Kursor Lark tertinggal dari balasan yang sudah `delivered` (crash setelah
     /// kirim sebelum kursor ditulis): antrekan kursor tanpa mengirim ulang.
-    async fn reconcile_cursor(&self, task: &Task, replies: &[Reply]) -> Result<(), RunError> {
+    pub(super) async fn reconcile_cursor(
+        &self,
+        task: &Task,
+        replies: &[Reply],
+    ) -> Result<(), RunError> {
         let cursor = task.comment_cursor.as_deref().and_then(Cursor::parse);
         let delivered: HashSet<String> = self
             .runs
@@ -381,7 +425,11 @@ impl<D: Deps> RunService<D> {
         self.enqueue_cursor(&task.record_id, &max).await
     }
 
-    async fn enqueue_cursor(&self, record_id: &str, cursor: &Cursor) -> Result<(), RunError> {
+    pub(super) async fn enqueue_cursor(
+        &self,
+        record_id: &str,
+        cursor: &Cursor,
+    ) -> Result<(), RunError> {
         let text = cursor.encode();
         {
             let mut sent = self
@@ -398,16 +446,27 @@ impl<D: Deps> RunService<D> {
         Ok(())
     }
 
-    /// Menjalankan giliran perbaikan dengan `batch` komentar (dan instruksi dev).
-    async fn start_fix_turn(
+    /// Menjalankan giliran perbaikan dengan komentar per record (dan instruksi
+    /// dev). Run grup bisa membawa beberapa kartu sekaligus; komentar diberi
+    /// label kartunya dan setiap kartu dipindah sendiri-sendiri (R17).
+    pub(super) async fn start_fix_turn(
         self: &Arc<Self>,
         mut run: RunRecord,
-        task: &Task,
+        batches: Vec<(Task, Vec<Reply>)>,
         repo: &RepoInfo,
-        batch: Vec<Reply>,
         instruction: Option<&str>,
     ) -> Result<(), RunError> {
         let _work = self.enter_work()?;
+        if batches.is_empty() {
+            return Err(RunError::InvalidState("no comment to send"));
+        }
+        let grouped = !self.runs.cards(&run.id).await?.is_empty();
+        let group: Vec<Task> = if grouped {
+            batches.iter().map(|(t, _)| t.clone()).collect()
+        } else {
+            Vec::new()
+        };
+        let sent: usize = batches.iter().map(|(_, b)| b.len()).sum();
         // Perbaikan selalu mengerjakan kode, termasuk run yang masih di fase plan.
         run.phase = crate::run_ports::RunPhase::Implement;
         // Worktree yang hilang dibuat ulang sebelum diff diambil.
@@ -419,30 +478,9 @@ impl<D: Deps> RunService<D> {
             .clone()
             .ok_or(RunError::InvalidState("no worktree"))?;
         let resumable = run.session_started && run.session_id.is_some();
-        let message = if resumable {
-            self.prompts.fix_message(&FixContext {
-                task,
-                acs: &[],
-                diff: None,
-                comments: &batch,
-                instruction,
-            })
-        } else {
-            let acs = self.ac_texts(task).await?;
-            let diff = self
-                .git
-                .branch_diff(repo, &worktree)
-                .await
-                .unwrap_or_default();
-            run.session_id = Some(crate::ports::Ids::nonce(&self.sync.ids));
-            self.prompts.fix_message(&FixContext {
-                task,
-                acs: &acs,
-                diff: Some(&diff),
-                comments: &batch,
-                instruction,
-            })
-        };
+        let message = self
+            .fix_prompt(&mut run, &batches, &group, repo, &worktree, instruction)
+            .await?;
         let session_id = run.session_id.clone().unwrap_or_default();
         req.session = if resumable {
             SessionRef::Resume(session_id)
@@ -450,33 +488,119 @@ impl<D: Deps> RunService<D> {
             SessionRef::New(session_id)
         };
         req.message = message;
-        for r in &batch {
-            self.runs
-                .journal_pending(&task.record_id, &r.reply_id, &run.id, self.now())
-                .await?;
-        }
+        self.journal_batches(&run.id, &batches).await?;
         run.automatic = true;
         let summary = instruction.map_or_else(
-            || format!("{} reviewer comment(s) forwarded to the agent", batch.len()),
+            || format!("{sent} reviewer comment(s) forwarded to the agent"),
             str::to_owned,
         );
         self.spawn_turn(&mut run, req, Some(summary)).await?;
-        for r in &batch {
-            self.runs
-                .journal_delivered(&task.record_id, &r.reply_id)
-                .await?;
+        self.settle_batches(&batches).await
+    }
+
+    /// Pesan giliran perbaikan: lanjutan sesi bila ada, atau sesi baru dengan
+    /// konteks task, AC, dan diff.
+    async fn fix_prompt(
+        &self,
+        run: &mut RunRecord,
+        batches: &[(Task, Vec<Reply>)],
+        group: &[Task],
+        repo: &RepoInfo,
+        worktree: &std::path::Path,
+        instruction: Option<&str>,
+    ) -> Result<String, RunError> {
+        let first = &batches[0].0;
+        let comments: Vec<Reply> = batches
+            .iter()
+            .flat_map(|(_, b)| b.iter().cloned())
+            .collect();
+        if run.session_started && run.session_id.is_some() {
+            return Ok(self.prompts.fix_message(&FixContext {
+                task: first,
+                acs: &[],
+                diff: None,
+                comments: &comments,
+                instruction,
+                cards: group,
+            }));
         }
-        // Kursor sebelum status.
-        if let Some(max) = batch.iter().map(Cursor::of).max() {
-            self.enqueue_cursor(&task.record_id, &max).await?;
+        let mut acs = Vec::new();
+        for (t, _) in batches {
+            let texts = self.ac_texts(t).await?;
+            if group.is_empty() {
+                acs.extend(texts);
+            } else {
+                let key = t.key.as_deref().unwrap_or(&t.record_id);
+                acs.extend(texts.into_iter().map(|a| format!("{key} {a}")));
+            }
         }
-        if task.status == TaskStatus::WaitingFix {
-            let op = WriteOp::Transition {
-                from: TaskStatus::WaitingFix,
-                to: TaskStatus::InProgress,
-                fields: vec![],
-            };
-            self.sync.request_write(&task.record_id, &op).await?;
+        let diff = self
+            .git
+            .branch_diff(repo, worktree)
+            .await
+            .unwrap_or_default();
+        run.session_id = Some(crate::ports::Ids::nonce(&self.sync.ids));
+        Ok(self.prompts.fix_message(&FixContext {
+            task: first,
+            acs: &acs,
+            diff: Some(&diff),
+            comments: &comments,
+            instruction,
+            cards: group,
+        }))
+    }
+
+    /// Jurnal `pending` sebelum giliran dikirim; kartu grup mencatat balasan
+    /// siklus perbaikannya.
+    async fn journal_batches(
+        &self,
+        run_id: &str,
+        batches: &[(Task, Vec<Reply>)],
+    ) -> Result<(), RunError> {
+        for (t, batch) in batches {
+            for r in batch {
+                self.runs
+                    .journal_pending(&t.record_id, &r.reply_id, run_id, self.now())
+                    .await?;
+            }
+        }
+        let mut cards = self.runs.cards(run_id).await?;
+        if cards.is_empty() {
+            return Ok(());
+        }
+        for (t, batch) in batches {
+            if let Some(c) = cards.iter_mut().find(|c| c.record_id == t.record_id) {
+                c.in_fix = true;
+                c.quiet_until_ms = None;
+                c.fix_replies
+                    .extend(batch.iter().map(|r| r.reply_id.clone()));
+            }
+        }
+        self.runs.save_cards(run_id, &cards, None).await?;
+        Ok(())
+    }
+
+    /// Setelah giliran diterima agent: jurnal `delivered`, kursor, lalu status
+    /// Waiting Fix → In Progress per record.
+    async fn settle_batches(&self, batches: &[(Task, Vec<Reply>)]) -> Result<(), RunError> {
+        for (task, batch) in batches {
+            for r in batch {
+                self.runs
+                    .journal_delivered(&task.record_id, &r.reply_id)
+                    .await?;
+            }
+            // Kursor sebelum status.
+            if let Some(max) = batch.iter().map(Cursor::of).max() {
+                self.enqueue_cursor(&task.record_id, &max).await?;
+            }
+            if task.status == TaskStatus::WaitingFix {
+                let op = WriteOp::Transition {
+                    from: TaskStatus::WaitingFix,
+                    to: TaskStatus::InProgress,
+                    fields: vec![],
+                };
+                self.sync.request_write(&task.record_id, &op).await?;
+            }
         }
         Ok(())
     }
@@ -512,8 +636,11 @@ impl<D: Deps> RunService<D> {
         self.sync.cache.upsert(&task).await?;
         let existing = self.runs.active_for(record_id).await?;
         let run = match existing {
-            Some(r) if r.state.in_fix_loop() && r.state != RunState::WfRunning => r,
             Some(r) if r.state.is_busy() => return Err(RunError::InvalidState(r.state.as_str())),
+            Some(r) if !self.runs.cards(&r.id).await?.is_empty() => {
+                self.enter_group_card(r, &task).await?
+            }
+            Some(r) if r.state.in_fix_loop() && r.state != RunState::WfRunning => r,
             other if task.status == TaskStatus::WaitingFix => self
                 .enter_fix_loop(&task, other)
                 .await?
@@ -543,7 +670,7 @@ impl<D: Deps> RunService<D> {
         if instruction.is_none() && batch.is_empty() {
             return Err(RunError::InvalidState("no instruction or comment to send"));
         }
-        self.start_fix_turn(run, &task, &repo, batch, instruction)
+        self.start_fix_turn(run, vec![(task, batch)], &repo, instruction)
             .await
     }
 
@@ -565,19 +692,16 @@ impl<D: Deps> RunService<D> {
                 .await;
             return Ok(());
         }
-        let task = self.task_of(&run.record_id).await?;
         let repo = self.repo_of(&run).await?;
-        let replies = self
-            .replies
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .clone();
-        let more = self
-            .unsent_trusted(&task, &replies, &repo.trusted_reviewers)
-            .await?;
+        let grouped = !self.runs.cards(&run.id).await?.is_empty();
+        let more = self.arrived_during_turn(&run, &repo, grouped).await?;
         if !more.is_empty() {
             // Komentar yang tiba saat agent berjalan: giliran berikutnya, sesi sama.
-            return self.continue_fix(run, task, repo, more).await;
+            return self.continue_fix(run, more, repo).await;
+        }
+        // PR grup merged saat perbaikan berjalan: tidak ada push ke branch grup.
+        if grouped && self.group_pr_merged(&run).await {
+            return self.follow_up_fixing(run).await;
         }
         let work = self.member_changes(&run).await?;
         if work.iter().all(|(_, c)| c.is_empty()) {
@@ -632,6 +756,32 @@ impl<D: Deps> RunService<D> {
         self.mark_waiting_review(&mut run, &url, false).await
     }
 
+    /// Komentar tepercaya yang tiba saat giliran perbaikan berjalan.
+    async fn arrived_during_turn(
+        &self,
+        run: &RunRecord,
+        repo: &RepoInfo,
+        grouped: bool,
+    ) -> Result<Vec<(Task, Vec<Reply>)>, RunError> {
+        let replies = self
+            .replies
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone();
+        if grouped {
+            return self.group_unsent(run, repo, &replies).await;
+        }
+        let task = self.task_of(&run.record_id).await?;
+        let batch = self
+            .unsent_trusted(&task, &replies, &repo.trusted_reviewers)
+            .await?;
+        Ok(if batch.is_empty() {
+            Vec::new()
+        } else {
+            vec![(task, batch)]
+        })
+    }
+
     /// Lanjutan review perbaikan otomatis (KTD-40): gerbang Ready (atau mode
     /// peringatan) mendorong push dan Waiting Review; selain itu push ditahan,
     /// task ditandai, dan dev diberi tahu. Status Lark tidak berubah.
@@ -647,7 +797,7 @@ impl<D: Deps> RunService<D> {
                 .flag_fix(run, RunState::AwaitingDev, &format!("Push held: {why}"))
                 .await;
         }
-        let rows = self.reviews.ac_rows(&run.id).await?;
+        let rows = self.gate_rows(&run).await?;
         let mode = self.gate_mode(&run).await?;
         let held = match evaluate(&rows, mode, &GateDecision::default()) {
             GateOutcome::Ready { .. } => None,
@@ -666,6 +816,9 @@ impl<D: Deps> RunService<D> {
         if let Some(note) = held {
             return self.flag_fix(run, RunState::AwaitingDev, &note).await;
         }
+        if !self.runs.cards(&run.id).await?.is_empty() && self.group_pr_merged(&run).await {
+            return self.follow_up_fixing(run).await;
+        }
         let generation = run.generation;
         let work = self.member_changes(&run).await?;
         run.state = RunState::Publishing;
@@ -677,15 +830,14 @@ impl<D: Deps> RunService<D> {
     fn continue_fix(
         self: &Arc<Self>,
         run: RunRecord,
-        task: Task,
+        batches: Vec<(Task, Vec<Reply>)>,
         repo: RepoInfo,
-        batch: Vec<Reply>,
     ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<(), RunError>> + Send + '_>>
     {
-        Box::pin(async move { self.start_fix_turn(run, &task, &repo, batch, None).await })
+        Box::pin(async move { self.start_fix_turn(run, batches, &repo, None).await })
     }
 
-    async fn flag_fix(
+    pub(super) async fn flag_fix(
         &self,
         mut run: RunRecord,
         state: RunState,

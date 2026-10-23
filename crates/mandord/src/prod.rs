@@ -283,6 +283,10 @@ impl Journal for BroadcastRuns {
         self.inner.journal_delivered(record_id, reply_id).await
     }
 
+    async fn journal_requeue(&self, record_id: &str, reply_id: &str) -> Result<(), PortError> {
+        self.inner.journal_requeue(record_id, reply_id).await
+    }
+
     async fn journal_pending_list(&self, record_id: &str) -> Result<Vec<String>, PortError> {
         self.inner.journal_pending_list(record_id).await
     }

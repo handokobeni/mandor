@@ -32,6 +32,9 @@ fn removed_label(state: &CardState) -> Option<&'static str> {
         CardState::Removed(RemovedReason::ChangedInLark) => Some("changed in Lark"),
         CardState::Removed(RemovedReason::ByDev) => Some("removed by the developer"),
         CardState::Removed(RemovedReason::Reverted) => Some("reverted"),
+        CardState::Removed(RemovedReason::FollowUp) => {
+            Some("fixed in a follow-up pull request after this one merged")
+        }
         _ => None,
     }
 }
@@ -47,6 +50,23 @@ pub(super) fn labelled_rows(rows: &[AcRow], keys: &HashMap<String, String>) -> V
             r
         })
         .collect()
+}
+
+/// "Do not merge" selama ada kartu grup di Waiting Fix (R19).
+fn fix_warning(active: &[&Task]) -> Option<String> {
+    let keys: Vec<&str> = active
+        .iter()
+        .filter(|t| t.status == TaskStatus::WaitingFix)
+        .map(|t| key_of(t))
+        .collect();
+    match keys.as_slice() {
+        [] => None,
+        [one] => Some(format!("Do not merge: {one} is in Waiting Fix.")),
+        many => Some(format!(
+            "Do not merge: {} are in Waiting Fix.",
+            many.join(", ")
+        )),
+    }
 }
 
 impl<D: Deps> RunService<D> {
@@ -259,6 +279,7 @@ impl<D: Deps> RunService<D> {
             description: description.trim_end().to_owned(),
             acs,
             cards: Some(pr_cards),
+            warning: fix_warning(&active),
         })
     }
 
@@ -277,24 +298,68 @@ impl<D: Deps> RunService<D> {
     }
 
     /// Link PR ke semua kartu grup yang masih disertakan; Waiting Review hanya
-    /// untuk kartu yang tidak berubah di Lark (R14, KTD-G7).
+    /// untuk kartu yang tidak berubah di Lark (R14, KTD-G7). Kartu yang masih
+    /// Waiting Fix tidak disentuh; kartu lain keluar dari loop perbaikan (R17).
     pub(super) async fn mark_group_cards(
         &self,
-        cards: &[GroupCardRow],
+        run_id: &str,
         url: &str,
         cursor_now_too: bool,
     ) -> Result<(), RunError> {
-        let domain = group_cards_domain(cards);
-        let moves = group::publish_moves(&domain);
-        for c in cards.iter().filter(|c| c.is_open()) {
-            if moves.contains(&c.record_id.as_str()) {
-                self.mark_card(&c.record_id, url, cursor_now_too).await?;
+        let mut cards = self.runs.cards(run_id).await?;
+        let domain = group_cards_domain(&cards);
+        let moves: Vec<String> = group::publish_moves(&domain)
+            .into_iter()
+            .map(str::to_owned)
+            .collect();
+        for c in cards.iter_mut().filter(|c| c.is_open()) {
+            let task = self.task_of(&c.record_id).await?;
+            // Kartu Waiting Fix yang komentarnya belum dikirim menunggu giliran
+            // perbaikannya sendiri. Kartu yang sudah diperbaiki di siklus ini
+            // bisa masih terbaca Waiting Fix selama transisinya di outbox.
+            if task.status == TaskStatus::WaitingFix && c.fix_replies.is_empty() {
+                continue;
+            }
+            if moves.contains(&c.record_id) {
+                self.mark_task(&task, url, cursor_now_too).await?;
             } else {
                 let op = WriteOp::Fields(vec![AppField::PrUrl(url.to_owned())]);
                 self.sync.request_write(&c.record_id, &op).await?;
             }
+            c.in_fix = false;
+            c.quiet_until_ms = None;
+            c.fix_replies.clear();
         }
+        self.runs.save_cards(run_id, &cards, None).await?;
         Ok(())
+    }
+
+    /// Baris buku AC untuk evaluasi gerbang; run grup memberi kunci kartu di
+    /// depan label agar pesan menyebut kartunya.
+    ///
+    /// # Errors
+    /// Penyimpanan atau Lark gagal.
+    pub(crate) async fn gate_rows(&self, run: &RunRecord) -> Result<Vec<AcRow>, RunError> {
+        let rows = self.reviews.ac_rows(&run.id).await?;
+        let ids: Vec<String> = self
+            .runs
+            .cards(&run.id)
+            .await?
+            .into_iter()
+            .map(|c| c.record_id)
+            .collect();
+        if ids.is_empty() {
+            return Ok(rows);
+        }
+        let keys: HashMap<String, String> = self
+            .sync
+            .lark
+            .fetch(&ids)
+            .await?
+            .iter()
+            .map(|t| (t.record_id.clone(), key_of(t).to_owned()))
+            .collect();
+        Ok(labelled_rows(&rows, &keys))
     }
 
     /// Link PR dan Waiting Review untuk satu kartu. Bila status sudah diubah
@@ -306,6 +371,16 @@ impl<D: Deps> RunService<D> {
         cursor_now_too: bool,
     ) -> Result<(), RunError> {
         let task = self.task_of(record_id).await?;
+        self.mark_task(&task, url, cursor_now_too).await
+    }
+
+    async fn mark_task(
+        &self,
+        task: &Task,
+        url: &str,
+        cursor_now_too: bool,
+    ) -> Result<(), RunError> {
+        let record_id = task.record_id.as_str();
         let mut fields = vec![AppField::PrUrl(url.to_owned())];
         if task.status == TaskStatus::WaitingReview {
             if task.pr_url.as_deref() != Some(url) {

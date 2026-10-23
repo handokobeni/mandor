@@ -488,7 +488,7 @@ impl<D: Deps> RunService<D> {
     }
 
     /// Menyimpan kartu (dengan pindah kartu utama bila perlu) lalu run.
-    pub(super) async fn save_group(
+    pub(crate) async fn save_group(
         &self,
         run: &mut RunRecord,
         cards: &[GroupCardRow],

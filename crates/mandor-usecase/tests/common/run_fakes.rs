@@ -503,6 +503,14 @@ impl Journal for FakeRuns {
         }
         Ok(())
     }
+    async fn journal_requeue(&self, record: &str, reply: &str) -> Result<(), PortError> {
+        for e in self.journal.lock().unwrap().iter_mut() {
+            if e.0 == record && e.1 == reply {
+                "pending".clone_into(&mut e.2);
+            }
+        }
+        Ok(())
+    }
     async fn journal_pending_list(&self, record: &str) -> Result<Vec<String>, PortError> {
         Ok(self
             .journal

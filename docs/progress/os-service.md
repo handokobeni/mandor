@@ -13,7 +13,18 @@ Plan: `docs/plans/2026-10-23-001-feat-daemon-os-service-installer-plan.md`. Caku
 
 `make check` hijau (cakupan baris 89,9%), `bun run check` dan `bun run test` (100) hijau, TS protokol diregenerasi (`StatusResult` opsional `busy`, `managed_by`, `draining`, `keep_awake`; `DrainResult` baru).
 
+## Uji langsung (2026-10-23, WSL Ubuntu dengan systemd user, mesin pemilik produk)
+
+| Skenario | Hasil |
+|---|---|
+| `install --check` sebelum pasang | `binary: differs` (biner manual 18 Oktober), `service: missing`, `systemd: true`, `linger: true`, `running: detached`. |
+| `install` dengan daemon setsid build lama (tanpa `daemon.drain`) berjalan, tanpa run yang bekerja | `{"result":"updated","service":"systemd","linger":true,"apps_stopped":true}` dalam 0,65 detik; jalur `runs.list` untuk daemon lama dipakai; daemon lama berhenti bersih; unit `active` dan `enabled`. |
+| `status` lewat `~/.local/bin/mandord connect` | `managed_by: systemd`, `busy: false`, `draining: false`. |
+| `kill -9` daemon | systemd menyalakan lagi dengan pid baru dalam ~2 detik (`Restart=always`); `status` tetap `managed_by: systemd`. |
+| `systemctl --user stop`, lalu `mandord token` | daemon dinyalakan lewat service (unit kembali `active`), `managed_by: systemd`; sesi Lark tersambung beberapa detik setelah start. |
+
+Setelah uji, daemon pemilik produk berjalan sebagai service dari `~/.local/bin/mandord` (build branch `feat/daemon-os-service`).
+
 ## Belum diverifikasi langsung
 
-- Verifikasi U3/U4 di plan: `mandord install` di WSL Ubuntu dengan systemd sungguhan (service aktif, selamat dari `kill -9`, termasuk saat ada daemon setsid berjalan) dan `connect` setelah `systemctl --user stop`. Ini mengubah setup daemon di mesin pemilik produk (biner `~/.local/bin`, unit systemd, linger, menghentikan daemon yang berjalan), jadi dijalankan bersama pemilik produk.
-- Drain `busy` dari daemon dengan run yang bekerja, dan daemon lama tanpa `daemon.drain`, belum diuji end-to-end (butuh sesi Lark); logika busy teruji di `crates/mandor-usecase/tests/drain.rs`.
+- Drain `busy` dari daemon dengan run yang bekerja belum diuji end-to-end; logika busy teruji di `crates/mandor-usecase/tests/drain.rs`.

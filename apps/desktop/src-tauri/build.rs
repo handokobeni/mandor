@@ -27,8 +27,8 @@ fn main() -> Result<(), String> {
     println!("cargo:rerun-if-changed={}", resource.display());
     let bytes = std::fs::read(&resource).unwrap_or_default();
     let real = !bytes.is_empty() && bytes != PLACEHOLDER;
-    let bundles_daemon = std::env::var("CARGO_CFG_TARGET_OS")
-        .is_ok_and(|os| os == "windows" || os == "linux");
+    let bundles_daemon =
+        std::env::var("CARGO_CFG_TARGET_OS").is_ok_and(|os| os == "windows" || os == "linux");
     let release = std::env::var("PROFILE").is_ok_and(|p| p == "release");
     if bundles_daemon && release && !real {
         return Err(format!(

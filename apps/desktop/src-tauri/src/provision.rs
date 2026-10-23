@@ -344,6 +344,27 @@ async fn run_with(
     out.map_err(|e| e.to_string())
 }
 
+/// Skrip melepas service lokal: `uninstall` dari biner terpasang (tanpa
+/// `--force`, sehingga run yang bekerja menghasilkan `deferred`).
+const UNINSTALL_SCRIPT: &str = r#"b="$HOME/.local/bin/mandord"
+if [ ! -x "$b" ]; then
+  echo '{"result":"uninstalled","service":"none","linger":false,"apps_stopped":false,"warnings":[]}'
+  exit 0
+fi
+exec "$b" uninstall"#;
+
+/// Melepas service daemon yang dipasang app di Linux (KTD-L6 plan paket Linux).
+///
+/// # Errors
+/// Perintah tidak bisa dijalankan, melewati batas waktu, atau tidak melapor.
+pub async fn uninstall_local(home: &Path, timeout: Duration) -> Result<InstallReport, String> {
+    let runner = Runner::Local {
+        home: home.to_owned(),
+    };
+    let out = run_with(runner.command(UNINSTALL_SCRIPT, ""), None, timeout).await?;
+    parse_install(&String::from_utf8_lossy(&out.stdout))
+}
+
 /// Masukan provisioning.
 #[derive(Debug, Clone)]
 pub struct Inputs {
@@ -784,6 +805,34 @@ mod tests {
             matches!(state, ProvisionState::CannotCheck { .. }),
             "{state:?}"
         );
+    }
+
+    /// Tombol melepas service (KTD-L6): `uninstall` tanpa `--force` dari biner
+    /// terpasang; biner tidak ada berarti tidak ada yang dilepas.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn melepas_service_lokal() {
+        let home = tempfile::tempdir().unwrap();
+        let t = Duration::from_secs(10);
+        let state = uninstall_local(home.path(), t).await.unwrap();
+        assert_eq!(state.result, "uninstalled", "tidak terpasang");
+
+        place_installed(
+            home.path(),
+            b"#!/bin/sh
+echo \"$*\" > \"$HOME/args\"
+echo '{\"result\":\"deferred\",\"service\":\"systemd\",\"linger\":true,\"apps_stopped\":false,\"warnings\":[]}'
+",
+        );
+        let state = uninstall_local(home.path(), t).await.unwrap();
+        assert_eq!(state.result, "deferred");
+        let args = std::fs::read_to_string(home.path().join("args")).unwrap();
+        assert_eq!(args.trim(), "uninstall", "tanpa --force");
+
+        place_installed(home.path(), b"#!/bin/sh
+echo rusak
+");
+        assert!(uninstall_local(home.path(), t).await.is_err());
     }
 
     #[cfg(unix)]

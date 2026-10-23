@@ -13,6 +13,9 @@ export interface InstallReport {
   message: string | null;
 }
 
+/** Tempat app memasang daemon: WSL (Windows) atau lokal (paket Linux). */
+export type Runner = 'wsl' | 'local';
+
 /** Keadaan provisioning daemon oleh app (command Tauri `provision_run`). */
 export type ProvisionState =
   | { state: 'not_needed' }
@@ -22,6 +25,9 @@ export type ProvisionState =
   | { state: 'deferred'; report: InstallReport }
   | { state: 'cannot_check'; message: string }
   | { state: 'failed'; message: string };
+
+/** Hasil `provision_run`: keadaan dan pelaksananya (tidak ada bila app tidak memasang daemon). */
+export type ProvisionView = ProvisionState & { runner?: Runner | null };
 
 /** Status `.wslconfig` (command Tauri `wsl_keepalive_status`). */
 export interface KeepAliveView {
@@ -46,8 +52,8 @@ export interface Notice {
 }
 
 export interface BackgroundInput {
-  /** App memakai daemon di WSL. */
-  wsl: boolean;
+  /** Pelaksana provisioning; `null` bila app tidak memasang daemon (build dev). */
+  runner: Runner | null;
   provision: ProvisionState | null;
   status: StatusResult | null;
   keepAlive: KeepAliveView | null;
@@ -60,8 +66,10 @@ export interface BackgroundView {
   ready: boolean;
 }
 
-const SYSTEMD_STEPS =
+const SYSTEMD_STEPS_WSL =
   'Turn on systemd in WSL: add "[boot]" and "systemd=true" to /etc/wsl.conf, then run "wsl --shutdown" from Windows and reopen Mandor.';
+const SYSTEMD_STEPS_LINUX =
+  'This system has no systemd user session. Log in to a desktop session that runs systemd, then reopen Mandor.';
 
 /** Status service, linger, dan sistem dari provisioning. */
 function provisioned(p: ProvisionState | null): { systemd: boolean | null; linger: boolean | null } {
@@ -77,7 +85,7 @@ function provisioned(p: ProvisionState | null): { systemd: boolean | null; linge
   }
 }
 
-function serviceRow(status: StatusResult | null, systemd: boolean | null): Row {
+function serviceRow(status: StatusResult | null, systemd: boolean | null, runner: Runner | null): Row {
   const managed = status?.managed_by;
   if (managed === 'systemd') {
     return {
@@ -93,24 +101,39 @@ function serviceRow(status: StatusResult | null, systemd: boolean | null): Row {
       tone: 'warn',
       title: 'Daemon is not a service',
       detail:
-        systemd === false
-          ? `It stops when WSL stops. ${SYSTEMD_STEPS}`
-          : 'It stops when WSL stops. Reopen Mandor to set up the service.'
+        runner === 'local'
+          ? systemd === false
+            ? `It stops when you log out or it crashes. ${SYSTEMD_STEPS_LINUX}`
+            : 'It stops when you log out or it crashes. Reopen Mandor to set up the service.'
+          : systemd === false
+            ? `It stops when WSL stops. ${SYSTEMD_STEPS_WSL}`
+            : 'It stops when WSL stops. Reopen Mandor to set up the service.'
     };
   }
   return { id: 'service', tone: 'unknown', title: 'Daemon service: unknown', detail: 'Update Mandor to see this status.' };
 }
 
-function lingerRow(linger: boolean | null): Row {
+function lingerRow(linger: boolean | null, runner: Runner | null): Row {
   if (linger === true) {
-    return { id: 'linger', tone: 'ok', title: 'Linger is on', detail: 'The service survives the end of your WSL session.' };
+    return {
+      id: 'linger',
+      tone: 'ok',
+      title: 'Linger is on',
+      detail:
+        runner === 'local'
+          ? 'The service keeps running after you log out.'
+          : 'The service survives the end of your WSL session.'
+    };
   }
   if (linger === false) {
     return {
       id: 'linger',
       tone: 'warn',
       title: 'Linger is off',
-      detail: 'The service stops when your WSL session ends. In WSL, run: sudo loginctl enable-linger "$USER"'
+      detail:
+        runner === 'local'
+          ? 'The service stops when you log out. In a terminal, run: sudo loginctl enable-linger "$USER"'
+          : 'The service stops when your WSL session ends. In WSL, run: sudo loginctl enable-linger "$USER"'
     };
   }
   return { id: 'linger', tone: 'unknown', title: 'Linger: unknown', detail: 'Shown after Mandor checks the daemon.' };
@@ -148,7 +171,7 @@ function keepAliveRow(k: KeepAliveView | null): Row {
   }
 }
 
-function keepAwakeRow(status: StatusResult | null): Row {
+function keepAwakeRow(status: StatusResult | null, runner: Runner | null): Row {
   switch (status?.keep_awake) {
     case 'held':
       return { id: 'keep_awake', tone: 'ok', title: 'Keeping the laptop awake', detail: 'Agents are working; sleep is held off.' };
@@ -171,7 +194,10 @@ function keepAwakeRow(status: StatusResult | null): Row {
         id: 'keep_awake',
         tone: 'warn',
         title: 'Keep-awake is not set up',
-        detail: 'Reopen Mandor to set it up; until then the laptop may sleep while agents work.'
+        detail:
+          runner === 'local'
+            ? 'Neither gnome-session-inhibit nor systemd-inhibit was found, so the computer may suspend while agents work.'
+            : 'Reopen Mandor to set it up; until then the laptop may sleep while agents work.'
       };
     default:
       return { id: 'keep_awake', tone: 'unknown', title: 'Keep-awake: unknown', detail: 'Update the daemon to see this status.' };
@@ -205,10 +231,10 @@ function notices(p: ProvisionState | null, status: StatusResult | null): Notice[
 /** Baris status dan pemberitahuan untuk Settings → Background work. */
 export function backgroundView(input: BackgroundInput): BackgroundView {
   const { systemd, linger } = provisioned(input.provision);
-  const rows: Row[] = [serviceRow(input.status, systemd)];
-  if (systemd !== false) rows.push(lingerRow(linger));
-  if (input.wsl) rows.push(keepAliveRow(input.keepAlive));
-  rows.push(keepAwakeRow(input.status));
+  const rows: Row[] = [serviceRow(input.status, systemd, input.runner)];
+  if (systemd !== false) rows.push(lingerRow(linger, input.runner));
+  if (input.runner === 'wsl') rows.push(keepAliveRow(input.keepAlive));
+  rows.push(keepAwakeRow(input.status, input.runner));
   return { rows, notices: notices(input.provision, input.status), ready: rows.every((r) => r.tone === 'ok') };
 }
 
@@ -220,4 +246,24 @@ export function shouldRetryProvision(p: ProvisionState | null, status: StatusRes
 /** App memegang keep-awake sendiri bila daemon belum mendukungnya dan ada run bekerja. */
 export function appShouldHoldKeepAwake(status: StatusResult | null): boolean {
   return !!status && status.keep_awake === undefined && status.busy === true;
+}
+
+/** Tombol melepas service hanya untuk daemon yang dipasang app di Linux (KTD-L6). */
+export function canRemoveService(runner: Runner | null): boolean {
+  return runner === 'local';
+}
+
+/** Pesan hasil `mandord uninstall` dari tombol melepas service. */
+export function uninstallMessage(report: InstallReport): { tone: Tone; text: string } {
+  switch (report.result) {
+    case 'uninstalled':
+      return {
+        tone: 'ok',
+        text: 'Background service removed. Quit Mandor, then remove the package. Opening Mandor again sets the service up again.'
+      };
+    case 'deferred':
+      return { tone: 'warn', text: 'Agents are still working. Try again when they finish.' };
+    default:
+      return { tone: 'error', text: `Could not remove the service: ${report.message ?? 'unknown error'}` };
+  }
 }

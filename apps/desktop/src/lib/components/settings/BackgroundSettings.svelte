@@ -1,7 +1,13 @@
 <script lang="ts">
   import { toast } from 'svelte-sonner';
   import { Button } from '#lib/components/ui/button/index.ts';
-  import { backgroundView, type Row, type Tone } from '#lib/background.ts';
+  import {
+    backgroundView,
+    canRemoveService,
+    uninstallMessage,
+    type Row,
+    type Tone
+  } from '#lib/background.ts';
   import { background } from '#lib/stores/background.svelte.ts';
 
   const CHIP: Record<Tone, string> = { ok: 'ok', warn: 'warning', error: 'failed', unknown: 'muted' };
@@ -9,7 +15,7 @@
 
   const view = $derived(
     backgroundView({
-      wsl: background.wsl,
+      runner: background.runner,
       provision: background.provision,
       status: background.status,
       keepAlive: background.keepAlive
@@ -18,6 +24,16 @@
   const busy = $derived(background.status?.busy === true);
   let saving = $state(false);
   let restartHint = $state(false);
+  let confirmRemove = $state(false);
+  let removing = $state(false);
+  let removeResult = $state<{ tone: Tone; text: string } | null>(null);
+
+  async function removeService(): Promise<void> {
+    removing = true;
+    removeResult = uninstallMessage(await background.removeService());
+    removing = false;
+    confirmRemove = false;
+  }
 
   $effect(() => {
     if (background.wsl) void background.loadKeepAlive();
@@ -95,6 +111,33 @@
         {:else}
           <strong>Restart WSL to apply.</strong>
           Run "wsl --shutdown" in PowerShell, then reopen Mandor.
+        {/if}
+      </div>
+    </div>
+  </section>
+{/if}
+
+{#if canRemoveService(background.runner)}
+  <section>
+    <div class="settings-card">
+      <div class="content">
+        <div class="row-setting">
+          <div class="txt">
+            Remove background service
+            <span>Stops the daemon service and removes it from ~/.local/bin before you uninstall the package. Your data in ~/.mandor stays.</span>
+          </div>
+          {#if confirmRemove}
+            <Button size="sm" variant="destructive" disabled={removing} onclick={removeService}>Remove</Button>
+            <Button size="sm" variant="outline" disabled={removing} onclick={() => (confirmRemove = false)}>Cancel</Button>
+          {:else}
+            <Button size="sm" variant="outline" onclick={() => (confirmRemove = true)}>Remove service…</Button>
+          {/if}
+        </div>
+        {#if removeResult}
+          <p style="margin:8px 0 0">
+            <span class="chip" data-tone={CHIP[removeResult.tone]}>{LABEL[removeResult.tone]}</span>
+            {removeResult.text}
+          </p>
         {/if}
       </div>
     </div>

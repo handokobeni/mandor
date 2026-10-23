@@ -171,6 +171,24 @@ async fn keep_awake_for(inputs: &provision::Inputs, cfg: &ClientConfig) -> Optio
     }
 }
 
+/// Melepas service daemon yang dipasang app di Linux, sebelum paket dihapus
+/// (KTD-L6 plan paket Linux).
+#[tauri::command]
+async fn daemon_uninstall(
+    link: State<'_, Arc<DaemonLink>>,
+    prov: State<'_, Arc<Provisioner>>,
+) -> Result<provision::InstallReport, String> {
+    if *link.mode() != LinkMode::LocalInstalled {
+        return Err("the background service is managed elsewhere on this system".to_owned());
+    }
+    let home = prov
+        .cfg
+        .home
+        .clone()
+        .ok_or_else(|| "HOME is not set".to_owned())?;
+    provision::uninstall_local(&home, Duration::from_secs(150)).await
+}
+
 /// Keep-awake milik app saat daemon yang tersambung belum mendukungnya.
 #[tauri::command]
 #[allow(
@@ -330,6 +348,7 @@ pub fn run() -> ExitCode {
             oauth_login,
             tray_update,
             provision_run,
+            daemon_uninstall,
             power_app_hold,
             wsl_keepalive_status,
             wsl_keepalive_set

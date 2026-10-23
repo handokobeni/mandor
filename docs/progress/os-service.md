@@ -36,6 +36,8 @@ Plan: `docs/plans/2026-10-23-001-feat-daemon-os-service-installer-plan.md`. Caku
 
 Setelah uji, daemon pemilik produk berjalan sebagai service dari `~/.local/bin/mandord` (build branch `feat/daemon-os-service`).
 
-## Belum diverifikasi langsung
+## Drain saat ada run yang bekerja
 
-- Drain `busy` dari daemon dengan run yang bekerja belum diuji end-to-end; logika busy teruji di `crates/mandor-usecase/tests/drain.rs`.
+Diuji end-to-end di `crates/mandord/tests/install.rs` dengan daemon sungguhan dan RPC sungguhan: database diisi run berstatus `running` atau `publishing` sebelum daemon start (tanpa sesi Lark, rekonsiliasi tidak mengubahnya). `install` dan `uninstall` menghasilkan `deferred`, biner dan unit tidak disentuh, daemon tetap hidup, `status` melaporkan `busy: true` dan `draining: false`. Mutation check: mematikan pengecekan run di `DrainGate::drain` membuat kedua test gagal. Tanpa memakai kuota Claude atau mengubah kartu Lark.
+
+Daemon versi lama tanpa `daemon.drain` (jalur `runs.list`) teruji langsung saat `install` pertama di mesin pemilik produk, tanpa run yang bekerja.

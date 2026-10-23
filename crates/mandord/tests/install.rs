@@ -593,3 +593,85 @@ fn install_dengan_mandor_home_lain_tidak_menulis_service() {
     assert!(!e.unit().exists());
     assert!(e.installed().exists());
 }
+
+/// Database daemon dengan satu run berstatus `state`. Tanpa sesi Lark,
+/// rekonsiliasi tidak berjalan sehingga state itu bertahan saat daemon start.
+fn seed_run(data: &Path, state: mandor_domain::RunState) {
+    use mandor_usecase::run_ports::{RunRecord, RunStore as _};
+    std::fs::create_dir_all(data).unwrap();
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+    rt.block_on(async {
+        let store = mandor_store::Store::open(&data.join("mandor.db"))
+            .await
+            .unwrap();
+        store
+            .insert_repo(&mandor_store::NewRepo {
+                id: "repo1".to_owned(),
+                path: "/tmp/repo1".to_owned(),
+                gh_profile: None,
+                default_branch: None,
+                now_ms: 1,
+            })
+            .await
+            .unwrap();
+        let mut run = RunRecord::new("run1".to_owned(), "repo1".to_owned(), "rec1".to_owned());
+        run.state = state;
+        mandor_store::RunsStore::new(store.clone())
+            .create(&run, 1)
+            .await
+            .unwrap();
+        drop(store);
+    });
+}
+
+#[test]
+fn install_ditunda_saat_daemon_melaporkan_run_bekerja() {
+    let e = env();
+    e.run(&["install"], &[]);
+    std::fs::write(e.installed(), "#!/bin/sh\necho 'mandord 0.0.1'\n").unwrap();
+    seed_run(&e.data, mandor_domain::RunState::Running);
+    let mut daemon = e.serve(None);
+    e.clear_calls();
+
+    let (out, raw) = e.run(&["install"], &[]);
+    assert!(raw.status.success());
+    assert_eq!(out["result"], "deferred");
+    assert_eq!(
+        std::fs::read_to_string(e.installed()).unwrap(),
+        "#!/bin/sh\necho 'mandord 0.0.1'\n",
+        "biner tidak disentuh"
+    );
+    assert!(!e.calls().contains("restart") && !e.calls().contains("enable --now"));
+    assert!(daemon.try_wait().unwrap().is_none(), "daemon tetap hidup");
+
+    let info: Value =
+        serde_json::from_slice(&std::fs::read(e.data.join("daemon.json")).unwrap()).unwrap();
+    let s = status(&e, info["token"].as_str().unwrap());
+    assert_eq!(s["busy"], true);
+    assert_eq!(
+        s["draining"], false,
+        "drain yang busy tidak meninggalkan jendela"
+    );
+
+    let (out, _) = e.run(&["uninstall"], &[]);
+    assert_eq!(out["result"], "deferred", "uninstall juga menunggu");
+    assert!(e.installed().exists());
+
+    let _ = daemon.kill();
+    let _ = daemon.wait();
+}
+
+#[test]
+fn run_publish_juga_menunda_install() {
+    let e = env();
+    seed_run(&e.data, mandor_domain::RunState::Publishing);
+    let mut daemon = e.serve(None);
+    let (out, _) = e.run(&["install"], &[]);
+    assert_eq!(out["result"], "deferred");
+    assert!(!e.installed().exists());
+    let _ = daemon.kill();
+    let _ = daemon.wait();
+}

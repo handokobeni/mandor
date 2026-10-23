@@ -59,6 +59,7 @@ impl<D: Deps> RunService<D> {
         record_id: &str,
         repo_id: &str,
     ) -> Result<RunRecord, RunError> {
+        let _work = self.enter_work()?;
         self.sync.claim(record_id, true).await?;
         let task = self.task_of(record_id).await?;
         let repo = self

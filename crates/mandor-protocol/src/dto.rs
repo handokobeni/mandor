@@ -41,6 +41,13 @@ pub struct StatusResult {
     pub keep_awake: Option<String>,
 }
 
+/// Hasil `daemon.drain`: `idle` (kerja baru ditolak sampai restart) atau
+/// `busy` (ada run yang bekerja; tidak ada yang berubah).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+pub struct DrainResult {
+    pub state: String,
+}
+
 /// Pengaturan Lark yang ditampilkan (tanpa secret).
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, TS)]
 pub struct LarkSettingsView {

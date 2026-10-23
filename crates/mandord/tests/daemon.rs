@@ -629,3 +629,27 @@ fn version_mencetak_satu_baris_polos() {
     let text = String::from_utf8(out.stdout).unwrap();
     assert_eq!(text, format!("mandord {}\n", env!("CARGO_PKG_VERSION")));
 }
+
+#[test]
+fn drain_dan_undrain_tanpa_sesi_lark() {
+    let home = tempfile::tempdir().unwrap();
+    let mut daemon = serve(home.path());
+    let token = wait_for_info(home.path())["token"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let replies = connect_roundtrip(
+        home.path(),
+        &[
+            hello(&token),
+            rpc(2, "daemon.drain", &Value::Null),
+            rpc(3, "daemon.drain", &Value::Null),
+            rpc(4, "daemon.undrain", &Value::Null),
+        ],
+    );
+    assert_eq!(replies[1]["result"]["state"], "idle");
+    assert_eq!(replies[2]["result"]["state"], "idle");
+    assert_eq!(replies[3]["result"], json!({}));
+    stop(home.path());
+    let _ = daemon.wait();
+}

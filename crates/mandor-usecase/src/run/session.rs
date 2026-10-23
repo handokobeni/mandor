@@ -45,6 +45,7 @@ impl<D: Deps> RunService<D> {
         req: AgentRequest,
         dev_message: Option<String>,
     ) -> Result<(), RunError> {
+        let _work = self.enter_work()?;
         let expected = run.generation;
         let handle = self.agent.spawn(&req).await?;
         run.generation += 1;
@@ -216,6 +217,7 @@ impl<D: Deps> RunService<D> {
         run_id: &str,
         follow_design: &[String],
     ) -> Result<(), RunError> {
+        let _work = self.enter_work()?;
         let mut run = self.load(run_id).await?;
         if run.state != RunState::AwaitingDev {
             return Err(RunError::InvalidState(run.state.as_str()));
@@ -254,6 +256,7 @@ impl<D: Deps> RunService<D> {
     /// # Errors
     /// Run tidak ada, agent masih bekerja, bukan fase brainstorm, atau agent gagal.
     pub async fn continue_to_plan(self: &Arc<Self>, run_id: &str) -> Result<(), RunError> {
+        let _work = self.enter_work()?;
         let mut run = self.load(run_id).await?;
         if run.state != RunState::AwaitingDev {
             return Err(RunError::InvalidState(run.state.as_str()));
@@ -281,6 +284,7 @@ impl<D: Deps> RunService<D> {
         run_id: &str,
         text: &str,
     ) -> Result<SendOutcome, RunError> {
+        let _work = self.enter_work()?;
         let mut run = self.load(run_id).await?;
         if run.state.is_busy() {
             run.queue.push(text.to_owned());
@@ -306,6 +310,7 @@ impl<D: Deps> RunService<D> {
         run_id: &str,
         text: &str,
     ) -> Result<SendOutcome, RunError> {
+        let _work = self.enter_work()?;
         self.interrupt(run_id).await?;
         self.send_message(run_id, text).await
     }

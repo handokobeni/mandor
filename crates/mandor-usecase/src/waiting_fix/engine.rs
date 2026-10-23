@@ -407,6 +407,7 @@ impl<D: Deps> RunService<D> {
         batch: Vec<Reply>,
         instruction: Option<&str>,
     ) -> Result<(), RunError> {
+        let _work = self.enter_work()?;
         // Perbaikan selalu mengerjakan kode, termasuk run yang masih di fase plan.
         run.phase = crate::run_ports::RunPhase::Implement;
         // Worktree yang hilang dibuat ulang sebelum diff diambil.
@@ -506,6 +507,7 @@ impl<D: Deps> RunService<D> {
         instruction: &str,
         chosen: &[String],
     ) -> Result<(), RunError> {
+        let _work = self.enter_work()?;
         let task = self.task_of(record_id).await?;
         self.sync.cache.upsert(&task).await?;
         let existing = self.runs.active_for(record_id).await?;

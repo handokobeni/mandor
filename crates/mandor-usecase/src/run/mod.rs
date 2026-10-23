@@ -1,5 +1,7 @@
 //! Orkestrasi task run (U10): Start, sesi agent, publish, rekonsiliasi.
 
+mod drain;
+pub use drain::{DRAIN_WINDOW_MS, DrainGate, DrainOutcome, WorkGuard};
 mod members;
 mod ownership;
 mod publish;
@@ -34,6 +36,8 @@ pub enum RunError {
     NoChanges,
     #[error("action not available ({0})")]
     InvalidState(&'static str),
+    #[error("daemon is updating; try again shortly")]
+    Draining,
 }
 
 impl From<GateRejection> for RunError {
@@ -70,6 +74,8 @@ pub struct RunService<D: Deps> {
     pub(crate) cursor_sent: Mutex<HashMap<String, String>>,
     /// Penghenti run aktif per run ID beserta generasinya.
     stoppers: Mutex<HashMap<String, (i64, StopperOf<D>)>>,
+    /// Gerbang drain untuk pembaruan daemon (dibagi dengan daemon).
+    drain: Arc<DrainGate>,
 }
 
 impl<D: Deps> std::fmt::Debug for RunService<D> {
@@ -117,12 +123,32 @@ impl<D: Deps> RunService<D> {
             replies_loaded: std::sync::atomic::AtomicBool::new(false),
             cursor_sent: Mutex::new(HashMap::new()),
             stoppers: Mutex::new(HashMap::new()),
+            drain: Arc::new(DrainGate::default()),
         }
     }
 
     #[must_use]
     pub fn sync(&self) -> &Arc<SyncService<D>> {
         &self.sync
+    }
+
+    /// Memakai gerbang drain milik daemon, agar drain berlaku walau sesi
+    /// Lark dibuat ulang.
+    #[must_use]
+    pub fn with_drain_gate(mut self, gate: Arc<DrainGate>) -> Self {
+        self.drain = gate;
+        self
+    }
+
+    /// Gerbang drain yang dipakai layanan ini.
+    #[must_use]
+    pub fn drain_gate(&self) -> Arc<DrainGate> {
+        Arc::clone(&self.drain)
+    }
+
+    /// Mendaftarkan kerja baru di gerbang drain.
+    pub(crate) fn enter_work(&self) -> Result<WorkGuard, RunError> {
+        self.drain.try_enter(self.now())
     }
 
     pub(crate) fn now(&self) -> i64 {

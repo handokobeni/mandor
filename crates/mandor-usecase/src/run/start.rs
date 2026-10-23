@@ -136,6 +136,7 @@ impl<D: Deps> RunService<D> {
         design: &[DesignRoot],
         progress: impl Fn(StartStep) + Send + Sync,
     ) -> Result<RunRecord, RunError> {
+        let _work = self.enter_work()?;
         let mut plan = self.resolve(target).await?;
         plan.design = design.to_vec();
         // Gerbang dan klaim dari baca segar; kalah klaim berhenti sebelum worktree.

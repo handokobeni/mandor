@@ -35,6 +35,8 @@ pub struct App {
     pub rpc_port: u16,
     /// Proses run app; hidup sepanjang daemon, bukan sesi Lark.
     pub apps: Arc<crate::apps::ProcApps>,
+    /// Gerbang drain untuk pembaruan; hidup sepanjang daemon, bukan sesi Lark.
+    pub drain: Arc<mandor_usecase::run::DrainGate>,
     settings: RwLock<Option<LarkSettings>>,
     session: RwLock<Option<Arc<LarkSession>>>,
     /// Nama akun Lark yang login (token lama tidak menyimpannya).
@@ -63,6 +65,7 @@ impl App {
         ));
         Self {
             apps,
+            drain: Arc::default(),
             cfg,
             store,
             events,
@@ -130,6 +133,7 @@ impl App {
             parent: &self.shutdown,
             rpc_port: self.rpc_port,
             apps: &self.apps,
+            drain: &self.drain,
         };
         let s = session::start(&env, settings, me).await?;
         *self.session.write().await = Some(s);

@@ -44,7 +44,12 @@ fn env() -> Env {
     fake(
         &systemctl,
         &log,
-        "case \"$*\" in *show-environment*) [ -n \"$FAKE_NO_SYSTEMD\" ] && exit 1;; esac",
+        "case \"$*\" in \
+           *show-environment*) [ -n \"$FAKE_NO_SYSTEMD\" ] && exit 1;; \
+           *'start mandord.service'*) [ -n \"$FAKE_START_FAIL\" ] && exit 1; \
+             [ -n \"$FAKE_START_BIN\" ] && INVOCATION_ID=fake setsid \"$FAKE_START_BIN\" serve \
+               </dev/null >/dev/null 2>&1 & ;; \
+         esac",
     );
     fake(
         &loginctl,
@@ -74,7 +79,9 @@ impl Env {
             .env_remove("INVOCATION_ID")
             .env_remove("FAKE_NO_SYSTEMD")
             .env_remove("FAKE_LINGER")
-            .env_remove("FAKE_LINGER_FAIL");
+            .env_remove("FAKE_LINGER_FAIL")
+            .env_remove("FAKE_START_FAIL")
+            .env_remove("FAKE_START_BIN");
         c
     }
 
@@ -463,4 +470,93 @@ fn status(e: &Env, token: &str) -> Value {
     drop(stdin);
     let _ = child.wait();
     s["result"].clone()
+}
+
+fn stop_daemon(e: &Env) {
+    let path = e.data.join("daemon.json");
+    if let Ok(body) = std::fs::read(&path) {
+        let info: Value = serde_json::from_slice(&body).unwrap();
+        let pid = info["pid"].as_u64().unwrap().to_string();
+        let _ = Command::new("kill").args(["-TERM", &pid]).status();
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while Instant::now() < deadline && path.exists() {
+            std::thread::sleep(Duration::from_millis(50));
+        }
+    }
+}
+
+/// `connect` mengirim `status` lewat relay; daemon dinyalakan bila perlu.
+fn connect_status(e: &Env, extra: &[(&str, &str)]) -> Value {
+    use std::io::{BufRead, BufReader, Write};
+    let mut c = e.cmd(&["connect"]);
+    for (k, v) in extra {
+        c.env(k, v);
+    }
+    let mut child = c
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .unwrap();
+    let mut stdin = child.stdin.take().unwrap();
+    let mut out = BufReader::new(child.stdout.take().unwrap());
+    // Token dibaca setelah daemon siap: kirim hello salah dulu untuk memicu start.
+    writeln!(
+        stdin,
+        "{}",
+        json!({"jsonrpc": "2.0", "id": 1, "method": "hello",
+        "params": {"token": "salah", "protocol": "1.0", "client": "test"}})
+    )
+    .unwrap();
+    let mut buf = String::new();
+    out.read_line(&mut buf).unwrap();
+    drop(stdin);
+    let _ = child.wait();
+    let info: Value =
+        serde_json::from_slice(&std::fs::read(e.data.join("daemon.json")).unwrap()).unwrap();
+    status(e, info["token"].as_str().unwrap())
+}
+
+#[test]
+fn connect_memakai_systemctl_bila_unit_ada() {
+    let e = env();
+    e.run(&["install"], &[]);
+    e.clear_calls();
+    let s = connect_status(&e, &[("FAKE_START_BIN", BIN)]);
+    assert_eq!(s["managed_by"], "systemd");
+    assert!(e.calls().contains("systemctl --user start mandord.service"));
+    stop_daemon(&e);
+}
+
+#[test]
+fn connect_tanpa_unit_memakai_setsid_tanpa_systemctl() {
+    let e = env();
+    let s = connect_status(&e, &[]);
+    assert_eq!(s["managed_by"], "detached");
+    assert!(!e.calls().contains("start mandord.service"));
+    stop_daemon(&e);
+}
+
+#[test]
+fn connect_jatuh_ke_setsid_bila_systemctl_gagal() {
+    let e = env();
+    e.run(&["install"], &[]);
+    e.clear_calls();
+    let s = connect_status(&e, &[("FAKE_START_FAIL", "1")]);
+    assert_eq!(s["managed_by"], "detached");
+    assert!(e.calls().contains("systemctl --user start mandord.service"));
+    stop_daemon(&e);
+}
+
+#[test]
+fn connect_ke_daemon_yang_sudah_berjalan_tidak_menyalakan_apa_pun() {
+    let e = env();
+    e.run(&["install"], &[]);
+    let mut daemon = e.serve(None);
+    e.clear_calls();
+    let s = connect_status(&e, &[("FAKE_START_BIN", BIN)]);
+    assert_eq!(s["managed_by"], "detached");
+    assert!(!e.calls().contains("start mandord.service"));
+    let _ = daemon.kill();
+    let _ = daemon.wait();
 }

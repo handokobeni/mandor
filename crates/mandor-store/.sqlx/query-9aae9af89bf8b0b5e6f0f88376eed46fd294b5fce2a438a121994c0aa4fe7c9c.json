@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "SELECT ac_id, label, text, design, design_note, verdict, evidence, stale, status,\n                    reason, decided_by\n             FROM ac_rows WHERE run_id = ? ORDER BY position",
+  "query": "SELECT ac_id, label, text, design, design_note, verdict, evidence, stale, status,\n                    reason, decided_by, card\n             FROM ac_rows WHERE run_id = ? ORDER BY position",
   "describe": {
     "columns": [
       {
@@ -123,6 +123,17 @@
             "name": "decided_by"
           }
         }
+      },
+      {
+        "name": "card",
+        "ordinal": 11,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "ac_rows",
+            "name": "card"
+          }
+        }
       }
     ],
     "parameters": {
@@ -139,8 +150,9 @@
       false,
       false,
       true,
+      true,
       true
     ]
   },
-  "hash": "9af3644de39478f2f979929c9a676911e7da04bee069c6fe1cae8e192bf99988"
+  "hash": "9aae9af89bf8b0b5e6f0f88376eed46fd294b5fce2a438a121994c0aa4fe7c9c"
 }

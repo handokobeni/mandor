@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "UPDATE run_cards SET open = 0 WHERE run_id = ?",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": []
+  },
+  "hash": "ef8e35a4961bfd6d33fa55f84469e54cc60b210cd451666692665075b8e5e9f8"
+}

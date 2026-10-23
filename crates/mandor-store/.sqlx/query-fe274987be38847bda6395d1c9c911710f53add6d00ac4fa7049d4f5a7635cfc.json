@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO run_cards (run_id, record_id, position, state, data_json, open)\n             VALUES (?, ?, ?, ?, ?, ?)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 6
+    },
+    "nullable": []
+  },
+  "hash": "fe274987be38847bda6395d1c9c911710f53add6d00ac4fa7049d4f5a7635cfc"
+}

@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "SELECT a.run_id, a.ac_id, a.label, a.text, a.design, a.design_note, a.verdict,\n                    a.evidence, a.stale, a.status, a.reason, a.decided_by\n             FROM ac_rows a JOIN runs r ON r.id = a.run_id\n             WHERE r.closed = 0 ORDER BY a.run_id, a.position",
+  "query": "SELECT a.run_id, a.ac_id, a.label, a.text, a.design, a.design_note, a.verdict,\n                    a.evidence, a.stale, a.status, a.reason, a.decided_by, a.card\n             FROM ac_rows a JOIN runs r ON r.id = a.run_id\n             WHERE r.closed = 0 ORDER BY a.run_id, a.position",
   "describe": {
     "columns": [
       {
@@ -134,6 +134,17 @@
             "name": "decided_by"
           }
         }
+      },
+      {
+        "name": "card",
+        "ordinal": 12,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "ac_rows",
+            "name": "card"
+          }
+        }
       }
     ],
     "parameters": {
@@ -151,8 +162,9 @@
       false,
       false,
       true,
+      true,
       true
     ]
   },
-  "hash": "1fd39538e0ad04d98f68ec0c5e9fbd7e165e7fc518e74c577daaa13324ccc87b"
+  "hash": "924a27691a58da39e42827539defd3cab532affed8c9eb577b9cef7bc08d0fc8"
 }

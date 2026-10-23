@@ -8,12 +8,13 @@ use mandor_domain::app_run::{AppSettings, TestMode};
 use mandor_usecase::PortError;
 use mandor_usecase::review::DesignRoot;
 use mandor_usecase::run_ports::{
-    ChatItem, Journal, RepoInfo, Repos, RunMember, RunPhase, RunRecord, RunStore, RunWorkspace,
-    WorkspaceInfo,
+    ChatItem, GroupCardRow, Journal, RepoInfo, Repos, RunMember, RunPhase, RunRecord, RunStore,
+    RunWorkspace, WorkspaceInfo,
 };
 use serde::{Deserialize, Serialize};
 
 use crate::codec::chat_to_json;
+use crate::run_cards;
 use crate::{Store, StoreError, from_json};
 
 /// Bagian run yang disimpan di `state_json`.
@@ -325,8 +326,13 @@ impl RunsStore {
     }
 }
 
-impl RunStore for RunsStore {
-    async fn create(&self, r: &RunRecord, now_ms: i64) -> Result<(), PortError> {
+impl RunsStore {
+    /// Menyisipkan baris `runs` dalam transaksi `conn`.
+    async fn insert_run(
+        conn: &mut sqlx::SqliteConnection,
+        r: &RunRecord,
+        now_ms: i64,
+    ) -> Result<(), StoreError> {
         let state = r.state.as_str();
         let extra = extra_of(r)?;
         let worktree = r.worktree.as_ref().map(|p| p.display().to_string());
@@ -348,9 +354,83 @@ impl RunStore for RunsStore {
             now_ms,
             now_ms
         )
-        .execute(&self.store.pool)
+        .execute(&mut *conn)
         .await
-        .map_err(|e| StoreError::from_sqlx(e, "record already has an active run"))?;
+        .map_err(|e| StoreError::from_sqlx(e, run_cards::CONFLICT))?;
+        Ok(())
+    }
+}
+
+impl RunStore for RunsStore {
+    async fn create(&self, r: &RunRecord, now_ms: i64) -> Result<(), PortError> {
+        let mut tx = self
+            .store
+            .pool
+            .begin()
+            .await
+            .map_err(StoreError::internal)?;
+        run_cards::ensure_free(&mut tx, &r.record_id).await?;
+        Self::insert_run(&mut tx, r, now_ms).await?;
+        tx.commit().await.map_err(StoreError::internal)?;
+        Ok(())
+    }
+
+    async fn create_group(
+        &self,
+        r: &RunRecord,
+        cards: &[GroupCardRow],
+        now_ms: i64,
+    ) -> Result<(), PortError> {
+        let mut tx = self
+            .store
+            .pool
+            .begin()
+            .await
+            .map_err(StoreError::internal)?;
+        for c in cards {
+            run_cards::ensure_free(&mut tx, &c.record_id).await?;
+            run_cards::ensure_no_single_run(&mut tx, &c.record_id).await?;
+        }
+        Self::insert_run(&mut tx, r, now_ms).await?;
+        run_cards::write_cards(&mut tx, &r.id, cards).await?;
+        tx.commit().await.map_err(StoreError::internal)?;
+        Ok(())
+    }
+
+    async fn cards(&self, run_id: &str) -> Result<Vec<GroupCardRow>, PortError> {
+        let mut conn = self
+            .store
+            .pool
+            .acquire()
+            .await
+            .map_err(StoreError::internal)?;
+        Ok(run_cards::read_cards(&mut conn, run_id).await?)
+    }
+
+    async fn save_cards(
+        &self,
+        run_id: &str,
+        cards: &[GroupCardRow],
+        primary: Option<&str>,
+    ) -> Result<(), PortError> {
+        let mut tx = self
+            .store
+            .pool
+            .begin()
+            .await
+            .map_err(StoreError::internal)?;
+        run_cards::write_cards(&mut tx, run_id, cards).await?;
+        if let Some(record_id) = primary {
+            sqlx::query!(
+                "UPDATE runs SET record_id = ? WHERE id = ?",
+                record_id,
+                run_id
+            )
+            .execute(&mut *tx)
+            .await
+            .map_err(|e| StoreError::from_sqlx(e, run_cards::CONFLICT))?;
+        }
+        tx.commit().await.map_err(StoreError::internal)?;
         Ok(())
     }
 
@@ -359,6 +439,17 @@ impl RunStore for RunsStore {
     }
 
     async fn active_for(&self, record_id: &str) -> Result<Option<RunRecord>, PortError> {
+        let mut conn = self
+            .store
+            .pool
+            .acquire()
+            .await
+            .map_err(StoreError::internal)?;
+        if let Some(id) = run_cards::open_group_of(&mut conn, record_id).await? {
+            drop(conn);
+            return Ok(self.fetch(&id).await?);
+        }
+        drop(conn);
         let id = sqlx::query_scalar!(
             "SELECT id FROM runs WHERE record_id = ? AND closed = 0 ORDER BY created_at_ms DESC LIMIT 1",
             record_id

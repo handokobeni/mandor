@@ -14,6 +14,10 @@ impl Store {
         .execute(&self.pool)
         .await
         .map_err(StoreError::internal)?;
+        sqlx::query!("UPDATE run_cards SET open = 0 WHERE run_id = ?", id)
+            .execute(&self.pool)
+            .await
+            .map_err(StoreError::internal)?;
         Ok(())
     }
 }

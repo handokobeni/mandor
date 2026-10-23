@@ -441,6 +441,49 @@ pub enum ChatItem {
     System(String),
 }
 
+/// Commit lokal satu kartu run grup di satu repo.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CardCommit {
+    pub repo_id: String,
+    pub sha: String,
+}
+
+/// Satu kartu run grup yang tersimpan (KTD-G1 plan run grup), urut posisi.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GroupCardRow {
+    pub record_id: String,
+    pub state: mandor_domain::group::CardState,
+    /// Kartu `Done` yang berubah status atau PIC di Lark (R13).
+    pub changed_in_lark: bool,
+    /// Commit lokal kartu, satu per repo yang berubah.
+    pub commits: Vec<CardCommit>,
+    /// Plan kartu yang disetujui atau ditulis agent.
+    pub plan: Option<String>,
+    /// Orang yang memindah kartu ke Waiting Fix (aturan Feedback QA, KTD-41).
+    pub fix_requested_by: Option<String>,
+    /// Jeda tenang Waiting Fix kartu.
+    pub quiet_until_ms: Option<i64>,
+    /// Kartu sedang dalam loop perbaikan.
+    pub in_fix: bool,
+}
+
+impl GroupCardRow {
+    /// Kartu baru yang belum dikerjakan.
+    #[must_use]
+    pub fn pending(record_id: &str) -> Self {
+        Self {
+            record_id: record_id.to_owned(),
+            state: mandor_domain::group::CardState::Pending,
+            changed_in_lark: false,
+            commits: Vec::new(),
+            plan: None,
+            fix_requested_by: None,
+            quiet_until_ms: None,
+            in_fix: false,
+        }
+    }
+}
+
 /// Penyimpanan run dan chat.
 pub trait RunStore: Send + Sync {
     /// Membuat run; `PortError::Conflict` bila record sudah punya run aktif.
@@ -448,6 +491,27 @@ pub trait RunStore: Send + Sync {
         &self,
         run: &RunRecord,
         now_ms: i64,
+    ) -> impl Future<Output = Result<(), PortError>> + Send;
+    /// Membuat run grup beserta kartunya secara atomik; `PortError::Conflict`
+    /// bila salah satu kartu sudah ada di run terbuka (KTD-G2).
+    fn create_group(
+        &self,
+        run: &RunRecord,
+        cards: &[GroupCardRow],
+        now_ms: i64,
+    ) -> impl Future<Output = Result<(), PortError>> + Send;
+    /// Kartu run grup, urut posisi; kosong untuk run tunggal.
+    fn cards(
+        &self,
+        run_id: &str,
+    ) -> impl Future<Output = Result<Vec<GroupCardRow>, PortError>> + Send;
+    /// Menyimpan seluruh kartu run grup. Kartu `Removed` tidak lagi menahan
+    /// keunikan. `primary` memindah `record_id` run ke kartu lain.
+    fn save_cards(
+        &self,
+        run_id: &str,
+        cards: &[GroupCardRow],
+        primary: Option<&str>,
     ) -> impl Future<Output = Result<(), PortError>> + Send;
     fn get(&self, id: &str) -> impl Future<Output = Result<Option<RunRecord>, PortError>> + Send;
     fn active_for(

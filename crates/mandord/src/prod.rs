@@ -9,7 +9,7 @@ use mandor_lark::LarkGateway;
 use mandor_protocol::{NoticeView, Notification, RunEventView, event};
 use mandor_store::{ReposStore, ReviewsStore, RunsStore, Store, TaskStore};
 use mandor_usecase::run_ports::{
-    ChatItem, Journal, LedgerStore, Notice, Notifier, RunRecord, RunStore, Spawner,
+    ChatItem, GroupCardRow, Journal, LedgerStore, Notice, Notifier, RunRecord, RunStore, Spawner,
 };
 use mandor_usecase::{CachedTask, Clock, Deps, Ids, PortError, TaskCache};
 use serde_json::{Value, json};
@@ -206,6 +206,32 @@ impl RunStore for BroadcastRuns {
     async fn create(&self, run: &RunRecord, now_ms: i64) -> Result<(), PortError> {
         self.inner.create(run, now_ms).await?;
         self.run_event(event::RUN_UPDATED, &run.id);
+        Ok(())
+    }
+
+    async fn create_group(
+        &self,
+        run: &RunRecord,
+        cards: &[GroupCardRow],
+        now_ms: i64,
+    ) -> Result<(), PortError> {
+        self.inner.create_group(run, cards, now_ms).await?;
+        self.run_event(event::RUN_UPDATED, &run.id);
+        Ok(())
+    }
+
+    async fn cards(&self, run_id: &str) -> Result<Vec<GroupCardRow>, PortError> {
+        self.inner.cards(run_id).await
+    }
+
+    async fn save_cards(
+        &self,
+        run_id: &str,
+        cards: &[GroupCardRow],
+        primary: Option<&str>,
+    ) -> Result<(), PortError> {
+        self.inner.save_cards(run_id, cards, primary).await?;
+        self.run_event(event::RUN_UPDATED, run_id);
         Ok(())
     }
 

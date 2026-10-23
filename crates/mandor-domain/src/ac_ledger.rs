@@ -170,6 +170,8 @@ pub struct AcRow {
     pub reason: Option<String>,
     /// Nama orang yang mengonfirmasi atau melewati baris ini.
     pub decided_by: Option<String>,
+    /// Kartu asal AC di run grup (`record_id`); `None` untuk run tunggal.
+    pub card: Option<String>,
 }
 
 impl AcRow {
@@ -188,6 +190,7 @@ impl AcRow {
             status,
             reason: None,
             decided_by: None,
+            card: None,
         }
     }
 

@@ -19,6 +19,11 @@ pub mod method {
     pub const HELLO: &str = "hello";
     /// Status daemon (pengganti `/healthz` untuk daemon lokal).
     pub const STATUS: &str = "status";
+    /// Bersiap untuk pembaruan: menolak kerja baru bila tidak ada run yang
+    /// bekerja (`DrainResult`). Jendela berakhir sendiri setelah 2 menit.
+    pub const DAEMON_DRAIN: &str = "daemon.drain";
+    /// Membatalkan drain (`{}`).
+    pub const DAEMON_UNDRAIN: &str = "daemon.undrain";
     pub const SYSTEM_CHECK: &str = "system.check";
     pub const LARK_SETTINGS_GET: &str = "lark.settings.get";
     pub const LARK_SETTINGS_SET: &str = "lark.settings.set";
@@ -166,6 +171,8 @@ pub fn ts_bindings() -> Result<Vec<(&'static str, String)>, String> {
         one("Response.ts", Response::export_to_string(&cfg))?,
         one("LarkStatus.ts", LarkStatus::export_to_string(&cfg))?,
         one("StatusResult.ts", StatusResult::export_to_string(&cfg))?,
+        one("DrainResult.ts", DrainResult::export_to_string(&cfg))?,
+        one("DrainResult.ts", DrainResult::export_to_string(&cfg))?,
         one(
             "LarkSettingsView.ts",
             LarkSettingsView::export_to_string(&cfg),

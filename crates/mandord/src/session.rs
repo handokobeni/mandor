@@ -73,6 +73,8 @@ pub struct SessionEnv<'a> {
     pub rpc_port: u16,
     /// Proses run app milik daemon.
     pub apps: &'a Arc<crate::apps::ProcApps>,
+    /// Gerbang drain milik daemon (KTD-52).
+    pub drain: &'a Arc<mandor_usecase::run::DrainGate>,
 }
 
 /// Klien Lark dari pengaturan.
@@ -126,27 +128,30 @@ pub async fn start(
         UuidIds,
         me.clone(),
     ));
-    let runs = Arc::new(RunService::new(
-        Arc::clone(&sync),
-        RunPorts {
-            git: GitAdapter::new(git.clone()),
-            agent: agent.clone(),
-            runs: BroadcastRuns::new(RunsStore::new(env.store.clone()), env.events.clone()),
-            notifier: DaemonNotifier::new(env.store.clone(), env.events.clone()),
-            spawner: TrackerSpawner::new(env.tracker.clone()),
-            repos: ReposStore::new(env.store.clone()),
-            prompts: ClaudePrompts,
-            reviews: BroadcastReviews::new(
-                ReviewsStore::new(env.store.clone()),
-                env.events.clone(),
-            ),
-            apps: crate::apps::BroadcastApps::new(
-                Arc::clone(env.apps),
-                mandor_store::AppStateStore::new(env.store.clone()),
-                env.events.clone(),
-            ),
-        },
-    ));
+    let runs = Arc::new(
+        RunService::new(
+            Arc::clone(&sync),
+            RunPorts {
+                git: GitAdapter::new(git.clone()),
+                agent: agent.clone(),
+                runs: BroadcastRuns::new(RunsStore::new(env.store.clone()), env.events.clone()),
+                notifier: DaemonNotifier::new(env.store.clone(), env.events.clone()),
+                spawner: TrackerSpawner::new(env.tracker.clone()),
+                repos: ReposStore::new(env.store.clone()),
+                prompts: ClaudePrompts,
+                reviews: BroadcastReviews::new(
+                    ReviewsStore::new(env.store.clone()),
+                    env.events.clone(),
+                ),
+                apps: crate::apps::BroadcastApps::new(
+                    Arc::clone(env.apps),
+                    mandor_store::AppStateStore::new(env.store.clone()),
+                    env.events.clone(),
+                ),
+            },
+        )
+        .with_drain_gate(Arc::clone(env.drain)),
+    );
     warn_err(runs.reap_apps().await, "pembersihan app yatim gagal");
     if let Some(marked) = warn_err(runs.reconcile().await, "rekonsiliasi run gagal") {
         if !marked.is_empty() {

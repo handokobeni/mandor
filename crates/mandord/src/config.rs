@@ -30,6 +30,47 @@ pub struct Config {
     pub mcp_token: Option<secrecy::SecretString>,
     /// Environment dasar (PATH, HOME, bahasa) bila env login shell gagal ditangkap.
     pub base_env: Vec<(String, String)>,
+    /// Pengelola proses daemon, dari `INVOCATION_ID` yang di-set systemd.
+    pub managed_by: ManagedBy,
+    /// `mandord install`: direktori biner terpasang (`~/.local/bin`).
+    pub bin_dir: PathBuf,
+    /// `mandord install`: direktori unit systemd user
+    /// (`$XDG_CONFIG_HOME/systemd/user`, default `~/.config/systemd/user`).
+    pub systemd_user_dir: PathBuf,
+    /// Program `systemctl` (`MANDOR_SYSTEMCTL`, default `systemctl`).
+    pub systemctl: PathBuf,
+    /// Program `loginctl` (`MANDOR_LOGINCTL`, default `loginctl`).
+    pub loginctl: PathBuf,
+    /// Nama pengguna untuk status linger (`USER`).
+    pub user: Option<String>,
+}
+
+/// Siapa yang mengelola siklus hidup proses daemon (KTD-44).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ManagedBy {
+    /// Unit systemd user (`mandord.service`).
+    Systemd,
+    /// Dijalankan terlepas oleh `connect` (setsid) atau manual.
+    Detached,
+}
+
+impl ManagedBy {
+    /// systemd men-set `INVOCATION_ID` untuk setiap proses unit.
+    #[must_use]
+    pub fn from_invocation_id(value: Option<&str>) -> Self {
+        match value {
+            Some(v) if !v.is_empty() => Self::Systemd,
+            _ => Self::Detached,
+        }
+    }
+
+    #[must_use]
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Systemd => "systemd",
+            Self::Detached => "detached",
+        }
+    }
 }
 
 impl Config {
@@ -68,6 +109,22 @@ impl Config {
             .iter()
             .filter_map(|k| std::env::var(k).ok().map(|v| ((*k).to_owned(), v)))
             .collect();
+        let managed_by =
+            ManagedBy::from_invocation_id(std::env::var("INVOCATION_ID").ok().as_deref());
+        let bin_dir = user_home.join(".local").join("bin");
+        let systemd_user_dir = std::env::var_os("XDG_CONFIG_HOME")
+            .filter(|v| !v.is_empty())
+            .map_or_else(|| user_home.join(".config"), PathBuf::from)
+            .join("systemd")
+            .join("user");
+        let program = |key: &str, default: &str| {
+            std::env::var_os(key)
+                .filter(|v| !v.is_empty())
+                .map_or_else(|| PathBuf::from(default), PathBuf::from)
+        };
+        let systemctl = program("MANDOR_SYSTEMCTL", "systemctl");
+        let loginctl = program("MANDOR_LOGINCTL", "loginctl");
+        let user = std::env::var("USER").ok().filter(|u| !u.is_empty());
         Ok(Self {
             home,
             user_home,
@@ -80,7 +137,21 @@ impl Config {
             mcp_port,
             mcp_token,
             base_env,
+            managed_by,
+            bin_dir,
+            systemd_user_dir,
+            systemctl,
+            loginctl,
+            user,
         })
+    }
+
+    /// Direktori data adalah `~/.mandor` bawaan. Unit systemd hanya melayani
+    /// direktori ini, jadi `install` dan `connect` dengan `MANDOR_HOME` lain
+    /// tidak memakai service.
+    #[must_use]
+    pub fn uses_default_home(&self) -> bool {
+        self.home == self.user_home.join(".mandor")
     }
 
     /// Path database `SQLite`.
@@ -156,7 +227,19 @@ fn shell_quote(path: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{agent_may_read, shell_quote, workspaces_dir_for};
+    #[test]
+    fn pengelola_daemon_dari_invocation_id() {
+        assert_eq!(
+            ManagedBy::from_invocation_id(Some("abc")),
+            ManagedBy::Systemd
+        );
+        assert_eq!(ManagedBy::from_invocation_id(Some("")), ManagedBy::Detached);
+        assert_eq!(ManagedBy::from_invocation_id(None), ManagedBy::Detached);
+        assert_eq!(ManagedBy::Systemd.as_str(), "systemd");
+        assert_eq!(ManagedBy::Detached.as_str(), "detached");
+    }
+
+    use super::{ManagedBy, agent_may_read, shell_quote, workspaces_dir_for};
     use std::path::Path;
 
     #[test]

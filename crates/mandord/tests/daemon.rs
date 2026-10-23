@@ -41,6 +41,7 @@ fn serve(home: &Path) -> Child {
     Command::new(BIN)
         .arg("serve")
         .env("MANDOR_HOME", home)
+        .env_remove("INVOCATION_ID")
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::piped())
@@ -53,6 +54,7 @@ fn connect_roundtrip(home: &Path, lines: &[Value]) -> Vec<Value> {
     let mut child = Command::new(BIN)
         .arg("connect")
         .env("MANDOR_HOME", home)
+        .env_remove("INVOCATION_ID")
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
@@ -129,6 +131,8 @@ fn connect_menjalankan_daemon_terlepas_dan_tetap_hidup_setelah_relay_ditutup() {
     );
     assert_eq!(replies[0]["result"]["protocol"], "1.0");
     assert_eq!(replies[1]["result"]["repos"], 0);
+    assert_eq!(replies[1]["result"]["busy"], false);
+    assert_eq!(replies[1]["result"]["managed_by"], "detached");
 
     // Relay sudah ditutup; daemon tetap hidup dengan pid yang sama.
     std::thread::sleep(Duration::from_millis(300));
@@ -588,6 +592,64 @@ fn rpc_sumber_desain_diuji_didaftarkan_dan_ditolak_bila_tidak_layak() {
     assert_eq!(replies[1]["result"][0]["ready"], false);
     assert_eq!(replies[2]["result"]["name"], "mock");
     assert_eq!(replies[4]["result"], json!([]));
+    stop(home.path());
+    let _ = daemon.wait();
+}
+
+#[test]
+fn status_melaporkan_dikelola_systemd_bila_invocation_id_ada() {
+    let home = tempfile::tempdir().unwrap();
+    let mut daemon = Command::new(BIN)
+        .arg("serve")
+        .env("MANDOR_HOME", home.path())
+        .env("INVOCATION_ID", "0123456789abcdef")
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .unwrap();
+    let token = wait_for_info(home.path())["token"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let replies = connect_roundtrip(
+        home.path(),
+        &[hello(&token), rpc(2, "status", &Value::Null)],
+    );
+    assert_eq!(replies[1]["result"]["managed_by"], "systemd");
+    assert_eq!(replies[1]["result"]["busy"], false);
+    stop(home.path());
+    let _ = daemon.wait();
+}
+
+#[test]
+fn version_mencetak_satu_baris_polos() {
+    let out = Command::new(BIN).arg("--version").output().unwrap();
+    assert!(out.status.success());
+    let text = String::from_utf8(out.stdout).unwrap();
+    assert_eq!(text, format!("mandord {}\n", env!("CARGO_PKG_VERSION")));
+}
+
+#[test]
+fn drain_dan_undrain_tanpa_sesi_lark() {
+    let home = tempfile::tempdir().unwrap();
+    let mut daemon = serve(home.path());
+    let token = wait_for_info(home.path())["token"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let replies = connect_roundtrip(
+        home.path(),
+        &[
+            hello(&token),
+            rpc(2, "daemon.drain", &Value::Null),
+            rpc(3, "daemon.drain", &Value::Null),
+            rpc(4, "daemon.undrain", &Value::Null),
+        ],
+    );
+    assert_eq!(replies[1]["result"]["state"], "idle");
+    assert_eq!(replies[2]["result"]["state"], "idle");
+    assert_eq!(replies[3]["result"], json!({}));
     stop(home.path());
     let _ = daemon.wait();
 }

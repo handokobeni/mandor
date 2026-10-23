@@ -5,15 +5,16 @@ use std::sync::Arc;
 
 use mandor_api::Dispatch;
 use mandor_protocol::{
-    ApprovePlanParams, BoardView, CommentView, DirEntryView, DirListingView, DirQuery, ErrorCode,
-    FileChangeView, FileDiffParams, LarkSettingsInput, LoginComplete, MessageView, MessagesQuery,
-    NoticeView, NotificationsRead, PeopleQuery, PersonView, PublishParams, PublishResult,
-    QuietPeriodSet, RecordRef, RepoAdd, RepoCandidateView, RepoRef, RepoUpdate, RepoView, RpcError,
-    RunRef, SendParams, SendResult, SkillView, StartFixParams, StartParams, StartPlanning,
-    StartProgressView, StatusResult, TakeoverParams, event, method,
+    ApprovePlanParams, BoardView, CommentView, DirEntryView, DirListingView, DirQuery, DrainResult,
+    ErrorCode, FileChangeView, FileDiffParams, LarkSettingsInput, LoginComplete, MessageView,
+    MessagesQuery, NoticeView, NotificationsRead, PeopleQuery, PersonView, PublishParams,
+    PublishResult, QuietPeriodSet, RecordRef, RepoAdd, RepoCandidateView, RepoRef, RepoUpdate,
+    RepoView, RpcError, RunRef, SendParams, SendResult, SkillView, StartFixParams, StartParams,
+    StartPlanning, StartProgressView, StatusResult, TakeoverParams, event, method,
 };
-use mandor_store::{NewRepo, StoreError};
-use mandor_usecase::run::PublishOutcome;
+use mandor_store::{NewRepo, RunsStore, StoreError};
+use mandor_usecase::run::{DrainOutcome, PublishOutcome};
+use mandor_usecase::run_ports::RunStore as _;
 use mandor_usecase::{
     Planning, PortError, RunError, SendOutcome, StartStep, StartTarget, SyncError,
 };
@@ -137,7 +138,9 @@ fn port_error(e: &PortError) -> RpcError {
 fn run_error(e: RunError) -> RpcError {
     match &e {
         RunError::NotFound(_) => RpcError::new(ErrorCode::NotFound, e.to_string()),
-        RunError::InvalidState(_) => RpcError::new(ErrorCode::Conflict, e.to_string()),
+        RunError::InvalidState(_) | RunError::Draining => {
+            RpcError::new(ErrorCode::Conflict, e.to_string())
+        }
         RunError::Port(p) | RunError::Sync(SyncError::Port(p)) => port_error(p),
         _ => rejected(e),
     }
@@ -168,11 +171,37 @@ impl AppDispatch {
 
     async fn status(&self) -> Result<Value, RpcError> {
         let repos = self.app.store.list_repos().await.map_err(store_error)?;
+        let active = RunsStore::new(self.app.store.clone())
+            .list_active()
+            .await
+            .map_err(internal)?;
         ok(&StatusResult {
             version: VERSION.to_owned(),
             uptime_ms: u64::try_from(self.app.started.elapsed().as_millis()).unwrap_or(u64::MAX),
             repos: repos.len() as u64,
             lark: self.app.lark_status().await,
+            busy: Some(mandor_domain::run::any_working(
+                active.iter().map(|r| r.state),
+            )),
+            managed_by: Some(self.app.cfg.managed_by.as_str().to_owned()),
+            draining: Some(self.app.drain.is_draining(now_ms())),
+            keep_awake: Some("not_configured".to_owned()),
+        })
+    }
+
+    async fn drain(&self) -> Result<Value, RpcError> {
+        let outcome = self
+            .app
+            .drain
+            .drain(&RunsStore::new(self.app.store.clone()), now_ms())
+            .await
+            .map_err(|e| port_error(&e))?;
+        let state = match outcome {
+            DrainOutcome::Idle => "idle",
+            DrainOutcome::Busy => "busy",
+        };
+        ok(&DrainResult {
+            state: state.to_owned(),
         })
     }
 
@@ -896,6 +925,11 @@ impl Dispatch for AppDispatch {
     async fn call(&self, name: &str, v: Value) -> Result<Value, RpcError> {
         match name {
             method::STATUS => self.status().await,
+            method::DAEMON_DRAIN => self.drain().await,
+            method::DAEMON_UNDRAIN => {
+                self.app.drain.undrain();
+                ok(&json!({}))
+            }
             method::LARK_SETTINGS_GET
             | method::LARK_SETTINGS_SET
             | method::WAITING_FIX_QUIET_SET => self.settings_call(name, v).await,

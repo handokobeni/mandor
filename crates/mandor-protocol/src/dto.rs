@@ -26,6 +26,30 @@ pub struct StatusResult {
     #[ts(type = "number")]
     pub repos: u64,
     pub lark: LarkStatus,
+    /// Ada run yang bekerja (agent, review, persiapan worktree, atau publish);
+    /// daemon tidak boleh di-restart. Daemon lama tidak mengirimnya.
+    #[serde(default)]
+    #[ts(optional)]
+    pub busy: Option<bool>,
+    /// Pengelola proses daemon: `systemd` atau `detached`.
+    #[serde(default)]
+    #[ts(optional)]
+    pub managed_by: Option<String>,
+    /// Daemon sedang bersiap untuk pembaruan dan menolak kerja baru.
+    #[serde(default)]
+    #[ts(optional)]
+    pub draining: Option<bool>,
+    /// Keadaan keep-awake: `not_configured`, `off`, `held`, atau `failing`.
+    #[serde(default)]
+    #[ts(optional)]
+    pub keep_awake: Option<String>,
+}
+
+/// Hasil `daemon.drain`: `idle` (kerja baru ditolak sampai restart) atau
+/// `busy` (ada run yang bekerja; tidak ada yang berubah).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+pub struct DrainResult {
+    pub state: String,
 }
 
 /// Pengaturan Lark yang ditampilkan (tanpa secret).

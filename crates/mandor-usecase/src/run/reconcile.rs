@@ -103,6 +103,7 @@ impl<D: Deps> RunService<D> {
         run_id: &str,
         text: Option<&str>,
     ) -> Result<(), RunError> {
+        let _work = self.enter_work()?;
         let run = self.load(run_id).await?;
         if run.state != RunState::Failed {
             return Err(RunError::InvalidState(run.state.as_str()));

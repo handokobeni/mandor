@@ -65,6 +65,7 @@ impl<D: Deps> RunService<D> {
         run_id: &str,
         decision: &GateDecision,
     ) -> Result<PublishOutcome, RunError> {
+        let _work = self.enter_work()?;
         let mut run = self.load(run_id).await?;
         if run.phase != RunPhase::Implement {
             return Err(RunError::InvalidState("plan not approved"));

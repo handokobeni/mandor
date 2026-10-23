@@ -64,6 +64,14 @@ impl RunState {
         matches!(self, Self::Running | Self::WfRunning | Self::Reviewing)
     }
 
+    /// Run sedang bekerja dan tidak boleh diputus oleh restart daemon: agent
+    /// atau reviewer berjalan, worktree sedang disiapkan, atau push/PR sedang
+    /// berlangsung. Sama dengan state yang dianggap terputus oleh rekonsiliasi.
+    #[must_use]
+    pub fn is_working(self) -> bool {
+        self.is_busy() || matches!(self, Self::Preparing | Self::Publishing)
+    }
+
     /// Run diparkir (klaim hilang atau record hilang): tidak menerima pesan,
     /// tidak di-push, menunggu dev menutupnya.
     #[must_use]
@@ -79,6 +87,12 @@ impl RunState {
             Self::WfAwaitingComment | Self::WfQuiet | Self::WfRunning
         )
     }
+}
+
+/// Ada run yang sedang bekerja di antara state ini (sinyal `busy` daemon).
+#[must_use]
+pub fn any_working(states: impl IntoIterator<Item = RunState>) -> bool {
+    states.into_iter().any(RunState::is_working)
 }
 
 /// Alasan klaim run tidak berlaku lagi (heartbeat).
@@ -204,6 +218,38 @@ mod slash_tests {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn run_bekerja_mencakup_persiapan_dan_publish() {
+        let bekerja = [
+            RunState::Running,
+            RunState::WfRunning,
+            RunState::Reviewing,
+            RunState::Preparing,
+            RunState::Publishing,
+        ];
+        for s in bekerja {
+            assert!(s.is_working(), "{s:?}");
+        }
+        for s in [
+            RunState::AwaitingDev,
+            RunState::InReviewLoop,
+            RunState::WfAwaitingComment,
+            RunState::WfQuiet,
+            RunState::Failed,
+            RunState::Orphaned,
+            RunState::Stopped,
+        ] {
+            assert!(!s.is_working(), "{s:?}");
+        }
+    }
+
+    #[test]
+    fn ada_run_bekerja_dari_kumpulan_state() {
+        assert!(!any_working([]));
+        assert!(!any_working([RunState::AwaitingDev, RunState::Failed]));
+        assert!(any_working([RunState::AwaitingDev, RunState::Publishing]));
+    }
 
     #[test]
     fn state_bolak_balik() {

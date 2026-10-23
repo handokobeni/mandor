@@ -1,6 +1,9 @@
 //! `mandord connect`: relay stdio ke daemon. Bila daemon belum berjalan,
-//! daemon dijalankan terlepas penuh dari sesi ini (setsid) sehingga menutup
-//! relay atau UI tidak menghentikan daemon (KTD-18).
+//! daemon dinyalakan lewat service systemd user bila unit-nya terpasang
+//! (KTD-47 plan service OS); selain itu dijalankan terlepas penuh dari sesi
+//! ini (setsid) sehingga menutup relay atau UI tidak menghentikan daemon
+//! (KTD-18). Environment `connect` (termasuk `MANDOR_KEEP_AWAKE_CMD`) diwarisi
+//! daemon setsid.
 
 use std::net::{Ipv4Addr, SocketAddr};
 use std::time::Duration;
@@ -13,6 +16,9 @@ use crate::discovery::{self, DaemonInfo};
 
 /// Batas waktu daemon baru menulis `daemon.json`.
 const START_TIMEOUT: Duration = Duration::from_secs(15);
+/// Batas waktu `systemctl --user start`.
+const SYSTEMCTL_TIMEOUT: Duration = Duration::from_secs(15);
+const UNIT_NAME: &str = "mandord.service";
 const POLL_INTERVAL: Duration = Duration::from_millis(100);
 
 /// Menjalankan relay.
@@ -57,8 +63,10 @@ async fn reachable(cfg: &Config) -> Option<DaemonInfo> {
 }
 
 async fn start_detached(cfg: &Config) -> anyhow::Result<DaemonInfo> {
-    let exe = std::env::current_exe().context("locating the mandord binary")?;
-    spawn_detached(&exe).context("starting mandord serve")?;
+    if !start_service(cfg).await {
+        let exe = std::env::current_exe().context("locating the mandord binary")?;
+        spawn_detached(&exe).context("starting mandord serve")?;
+    }
     let deadline = tokio::time::Instant::now() + START_TIMEOUT;
     while tokio::time::Instant::now() < deadline {
         if let Some(info) = reachable(cfg).await {
@@ -70,6 +78,32 @@ async fn start_detached(cfg: &Config) -> anyhow::Result<DaemonInfo> {
         "mandord was not ready within {START_TIMEOUT:?}; check {}",
         cfg.log_path().display()
     )
+}
+
+/// Menyalakan daemon lewat service bila unit terpasang. `false` bila unit
+/// tidak ada atau `systemctl` gagal; pemanggil lalu memakai setsid.
+async fn start_service(cfg: &Config) -> bool {
+    let unit = cfg.systemd_user_dir.join(UNIT_NAME);
+    if !cfg.uses_default_home() || tokio::fs::metadata(&unit).await.is_err() {
+        return false;
+    }
+    let started = mandor_proc::run(
+        &mandor_proc::Cmd::new(&cfg.systemctl)
+            .args(["--user", "start", UNIT_NAME])
+            .timeout(SYSTEMCTL_TIMEOUT),
+    )
+    .await;
+    match started {
+        Ok(out) if out.success() => true,
+        Ok(out) => {
+            tracing::warn!(stderr = %out.stderr.trim(), "systemctl start gagal; memakai setsid");
+            false
+        }
+        Err(e) => {
+            tracing::warn!(error = %e, "systemctl start gagal; memakai setsid");
+            false
+        }
+    }
 }
 
 #[cfg(unix)]

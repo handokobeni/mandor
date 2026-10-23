@@ -47,6 +47,7 @@ impl<D: Deps> RunService<D> {
         trigger: ReviewTrigger,
         skill: Option<&str>,
     ) -> Result<ReviewRecord, RunError> {
+        let _work = self.enter_work()?;
         let mut run = self.load(run_id).await?;
         let skill = skill.or(run.reviewer_skill.as_deref()).map(str::to_owned);
         let skill = skill.as_deref();

@@ -1,6 +1,7 @@
 //! Orkestrasi task run (U10): Start, sesi agent, publish, rekonsiliasi.
 
 mod drain;
+mod group;
 pub use drain::{DRAIN_WINDOW_MS, DrainGate, DrainOutcome, WorkGuard};
 mod members;
 mod ownership;

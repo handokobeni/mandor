@@ -164,6 +164,23 @@ pub fn card_number(key: Option<&str>) -> u64 {
         .unwrap_or(u64::MAX)
 }
 
+/// Nama branch grup: `mandor/<kunci-awal>-<nomor-akhir>-<slug judul>`, mis.
+/// `mandor/pgs-1401-1404-job-position`; batas panjang sama dengan run tunggal.
+#[must_use]
+pub fn branch_name(
+    first_key: Option<&str>,
+    last_key: Option<&str>,
+    record_id: &str,
+    title: &str,
+) -> String {
+    let head = match (first_key, last_key.and_then(|k| k.rsplit('-').next())) {
+        (Some(first), Some(last)) => format!("{first}-{last}"),
+        (Some(first), None) => first.to_owned(),
+        (None, _) => record_id.to_owned(),
+    };
+    crate::run::branch_name(Some(&head), record_id, title)
+}
+
 /// Kartu berikutnya yang belum dikerjakan.
 #[must_use]
 pub fn next_pending(cards: &[GroupCard]) -> Option<&GroupCard> {
@@ -246,6 +263,19 @@ mod tests {
             t.epic_ids = vec![epic.to_owned()];
         }
         t
+    }
+
+    #[test]
+    fn nama_branch_grup() {
+        assert_eq!(
+            branch_name(Some("PGS-1401"), Some("PGS-1404"), "r", "Job & Position"),
+            "mandor/pgs-1401-1404-job-position"
+        );
+        assert_eq!(
+            branch_name(None, None, "recX", "Judul"),
+            "mandor/recx-judul"
+        );
+        assert!(branch_name(Some("PGS-1"), Some("PGS-9"), "r", &"x".repeat(200)).len() <= 60);
     }
 
     #[test]

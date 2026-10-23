@@ -3,11 +3,12 @@
 use std::sync::{Arc, PoisonError};
 
 use mandor_domain::ac_ledger::{initial_rows, reconcile_rows};
+use mandor_domain::group::CardState;
 use mandor_domain::{AcRow, FetchedAc};
 
 use crate::ports::{AcItem, Deps, LarkTasks};
 use crate::run::{RunError, RunService};
-use crate::run_ports::{LedgerStore, RunStore};
+use crate::run_ports::{GroupCardRow, LedgerStore, RunRecord, RunStore};
 
 /// Hasil refresh buku AC.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -69,6 +70,10 @@ impl<D: Deps> RunService<D> {
             .await?
             .ok_or(RunError::NotFound("run"))?;
         let existing = self.reviews.ac_rows(run_id).await?;
+        let cards = self.runs.cards(run_id).await?;
+        if !cards.is_empty() {
+            return self.refresh_group_ledger(&run, &cards, existing).await;
+        }
         let latest = async {
             let task = self
                 .sync
@@ -110,6 +115,77 @@ impl<D: Deps> RunService<D> {
         })
     }
 
+    /// Refresh buku AC run grup: AC semua kartu aktif, diberi label kartunya.
+    /// Satu kartu gagal dibaca membatalkan seluruh refresh agar AC kartu itu
+    /// tidak menjadi Removed.
+    async fn refresh_group_ledger(
+        &self,
+        run: &RunRecord,
+        cards: &[GroupCardRow],
+        existing: Vec<AcRow>,
+    ) -> Result<LedgerRefresh, RunError> {
+        let active: Vec<String> = cards
+            .iter()
+            .filter(|c| !matches!(c.state, CardState::Removed(_)))
+            .map(|c| c.record_id.clone())
+            .collect();
+        let latest = async {
+            let tasks = self.sync.lark.fetch(&active).await?;
+            let mut per_card = Vec::with_capacity(active.len());
+            for id in &active {
+                let task = tasks
+                    .iter()
+                    .find(|t| &t.record_id == id)
+                    .ok_or_else(|| crate::PortError::Rejected(format!("task {id} not found")))?;
+                per_card.push((
+                    id.clone(),
+                    self.sync.lark.acceptance_criteria(&task.ac_ids).await?,
+                ));
+            }
+            Ok::<_, crate::PortError>(per_card)
+        }
+        .await;
+        let per_card = match latest {
+            Ok(v) => v,
+            Err(e) => {
+                tracing::warn!(run_id = %run.id, error = %e, "AC grup tidak terbaca; buku AC tidak berubah");
+                return Ok(LedgerRefresh {
+                    rows: existing,
+                    synced_at_ms: self.synced_at(&run.id),
+                    error: Some(e.to_string()),
+                    design_sources: design_names(run),
+                });
+            }
+        };
+        let all: Vec<AcItem> = per_card
+            .iter()
+            .flat_map(|(_, v)| v.iter().cloned())
+            .collect();
+        let mut rows = if existing.is_empty() {
+            initial_rows(&fetched(&all))
+        } else {
+            reconcile_rows(&existing, &fetched(&all))
+        };
+        for row in &mut rows {
+            if let Some((card, _)) = per_card
+                .iter()
+                .find(|(_, items)| items.iter().any(|a| a.record_id == row.ac_id))
+            {
+                row.card = Some(card.clone());
+            }
+        }
+        if rows != existing {
+            self.reviews.save_ac_rows(&run.id, &rows).await?;
+        }
+        self.mark_synced(&run.id);
+        Ok(LedgerRefresh {
+            rows,
+            synced_at_ms: self.synced_at(&run.id),
+            error: None,
+            design_sources: design_names(run),
+        })
+    }
+
     /// Refresh buku AC semua run aktif (rekonsiliasi penuh berkala). Kegagalan
     /// per run hanya dicatat. Mengembalikan jumlah run yang berhasil.
     pub async fn refresh_active_ledgers(self: &Arc<Self>) -> usize {
@@ -131,7 +207,7 @@ impl<D: Deps> RunService<D> {
         done
     }
 
-    fn mark_synced(&self, run_id: &str) {
+    pub(crate) fn mark_synced(&self, run_id: &str) {
         let now = self.now();
         self.ledger_synced
             .lock()

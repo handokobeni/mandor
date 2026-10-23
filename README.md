@@ -125,6 +125,14 @@ cargo build --release --bin mandord          # daemon
 cd apps/desktop && bun run tauri build       # installer app desktop
 ```
 
-Installer Windows tidak bisa dibangun dari WSL. Workflow `release` di GitHub Actions membangun installer Windows (NSIS) dan biner `mandord` untuk WSL: jalankan manual dari tab Actions (hasil berupa artifact), atau push tag `v*` untuk membuat GitHub Release beserta lampirannya.
+Installer Windows tidak bisa dibangun dari WSL. Workflow `release` di GitHub Actions membangun biner `mandord` untuk WSL, lalu installer Windows (NSIS) yang membawa biner itu sebagai resource dengan SHA-256 tertanam di app; app memasang dan memperbarui daemon di WSL sendiri. Jalankan manual dari tab Actions (hasil berupa artifact), atau push tag `v*` untuk membuat GitHub Release beserta lampirannya.
+
+Versi app (`tauri.conf.json`, `package.json`, `apps/desktop/src-tauri/Cargo.toml`) dan `mandord` harus sama: `./scripts/check-versions.sh` (dijalankan CI).
+
+Build app di Windows tanpa biner daemon (pengembangan) butuh placeholder; app build dev tidak pernah memasangnya:
+
+```bash
+printf 'placeholder\n' > apps/desktop/src-tauri/resources/mandord
+```
 
 Untuk Windows dengan daemon di WSL, ikuti `docs/runbook/setup-wsl.md`.

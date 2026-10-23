@@ -12,8 +12,9 @@ use mandor_protocol::{
     RunRef, SendParams, SendResult, SkillView, StartFixParams, StartParams, StartPlanning,
     StartProgressView, StatusResult, TakeoverParams, event, method,
 };
-use mandor_store::{NewRepo, StoreError};
+use mandor_store::{NewRepo, RunsStore, StoreError};
 use mandor_usecase::run::PublishOutcome;
+use mandor_usecase::run_ports::RunStore as _;
 use mandor_usecase::{
     Planning, PortError, RunError, SendOutcome, StartStep, StartTarget, SyncError,
 };
@@ -168,11 +169,20 @@ impl AppDispatch {
 
     async fn status(&self) -> Result<Value, RpcError> {
         let repos = self.app.store.list_repos().await.map_err(store_error)?;
+        let active = RunsStore::new(self.app.store.clone())
+            .list_active()
+            .await
+            .map_err(internal)?;
         ok(&StatusResult {
             version: VERSION.to_owned(),
             uptime_ms: u64::try_from(self.app.started.elapsed().as_millis()).unwrap_or(u64::MAX),
             repos: repos.len() as u64,
             lark: self.app.lark_status().await,
+            busy: Some(mandor_domain::run::any_working(
+                active.iter().map(|r| r.state),
+            )),
+            managed_by: Some(self.app.cfg.managed_by.as_str().to_owned()),
+            keep_awake: Some("not_configured".to_owned()),
         })
     }
 

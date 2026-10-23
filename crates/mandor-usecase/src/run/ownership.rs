@@ -88,7 +88,7 @@ impl<D: Deps> RunService<D> {
     /// Run atau berkas tidak ada, state tidak mengizinkan, atau git gagal.
     pub async fn discard_file(self: &Arc<Self>, run_id: &str, path: &str) -> Result<(), RunError> {
         let run = self.load(run_id).await?;
-        if run.state.is_busy() || matches!(run.state, RunState::Preparing | RunState::Publishing) {
+        if run.state.is_working() {
             return Err(RunError::InvalidState(run.state.as_str()));
         }
         let Some(branch) = &run.branch else {

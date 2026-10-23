@@ -26,6 +26,19 @@ pub struct StatusResult {
     #[ts(type = "number")]
     pub repos: u64,
     pub lark: LarkStatus,
+    /// Ada run yang bekerja (agent, review, persiapan worktree, atau publish);
+    /// daemon tidak boleh di-restart. Daemon lama tidak mengirimnya.
+    #[serde(default)]
+    #[ts(optional)]
+    pub busy: Option<bool>,
+    /// Pengelola proses daemon: `systemd` atau `detached`.
+    #[serde(default)]
+    #[ts(optional)]
+    pub managed_by: Option<String>,
+    /// Keadaan keep-awake: `not_configured`, `off`, `held`, atau `failing`.
+    #[serde(default)]
+    #[ts(optional)]
+    pub keep_awake: Option<String>,
 }
 
 /// Pengaturan Lark yang ditampilkan (tanpa secret).

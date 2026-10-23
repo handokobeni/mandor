@@ -4,4 +4,17 @@ import type { LarkStatus } from "./LarkStatus";
 /**
  * Hasil `status`.
  */
-export type StatusResult = { version: string, uptime_ms: number, repos: number, lark: LarkStatus, };
+export type StatusResult = { version: string, uptime_ms: number, repos: number, lark: LarkStatus, 
+/**
+ * Ada run yang bekerja (agent, review, persiapan worktree, atau publish);
+ * daemon tidak boleh di-restart. Daemon lama tidak mengirimnya.
+ */
+busy?: boolean, 
+/**
+ * Pengelola proses daemon: `systemd` atau `detached`.
+ */
+managed_by?: string, 
+/**
+ * Keadaan keep-awake: `not_configured`, `off`, `held`, atau `failing`.
+ */
+keep_awake?: string, };

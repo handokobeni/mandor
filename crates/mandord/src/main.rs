@@ -58,11 +58,7 @@ async fn run(args: Vec<String>) -> ExitCode {
         Some("connect") => connect::run(&cfg).await,
         Some("token") => connect::print_token(&cfg).await,
         Some("mcp") => mcp::run(&cfg).await,
-        Some("--version") => {
-            tracing_subscriber::fmt().init();
-            tracing::info!(version = VERSION, "mandord");
-            Ok(())
-        }
+        Some("--version") => print_version().await,
         Some(other) => Err(anyhow::anyhow!(
             "unknown subcommand: {other} (use serve, connect, token, mcp, or hook)"
         )),
@@ -71,6 +67,17 @@ async fn run(args: Vec<String>) -> ExitCode {
         Ok(()) => ExitCode::SUCCESS,
         Err(err) => fail(&err),
     }
+}
+
+/// Satu baris `mandord <versi>` untuk dibaca mesin (installer, app).
+async fn print_version() -> anyhow::Result<()> {
+    use anyhow::Context as _;
+    use tokio::io::AsyncWriteExt as _;
+    let mut out = tokio::io::stdout();
+    out.write_all(format!("mandord {VERSION}\n").as_bytes())
+        .await
+        .context("writing the version")?;
+    out.flush().await.context("flush version")
 }
 
 fn fail(err: &anyhow::Error) -> ExitCode {

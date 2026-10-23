@@ -249,7 +249,7 @@ pub fn linux_keep_awake_json(
     let find = |name: &str| {
         ["/usr/bin", "/bin"]
             .iter()
-            .map(|dir| Path::new(dir).join(name))
+            .map(|dir| PathBuf::from(format!("{dir}/{name}")))
             .find(|p| exists(p))
             .map(|p| p.to_string_lossy().into_owned())
     };
@@ -829,9 +829,12 @@ echo '{\"result\":\"deferred\",\"service\":\"systemd\",\"linger\":true,\"apps_st
         let args = std::fs::read_to_string(home.path().join("args")).unwrap();
         assert_eq!(args.trim(), "uninstall", "tanpa --force");
 
-        place_installed(home.path(), b"#!/bin/sh
+        place_installed(
+            home.path(),
+            b"#!/bin/sh
 echo rusak
-");
+",
+        );
         assert!(uninstall_local(home.path(), t).await.is_err());
     }
 

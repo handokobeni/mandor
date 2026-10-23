@@ -98,6 +98,10 @@ jobs:
       - run: bun install --frozen-lockfile
         working-directory: apps/desktop
       - name: Build paket deb, rpm, AppImage
+        # linuxdeploy (AppImage) men-strip biner ELF di AppDir; daemon harus
+        # identik dengan hash tertanam.
+        env:
+          NO_STRIP: "true"
         run: bun run tauri build --bundles deb,rpm,appimage
         working-directory: apps/desktop
       - name: Hash daemon tertanam di app dan ikut di setiap paket
@@ -110,7 +114,12 @@ jobs:
             local found
             found=$(find "$1" -type f -path '*resources/mandord' -print -quit)
             [ -n "$found" ] || { echo "mandord tidak ada di $2"; exit 1; }
-            [ "$(sha256sum "$found" | cut -d' ' -f1)" = "$hash" ] || { echo "hash mandord di $2 berbeda"; exit 1; }
+            [ "$(sha256sum "$found" | cut -d' ' -f1)" = "$hash" ] || {
+              echo "hash mandord di $2 berbeda: $found"
+              ls -l resources/mandord "$found"; file resources/mandord "$found" || true
+              readelf -d "$found" | grep -iE 'rpath|runpath' || true
+              exit 1
+            }
             echo "$2: mandord $hash"
           }
           x=$(mktemp -d)

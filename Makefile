@@ -14,7 +14,9 @@ deny:
 	cargo deny check
 
 # .sqlx/ offline metadata harus cocok dengan query (SQLX_OFFLINE di CI)
-SQLX_DB := sqlite://$(CURDIR)/target/sqlx-check.db
+# Tanpa `//`: `sqlite://D:/...` dibaca sebagai host `D:` di Windows, sedangkan
+# `sqlite:<jalur absolut>` sah di Linux, macOS, dan Windows.
+SQLX_DB := sqlite:$(CURDIR)/target/sqlx-check.db
 
 sqlx-check:
 	mkdir -p target

@@ -112,7 +112,7 @@ Lembur di laptop pribadi tidak realistis: laptop dibawa pulang, ditutup, kehabis
 - AE4. **Covers R9.** Given kartu di antrean sudah dipindahkan orang lain ke In Progress di Lark, when jam lembur tiba, then kartu dikeluarkan dari antrean dan laporan pagi mencatat alasannya.
 - AE5. **Covers R10.** Given jam lembur 19:00–06:00 dan batas pemakaian tercapai pukul 23:00 saat kartu kedua berjalan, when batas tercapai, then agent dihentikan, kartu diparkir dengan alasan "usage limit", dan kartu ketiga tidak dimulai sebelum 19:00 berikutnya, termasuk setelah tengah malam.
 - AE6. **Covers R12.** Given review AC headless menghasilkan satu baris "Can't verify", when kartu siap di-push, then VM tidak push, kartu diparkir dengan alasan "AC gate", dan baris itu tampil di laporan pagi.
-- AE7. **Covers R5, R14.** Given dua developer punya daemon di VM yang sama, when agent milik developer A berjalan, then agent itu tidak bisa membaca token, repo, atau worktree developer B, tidak bisa menjalankan container yang memasang home developer B, tidak bisa memanggil daemon developer B, dan tidak bisa membaca token Lark atau kredensial GitHub developer A sendiri.
+- AE7. **Covers R5, R14.** Given dua developer punya daemon di VM yang sama, when agent milik developer A berjalan, then agent itu tidak bisa membaca token, repo, atau worktree developer B, tidak bisa menjalankan container yang memasang home developer B, tidak bisa memanggil daemon developer B, dan tidak bisa membaca token Lark atau kredensial GitHub developer A sendiri. App dev developer B tidak termasuk (R5).
 - AE8. **Covers R16, R17.** Given kartu dipegang daemon VM, when daemon laptop developer yang sama melihat kartu itu (termasuk saat kartu di Waiting Fix), then daemon laptop tidak menjalankan run atau memproses komentarnya, dan board menampilkan "On VM".
 - AE9. **Covers R21.** Given kartu VM masuk Waiting Fix pukul 11:00 dengan komentar reviewer dan VM sedang tidak mengerjakan kartu lain, when jeda tenang Waiting Fix lewat, then daemon VM langsung mengerjakan perbaikannya tanpa menunggu jam lembur.
 - AE10. **Covers R8, R21.** Given VM sedang mengerjakan kartu "Start now" dan kartu lain masuk Waiting Fix, when perbaikan siap dimulai, then perbaikan menunggu sampai kartu yang berjalan selesai atau diparkir, lalu mulai sebelum kartu antrean berikutnya.
@@ -166,20 +166,20 @@ Pertanyaan yang ditunda ke planning sudah dijawab di Planning Contract (KTD-54 s
 
 ### Key Technical Decisions
 
-- **KTD-54. Peran daemon dari konfigurasi.** `Config::from_env` membaca `MANDOR_ROLE` (`laptop` default, `vm`) dan `MANDOR_DAEMON_ID` (default dari hostname dan user). Peran `vm` menyalakan antrean, siklus pemakaian, gerbang AC yang selalu memblokir, review headless, dan agent di user terpisah. Logika lain sama di kedua peran (R8 plan service OS).
-- **KTD-55. Klaim membawa identitas daemon, kompatibel ke belakang.** Format tetap `open_id|ts_ms|nonce`, dengan nonce berisi `<acak>~<daemon_id>`. `Claim::parse` lama (`splitn(3, '|')`) tetap membacanya. `may_claim`, `held_by`, dan heartbeat membandingkan `open_id` dan `daemon_id`: klaim milik daemon lain dari developer yang sama tidak boleh ditimpa kecuali lewat serah-terima eksplisit (KTD-63). Klaim tanpa `daemon_id` (versi lama) diperlakukan sebagai milik "daemon tak dikenal" dari developer itu dan hanya bisa diambil setelah basi, seperti sekarang.
-- **KTD-56. Semua jalur "kartu milik saya" memakai pemegang daemon.** `fix_candidates`, poller (pelepasan klaim saat kartu kembali ke To Do), heartbeat, `release_claim`, dan view kartu memakai predikat baru "dipegang daemon ini", bukan `claimed_by(me)`. View menambah `holder` (`self` | `own_other_daemon` | `other_person`) sehingga board bisa menampilkan "On VM" (R17) dan daemon lain hanya-baca (R16).
-- **KTD-57. Antrean dan siklus di daemon VM, disimpan di SQLite.** Migrasi baru: tabel `overnight_queue` (urutan, record, alasan keluar), `overnight_cycles` (awal siklus, token terpakai), dan setelan di tabel `settings` (jam mulai/selesai, offset UTC, batas token, aktif). Penjadwal adalah satu langkah baru di `Schedule::run_due` (`crates/mandord/src/session.rs`) yang memanggil usecase `OvernightService::tick` dengan `Clock`.
-- **KTD-58. Jam lembur memakai offset UTC tetap per developer.** Developer mengisi offset (mis. `+07:00`); tidak ada database zona waktu dan tidak ada crate baru. Logika jendela, siklus, dan "kartu baru boleh mulai?" adalah fungsi murni di `mandor-domain`.
-- **KTD-59. Pemakaian dihitung per pesan, dedup per `message.id`.** Parser stream mengeluarkan event usage per pesan assistant (input dan output, di-dedup per `message.id`, mengabaikan pesan subagent), selain `result` akhir yang tetap dipakai untuk total run. Batas siklus menghitung input dan output; cache read dan cache creation dicatat terpisah untuk laporan. `rate_limit_event` berstatus `rejected` dan error kuota memarkir kartu dengan alasan "usage limit".
-- **KTD-60. Parkir dengan alasan sebagai state baru.** `RunState::Parked` dengan `park_reason` di `RunExtra` (`stuck`, `ac_gate`, `needs_confirmation`, `usage_limit`). Jalur yang sekarang berakhir di `AwaitingDev` lewat `flag_fix` atau `publish_gated` diarahkan ke `Parked` bila peran `vm`. `Parked` tidak dihitung `busy`.
-- **KTD-61. Gerbang AC selalu Block di VM.** `gate_mode()` mengembalikan `Block` bila peran `vm`, apa pun setelan repo. `finish_fix_turn` di VM selalu lewat gerbang, termasuk saat tidak ada baris AC di gerbang (diperlakukan siap hanya bila memang tidak ada baris AC). Keputusan developer atas kartu `ac_gate` (R12a) memanggil `publish_gated` dengan `GateDecision` dari tab Overnight, tanpa menjalankan agent.
-- **KTD-62. Agent berjalan sebagai user Linux terpisah lewat sudoers sempit.** Tiap developer punya user `<dev>-agent`. Daemon menjalankan agent dengan `sudo -n -u <dev>-agent <wrapper> <argv claude>`, dan aturan sudoers yang dipasang admin hanya mengizinkan wrapper itu. Wrapper (subcommand `mandord agent-exec`) membersihkan environment, memasang `DOCKER_HOST` ke container rootless milik user agent, lalu `exec` Claude Code tanpa modifikasi. Worktree berada di direktori grup bersama (daemon dan agent bisa menulis, user lain tidak). Login Claude Code disimpan di home user agent; Mandor tidak pernah membaca atau menyimpannya.
-- **KTD-63. Serah-terima "Take over to laptop" lewat RPC daemon VM.** Laptop meminta daemon VM `runs.handoff`. Daemon VM menghentikan run bila ada, commit dan push branch kartu tanpa PR, menulis klaim dengan `daemon_id` laptop yang diminta, dan menandai kartu "hanya laptop". Laptop lalu memulihkan worktree dari branch kartu (pola `run/ownership.rs`) dan membuat run `AwaitingDev`.
-- **KTD-64. Review headless lewat Playwright MCP.** Di peran `vm`, reviewer mendapat MCP Playwright (`--headless --isolated`) dan allowlist `mcp__playwright__*`, menggantikan `--chrome`. Kesiapan browser di VM tidak bergantung pada `chrome_connected`, tapi pada app berjalan dan setelan repo baru `unattended_login` (repo menyiapkan login uji sendiri lewat setup command). Tanpa itu, AC browser menjadi "Can't verify" dan kartu diparkir `ac_gate`. Review ulang pagi (R19) memakai jalur laptop yang ada: Claude in Chrome di laptop, app dev VM lewat port forward SSH, ledger dibaca lewat RPC daemon VM.
-- **KTD-65. Git daemon tidak mempercayai konfigurasi worktree.** Selain `core.hooksPath=/dev/null` dan `core.fsmonitor=false`, semua git daemon memakai `GIT_CONFIG_NOSYSTEM=1`, `GIT_CONFIG_GLOBAL` milik daemon, dan menolak worktree yang konfigurasi lokalnya memuat kunci yang bisa mengeksekusi atau mengalihkan (`core.sshCommand`, `credential.*`, `url.*`, `include*`, `core.pager`, filter). Kredensial push tetap hanya disuntikkan untuk push daemon.
-- **KTD-66. Login VM lewat terminal.** Subcommand baru `mandord login lark` membuka listener callback di loopback VM (port dari konfigurasi) dan mencetak URL; developer menjalankannya lewat `ssh -L` sesuai runbook. `claude` dan `gh` login di terminal masing-masing (Claude di user agent). RPC `status` menambah status ketiga login untuk ditampilkan app.
-- **KTD-67. App memegang dua koneksi: laptop dan VM lewat SSH.** `LinkMode::Ssh { host, user, known_hosts }` menjalankan `ssh -F /dev/null -o BatchMode=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile=<milik app> -o ExitOnForwardFailure=yes -o ServerAliveInterval=15 <host> mandord connect` sebagai argv tanpa shell. Host key dipin saat developer menambahkan VM, setelah fingerprint dikonfirmasi. Link disimpan per kunci (`laptop`, `vm`), event bernama per link, dan frontend membuat client RPC kedua dengan store terpisah untuk tab Overnight.
+- **KTD-54. Peran daemon dari konfigurasi, diteruskan sebagai nilai domain.** `Config::from_env` membaca `MANDOR_ROLE` (`laptop` default, `vm`) dan `MANDOR_DAEMON_ID` (default dari hostname dan user). `mandord` meneruskan `DaemonRole` (didefinisikan di `mandor-domain`) dan id daemon ke konstruktor `RunService`, `SyncService`, dan `OvernightService` saat wiring; cabang perilaku di `mandor-usecase` hanya membaca field itu. Peran `vm` menyalakan antrean, siklus pemakaian, gerbang AC yang selalu memblokir, review headless, dan agent di user terpisah.
+- **KTD-55. Klaim membawa identitas daemon, kompatibel baca ke belakang.** Format tetap `open_id|ts_ms|nonce`, dengan nonce berisi `<acak>~<daemon_id>`, sehingga `Claim::parse` lama (`splitn(3, '|')`) tetap membacanya. `may_claim`, `held_by`, dan heartbeat membandingkan `open_id` dan `daemon_id`: klaim aktif milik daemon lain dari developer yang sama tidak boleh ditimpa kecuali lewat serah-terima (KTD-63). Klaim tanpa `daemon_id` diperlakukan sebagai milik daemon tak dikenal dan hanya bisa diambil setelah basi. Daemon versi lama tetap menimpa klaim dengan `open_id` sama, jadi app menolak mengaktifkan link VM bila daemon laptop belum mendukung klaim per daemon (dicek dari versi protokol `hello`).
+- **KTD-56. Semua jalur "bertindak atas kartu saya" memakai pemegang daemon.** `fix_candidates`, poller (pelepasan klaim saat kartu kembali ke To Do), heartbeat, `release_claim`, `revalidate` outbox (`crates/mandor-domain/src/task.rs`), dan view kartu memakai predikat baru "dipegang daemon ini". `claimed_by(me)` tetap hanya untuk tampilan "milik saya". View menambah `holder` (`self` | `own_other_daemon` | `other_person`) untuk badge "On VM" (R17) dan mode hanya-baca (R16).
+- **KTD-57. Antrean dan siklus di daemon VM, disimpan di SQLite.** Migrasi baru: tabel `overnight_queue` (urutan, record, target repo atau workspace yang dipilih saat mengantre, tanda "hanya laptop", alasan keluar), `overnight_cycles` (awal siklus, token input dan output, token cache terpisah), dan setelan di tabel `settings` (jam mulai dan selesai, offset UTC, batas token, aktif). Penjadwal adalah langkah baru di `Schedule::run_due` (`crates/mandord/src/session.rs`) yang memanggil `OvernightService::tick` dengan `Clock`. Kartu To Do dimulai lewat `start_planned` dengan `Planning::Skip` (VM tidak menunggu persetujuan plan); kartu `Held` yang diantre ulang melanjutkan run yang ada dengan giliran baru di sesi, branch, dan worktree yang sama, membawa jawaban developer.
+- **KTD-58. Jam lembur memakai offset UTC tetap per developer.** Developer mengisi offset (mis. `+07:00`); tidak ada database zona waktu dan tidak ada crate baru. Logika jendela, siklus, dan keputusan "boleh mulai" adalah fungsi murni di `mandor-domain`.
+- **KTD-59. Pemakaian per pesan sebagai event domain baru.** `AgentEvent::MessageUsage { message_id, usage }` baru di `crates/mandor-domain/src/agent.rs`, dikeluarkan parser stream per pesan assistant (dedup per `message.id`, mengabaikan pesan subagent). `AgentEvent::Usage` tetap total run dari `result`, sehingga statistik run dan jurnal tidak berubah artinya. Batas siklus menghitung input dan output; cache dicatat terpisah untuk laporan. `rate_limit_event` berstatus `rejected` dan error kuota menahan kartu dengan alasan "usage limit". Penjadwal juga mengecek status login Claude sebelum memulai siklus; login tidak valid berarti tidak ada kartu yang dimulai.
+- **KTD-60. Kartu tertahan sebagai state baru `Held`, terpisah dari `is_parked`.** `RunState::Held` (disimpan `held`) dengan `hold_reason` (`stuck`, `ac_gate`, `needs_confirmation`, `usage_limit`) dan `hold_note` (pertanyaan agent) di `RunExtra`. `Held` tidak termasuk `is_parked()` (yang tetap Orphaned dan Stopped) dan tidak `busy`, sehingga `publish_gated` menerima run `Held` untuk keputusan AC (R12a). Semua pemanggil `is_parked()` dan `is_busy()` (antara lain `publish_gated`, `heartbeat_all`, Waiting Fix `process_record`, drain) diperiksa untuk state baru. Di UI istilahnya tetap "Parked". Jalur yang sekarang berakhir di `AwaitingDev` lewat `flag_fix` atau gerbang menjadi `Held` bila peran `vm`. `RunExtra` juga mencatat `entered_waiting_fix` untuk metrik "lolos tanpa Waiting Fix".
+- **KTD-61. Gerbang AC selalu Block di VM.** `gate_mode()` mengembalikan `Block` bila peran `vm`, apa pun setelan repo. `finish_fix_turn` di VM selalu lewat `evaluate`. Keputusan developer atas kartu `ac_gate` (R12a) memanggil `publish_gated` dengan `GateDecision` dari tab Overnight, tanpa menjalankan agent.
+- **KTD-62. Agent sebagai user Linux terpisah, diawasi `agent-exec`.** Tiap developer punya user `<dev>-agent`. Daemon menjalankan `sudo -n -u <dev>-agent mandord agent-exec ...`; aturan sudoers dari admin hanya mengizinkan subcommand `agent-exec` (jalankan, reap). `agent-exec` tetap hidup sebagai induk pengawas: ia membangun environment dari allowlist (termasuk `GIT_CONFIG_NOSYSTEM`, `GIT_CONFIG_GLOBAL`, `GH_CONFIG_DIR`, `GIT_SSH_COMMAND`, `GIT_TERMINAL_PROMPT`, `DOCKER_HOST` rootless), menjalankan Claude Code tanpa modifikasi di process group sendiri, meneruskan SIGINT dan SIGTERM yang diteruskan sudo, melakukan eskalasi sampai SIGKILL ke group sebagai user agent, dan membunuh group bila pipe ke daemon tertutup (daemon mati). Reap setelah restart memakai `agent-exec --reap <run>`. Berkas per run (konfigurasi MCP dengan token kapabilitas, state review untuk hook, gitconfig dan direktori gh agent) ada di direktori run per developer yang bisa dibaca user agent, di luar `~/.mandor`. Clone utama dan worktree tiap repo ada di direktori grup developer (daemon dan agent bisa menulis, user lain tidak). Biner `mandord` bisa dieksekusi user agent, sementara `~/.mandor` tetap `0700`. Login Claude Code ada di home user agent; Mandor tidak pernah membaca atau menyimpannya.
+- **KTD-63. Serah-terima "Take over to laptop" lewat RPC daemon VM.** Laptop meminta `runs.handoff` ke daemon VM. Daemon VM menghentikan run bila ada, commit dan push branch kartu tanpa PR, menulis klaim dengan `daemon_id` laptop yang diminta, dan menandai kartu "hanya laptop". Laptop lalu memulihkan worktree dari branch kartu (pola `run/ownership.rs`) dan membuat run `AwaitingDev`.
+- **KTD-64. Review headless lewat Playwright MCP.** Di peran `vm`, reviewer mendapat MCP Playwright (`--headless --isolated`) dan allowlist `mcp__playwright__*`, menggantikan `--chrome`. Kesiapan browser di VM bergantung pada app berjalan dan setelan repo baru `unattended_login` (repo menyiapkan login uji sendiri lewat setup command), bukan `chrome_connected` dan `confirmed.login`. Tanpa itu, AC browser menjadi "Can't verify" dan kartu ditahan `ac_gate`. Review ulang pagi (R19) memakai jalur laptop: Claude in Chrome di laptop, app dev VM lewat port forward SSH, ledger lewat RPC daemon VM.
+- **KTD-65. Git daemon tidak mempercayai konfigurasi repo yang bisa diubah agent.** Selain `core.hooksPath=/dev/null` dan `core.fsmonitor=false`, semua git daemon memakai `GIT_CONFIG_NOSYSTEM=1` dan `GIT_CONFIG_GLOBAL` milik daemon, dan sebelum setiap perintah menolak repo bila `.git/config` clone utama atau konfigurasi worktree memuat kunci yang bisa mengeksekusi atau mengalihkan (`core.sshCommand`, `credential.*`, `url.*`, `include*`, `core.pager`, `filter.*`). Kredensial push hanya disuntikkan untuk push daemon.
+- **KTD-66. Login VM lewat terminal, sebagai client daemon yang berjalan.** `mandord login lark` tersambung ke daemon lokal, memanggil `lark.login.begin`, melayani callback di loopback VM pada port milik developer, lalu meneruskan code ke `lark.login.complete`, sehingga daemon menyimpan token dan memulai sesi tanpa restart. Developer menjalankannya dengan `ssh -L` sesuai runbook; port callback tiap developer didaftarkan di konsol app Lark. `claude` login di user agent, `gh` login di user developer. RPC `status` menambah status ketiga login beserta langkah perbaikan.
+- **KTD-67. App memegang dua koneksi: laptop dan VM lewat SSH.** `LinkMode::Ssh { host }` menjalankan `ssh -o BatchMode=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile=<milik app> -o ExitOnForwardFailure=yes -o ServerAliveInterval=15 <host> '$HOME/.local/bin/mandord' connect` (dan `token`) sebagai argv tanpa shell lokal, memakai konfigurasi ssh developer untuk port dan kunci. Di Windows, ssh dijalankan di dalam WSL lewat `wsl.exe` agar kunci dan konfigurasinya sama dengan workspace developer. Host key dipin saat developer menambahkan VM, setelah fingerprint dikonfirmasi. Link disimpan per kunci (`laptop`, `vm`), event bernama per link, dan frontend membuat client RPC kedua dengan store terpisah untuk tab Overnight.
 
 ### High-Level Technical Design
 
@@ -197,19 +197,20 @@ flowchart LR
       Q[(SQLite: antrean, siklus)]
     end
     subgraph user beni-agent
+      AX[agent-exec pengawas]
       AG[claude -p<br/>login Claude]
       PW[Playwright MCP headless]
       CT[container rootless]
     end
-    WT[worktree grup bersama]
+    G[direktori grup: clone, worktree, berkas run]
   end
   LARK[(Lark Base)]
   GH[(GitHub)]
   APP -- "link laptop" --> DL
   APP -- "ssh ... mandord connect" --> DV
-  DV -- "sudo -u beni-agent agent-exec" --> AG
-  AG --> WT
-  DV --> WT
+  DV -- "sudo -u beni-agent agent-exec" --> AX --> AG
+  AG --> G
+  DV --> G
   AG --> PW
   AG --> CT
   DV --> Q
@@ -222,44 +223,46 @@ Siklus hidup kartu di VM:
 
 ```mermaid
 stateDiagram-v2
-  [*] --> Antre: developer kirim (To Do / Parked)
+  [*] --> Antre: developer kirim (To Do / Held)
   Antre --> Keluar: cek ulang gagal
-  Antre --> Running: jendela buka atau Start now, VM kosong, kuota ada
+  Antre --> Running: jendela buka atau Start now, VM kosong, kuota dan login ada
   Running --> Reviewing: selesai implementasi
   Reviewing --> WaitingReview: gerbang AC siap, push + PR
-  Reviewing --> Parked: ac_gate
-  Running --> Parked: stuck / usage_limit / needs_confirmation
-  Parked --> WaitingReview: developer putuskan AC (R12a)
-  Parked --> Antre: developer jawab dan antre ulang
-  Parked --> Laptop: Take over
+  Reviewing --> Held: ac_gate
+  Running --> Held: stuck / usage_limit / needs_confirmation
+  Held --> WaitingReview: developer putuskan AC (R12a)
+  Held --> Antre: developer jawab dan antre ulang
+  Held --> Laptop: Take over
   WaitingReview --> WaitingFix: reviewer
   WaitingFix --> Running: giliran berikutnya (R21)
   WaitingFix --> Laptop: Take over
   Laptop --> [*]
 ```
 
-Keputusan "boleh mulai kartu berikutnya?" (fungsi murni, U3):
+Keputusan "boleh mulai kartu berikutnya?" (fungsi murni, U2):
 
-| Ada run VM berjalan | Waiting Fix siap | Dalam jendela | Start now | Kuota siklus | Keputusan |
+| Ada run VM berjalan | Batas dan login siap | Waiting Fix siap | Start now | Dalam jendela | Keputusan |
 |---|---|---|---|---|---|
 | ya | — | — | — | — | tunggu |
-| tidak | — | — | — | habis | tidak ada yang mulai |
-| tidak | ya | — | — | ada | mulai Waiting Fix |
-| tidak | tidak | — | ya | ada | mulai kartu Start now |
-| tidak | tidak | ya | tidak | ada | mulai kartu antrean teratas |
-| tidak | tidak | tidak | tidak | ada | tunggu jendela |
+| tidak | tidak | — | — | — | tidak ada yang mulai |
+| tidak | ya | ya | — | — | mulai Waiting Fix |
+| tidak | ya | tidak | ya | — | mulai kartu Start now |
+| tidak | ya | tidak | tidak | ya | mulai kartu antrean teratas |
+| tidak | ya | tidak | tidak | tidak | tunggu jendela |
+
+"Batas dan login siap" berarti batas siklus sudah diisi dan belum habis, dan login Claude user agent valid.
 
 ### Assumptions
 
-- A1. Admin bisa memasang aturan sudoers per developer yang hanya mengizinkan `mandord agent-exec` sebagai `<dev>-agent`, dan user agent punya container rootless sendiri (linger aktif).
-- A2. Claude Code yang dijalankan sebagai user agent lewat `sudo -n` membaca login dari home user agent dan berjalan normal dalam mode `-p` stream-json.
+- A1. Admin bisa memasang aturan sudoers per developer yang hanya mengizinkan `mandord agent-exec` sebagai `<dev>-agent`, dan kedua user (developer dan agent) punya linger aktif; user agent punya container rootless sendiri.
+- A2. Claude Code yang dijalankan sebagai user agent lewat `sudo -n` membaca login dari home user agent dan berjalan normal dalam mode `-p` stream-json; sudo meneruskan SIGINT dan SIGTERM ke `agent-exec`.
 - A3. Playwright MCP headless dengan Chromium berjalan di VM dalam batas sumber daya satu run per developer.
-- A4. Field klaim Lark menerima nonce yang lebih panjang (`acak~daemon_id`) tanpa batas panjang yang mengganggu.
-- A5. Developer bisa memakai `ssh -L` untuk login Lark sekali dan `ssh` biasa untuk link app; VM menjalankan OpenSSH dengan login kunci.
+- A4. Field klaim Lark menerima nonce yang lebih panjang (`acak~daemon_id`).
+- A5. Developer punya akses ssh berbasis kunci ke VM dari WSL atau Linux, dan bisa memakai `ssh -L` untuk login Lark.
 
 ### Sequencing
 
-U1 → U2 → U3 → U4 → U5 → U6 → U7 → U8 → U11, dengan U9 → U10 (app) setelah U1, U3, U5, dan U8. U12 terakhir. U6 (agent user terpisah) boleh dikerjakan paralel setelah U1 karena tidak bergantung pada antrean. Semua setelah U1–U4 plan service OS.
+U1 → U2 → U4 → U3 → U5 → U6 → U7 → U8 → U11, lalu U9 setelah U8, dan U10 setelah U2, U3, U4, U5, dan U9. U12 terakhir. U6 boleh dikerjakan paralel setelah U1. Semua setelah U1–U4 plan service OS.
 
 ---
 
@@ -267,94 +270,101 @@ U1 → U2 → U3 → U4 → U5 → U6 → U7 → U8 → U11, dengan U9 → U10 (
 
 ### U1. Klaim per daemon dan peran daemon
 
-- **Goal:** dua daemon developer yang sama tidak lagi sama-sama menganggap kartu miliknya.
+- **Goal:** dua daemon developer yang sama tidak lagi sama-sama bertindak atas kartu yang sama.
 - **Requirements:** R16, R17; KTD-54, KTD-55, KTD-56; AE8.
 - **Dependencies:** U1–U4 plan service OS.
 - **Files:**
-  - `crates/mandor-domain/src/claim.rs` (daemon id di nonce, `held_by_daemon`, `may_claim` sadar daemon, varian `ClaimRefused::OwnOtherDaemon`)
-  - `crates/mandor-domain/src/task.rs` (predikat pemegang)
+  - `crates/mandor-domain/src/claim.rs` (daemon id di nonce, `held_by_daemon`, `may_claim` sadar daemon, `ClaimRefused::OwnOtherDaemon`)
+  - `crates/mandor-domain/src/task.rs` (predikat pemegang, `revalidate`), `crates/mandor-domain/src/role.rs` (baru: `DaemonRole`)
   - `crates/mandor-usecase/src/sync/claim.rs`, `crates/mandor-usecase/src/sync/poller.rs`, `crates/mandor-usecase/src/run/ownership.rs`, `crates/mandor-usecase/src/waiting_fix/engine.rs` (`fix_candidates`)
-  - `crates/mandord/src/config.rs` (`MANDOR_ROLE`, `MANDOR_DAEMON_ID`), `crates/mandord/src/views.rs` (`holder`)
+  - `crates/mandord/src/config.rs` (`MANDOR_ROLE`, `MANDOR_DAEMON_ID`), `crates/mandord/src/app.rs` (wiring), `crates/mandord/src/views.rs` (`holder`)
   - `crates/mandor-protocol/src/dto.rs` (`CardView.holder`), TS diregenerasi
-  - test: `crates/mandor-domain/src/claim.rs` (tests), `crates/mandor-usecase/tests/sync.rs`, `crates/mandor-usecase/tests/waiting_fix.rs`
-- **Approach:** daemon id masuk ke nonce agar daemon lama tetap bisa mem-parse. Semua jalur yang sekarang memakai `claimed_by(me)` untuk keputusan bertindak diganti predikat pemegang daemon; `claimed_by(me)` tetap untuk tampilan "milik saya".
+  - test: `crates/mandor-domain/src/claim.rs` (tests), `crates/mandor-domain/src/task.rs` (tests), `crates/mandor-usecase/tests/sync.rs`, `crates/mandor-usecase/tests/waiting_fix.rs`
+- **Approach:** daemon id masuk ke nonce agar daemon lama tetap bisa mem-parse. Semua jalur keputusan yang memakai `claimed_by(me)` diganti predikat pemegang daemon.
 - **Execution note:** test-first di domain; pakai dua `station` dengan `me` sama dan `FakeLark` bersama untuk test integrasi.
 - **Test scenarios:**
   - Parse dan encode klaim dengan dan tanpa daemon id; klaim lama tetap valid.
-  - `may_claim`: klaim aktif daemon lain dari developer sama → ditolak `OwnOtherDaemon`; klaim daemon sendiri → boleh; klaim lama tanpa id, belum basi → ditolak; basi → boleh.
-  - Covers AE8. Dua station (laptop, VM) developer sama: VM memegang kartu di Waiting Fix; `tick_waiting_fix` di laptop tidak membuat run; heartbeat laptop tidak memperbarui klaim VM.
-  - Poller laptop tidak menghapus klaim VM saat kartu kembali ke To Do; daemon pemegang yang menghapus.
+  - `may_claim`: klaim aktif daemon lain dari developer sama → `OwnOtherDaemon`; klaim daemon sendiri → boleh; klaim lama tanpa id, belum basi → ditolak; basi → boleh.
+  - Covers AE8. Dua station developer sama: VM memegang kartu di Waiting Fix; `tick_waiting_fix` di laptop tidak membuat run; heartbeat laptop tidak memperbarui klaim VM.
+  - Outbox laptop untuk kartu yang dipegang VM dibatalkan sebagai `NotOwner`.
+  - Poller laptop tidak menghapus klaim VM saat kartu kembali ke To Do.
   - View: `holder` `own_other_daemon` untuk kartu yang dipegang VM.
 - **Verification:** test hijau; dua daemon nyata dengan identitas Lark sama tidak saling menimpa klaim di Base salinan.
 
 ### U2. Penjadwal antrean dan siklus di daemon VM
 
 - **Goal:** daemon VM mengerjakan antrean sesuai jendela, Start now, dan prioritas Waiting Fix, satu kartu sekaligus.
-- **Requirements:** R6, R7, R8, R9, R21; KTD-57, KTD-58; AE1, AE2, AE3, AE4, AE9, AE10.
+- **Requirements:** R6, R7, R8, R9, R10 (syarat aktif), R20, R21; KTD-57, KTD-58; AE1, AE2, AE3, AE4, AE9, AE10.
 - **Dependencies:** U1.
 - **Files:**
   - `crates/mandor-domain/src/overnight.rs` (baru: jendela dengan offset, siklus, keputusan "boleh mulai" sesuai tabel)
-  - `crates/mandor-usecase/src/overnight/mod.rs` (baru: `OvernightService` tick, cek ulang `check_start`, mulai kartu lewat `start_planned`, prioritas Waiting Fix)
+  - `crates/mandor-usecase/src/overnight/mod.rs` (baru: `OvernightService` tick, cek ulang `check_start`, mulai To Do lewat `start_planned` dengan `Planning::Skip`, lanjutkan `Held` lewat giliran baru, prioritas Waiting Fix)
   - `crates/mandor-usecase/src/ports.rs` (port antrean dan siklus di `Deps`)
   - `crates/mandor-store/migrations/0006_overnight.sql`, `crates/mandor-store/src/overnight.rs` (baru), `.sqlx` diperbarui
   - `crates/mandord/src/session.rs` (langkah jadwal baru, hanya peran `vm`)
-  - `crates/mandor-usecase/src/waiting_fix/engine.rs` (di peran `vm`, mulai giliran Waiting Fix lewat penjadwal agar satu kartu sekaligus)
+  - `crates/mandor-usecase/src/waiting_fix/engine.rs` (di peran `vm`, giliran Waiting Fix lewat penjadwal)
   - test: `crates/mandor-domain/src/overnight.rs` (tests), `crates/mandor-usecase/tests/overnight.rs` (baru), `crates/mandor-store/tests/overnight.rs` (baru)
-- **Approach:** penjadwal hanya memutuskan dan memulai; eksekusi memakai jalur start dan Waiting Fix yang ada. Waiting Fix yang siap (lewat jeda tenang) masuk giliran sebelum antrean.
+- **Approach:** penjadwal hanya memutuskan dan memulai; eksekusi memakai jalur start, lanjut sesi, dan Waiting Fix yang ada.
 - **Execution note:** test-first lewat tabel keputusan di domain, lalu `FakeClock` di usecase.
 - **Test scenarios:**
-  - Jendela 19:00–06:00 +07:00: 18:59 tutup, 19:00 buka, 05:59 buka, 06:00 tutup; jendela yang tidak melewati tengah malam; offset negatif.
-  - Siklus: mulai saat jendela mulai; run 14:00 masuk siklus yang dimulai 19:00 kemarin.
-  - Covers AE1. Tiga kartu antre: hanya satu berjalan; kedua mulai setelah pertama selesai atau parkir.
+  - Jendela 19:00–06:00 +07:00: 18:59 tutup, 19:00 buka, 05:59 buka, 06:00 tutup; jendela tanpa lewat tengah malam; offset negatif.
+  - Siklus mulai saat jendela mulai; run 14:00 masuk siklus yang dimulai 19:00 kemarin.
+  - Batas siklus belum diisi: tidak ada kartu yang dimulai, termasuk Start now.
+  - Covers AE1. Tiga kartu antre: hanya satu berjalan; kedua mulai setelah pertama selesai atau tertahan.
   - Covers AE2. Kartu mulai 05:40 terus berjalan setelah 06:00; kartu berikut tidak mulai.
   - Covers AE3. Start now pukul 14:00 mulai langsung bila VM kosong.
   - Covers AE4. Kartu yang sudah In Progress milik orang lain dikeluarkan dengan alasan tercatat.
   - Covers AE9, AE10. Waiting Fix siap saat VM kosong mulai langsung; saat VM sibuk menunggu lalu mendahului antrean.
-  - Antrean: tambah hanya To Do atau Parked; urut ulang; keluarkan; kartu "hanya laptop" ditolak.
+  - Kartu To Do dimulai dengan target repo dari antrean dan tanpa menunggu persetujuan plan.
+  - Kartu `Held` yang dijawab dan diantre ulang dilanjutkan pada branch dan sesi yang sama, dengan commit sebelumnya utuh.
+  - Antrean: tambah hanya To Do atau `Held`; urut ulang; keluarkan; kartu "hanya laptop" ditolak.
 - **Verification:** test hijau; di VM uji, antrean dua kartu berjalan berurutan pada jendela pendek.
+
+### U4. Kartu tertahan dengan alasan dan gerbang AC VM
+
+- **Goal:** semua kartu VM yang berhenti punya alasan, dan VM tidak pernah push melewati gerbang AC.
+- **Requirements:** R12, R12a, R13, R15, R18 (metrik); KTD-60, KTD-61; AE6, AE12.
+- **Dependencies:** U1, U2.
+- **Files:**
+  - `crates/mandor-domain/src/run.rs` (`RunState::Held`, `HoldReason`)
+  - `crates/mandor-store/src/run_port.rs` (`RunExtra.hold_reason`, `hold_note`, `entered_waiting_fix`)
+  - `crates/mandor-usecase/src/run/publish.rs` (`gate_mode` Block di peran `vm`; terima run `Held` untuk keputusan R12a)
+  - `crates/mandor-usecase/src/waiting_fix/engine.rs` (`finish_fix_turn` dan `after_fix_review` ke `Held` di peran `vm`; set `entered_waiting_fix`)
+  - `crates/mandor-usecase/src/run/session.rs` (agent buntu → `Held stuck` dengan pertanyaan), pemanggil `is_parked()`/`is_busy()` lain
+  - `crates/mandor-protocol/src/{lib.rs,dto.rs}` (`overnight.gate_decide`), `crates/mandord/src/dispatch.rs`
+  - test: `crates/mandor-usecase/tests/publish_gate.rs`, `crates/mandor-usecase/tests/waiting_fix.rs`, `crates/mandor-usecase/tests/overnight.rs`
+- **Approach:** di peran laptop perilaku tidak berubah. Di peran `vm`, setiap hasil yang menunggu developer menjadi `Held` dengan alasan, lalu penjadwal lanjut ke kartu berikutnya.
+- **Test scenarios:**
+  - Covers AE6. Review menghasilkan "Can't verify": tidak push, `Held ac_gate`, penjadwal mulai kartu berikutnya.
+  - Repo bersetelan Warn: di peran `vm` tetap Block; di laptop tetap Warn.
+  - Waiting Fix dengan baris AC Fail: `Held ac_gate`.
+  - Perubahan menyentuh CI atau konfigurasi agent: `Held needs_confirmation`.
+  - Agent buntu: `Held stuck` dengan pertanyaan tersimpan, lalu kartu berikutnya dimulai.
+  - Covers AE12. Developer mengonfirmasi baris "Can't verify" pada run `Held`: `publish_gated` menerima, push dan PR tanpa agent, kartu ke Waiting Review.
+  - `Held` tidak `busy`, tidak `is_parked`, tidak memblokir drain, dan dilewati `heartbeat_all` sesuai aturan klaim.
+  - Kartu yang pernah masuk Waiting Fix tercatat `entered_waiting_fix`.
+- **Verification:** test hijau; setiap jalur publish di peran `vm` punya test yang membuktikan lewat `evaluate` Block.
 
 ### U3. Pemakaian per siklus dan batas
 
-- **Goal:** VM berhenti tepat saat batas token siklus tercapai atau kuota langganan habis.
+- **Goal:** VM berhenti tepat saat batas token siklus tercapai, kuota langganan habis, atau login Claude tidak valid.
 - **Requirements:** R10; KTD-59; AE5.
-- **Dependencies:** U2.
+- **Dependencies:** U2, U4.
 - **Files:**
-  - `crates/mandor-agent/src/claude/stream.rs` (event usage per pesan, dedup `message.id`, abaikan subagent; status `rejected`)
-  - `crates/mandor-agent/src/port.rs` (`AgentEvent::Usage` per pesan)
-  - `crates/mandor-usecase/src/run/session.rs` (akumulasi ke siklus, hentikan run saat batas)
-  - `crates/mandor-usecase/src/overnight/mod.rs` (cek batas sebelum mulai)
+  - `crates/mandor-domain/src/agent.rs` (`AgentEvent::MessageUsage`)
+  - `crates/mandor-agent/src/claude/stream.rs` (usage per pesan, dedup `message.id`, abaikan subagent; status `rejected`)
+  - `crates/mandor-usecase/src/run/session.rs` (akumulasi ke siklus, hentikan run saat batas), `crates/mandor-store/src/codec.rs` (varian baru)
+  - `crates/mandor-usecase/src/overnight/mod.rs` (cek batas dan login sebelum mulai)
   - test: `crates/mandor-agent/src/claude/stream.rs` (tests dengan fixture stream-json), `crates/mandor-usecase/tests/overnight.rs`
-- **Approach:** total run tetap dari `result`; batas siklus memakai akumulasi per pesan agar bisa berhenti di tengah run. Saat berhenti, run diparkir `usage_limit` (U4).
+- **Approach:** total run tetap dari `result`; batas siklus memakai akumulasi `MessageUsage` agar bisa berhenti di tengah run. Saat berhenti, run menjadi `Held usage_limit` (U4).
 - **Test scenarios:**
-  - Stream dengan tiga pesan, dua di antaranya `message.id` sama: input dihitung sekali.
-  - Pesan subagent (`parent_tool_use_id` terisi) tidak dihitung.
-  - Covers AE5. Batas tercapai di tengah kartu kedua: run dihentikan, parkir `usage_limit`, kartu ketiga tidak mulai sampai siklus berikutnya, termasuk setelah tengah malam.
-  - `rate_limit_event` `rejected`: parkir `usage_limit` tanpa retry.
+  - Stream dengan tiga pesan, dua dengan `message.id` sama: input dihitung sekali; `AgentEvent::Usage` dari `result` tidak berubah.
+  - Pesan subagent tidak dihitung.
+  - Covers AE5. Batas tercapai di tengah kartu kedua: run dihentikan, `Held usage_limit`, kartu ketiga tidak mulai sampai siklus berikutnya, termasuk setelah tengah malam.
+  - `rate_limit_event` `rejected`: `Held usage_limit` tanpa retry.
+  - Login Claude tidak valid saat siklus mulai: tidak ada kartu yang dimulai, status tampil.
   - Siklus baru: penghitung kembali nol.
-- **Verification:** test hijau; laporan siklus menampilkan pemakaian yang cocok dengan `result` akhir run dalam toleransi.
-
-### U4. Parkir dengan alasan dan gerbang AC VM
-
-- **Goal:** semua kartu VM yang berhenti punya alasan, dan VM tidak pernah push melewati gerbang AC.
-- **Requirements:** R12, R12a, R13, R15; KTD-60, KTD-61; AE6, AE12.
-- **Dependencies:** U1, U2.
-- **Files:**
-  - `crates/mandor-domain/src/run.rs` (`RunState::Parked`, `ParkReason`)
-  - `crates/mandor-store/src/run_port.rs` (`RunExtra.park_reason`)
-  - `crates/mandor-usecase/src/run/publish.rs` (`gate_mode` Block di peran `vm`; jalur keputusan R12a)
-  - `crates/mandor-usecase/src/waiting_fix/engine.rs` (`finish_fix_turn` dan `after_fix_review` ke `Parked` di peran `vm`)
-  - `crates/mandor-usecase/src/run/session.rs` (agent buntu → `Parked stuck`)
-  - `crates/mandor-protocol/src/{lib.rs,dto.rs}` (`overnight.gate_decide`), `crates/mandord/src/dispatch.rs`
-  - test: `crates/mandor-usecase/tests/publish_gate.rs`, `crates/mandor-usecase/tests/waiting_fix.rs`, `crates/mandor-usecase/tests/overnight.rs`
-- **Approach:** di peran laptop perilaku tidak berubah. Di peran `vm`, setiap `flag_fix`/hasil gerbang yang menunggu developer menjadi `Parked` dengan alasan, lalu penjadwal lanjut ke kartu berikutnya.
-- **Test scenarios:**
-  - Covers AE6. Review menghasilkan "Can't verify": tidak push, `Parked ac_gate`, penjadwal mulai kartu berikutnya.
-  - Repo bersetelan Warn: di peran `vm` tetap Block; di laptop tetap Warn.
-  - Waiting Fix tanpa baris AC di gerbang: di `vm` lewat `evaluate` dan siap; dengan baris Fail: `Parked ac_gate`.
-  - Perubahan menyentuh CI atau konfigurasi agent: `Parked needs_confirmation`.
-  - Covers AE12. Developer mengonfirmasi baris "Can't verify": push dan PR tanpa agent, kartu ke Waiting Review.
-  - `Parked` tidak `busy` dan tidak memblokir drain.
-- **Verification:** test hijau; tidak ada jalur push di peran `vm` yang melewati `evaluate` Block (dicek dengan test per jalur publish).
+- **Verification:** test hijau; pemakaian siklus cocok dengan jumlah `result` akhir run dalam toleransi.
 
 ### U5. Serah-terima ke laptop
 
@@ -362,37 +372,42 @@ U1 → U2 → U3 → U4 → U5 → U6 → U7 → U8 → U11, dengan U9 → U10 (
 - **Requirements:** R22; KTD-63; AE11.
 - **Dependencies:** U1, U4.
 - **Files:**
-  - `crates/mandor-usecase/src/run/ownership.rs` (handoff di VM: stop, commit, push tanpa PR, tulis klaim ke daemon laptop, tandai "hanya laptop"; sisi laptop: pulihkan worktree)
+  - `crates/mandor-usecase/src/run/ownership.rs` (handoff di VM; sisi laptop memulihkan worktree)
   - `crates/mandor-usecase/src/run/members.rs` (push tanpa membuat PR)
   - `crates/mandor-protocol/src/{lib.rs,dto.rs}` (`runs.handoff`), `crates/mandord/src/dispatch.rs`
   - test: `crates/mandor-usecase/tests/ownership.rs` (baru atau perluasan suite yang ada)
-- **Approach:** serah-terima diminta dari laptop ke daemon VM lewat link VM, karena hanya pemegang klaim yang boleh memindahkannya (R16). Tanda "hanya laptop" disimpan di record antrean VM dan menolak antre ulang.
+- **Approach:** serah-terima diminta dari laptop ke daemon VM lewat link VM, karena hanya pemegang klaim yang boleh memindahkannya (R16).
 - **Test scenarios:**
-  - Covers AE11. Kartu `Parked` dengan commit belum di-push: handoff mendorong commit ke branch kartu, klaim berpindah ke daemon laptop, laptop membuat run `AwaitingDev` di branch yang sama.
+  - Covers AE11. Kartu `Held` dengan commit belum di-push: handoff mendorong commit, klaim berpindah ke daemon laptop, laptop membuat run `AwaitingDev` di branch yang sama.
   - Kartu di Waiting Fix sedang berjalan di VM: run dihentikan dulu, lalu serah-terima.
   - Push gagal: klaim tidak berpindah, error dikembalikan.
   - Antre ulang kartu "hanya laptop": ditolak.
-- **Verification:** test hijau; serah-terima nyata di VM uji ke laptop mempertahankan semua commit.
+- **Verification:** test hijau; serah-terima nyata di VM uji mempertahankan semua commit.
 
 ### U6. Agent sebagai user Linux terpisah
 
-- **Goal:** agent di VM tidak bisa menjangkau token daemon, dan containernya milik user agent.
+- **Goal:** agent di VM tidak bisa menjangkau token daemon, tetap bisa dihentikan, dan containernya milik user agent.
 - **Requirements:** R5, R14; KTD-62, KTD-65; AE7.
 - **Dependencies:** U1.
 - **Files:**
-  - `crates/mandord/src/main.rs`, `crates/mandord/src/agent_exec.rs` (baru: subcommand `agent-exec`, environment bersih, `DOCKER_HOST` rootless, `exec` claude)
-  - `crates/mandor-agent/src/claude/command.rs` (bungkus argv dengan `sudo -n -u <agent_user> mandord agent-exec` di peran `vm`)
-  - `crates/mandord/src/config.rs` (`MANDOR_AGENT_USER`, direktori worktree grup)
-  - `crates/mandor-git/src/lib.rs` (KTD-65: `GIT_CONFIG_NOSYSTEM`, global milik daemon, tolak konfigurasi lokal berbahaya)
-  - `crates/mandor-git/src/` (worktree di direktori grup dengan izin grup)
+  - `crates/mandord/src/main.rs`, `crates/mandord/src/agent_exec.rs` (baru: induk pengawas, environment dari allowlist, process group, penerusan sinyal, eskalasi kill, kill saat pipe daemon tertutup, `--reap`)
+  - `crates/mandor-agent/src/claude/command.rs`, `crates/mandor-agent/src/claude/guardrails.rs` (bungkus argv dengan `sudo -n -u <agent_user> mandord agent-exec` di peran `vm`; berkas run di direktori run, bukan `~/.mandor/agent`)
+  - `crates/mandor-agent/src/port.rs` (konfigurasi MCP dan state review di direktori run yang bisa dibaca user agent)
+  - `crates/mandor-proc/src/reap.rs` (reap peran `vm` lewat `agent-exec --reap`)
+  - `crates/mandord/src/config.rs` (`MANDOR_AGENT_USER`, direktori grup, direktori run)
+  - `crates/mandor-git/src/lib.rs` (KTD-65 untuk clone utama dan worktree), `crates/mandor-git/src/` (clone dan worktree di direktori grup)
   - test: `crates/mandor-agent/src/claude/command.rs` (tests argv), `crates/mandord/tests/agent_exec.rs` (baru), `crates/mandor-git/tests/git_flow.rs`
-- **Approach:** daemon tidak pernah membaca login Claude. Hook `PreToolUse` dan deny list tetap aktif sebagai lapisan kedua. Bila sudo gagal (aturan belum dipasang), run gagal dengan pesan yang menunjuk runbook, bukan jatuh ke user daemon.
+- **Approach:** daemon tidak pernah membaca login Claude. Hook `PreToolUse` dan deny list tetap aktif sebagai lapisan kedua. Bila sudo gagal, run gagal dengan pesan yang menunjuk runbook, tidak jatuh ke user daemon. Test `agent-exec` dijalankan sebagai user yang sama di CI (tanpa sudo); pemisahan uid dibuktikan di uji langsung.
 - **Test scenarios:**
   - Argv peran `vm`: `sudo -n -u beni-agent <exe> agent-exec -- claude ...`; peran laptop tidak berubah.
-  - `agent-exec`: environment hanya berisi variabel yang diizinkan; tidak ada variabel rahasia; `DOCKER_HOST` diisi.
-  - sudo ditolak: run `Failed` dengan pesan runbook, tidak ada fallback ke user daemon.
-  - Git daemon pada worktree dengan `core.sshCommand` atau `credential.helper` lokal: operasi ditolak.
-  - Covers AE7 (bagian file). Di uji langsung: user agent tidak bisa membaca `~/.mandor` developer dan tidak bisa menjalankan container yang memasang home developer lain.
+  - `agent-exec`: environment hanya berisi variabel allowlist; tidak ada variabel rahasia; variabel isolasi git dan `DOCKER_HOST` diisi.
+  - SIGTERM ke `agent-exec`: diteruskan ke group, lalu SIGKILL setelah batas waktu; group habis.
+  - Pipe dari daemon tertutup: `agent-exec` membunuh group.
+  - Stop karena batas pemakaian, serah-terima, dan timeout giliran menghentikan agent lewat jalur yang sama.
+  - Reap setelah restart: `agent-exec --reap` membersihkan group run lama.
+  - sudo ditolak: run `Failed` dengan pesan runbook, tanpa fallback.
+  - Git daemon pada clone utama atau worktree dengan `core.sshCommand`, `credential.helper`, atau `include.path`: operasi ditolak.
+  - Covers AE7 (bagian file dan container). Uji langsung: user agent tidak bisa membaca `~/.mandor`, tetap bisa membaca berkas run, dan tidak bisa menjalankan container yang memasang home developer lain.
 - **Verification:** test hijau; uji langsung di VM sesuai AE7.
 
 ### U7. Review headless di VM
@@ -401,71 +416,75 @@ U1 → U2 → U3 → U4 → U5 → U6 → U7 → U8 → U11, dengan U9 → U10 (
 - **Requirements:** R11, R19; KTD-64.
 - **Dependencies:** U4, U6.
 - **Files:**
-  - `crates/mandor-agent/src/claude/command.rs` dan `crates/mandor-agent/src/claude/guardrails.rs` (MCP Playwright headless untuk reviewer peran `vm`, allowlist `mcp__playwright__*`)
-  - `crates/mandord/src/hook.rs` / `crates/mandor-domain/src/hook.rs` (klasifikasi tool Playwright)
-  - `crates/mandor-usecase/src/review/service.rs` (kesiapan browser peran `vm`: app berjalan dan `unattended_login`)
-  - `crates/mandor-domain/src/app_run.rs` (setelan repo `unattended_login`), `apps/desktop/src/lib/components/settings/` (field repo)
-  - test: `crates/mandor-usecase/tests/review_flow.rs`, `crates/mandor-agent/src/claude/command.rs` (tests)
-- **Approach:** jalur laptop tidak berubah. Di VM, `confirmed.login` digantikan `unattended_login` pada repo; tanpa itu baris browser menjadi "Can't verify".
+  - `crates/mandor-agent/src/claude/command.rs`, `crates/mandor-agent/src/claude/guardrails.rs` (MCP Playwright headless untuk reviewer peran `vm`, allowlist `mcp__playwright__*`)
+  - `crates/mandor-domain/src/hook.rs` (klasifikasi tool Playwright: hanya host app dev)
+  - `crates/mandor-usecase/src/review/service.rs` (kesiapan browser peran `vm`)
+  - `crates/mandor-domain/src/app_run.rs` (setelan repo `unattended_login`), `crates/mandord/src/dispatch/app_run.rs`, `apps/desktop/src/lib/components/settings/` (field repo)
+  - test: `crates/mandor-usecase/tests/review_flow.rs`, `crates/mandor-agent/src/claude/command.rs` (tests), `crates/mandor-domain/src/hook.rs` (tests)
+- **Approach:** jalur laptop tidak berubah. Di VM, `confirmed.login` digantikan `unattended_login` pada repo.
 - **Test scenarios:**
   - Peran `vm`, repo `unattended_login` true, app berjalan: fakta browser tersedia, argv reviewer memuat MCP Playwright, tanpa `--chrome`.
-  - Repo tanpa `unattended_login`: baris browser "Can't verify" → `Parked ac_gate` (lewat U4).
-  - Tool `mcp__playwright__browser_navigate` ke host di luar app dev: ditolak hook.
-  - Peran laptop: tetap memakai Claude in Chrome.
+  - Repo tanpa `unattended_login`: baris browser "Can't verify" → `Held ac_gate` (lewat U4).
+  - `mcp__playwright__browser_navigate` ke host di luar app dev: ditolak hook.
+  - Peran laptop: tetap Claude in Chrome.
 - **Verification:** test hijau; review headless nyata di VM uji pada repo dengan login uji.
 
-### U8. Login dan status di VM
+### U8. Login, status, dan port di VM
 
 - **Goal:** developer menyiapkan daemon VM dari terminal SSH, dan app menampilkan statusnya.
 - **Requirements:** R3, R5; KTD-66.
-- **Dependencies:** U1.
+- **Dependencies:** U1, U6.
 - **Files:**
-  - `crates/mandord/src/login.rs` (baru: `mandord login lark`, listener callback loopback dengan timeout, URL dicetak)
-  - `crates/mandord/src/main.rs`, `crates/mandord/src/dispatch.rs` (`status` menambah status login Lark, gh, Claude user agent)
-  - `crates/mandor-domain/src/app_run.rs` atau setelan repo (rentang port app per developer, `MANDOR_PORT_RANGE`)
+  - `crates/mandord/src/login.rs` (baru: `mandord login lark` sebagai client daemon lokal, listener callback loopback dengan timeout)
+  - `crates/mandord/src/main.rs`, `crates/mandord/src/dispatch.rs` (`status` menambah status login Lark, gh, dan Claude user agent beserta langkah perbaikan)
+  - `crates/mandor-protocol/src/dto.rs` (status login), TS diregenerasi
+  - `crates/mandord/src/config.rs` (port callback dan rentang port app per developer), `crates/mandord/src/dispatch/app_run.rs` (validasi port)
   - test: `crates/mandord/tests/login.rs` (baru), test `status`
-- **Approach:** login Lark memakai alur OAuth PKCE yang sudah ada di `mandor-lark`, dengan callback di daemon bukan di app. Status login Claude dicek dengan menjalankan `claude` sebagai user agent lewat `agent-exec` dalam mode cek, dengan timeout.
+- **Approach:** login Lark memakai RPC `lark.login.begin` dan `lark.login.complete` yang sudah ada; callback dilayani CLI, bukan app desktop. Status login Claude dicek lewat `agent-exec` dalam mode cek, dengan timeout.
 - **Test scenarios:**
-  - `login lark`: callback dengan code valid menyimpan token; state salah ditolak; timeout menutup listener.
-  - `status`: ketiga login dilaporkan `ok`, `missing`, atau `expired`.
+  - `login lark`: code valid → daemon menyimpan token dan sesi Lark mulai tanpa restart; state salah ditolak; timeout menutup listener.
+  - `status`: ketiga login `ok`, `missing`, atau `expired`, masing-masing dengan langkah perbaikan.
   - Port app di luar rentang developer ditolak saat menyimpan setelan repo di peran `vm`.
 - **Verification:** test hijau; developer baru menyelesaikan login di VM uji hanya dari runbook.
 
 ### U9. Koneksi SSH dan dua link di app
 
 - **Goal:** app tersambung ke daemon laptop dan daemon VM bersamaan.
-- **Requirements:** R1; KTD-67.
+- **Requirements:** R1; KTD-55 (cek versi), KTD-67.
 - **Dependencies:** U8.
 - **Files:**
-  - `apps/desktop/src-tauri/src/daemon_link.rs` (`LinkMode::Ssh`, argv ssh, known_hosts milik app)
+  - `apps/desktop/src-tauri/src/daemon_link.rs` (`LinkMode::Ssh`, argv ssh dengan jalur absolut, ssh lewat WSL di Windows, known_hosts milik app)
   - `apps/desktop/src-tauri/src/lib.rs` (peta link per kunci, command `daemon_open/send/token` menerima kunci, command tambah VM dengan konfirmasi fingerprint)
   - `apps/desktop/src/lib/api/tauri-transport.ts` (event per link), `apps/desktop/src/lib/stores/connection.svelte.ts` (koneksi per kunci)
   - test: `apps/desktop/src-tauri/src/daemon_link.rs` (tests argv), test frontend transport
-- **Approach:** link laptop tetap default; link VM opsional. Host tidak boleh diawali `-` dan argumen tidak pernah lewat shell.
+- **Approach:** link laptop tetap default; link VM opsional. Host tidak boleh diawali `-`; argumen tidak pernah lewat shell lokal.
 - **Test scenarios:**
-  - Argv ssh memuat opsi pin host key dan known_hosts milik app; host diawali `-` ditolak.
+  - Argv ssh memuat opsi pin host key, known_hosts milik app, dan `'$HOME/.local/bin/mandord' connect` atau `token`; di Windows dibungkus `wsl.exe`; host diawali `-` ditolak.
   - Dua link aktif: event `daemon://laptop/line` dan `daemon://vm/line` tidak tercampur.
   - Host key berubah: link VM gagal dengan pesan, link laptop tidak terpengaruh.
+  - Daemon laptop belum mendukung klaim per daemon: link VM tidak diaktifkan, pesan meminta pembaruan.
   - Frontend: store VM terpisah dari store laptop.
 - **Verification:** test hijau; app nyata tersambung ke VM uji dan laptop sekaligus.
 
 ### U10. Tab Overnight dan badge On VM
 
 - **Goal:** developer mengelola antrean, membaca laporan pagi, dan bertindak atas kartu VM.
-- **Requirements:** R6, R7, R10, R12a, R17, R18, R19, R20, R22; AE7 (tampilan).
+- **Requirements:** R3 (tampilan), R6, R7, R10, R12a, R17, R18, R19, R20, R22.
 - **Dependencies:** U2, U3, U4, U5, U9.
 - **Files:**
   - `crates/mandor-protocol/src/{lib.rs,dto.rs}` (`overnight.queue.*`, `overnight.settings.*`, `overnight.report`), `crates/mandord/src/dispatch.rs`
   - `apps/desktop/src/lib/stores/nav.svelte.ts` (halaman `overnight`), `apps/desktop/src/lib/components/shell/AppSidebar.svelte`
-  - `apps/desktop/src/lib/components/overnight/` (baru: antrean, setelan jendela/offset/batas, laporan per siklus, keputusan AC, Take over, review ulang)
+  - `apps/desktop/src/lib/components/overnight/` (baru: antrean dengan pilihan target repo, setelan jendela/offset/batas, status login, laporan per siklus, keputusan AC, jawaban kartu tertahan, Take over, review ulang)
   - `apps/desktop/src/lib/stores/overnight.svelte.ts` dan `overnight.test.ts` (baru)
   - `apps/desktop/src/lib/components/mandor/CardFlagBadge.svelte` (badge "On VM" dari `holder`)
   - `apps/desktop/src/lib/dev/mock-transport.ts`
 - **Approach:** tab Overnight membaca dari link VM; board tetap dari link laptop. Teks UI dalam bahasa Inggris.
 - **Test scenarios:**
-  - Store: tambah, urut ulang, keluarkan kartu; kartu bukan To Do/Parked tidak bisa ditambah.
-  - Laporan: kartu dikelompokkan per hasil, parkir `ac_gate` terpisah, ringkasan pemakaian terhadap batas.
-  - Keputusan AC memanggil `overnight.gate_decide`; Take over memanggil `runs.handoff` lalu membuka kartu di board.
+  - Store: tambah dengan target repo, urut ulang, keluarkan; kartu bukan To Do/Held tidak bisa ditambah.
+  - VM tidak bisa diaktifkan sebelum batas siklus diisi.
+  - Status tiga login tampil dengan langkah perbaikan; login `expired` memberi peringatan.
+  - Laporan: kartu dikelompokkan per hasil, `ac_gate` terpisah, ringkasan pemakaian terhadap batas, dan jumlah kartu yang sampai Waiting Review tanpa pernah masuk Waiting Fix.
+  - Keputusan AC memanggil `overnight.gate_decide`; jawaban kartu tertahan mengantre ulang; Take over memanggil `runs.handoff` lalu membuka kartu di board.
   - Badge "On VM" muncul untuk `holder` `own_other_daemon` dan membuka tab Overnight.
   - VM tidak tersambung: tab menampilkan status koneksi dan langkah perbaikan.
 - **Verification:** test frontend hijau; dicek visual di mode mock dan dengan VM uji.
@@ -476,13 +495,12 @@ U1 → U2 → U3 → U4 → U5 → U6 → U7 → U8 → U11, dengan U9 → U10 (
 - **Requirements:** R13, R14; AE3.
 - **Dependencies:** U4, U6.
 - **Files:**
-  - `crates/mandor-usecase/src/notify.rs` (tidak mengirim pesan di peran `vm`)
-  - `crates/mandor-domain/src/gate.rs` (transisi maksimal Waiting Review, sudah ada; test peran `vm`)
-  - `crates/mandor-domain/src/hook.rs` (larangan staging tetap, test peran `vm`)
-  - test: `crates/mandor-usecase/tests/overnight.rs`, `crates/mandor-domain/src/hook.rs` (tests)
-- **Approach:** pagar yang ada di Rilis 1 dipakai ulang; unit ini memastikan tidak ada jalur di peran `vm` yang melewatinya, termasuk jalur siang hari.
+  - `crates/mandor-domain/src/hook.rs` (peran `vm`: tool pengirim pesan dan MCP di luar allowlist ditolak; larangan staging tetap)
+  - `crates/mandor-domain/src/gate.rs` (transisi maksimal Waiting Review; test peran `vm`)
+  - test: `crates/mandor-domain/src/hook.rs` (tests), `crates/mandor-usecase/tests/overnight.rs`
+- **Approach:** pagar Rilis 1 dipakai ulang; unit ini memastikan tidak ada jalur di peran `vm` yang melewatinya, termasuk jalur siang hari. Notifikasi in-app ke developer tetap jalan.
 - **Test scenarios:**
-  - Covers AE3. Start now siang hari: notifikasi pesan ditahan, transisi ke Done ditolak, push hanya ke branch kartu.
+  - Covers AE3. Start now siang hari: tool pengirim pesan ditolak hook, transisi ke Done ditolak, push hanya ke branch kartu.
   - Waiting Fix di VM: pagar yang sama.
   - Agent mencoba `gh pr merge` atau push ke `main`: ditolak hook dan daemon.
 - **Verification:** test hijau.
@@ -493,10 +511,10 @@ U1 → U2 → U3 → U4 → U5 → U6 → U7 → U8 → U11, dengan U9 → U10 (
 - **Requirements:** R2, R3, R4; Success Criteria; semua AE.
 - **Dependencies:** U1–U11.
 - **Files:**
-  - `docs/runbook/setup-vm.md` (baru: user developer dan agent, sudoers, container rootless dan linger, grup worktree, rentang port, OpenSSH, `mandord install` peran `vm`, login lewat terminal, pencabutan token saat orang keluar)
+  - `docs/runbook/setup-vm.md` (baru: user developer dan agent, linger keduanya, sudoers persis, container rootless, direktori grup untuk clone/worktree/berkas run, izin eksekusi biner dengan `~/.mandor` tetap `0700`, rentang port, port callback Lark terdaftar, OpenSSH, `mandord install` peran `vm`, login lewat terminal, pencabutan token saat orang keluar)
   - `docs/progress/vm-overnight.md` (baru: hasil uji dan asumsi A1–A5)
   - `README.md`
-- **Approach:** uji di VM bersama dengan dua developer: antrean semalam, batas tercapai, kartu parkir AC gate diputuskan pagi, Waiting Fix siang hari, Take over, isolasi antar developer.
+- **Approach:** uji di VM bersama dengan dua developer: antrean semalam, batas tercapai, kartu `ac_gate` diputuskan pagi, Waiting Fix siang hari, Take over, isolasi antar developer.
 - **Test expectation:** uji langsung; hasil per AE dicatat di progres.
 - **Verification:** semua AE tercatat lulus atau ada catatan tindak lanjut.
 
@@ -508,7 +526,7 @@ U1 → U2 → U3 → U4 → U5 → U6 → U7 → U8 → U11, dengan U9 → U10 (
 |---|---|---|
 | Gerbang Rust `rust-engineering` | `make check` | U1–U8, U11 |
 | Pembuktian lapisan | `make red-check` | unit yang menambah dependensi crate |
-| Tipe protokol | `MANDOR_REGEN_TS=1 cargo test -p mandor-protocol` | U1, U4, U5, U10 |
+| Tipe protokol | `MANDOR_REGEN_TS=1 cargo test -p mandor-protocol` | U1, U4, U5, U8, U10 |
 | sqlx offline | `make sqlx-check` | U2 |
 | Tauri | `cd apps/desktop/src-tauri && cargo clippy --all-targets -- -D warnings && cargo test` | U9 |
 | Frontend | `cd apps/desktop && bun run check && bun run test` | U7 (setelan), U9, U10 |
@@ -540,15 +558,16 @@ U1 → U2 → U3 → U4 → U5 → U6 → U7 → U8 → U11, dengan U9 → U10 (
 ### Risks
 
 - **Ketentuan Anthropic.** Klausul akses otomatis di Consumer Terms tidak eksplisit untuk kasus ini. Mitigasi: setiap developer login sendiri di user agent-nya, Mandor tidak menyentuh kredensial, dan konfirmasi tertulis sebelum rollout.
-- **Login Claude kedaluwarsa di malam hari.** Semua kartu malam itu gagal. Mitigasi: `status` login di app dan cek login sebelum siklus dimulai; kartu tidak dimulai bila login tidak valid.
+- **Login Claude kedaluwarsa di malam hari.** Mitigasi: status login di app, cek login sebelum memulai kartu.
 - **Review headless kurang setia dibanding Claude in Chrome.** Mitigasi: kartu yang ragu menjadi `ac_gate`, metrik `ac_gate` dilaporkan terpisah, review ulang pagi dari laptop.
+- **Daemon laptop versi lama.** Daemon lama menimpa klaim VM. Mitigasi: link VM tidak diaktifkan sebelum daemon laptop diperbarui.
 - **Beban VM bersama.** Satu run plus Chromium dan container per developer. Mitigasi: satu kartu sekaligus per developer; ukur di uji langsung.
 - **Polling Lark berlipat.** Dua daemon per developer. Mitigasi: dicatat; backoff adaptif ditunda.
-- **Konfigurasi sudoers salah.** Bisa memberi akses lebih luas. Mitigasi: runbook memberi aturan persis satu perintah, dan agent tidak pernah jatuh ke user daemon.
+- **Konfigurasi sudoers salah.** Mitigasi: runbook memberi aturan persis untuk `agent-exec`, dan agent tidak pernah jatuh ke user daemon.
 
 ### Sources
 
-- Grounding kode: `crates/mandor-domain/src/claim.rs`, `crates/mandor-usecase/src/sync/claim.rs`, `crates/mandor-usecase/src/waiting_fix/engine.rs`, `crates/mandor-usecase/src/run/{start,publish,ownership,members,session}.rs`, `crates/mandor-domain/src/{run,push_gate,gate,hook}.rs`, `crates/mandor-agent/src/claude/{stream,command,guardrails}.rs`, `crates/mandor-git/src/{lib,publish}.rs`, `crates/mandord/src/{session,serve,connect,settings,views}.rs`, `apps/desktop/src-tauri/src/{daemon_link,lib,oauth_callback}.rs`, `apps/desktop/src/lib/stores/`.
+- Grounding kode: `crates/mandor-domain/src/{claim,task,run,agent,push_gate,gate,hook}.rs`, `crates/mandor-usecase/src/sync/{claim,poller}.rs`, `crates/mandor-usecase/src/waiting_fix/engine.rs`, `crates/mandor-usecase/src/run/{start,publish,ownership,members,session}.rs`, `crates/mandor-agent/src/claude/{stream,command,guardrails}.rs`, `crates/mandor-agent/src/port.rs`, `crates/mandor-proc/src/{supervised,cmd,reap}.rs`, `crates/mandor-git/src/{lib,publish}.rs`, `crates/mandor-store/src/{run_port,codec}.rs`, `crates/mandord/src/{session,serve,connect,settings,views}.rs`, `apps/desktop/src-tauri/src/{daemon_link,lib,oauth_callback}.rs`, `apps/desktop/src/lib/stores/`.
 - Claude Code legal and compliance, authentication, sandboxing, headless (diakses 2026-10-23): https://code.claude.com/docs/en/legal-and-compliance, https://code.claude.com/docs/en/authentication, https://code.claude.com/docs/en/sandboxing, https://code.claude.com/docs/en/headless
 - Anthropic Consumer Terms: https://www.anthropic.com/legal/consumer-terms
 - Playwright MCP: https://github.com/microsoft/playwright-mcp

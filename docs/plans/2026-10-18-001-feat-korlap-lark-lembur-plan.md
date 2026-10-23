@@ -703,7 +703,7 @@ Smoke langsung tidak berjalan di CI karena membutuhkan login Lark, GitHub, dan C
 ### Deferred to Follow-Up Work
 
 - Rilis 2: review otomatis berbasis AC (R17–R18); requirements di `docs/plans/2026-10-21-003-feat-ac-review-plan.md`.
-- Rilis 3: AI Lembur (R19–R25), termasuk sandbox OS untuk agent dan keputusan identitas mesin lembur.
+- Rilis 3: AI Lembur (R19–R25), dirinci untuk VM bersama di `docs/plans/2026-10-23-002-feat-vm-overnight-mode-plan.md`, termasuk keputusan identitas (per developer), sandbox (user Linux agent terpisah), dan PR draft sebelum Waiting Review.
 - Rilis 4+: autopilot, knowledge base, LSP, dan backend Codex (R26–R28).
 - Jalur "Mandor untuk umum" (dicatat 2026-10-21, syarat untuk dijual ke tim lain): pemetaan field dan status tracker yang bisa dikonfigurasi (saat ini nama field Lark dan nilai Task Status serta Development Readiness tim pertama ditulis langsung di kode), sumber AC yang fleksibel (tabel tertaut, deskripsi, atau checklist), dan adapter tracker serta Git hosting selain Lark Base dan GitHub.
 - Fitur workbench Korlap asli: terminal PTY, file browser, editor CodeMirror, script runner, MCP server korlap, PR checkout, combo PR, staging.

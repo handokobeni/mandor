@@ -1,6 +1,6 @@
 # mandor — Aturan Proyek (Mengikat)
 
-Repo ini membangun **Mandor**, penulisan ulang Korlap: daemon Rust `mandord` + client Tauri v2/Svelte 5, dengan sinkron Lark Base. Kode, dokumen rencana (`docs/plans/`), progres (`docs/progress/`), desain (`docs/design/`), dan runbook (`docs/runbook/`) ada di repo ini; jalankan `make`, `cargo`, dan `bun` dari root repo. Cara menjalankan app: `README.md`. Rencana aktif: `docs/plans/2026-10-18-001-feat-korlap-lark-lembur-plan.md` (Rilis 1) dan `docs/plans/2026-10-21-003-feat-ac-review-plan.md` (Rilis 2).
+Repo ini membangun **Mandor**, penulisan ulang Korlap: daemon Rust `mandord` + client Tauri v2/Svelte 5, dengan sinkron Lark Base. Kode, dokumen rencana (`docs/plans/`), progres (`docs/progress/`), desain (`docs/design/`), dan runbook (`docs/runbook/`) ada di repo ini; jalankan `make`, `cargo`, dan `bun` dari root repo. Cara menjalankan app: `README.md`. Rencana aktif: `docs/plans/2026-10-18-001-feat-korlap-lark-lembur-plan.md` (Rilis 1), `docs/plans/2026-10-21-003-feat-ac-review-plan.md` (Rilis 2), `docs/plans/2026-10-23-001-feat-daemon-os-service-installer-plan.md` (daemon sebagai service OS), dan `docs/plans/2026-10-23-002-feat-vm-overnight-mode-plan.md` (Rilis 3, lembur di VM).
 
 Source Korlap asli (MIT) ada di luar repo ini, di folder `korlap/` di sebelahnya (`../korlap` dari root repo), dan **hanya** menjadi referensi perilaku. Jangan mengubahnya, dan aturan di `korlap/CLAUDE.md` **tidak berlaku** untuk kode baru.
 

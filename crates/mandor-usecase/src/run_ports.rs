@@ -468,6 +468,8 @@ pub struct GroupCardRow {
     pub state: mandor_domain::group::CardState,
     /// Kartu `Done` yang berubah status atau PIC di Lark (R13).
     pub changed_in_lark: bool,
+    /// Alasan dev tetap menyertakan kartu yang berubah di Lark (R13).
+    pub kept_reason: Option<String>,
     /// Commit lokal kartu, satu per repo yang berubah.
     pub commits: Vec<CardCommit>,
     /// Plan kartu yang disetujui atau ditulis agent.
@@ -488,12 +490,19 @@ impl GroupCardRow {
             record_id: record_id.to_owned(),
             state: mandor_domain::group::CardState::Pending,
             changed_in_lark: false,
+            kept_reason: None,
             commits: Vec::new(),
             plan: None,
             fix_requested_by: None,
             quiet_until_ms: None,
             in_fix: false,
         }
+    }
+
+    /// Kartu masih bagian grup (belum dikeluarkan).
+    #[must_use]
+    pub fn is_open(&self) -> bool {
+        !matches!(self.state, mandor_domain::group::CardState::Removed(_))
     }
 }
 
@@ -786,6 +795,9 @@ pub struct ReviewBrief<'a> {
     pub skill: Option<&'a str>,
     /// Run workspace: folder repo anggota.
     pub repos: &'a [String],
+    /// Run grup: semua kartu yang disertakan, urut posisi (R12). Kosong untuk
+    /// run tunggal.
+    pub cards: &'a [Task],
 }
 
 /// Pemicu review.

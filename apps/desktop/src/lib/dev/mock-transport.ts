@@ -668,7 +668,7 @@ function handle(method: string, params: Record<string, unknown>): unknown {
         scenarioFor(id) === 'warn' ? 'warn' : 'block',
         false
       );
-      const base = { pr_url: null, failed: [], unverified: [], warnings: [], sync_warning: null, review_id: null };
+      const base = { pr_url: null, failed: [], unverified: [], warnings: [], sync_warning: null, review_id: null, changed_cards: [] };
       if (g.state === 'review_needed') return { ...base, outcome: 'review_started', review_id: 'rv-mock' };
       if (g.state === 'blocked') return { ...base, outcome: 'blocked', failed: ['AC-3'] };
       if (g.state === 'needs_confirmation') return { ...base, outcome: 'needs_confirmation', unverified: ['AC-4'] };

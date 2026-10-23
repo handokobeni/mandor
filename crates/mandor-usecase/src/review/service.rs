@@ -79,12 +79,14 @@ impl<D: Deps> RunService<D> {
             .iter()
             .map(|m| m.repo.id.clone())
             .collect();
+        let cards = self.review_cards(&run).await?;
         let message = self.prompts.review_message(&ReviewBrief {
             task: &task,
             rows: &gate,
             facts: &facts,
             skill,
             repos: if run.workspace.is_some() { &repos } else { &[] },
+            cards: &cards,
         });
         let record = ReviewRecord {
             id: self.sync.ids.nonce(),

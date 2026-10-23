@@ -8,8 +8,9 @@ use std::sync::atomic::Ordering;
 
 use common::run_fakes::eventually;
 use common::{FakeClock, FakeLark, Station, ready_task, station};
-use mandor_domain::group::{CardState, RemovedReason};
-use mandor_domain::{AppField, Claim, RunState, TaskStatus, WriteOp};
+use mandor_domain::group::{CardDecision, CardState, RemovedReason};
+use mandor_domain::{AppField, Claim, GateDecision, RunState, TaskStatus, Verdict, WriteOp};
+use mandor_usecase::run::{CardOutcome, PublishOutcome};
 use mandor_usecase::run_ports::{GroupCardRow, RunPhase, SessionRef, WorkChanges};
 use mandor_usecase::{AcItem, EpicItem, Planning, RunError, StartTarget};
 use pretty_assertions::assert_eq;
@@ -474,4 +475,405 @@ async fn heartbeat_pic_berubah_di_kartu_lain_tidak_menghentikan_grup() {
     st.svc.heartbeat_all().await.unwrap();
     let _ = &run_id;
     assert_eq!(st.runs.only().state, RunState::Stopped);
+}
+
+/// Grup tanpa plan dengan semua kartu selesai, satu commit per kartu.
+async fn finished(lark: &FakeLark, clock: &FakeClock, cards: &[&str]) -> (Station, String) {
+    let (st, run_id) = working(lark, clock, cards).await;
+    for i in 0..cards.len() {
+        dirty(&st, &format!("+fn kartu{i}(){{}}"));
+        st.svc.next_card(&run_id).await.unwrap();
+        if i + 1 < cards.len() {
+            st.agent.last().done();
+            eventually(|| st.runs.only().state == RunState::AwaitingDev).await;
+        }
+    }
+    (st, run_id)
+}
+
+/// Semua baris buku AC run diberi verdict, kecuali `ac_id` di `fails`.
+fn verdicts(st: &Station, run: &str, fails: &[&str]) {
+    let mut ledgers = st.reviews.ledgers.lock().unwrap();
+    for r in ledgers.get_mut(run).unwrap().iter_mut() {
+        r.verdict = if fails.contains(&r.ac_id.as_str()) {
+            Verdict::Fail
+        } else {
+            Verdict::Pass
+        };
+        r.stale = false;
+    }
+}
+
+fn blocked(lark: &FakeLark, id: &str) {
+    lark.edit(id, |t| t.status = TaskStatus::Unknown("Blocked".to_owned()));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn covers_ae2_satu_pr_dan_semua_kartu_waiting_review_bersama() {
+    let (lark, clock) = setup();
+    let (st, run_id) = finished(&lark, &clock, &["c1", "c2", "c3"]).await;
+    verdicts(&st, &run_id, &[]);
+
+    let out = st
+        .svc
+        .publish_gated(&run_id, &GateDecision::default())
+        .await
+        .unwrap();
+    let PublishOutcome::Published { url, .. } = out else {
+        panic!("{out:?}")
+    };
+    let created = st.git.st().created_prs.clone();
+    assert_eq!(created.len(), 1, "satu PR");
+    assert_eq!(created[0].1, "PGS-1401–PGS-1403: Job & Position");
+    let body = st.git.st().pr_bodies.last().cloned().unwrap();
+    for key in ["PGS-1401", "PGS-1402", "PGS-1403"] {
+        assert!(body.contains(key), "{key} di deskripsi PR:\n{body}");
+    }
+
+    st.svc.sync().drain_outbox(20).await.unwrap();
+    for id in ["c1", "c2", "c3"] {
+        let t = lark.get(id).unwrap();
+        assert_eq!(t.status, TaskStatus::WaitingReview, "{id}");
+        assert_eq!(t.pr_url.as_deref(), Some(url.as_str()), "{id}");
+    }
+    assert_eq!(st.runs.only().state, RunState::InReviewLoop);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn publish_grup_menunggu_semua_kartu_selesai() {
+    let (lark, clock) = setup();
+    let (st, run_id) = working(&lark, &clock, &["c1", "c2"]).await;
+    st.svc.next_card(&run_id).await.unwrap();
+    st.agent.last().done();
+    eventually(|| st.runs.only().state == RunState::AwaitingDev).await;
+    let err = st
+        .svc
+        .publish_gated(&run_id, &GateDecision::default())
+        .await
+        .unwrap_err();
+    assert!(matches!(err, RunError::InvalidState(_)), "{err:?}");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn covers_ae8_kartu_berubah_menahan_gerbang_lalu_tetap_dengan_alasan() {
+    let (lark, clock) = setup();
+    let (st, run_id) = finished(&lark, &clock, &["c1", "c2", "c3"]).await;
+    verdicts(&st, &run_id, &[]);
+    blocked(&lark, "c1");
+
+    let out = st
+        .svc
+        .publish_gated(&run_id, &GateDecision::default())
+        .await
+        .unwrap();
+    assert_eq!(
+        out,
+        PublishOutcome::CardsChanged {
+            cards: vec!["PGS-1401".to_owned()]
+        }
+    );
+    assert!(st.git.st().pushes.is_empty(), "PR tidak berjalan");
+    assert!(
+        st.reviews.history.lock().unwrap().is_empty(),
+        "review tidak berjalan"
+    );
+    let cards = st.svc.group_cards(&run_id).await.unwrap();
+    assert!(cards[0].changed_in_lark);
+
+    let err = st
+        .svc
+        .gate_card_decision(
+            &run_id,
+            "c1",
+            &CardDecision::Keep {
+                reason: " ".to_owned(),
+            },
+        )
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(err, RunError::InvalidState(_)),
+        "alasan wajib: {err:?}"
+    );
+    let got = st
+        .svc
+        .gate_card_decision(
+            &run_id,
+            "c1",
+            &CardDecision::Keep {
+                reason: "QA masih butuh kodenya".to_owned(),
+            },
+        )
+        .await
+        .unwrap();
+    assert_eq!(got, CardOutcome::Kept);
+
+    let out = st
+        .svc
+        .publish_gated(&run_id, &GateDecision::default())
+        .await
+        .unwrap();
+    assert!(matches!(out, PublishOutcome::Published { .. }), "{out:?}");
+    let body = st.git.st().pr_bodies.last().cloned().unwrap();
+    assert!(body.contains("QA masih butuh kodenya"), "{body}");
+
+    st.svc.sync().drain_outbox(20).await.unwrap();
+    assert_eq!(
+        lark.get("c1").unwrap().status,
+        TaskStatus::Unknown("Blocked".to_owned()),
+        "kartu yang berubah tidak dipindah"
+    );
+    for id in ["c2", "c3"] {
+        assert_eq!(
+            lark.get(id).unwrap().status,
+            TaskStatus::WaitingReview,
+            "{id}"
+        );
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn revert_kartu_utama_memindah_run_dan_meminta_review_ulang() {
+    let (lark, clock) = setup();
+    let (st, run_id) = finished(&lark, &clock, &["c1", "c2", "c3"]).await;
+    verdicts(&st, &run_id, &[]);
+    blocked(&lark, "c1");
+    let sha = st.svc.group_cards(&run_id).await.unwrap()[0].commits[0]
+        .sha
+        .clone();
+
+    st.svc
+        .publish_gated(&run_id, &GateDecision::default())
+        .await
+        .unwrap();
+    let got = st
+        .svc
+        .gate_card_decision(&run_id, "c1", &CardDecision::Revert)
+        .await
+        .unwrap();
+    assert_eq!(got, CardOutcome::Reverted);
+    assert_eq!(st.git.st().reverts, [sha]);
+
+    let cards = st.svc.group_cards(&run_id).await.unwrap();
+    assert_eq!(cards[0].state, CardState::Removed(RemovedReason::Reverted));
+    assert_eq!(lark.get("c1").unwrap().claim, None, "klaim dilepas");
+    assert_eq!(st.runs.only().record_id, "c2", "kartu utama pindah");
+    assert!(
+        st.svc
+            .ledger(&run_id)
+            .await
+            .unwrap()
+            .iter()
+            .all(|r| r.stale),
+        "kode berubah: verdict usang"
+    );
+    let out = st
+        .svc
+        .publish_gated(&run_id, &GateDecision::default())
+        .await
+        .unwrap();
+    assert!(
+        matches!(out, PublishOutcome::ReviewStarted { .. }),
+        "{out:?}"
+    );
+
+    // Kartu yang di-revert bisa dimulai lagi sebagai run tunggal.
+    lark.edit("c1", |t| t.status = TaskStatus::ToDo);
+    st.svc.sync().poll(true, &[]).await.unwrap();
+    assert!(st.svc.start("c1", "repo1", None).await.is_ok());
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn judul_pr_memakai_kartu_aktif_setelah_revert() {
+    let (lark, clock) = setup();
+    let (st, run_id) = finished(&lark, &clock, &["c1", "c2", "c3"]).await;
+    blocked(&lark, "c1");
+    st.svc
+        .gate_card_decision(&run_id, "c1", &CardDecision::Revert)
+        .await
+        .unwrap_err();
+    st.svc
+        .publish_gated(&run_id, &GateDecision::default())
+        .await
+        .unwrap();
+    st.svc
+        .gate_card_decision(&run_id, "c1", &CardDecision::Revert)
+        .await
+        .unwrap();
+    verdicts(&st, &run_id, &[]);
+    let out = st
+        .svc
+        .publish_gated(&run_id, &GateDecision::default())
+        .await
+        .unwrap();
+    assert!(matches!(out, PublishOutcome::Published { .. }), "{out:?}");
+    assert_eq!(
+        st.git.st().created_prs[0].1,
+        "PGS-1402–PGS-1403: Job & Position"
+    );
+    let body = st.git.st().pr_bodies.last().cloned().unwrap();
+    assert!(
+        body.contains("PGS-1401") && body.contains("reverted"),
+        "{body}"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn revert_konflik_menahan_gerbang() {
+    let (lark, clock) = setup();
+    let (st, run_id) = finished(&lark, &clock, &["c1", "c2"]).await;
+    verdicts(&st, &run_id, &[]);
+    blocked(&lark, "c1");
+    let sha = st.svc.group_cards(&run_id).await.unwrap()[0].commits[0]
+        .sha
+        .clone();
+    st.git.state.lock().unwrap().revert_conflicts.push(sha);
+    st.svc
+        .publish_gated(&run_id, &GateDecision::default())
+        .await
+        .unwrap();
+
+    let got = st
+        .svc
+        .gate_card_decision(&run_id, "c1", &CardDecision::Revert)
+        .await
+        .unwrap();
+    assert_eq!(got, CardOutcome::RevertConflict);
+    assert!(st.git.st().reverts.is_empty());
+    let cards = st.svc.group_cards(&run_id).await.unwrap();
+    assert_eq!(cards[0].state, CardState::Done);
+    assert!(cards[0].changed_in_lark);
+    assert!(st.runs.only().note.unwrap().contains("revert conflict"));
+    let out = st
+        .svc
+        .publish_gated(&run_id, &GateDecision::default())
+        .await
+        .unwrap();
+    assert!(
+        matches!(out, PublishOutcome::CardsChanged { .. }),
+        "{out:?}"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn ac_gagal_di_satu_kartu_menahan_grup_dengan_label_kartu() {
+    let (lark, clock) = setup();
+    let (st, run_id) = finished(&lark, &clock, &["c1", "c2", "c3"]).await;
+    verdicts(&st, &run_id, &["ac3"]);
+    let out = st
+        .svc
+        .publish_gated(&run_id, &GateDecision::default())
+        .await
+        .unwrap();
+    assert_eq!(
+        out,
+        PublishOutcome::Blocked {
+            failed: vec!["PGS-1403 AC-3".to_owned()]
+        }
+    );
+    let anyway = GateDecision {
+        push_anyway_reason: Some("Di luar cakupan sprint".to_owned()),
+        decided_by: Some("Beni".to_owned()),
+        ..GateDecision::default()
+    };
+    let out = st.svc.publish_gated(&run_id, &anyway).await.unwrap();
+    assert!(matches!(out, PublishOutcome::Published { .. }), "{out:?}");
+    assert_eq!(st.git.st().created_prs.len(), 1);
+}
+
+fn ws_repo(id: &str) -> mandor_usecase::run_ports::RepoInfo {
+    mandor_usecase::run_ports::RepoInfo {
+        id: id.to_owned(),
+        path: std::path::PathBuf::from(format!("/src/{id}")),
+        default_branch: "main".to_owned(),
+        gh_profile: None,
+        companions: vec![],
+        trusted_reviewers: vec![],
+        extra_allowed: vec![],
+        app: mandor_domain::app_run::AppSettings::default(),
+        gate_mode: None,
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn grup_workspace_satu_pr_per_repo_dan_tautan_sama_di_semua_kartu() {
+    let (lark, clock) = setup();
+    let st = station(&lark, &clock, "ou_me");
+    st.repos.add(ws_repo("kelola-api"));
+    st.repos.add(ws_repo("kelola-web"));
+    st.repos
+        .add_workspace(mandor_usecase::run_ports::WorkspaceInfo {
+            id: "kelola-v2".to_owned(),
+            name: "kelola-v2".to_owned(),
+            root: std::path::PathBuf::from("/src/kelola-v2"),
+            repo_ids: vec!["kelola-api".to_owned(), "kelola-web".to_owned()],
+            mcp_servers: vec![],
+            browser_tests: false,
+            gate_mode: None,
+        });
+    let target = StartTarget::Workspace {
+        id: "kelola-v2".to_owned(),
+        repo_ids: vec!["kelola-api".to_owned(), "kelola-web".to_owned()],
+    };
+    let run = st
+        .svc
+        .start_group(
+            &ids(&["c1", "c2"]),
+            &target,
+            None,
+            &Planning::Skip,
+            &[],
+            |_| {},
+        )
+        .await
+        .unwrap();
+    st.svc.sync().drain_outbox(20).await.unwrap();
+    st.agent.last().done();
+    eventually(|| st.runs.only().state == RunState::AwaitingDev).await;
+
+    // Kartu 1 mengubah kedua repo, kartu 2 hanya web.
+    let r = st.runs.only();
+    let api = r.worktree.clone().unwrap();
+    let web = r.extra[0].worktree.clone();
+    let change = |wt: &std::path::Path| {
+        st.git.set_changes(
+            wt,
+            WorkChanges {
+                dirty: true,
+                unpushed: 0,
+                files: vec!["src/a.rs".to_owned()],
+                diff: "+a".to_owned(),
+            },
+        );
+    };
+    change(&api);
+    change(&web);
+    st.svc.next_card(&run.id).await.unwrap();
+    assert_eq!(
+        st.svc.group_cards(&run.id).await.unwrap()[0].commits.len(),
+        2,
+        "satu commit per repo"
+    );
+    st.agent.last().done();
+    eventually(|| st.runs.only().state == RunState::AwaitingDev).await;
+    change(&web);
+    st.svc.next_card(&run.id).await.unwrap();
+
+    verdicts(&st, &run.id, &[]);
+    let out = st
+        .svc
+        .publish_gated(&run.id, &GateDecision::default())
+        .await
+        .unwrap();
+    let PublishOutcome::Published { url, .. } = out else {
+        panic!("{out:?}")
+    };
+    assert_eq!(st.git.st().created_prs.len(), 2, "satu PR per repo");
+    assert_eq!(url.lines().count(), 2);
+    st.svc.sync().drain_outbox(20).await.unwrap();
+    for id in ["c1", "c2"] {
+        let t = lark.get(id).unwrap();
+        assert_eq!(t.status, TaskStatus::WaitingReview, "{id}");
+        assert_eq!(t.pr_url.as_deref(), Some(url.as_str()), "{id}");
+    }
 }

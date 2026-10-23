@@ -355,7 +355,8 @@ pub struct StartFixParams {
 /// Hasil `runs.publish`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
 pub struct PublishResult {
-    /// `published`, `review_started`, `blocked`, atau `needs_confirmation`.
+    /// `published`, `review_started`, `blocked`, `needs_confirmation`, atau
+    /// `cards_changed` (run grup).
     pub outcome: String,
     pub pr_url: Option<String>,
     /// Label AC gagal (Blocked).
@@ -368,6 +369,9 @@ pub struct PublishResult {
     pub sync_warning: Option<String>,
     /// Review yang dimulai (`review_started`).
     pub review_id: Option<String>,
+    /// Kunci kartu grup yang berubah di Lark dan menunggu keputusan revert
+    /// atau tetap (`cards_changed`).
+    pub changed_cards: Vec<String>,
 }
 
 /// Parameter `runs.publish` dengan keputusan dev (KTD-35).

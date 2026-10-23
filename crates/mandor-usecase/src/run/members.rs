@@ -10,7 +10,7 @@ use std::sync::Arc;
 use super::{RunError, RunService};
 use crate::ports::Deps;
 use mandor_domain::Task;
-use mandor_domain::push_gate::pr_summary;
+use mandor_domain::push_gate::{PrCard, group_pr_summary, pr_summary};
 
 use crate::hash::fnv1a_hex;
 
@@ -48,6 +48,39 @@ fn is_legacy_body(body: &str) -> bool {
 const PR_DIFF_MAX: usize = 60_000;
 /// Batas deskripsi buatan model; GitHub menolak badan PR di atas 65.536 karakter.
 const PR_BODY_MAX: usize = 20_000;
+
+/// Judul, pembuka, dan bahan deskripsi PR.
+pub(crate) struct PrHeading {
+    pub title: String,
+    /// Baris pertama badan, mis. `Lark task: PGS-7`.
+    pub header: String,
+    pub description: String,
+    /// AC aktif sebagai `label: teks`.
+    pub acs: Vec<String>,
+    /// Kartu run grup untuk ringkasan per kartu; `None` untuk run tunggal.
+    pub cards: Option<Vec<GroupPrCard>>,
+}
+
+/// Kartu run grup di deskripsi PR.
+pub(crate) struct GroupPrCard {
+    pub record_id: String,
+    pub key: String,
+    pub title: String,
+    pub removed: Option<&'static str>,
+    pub kept_reason: Option<String>,
+}
+
+impl GroupPrCard {
+    fn as_pr_card(&self) -> PrCard<'_> {
+        PrCard {
+            record_id: &self.record_id,
+            key: &self.key,
+            title: &self.title,
+            removed: self.removed,
+            kept_reason: self.kept_reason.as_deref(),
+        }
+    }
+}
 
 /// Satu repo dalam run beserta worktree dan link PR-nya.
 #[derive(Debug, Clone)]
@@ -310,16 +343,33 @@ impl<D: Deps> RunService<D> {
         m: &Member,
         branch: &str,
     ) -> Result<String, RunError> {
-        let task = self.task_of(&run.record_id).await?;
-        let title = pr_title(&task);
-        let body = self.pr_body(run, m, &task, &title).await;
+        let heading = self.pr_heading(run).await?;
+        let body = self.pr_body(run, m, &heading).await;
         let url = self
             .git
-            .create_pr(&m.repo, &m.worktree, branch, &title, &body)
+            .create_pr(&m.repo, &m.worktree, branch, &heading.title, &body)
             .await?;
         run.pr_body_hashes
             .insert(url.clone(), fnv1a_hex(&normalize_body(&body)));
         Ok(url)
+    }
+
+    /// Judul dan bahan deskripsi PR: dari task run tunggal, atau dari semua
+    /// kartu run grup.
+    async fn pr_heading(&self, run: &RunRecord) -> Result<PrHeading, RunError> {
+        let cards = self.runs.cards(&run.id).await?;
+        if !cards.is_empty() {
+            return self.group_heading(&cards).await;
+        }
+        let task = self.task_of(&run.record_id).await?;
+        let key = task.key.as_deref().unwrap_or(&task.record_id);
+        Ok(PrHeading {
+            title: pr_title(&task),
+            header: format!("Lark task: {key}"),
+            description: task.description.clone(),
+            acs: self.ac_texts(&task).await.unwrap_or_default(),
+            cards: None,
+        })
     }
 
     /// Menulis ulang badan PR dari diff terbaru setelah push perbaikan, hanya bila
@@ -330,14 +380,14 @@ impl<D: Deps> RunService<D> {
         if !self.pr_body_owned(run, m, url).await {
             return false;
         }
-        let task = match self.task_of(&run.record_id).await {
-            Ok(t) => t,
+        let heading = match self.pr_heading(run).await {
+            Ok(h) => h,
             Err(e) => {
                 tracing::warn!(url, error = %e, "task tidak terbaca; badan PR tidak diperbarui");
                 return false;
             }
         };
-        let body = self.pr_body(run, m, &task, &pr_title(&task)).await;
+        let body = self.pr_body(run, m, &heading).await;
         if let Err(e) = self.git.set_pr_body(&m.repo, &m.worktree, url, &body).await {
             tracing::warn!(url, error = %e, "badan PR gagal diperbarui");
             return false;
@@ -369,9 +419,8 @@ impl<D: Deps> RunService<D> {
     /// Badan PR: deskripsi buatan model dari diff branch dan konteks task, diapit
     /// tautan task dan penanda Mandor. Bila model atau bahan gagal, PR tetap
     /// dibuat dengan badan minimal.
-    async fn pr_body(&self, run: &RunRecord, m: &Member, task: &Task, title: &str) -> String {
-        let key = task.key.as_deref().unwrap_or(&task.record_id);
-        let header = format!("Lark task: {key}");
+    async fn pr_body(&self, run: &RunRecord, m: &Member, heading: &PrHeading) -> String {
+        let header = &heading.header;
         let footer = "Created by Mandor.";
         let generated = async {
             let diff: String = self
@@ -381,14 +430,13 @@ impl<D: Deps> RunService<D> {
                 .chars()
                 .take(PR_DIFF_MAX)
                 .collect();
-            let acs = self.ac_texts(task).await.unwrap_or_default();
             let decided = mandor_domain::push_gate::pr_decisions(
                 &self.reviews.ac_rows(&run.id).await.unwrap_or_default(),
             );
             let ctx = PrContext {
-                title,
-                description: &task.description,
-                acs: &acs,
+                title: &heading.title,
+                description: &heading.description,
+                acs: &heading.acs,
                 plan: run.plan.as_deref(),
                 diff: &diff,
                 decided: &decided,
@@ -402,7 +450,15 @@ impl<D: Deps> RunService<D> {
                 let at = self
                     .synced_at(&run.id)
                     .map(crate::review::settings::utc_minutes);
-                format!("\n\n{}", pr_summary(&rows, at.as_deref()).trim_end())
+                let summary = match &heading.cards {
+                    Some(cards) => {
+                        let refs: Vec<PrCard<'_>> =
+                            cards.iter().map(GroupPrCard::as_pr_card).collect();
+                        group_pr_summary(&rows, &refs, at.as_deref())
+                    }
+                    None => pr_summary(&rows, at.as_deref()),
+                };
+                format!("\n\n{}", summary.trim_end())
             }
             Ok(_) => String::new(),
             Err(e) => {

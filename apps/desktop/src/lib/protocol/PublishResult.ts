@@ -5,7 +5,8 @@
  */
 export type PublishResult = { 
 /**
- * `published`, `review_started`, `blocked`, atau `needs_confirmation`.
+ * `published`, `review_started`, `blocked`, `needs_confirmation`, atau
+ * `cards_changed` (run grup).
  */
 outcome: string, pr_url: string | null, 
 /**
@@ -27,4 +28,9 @@ sync_warning: string | null,
 /**
  * Review yang dimulai (`review_started`).
  */
-review_id: string | null, };
+review_id: string | null, 
+/**
+ * Kunci kartu grup yang berubah di Lark dan menunggu keputusan revert
+ * atau tetap (`cards_changed`).
+ */
+changed_cards: Array<string>, };

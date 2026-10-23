@@ -638,6 +638,7 @@ impl AppDispatch {
             warnings: Vec::new(),
             sync_warning: None,
             review_id: None,
+            changed_cards: Vec::new(),
         };
         match out {
             PublishOutcome::Published {
@@ -662,6 +663,10 @@ impl AppDispatch {
             PublishOutcome::NeedsConfirmation { unverified } => {
                 "needs_confirmation".clone_into(&mut view.outcome);
                 view.unverified = unverified;
+            }
+            PublishOutcome::CardsChanged { cards } => {
+                "cards_changed".clone_into(&mut view.outcome);
+                view.changed_cards = cards;
             }
         }
         ok(&view)

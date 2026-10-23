@@ -70,6 +70,8 @@ pub struct GroupCard {
     /// Kartu `Done` yang berubah status atau PIC di Lark (R13); diputuskan di
     /// gerbang.
     pub changed_in_lark: bool,
+    /// Alasan dev tetap menyertakan kartu yang berubah di Lark (R13).
+    pub kept_reason: Option<String>,
 }
 
 impl GroupCard {
@@ -80,6 +82,7 @@ impl GroupCard {
             record_id: record_id.to_owned(),
             state: CardState::Pending,
             changed_in_lark: false,
+            kept_reason: None,
         }
     }
 
@@ -239,14 +242,36 @@ pub fn publish_moves(cards: &[GroupCard]) -> Vec<&str> {
         .collect()
 }
 
-/// Kartu `Done` yang berubah di Lark dan menahan gerbang (R13).
+/// Kartu `Done` yang berubah di Lark dan belum diputuskan dev; menahan
+/// gerbang (R13).
 #[must_use]
 pub fn gate_holds(cards: &[GroupCard]) -> Vec<&str> {
     cards
         .iter()
-        .filter(|c| c.state == CardState::Done && c.changed_in_lark)
+        .filter(|c| c.state == CardState::Done && c.changed_in_lark && c.kept_reason.is_none())
         .map(|c| c.record_id.as_str())
         .collect()
+}
+
+/// Keputusan dev atas kartu yang berubah di Lark (R13).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum CardDecision {
+    /// Revert commit kartu; kartu keluar dari grup.
+    Revert,
+    /// Tetap disertakan; alasan dicatat di PR.
+    Keep { reason: String },
+}
+
+/// Judul PR grup (KTD-G7): `<KEY-awal>–<KEY-akhir>: <epic>`, atau judul kartu
+/// pertama bila nama epic tidak ada. Satu kartu tersisa memakai satu kunci.
+#[must_use]
+pub fn pr_title(keys: &[&str], epic: Option<&str>, first_title: &str) -> String {
+    let name = epic.filter(|e| !e.trim().is_empty()).unwrap_or(first_title);
+    match keys {
+        [] => name.to_owned(),
+        [one] => format!("{one}: {name}"),
+        [first, .., last] => format!("{first}–{last}: {name}"),
+    }
 }
 
 #[cfg(test)]
@@ -394,6 +419,24 @@ mod tests {
         cards[2].state = CardState::Removed(RemovedReason::Reverted);
         assert_eq!(publish_moves(&cards), ["b"]);
         assert_eq!(gate_holds(&cards), ["a"]);
+        cards[0].kept_reason = Some("QA butuh kodenya".to_owned());
+        assert!(gate_holds(&cards).is_empty(), "sudah diputuskan tetap");
+        assert_eq!(publish_moves(&cards), ["b"], "tetap tidak dipindah");
+    }
+
+    #[test]
+    fn judul_pr_grup() {
+        assert_eq!(
+            pr_title(&["PGS-1", "PGS-2", "PGS-4"], Some("Job"), "Daftar"),
+            "PGS-1–PGS-4: Job"
+        );
+        assert_eq!(pr_title(&["PGS-2"], Some("Job"), "Daftar"), "PGS-2: Job");
+        assert_eq!(
+            pr_title(&["PGS-1", "PGS-2"], None, "Daftar"),
+            "PGS-1–PGS-2: Daftar",
+            "epic tidak terbaca"
+        );
+        assert_eq!(pr_title(&[], Some(" "), "Daftar"), "Daftar");
     }
 
     #[test]

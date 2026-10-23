@@ -2,7 +2,9 @@
 
 mod drain;
 mod group;
+mod group_gate;
 pub use drain::{DRAIN_WINDOW_MS, DrainGate, DrainOutcome, WorkGuard};
+pub use group_gate::CardOutcome;
 mod members;
 mod ownership;
 mod publish;

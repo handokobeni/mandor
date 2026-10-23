@@ -16,6 +16,8 @@ struct CardJson {
     #[serde(default)]
     changed_in_lark: bool,
     #[serde(default)]
+    kept_reason: Option<String>,
+    #[serde(default)]
     commits: Vec<CommitJson>,
     #[serde(default)]
     plan: Option<String>,
@@ -86,6 +88,7 @@ pub(crate) async fn write_cards(
         let open = i64::from(!matches!(c.state, CardState::Removed(_)));
         let data = serde_json::to_string(&CardJson {
             changed_in_lark: c.changed_in_lark,
+            kept_reason: c.kept_reason.clone(),
             commits: c
                 .commits
                 .iter()
@@ -139,6 +142,7 @@ pub(crate) async fn read_cards(
                 record_id: r.record_id,
                 state,
                 changed_in_lark: data.changed_in_lark,
+                kept_reason: data.kept_reason,
                 commits: data
                     .commits
                     .into_iter()

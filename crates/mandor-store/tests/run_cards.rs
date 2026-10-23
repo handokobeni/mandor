@@ -58,6 +58,7 @@ async fn kartu_grup_bolak_balik_dan_dicari_lewat_kartu() {
     got[1].quiet_until_ms = Some(9);
     got[1].in_fix = true;
     got[2].changed_in_lark = true;
+    got[2].kept_reason = Some("QA butuh kodenya".to_owned());
     runs.save_cards("g", &got, None).await.unwrap();
     assert_eq!(runs.cards("g").await.unwrap(), got);
     assert!(runs.cards("lain").await.unwrap().is_empty());

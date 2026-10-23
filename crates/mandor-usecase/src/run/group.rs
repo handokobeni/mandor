@@ -31,7 +31,7 @@ fn ac_lines(items: &[AcItem]) -> Vec<String> {
 }
 
 /// Kunci tampilan kartu.
-fn key_of(t: &Task) -> &str {
+pub(super) fn key_of(t: &Task) -> &str {
     t.key.as_deref().unwrap_or(&t.record_id)
 }
 
@@ -405,7 +405,7 @@ impl<D: Deps> RunService<D> {
     }
 
     /// Kartu run grup; `InvalidState` untuk run tunggal.
-    async fn group_of(&self, run_id: &str) -> Result<Vec<GroupCardRow>, RunError> {
+    pub(super) async fn group_of(&self, run_id: &str) -> Result<Vec<GroupCardRow>, RunError> {
         let cards = self.runs.cards(run_id).await?;
         if cards.is_empty() {
             return Err(RunError::InvalidState("not a group run"));
@@ -488,7 +488,7 @@ impl<D: Deps> RunService<D> {
     }
 
     /// Menyimpan kartu (dengan pindah kartu utama bila perlu) lalu run.
-    async fn save_group(
+    pub(super) async fn save_group(
         &self,
         run: &mut RunRecord,
         cards: &[GroupCardRow],
@@ -507,14 +507,14 @@ impl<D: Deps> RunService<D> {
     }
 
     /// Melepas klaim tanpa menggagalkan pemanggil.
-    async fn release_quietly(&self, record_id: &str) {
+    pub(super) async fn release_quietly(&self, record_id: &str) {
         if let Err(e) = self.sync.release_claim(record_id).await {
             tracing::warn!(record_id, error = %e, "gagal melepas klaim kartu grup");
         }
     }
 
     /// Kunci kartu dari cache, atau ID record.
-    async fn key_or_id(&self, record_id: &str) -> String {
+    pub(super) async fn key_or_id(&self, record_id: &str) -> String {
         self.task_of(record_id)
             .await
             .ok()
@@ -564,13 +564,14 @@ impl<D: Deps> RunService<D> {
 }
 
 /// Kartu tersimpan sebagai kartu domain.
-fn group_cards_domain(cards: &[GroupCardRow]) -> Vec<group::GroupCard> {
+pub(super) fn group_cards_domain(cards: &[GroupCardRow]) -> Vec<group::GroupCard> {
     cards
         .iter()
         .map(|c| group::GroupCard {
             record_id: c.record_id.clone(),
             state: c.state.clone(),
             changed_in_lark: c.changed_in_lark,
+            kept_reason: c.kept_reason.clone(),
         })
         .collect()
 }

@@ -780,7 +780,7 @@ mod tests {
         );
     }
 
-    /// Paket Linux membawa daemon dengan header agar linuxdeploy (AppImage) tidak
+    /// Paket Linux membawa daemon dengan header agar `linuxdeploy` (`AppImage`) tidak
     /// mengubah biner ELF-nya; header dilepas sebelum verifikasi dan pemasangan.
     #[cfg(unix)]
     #[tokio::test]

@@ -264,6 +264,36 @@ mod tests {
         assert!(!alive(pid), "penjaga berhenti setelah stdin ditutup");
     }
 
+    /// Bentuk penjaga Linux (KTD-L4 plan paket Linux): pembungkus penahan
+    /// yang menjalankan `cat` sebagai proses anak. Pembungkus dan anaknya
+    /// berhenti saat daemon menutup stdin.
+    #[tokio::test]
+    async fn penjaga_pembungkus_dengan_cat_anak_berhenti_saat_dilepas() {
+        let wrapper = vec![
+            "/bin/sh".to_owned(),
+            "-c".to_owned(),
+            "/bin/cat; :".to_owned(),
+        ];
+        let mut m = Monitor::new(Some(Ok(wrapper)), G);
+        m.step(true, 0).await;
+        let pid = m.guard_pid().unwrap();
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        let children = std::process::Command::new("pgrep")
+            .args(["-P", &pid.to_string()])
+            .output()
+            .unwrap();
+        let child: u32 = String::from_utf8_lossy(&children.stdout)
+            .trim()
+            .parse()
+            .unwrap();
+        assert!(alive(child), "cat anak berjalan");
+        m.step(false, 1).await;
+        m.step(false, 1 + G).await;
+        tokio::time::sleep(Duration::from_millis(200)).await;
+        assert!(!alive(pid), "pembungkus berhenti");
+        assert!(!alive(child), "cat anak berhenti");
+    }
+
     #[tokio::test]
     async fn penjaga_yang_keluar_dijalankan_ulang_lalu_failing() {
         let argv = Some(Ok(vec![

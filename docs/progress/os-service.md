@@ -56,3 +56,11 @@ Setelah uji, daemon pemilik produk berjalan sebagai service dari `~/.local/bin/m
 Diuji end-to-end di `crates/mandord/tests/install.rs` dengan daemon sungguhan dan RPC sungguhan: database diisi run berstatus `running` atau `publishing` sebelum daemon start (tanpa sesi Lark, rekonsiliasi tidak mengubahnya). `install` dan `uninstall` menghasilkan `deferred`, biner dan unit tidak disentuh, daemon tetap hidup, `status` melaporkan `busy: true` dan `draining: false`. Mutation check: mematikan pengecekan run di `DrainGate::drain` membuat kedua test gagal. Tanpa memakai kuota Claude atau mengubah kartu Lark.
 
 Daemon versi lama tanpa `daemon.drain` (jalur `runs.list`) teruji langsung saat `install` pertama di mesin pemilik produk, tanpa run yang bekerja.
+
+## Uji langsung Windows (U9, 2026-10-23, installer `aeae608`)
+
+| Skenario | Hasil |
+|---|---|
+| Pasang installer di atas daemon build branch (setsid lama sudah diganti service) lalu buka app | lulus: biner `~/.local/bin/mandord` berganti dari `5e94ea18…` ke `4a3be871…` (sama dengan artifact `mandord-linux-x86_64`); service di-restart 16:55:23; unit berisi `MANDOR_KEEP_AWAKE_CMD` ke `%LOCALAPPDATA%\Mandor\keepawake\0.1.0\mandor-keepawake.exe`; `~/.cache/mandor` bersih; `status`: `managed_by: systemd`, `keep_awake: off`, `busy: false`, sesi Lark tersambung. |
+| Settings → Background work setelah pasang | lulus: service, linger, keep-awake Ready; keep-alive WSL "Needs attention" dengan tombol Keep WSL on; pemberitahuan "Running dev apps stopped while the daemon updated" (app dev dari sesi daemon lama dihentikan saat pembaruan). |
+| Keep WSL on | lulus: `.wslconfig` (sebelumnya hanya `[wsl2]`) menjadi `[general] instanceIdleTimeout=-1` dan `[wsl2] vmIdleTimeout=-1`; cadangan `.wslconfig.mandor-bak` identik dengan berkas awal (sha256 `6b39ebf9…`); baris berubah Ready dengan tombol Turn off, ringkasan "Ready for overnight work", petunjuk `wsl --shutdown`. |

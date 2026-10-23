@@ -125,4 +125,6 @@ cargo build --release --bin mandord          # daemon
 cd apps/desktop && bun run tauri build       # installer app desktop
 ```
 
-Untuk Windows dengan daemon di WSL, ikuti `../docs/runbook/setup-wsl.md`.
+Installer Windows tidak bisa dibangun dari WSL. Workflow `release` di GitHub Actions membangun installer Windows (NSIS) dan biner `mandord` untuk WSL: jalankan manual dari tab Actions (hasil berupa artifact), atau push tag `v*` untuk membuat GitHub Release beserta lampirannya.
+
+Untuk Windows dengan daemon di WSL, ikuti `docs/runbook/setup-wsl.md`.

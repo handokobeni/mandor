@@ -96,6 +96,9 @@ pub struct AppSettings {
     pub env_keys: Vec<String>,
     /// Uji browser untuk run satu repo (bawaan aktif).
     pub browser_tests: bool,
+    /// Sebelum review berbrowser, Mandor menyalakan ulang app run ini dari
+    /// kode terbaru tanpa konfirmasi perubahan (opt-in, bawaan mati).
+    pub auto_restart: bool,
 }
 
 impl AppSettings {

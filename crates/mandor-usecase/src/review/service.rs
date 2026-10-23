@@ -67,6 +67,7 @@ impl<D: Deps> RunService<D> {
         reset_for_review(&mut rows);
         self.reviews.save_ac_rows(run_id, &rows).await?;
 
+        self.refresh_app_for_review(&run, &snapshot).await?;
         let facts = self.review_facts(&run, &snapshot).await?;
         let settings = self.reviews.reviewer_settings().await;
         let task = self.task_of(&run.record_id).await?;
@@ -210,6 +211,34 @@ impl<D: Deps> RunService<D> {
                 .unwrap_or_default(),
             chrome_connected: self.reviews.chrome_connected().await,
         })
+    }
+
+    /// Restart otomatis (opt-in per repo): app run ini yang menyala dari kode
+    /// lama dinyalakan ulang dari `snapshot` sebelum fakta browser dihitung,
+    /// dan hasilnya dicatat di chat run.
+    async fn refresh_app_for_review(
+        &self,
+        run: &RunRecord,
+        snapshot: &BTreeMap<String, String>,
+    ) -> Result<(), RunError> {
+        let auto_restart = self
+            .members(run)
+            .await?
+            .iter()
+            .filter(|m| m.repo.app.test_mode == TestMode::Web)
+            .all(|m| m.repo.app.auto_restart);
+        if !self
+            .readiness(run, snapshot)
+            .await?
+            .restarts_app(auto_restart)
+        {
+            return Ok(());
+        }
+        let note = self.restart_app_for_review(&run.id, snapshot).await;
+        self.runs
+            .append(&run.id, &ChatItem::System(note), self.now())
+            .await?;
+        Ok(())
     }
 
     /// Fakta kesiapan uji browser: repo Web dengan uji browser aktif, app run
@@ -503,6 +532,20 @@ impl ReviewReadiness {
     #[must_use]
     pub fn needs_dialog(&self) -> bool {
         self.web && self.browser_tests
+    }
+
+    /// App run ini perlu dinyalakan ulang otomatis sebelum review: restart
+    /// aktif di semua repo Web (`auto_restart`), app run ini menyala dari kode lama, tidak ada app run lain yang
+    /// menyala, login pernah dikonfirmasi, dan ekstensi tersambung, sehingga
+    /// restart membuat review bisa memakai browser.
+    #[must_use]
+    pub fn restarts_app(&self, auto_restart: bool) -> bool {
+        self.needs_dialog()
+            && auto_restart
+            && self.app == AppReadiness::OlderCode
+            && self.other_owner.is_none()
+            && self.confirmed.login
+            && self.chrome_connected
     }
 
     /// Fakta untuk prompt reviewer: browser hanya bila semua syarat terpenuhi.

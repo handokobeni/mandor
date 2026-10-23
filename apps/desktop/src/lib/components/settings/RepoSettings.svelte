@@ -29,6 +29,7 @@
     allowed: string[];
     app: RepoAppForm;
     browserTests: boolean;
+    autoRestart: boolean;
     gate: 'inherit' | 'block' | 'warn';
   }
   let edit = $state<Edit | null>(null);
@@ -52,6 +53,7 @@
           envKeys: [...repo.app.env_keys]
         },
         browserTests: repo.app.browser_tests,
+        autoRestart: repo.app.auto_restart,
         gate: repo.gate_mode === 'block' || repo.gate_mode === 'warn' ? repo.gate_mode : 'inherit'
       };
     }
@@ -86,7 +88,8 @@
           port: web && a.port.trim() ? Number(a.port.trim()) : null,
           app_url: web ? a.appUrl.trim() || null : null,
           env_keys: web ? a.envKeys : [],
-          browser_tests: edit.browserTests
+          browser_tests: edit.browserTests,
+          auto_restart: web && edit.autoRestart
         }
       });
       await lark.refresh();
@@ -237,6 +240,20 @@
             </div>
             <Switch bind:checked={edit.browserTests} aria-label="Browser testing" />
           </div>
+          {#if edit.app.testMode === 'web' && edit.browserTests}
+            <div class="row-setting">
+              <div class="txt">
+                Restart the app before reviews
+                <span>
+                  When this run's app runs older code, Mandor restarts it from the latest code before a browser review,
+                  including automatic reviews after Waiting Fix. The agent's code then runs with the selected .env keys
+                  without you checking the changes first. Use only with local or dev credentials. Needs a login you
+                  confirmed once; another run's app is never stopped.
+                </span>
+              </div>
+              <Switch bind:checked={edit.autoRestart} aria-label="Restart the app before reviews" />
+            </div>
+          {/if}
           <div class="field">
             <span class="text-sm font-medium">Push &amp; PR gate</span>
             <p class="field-help">

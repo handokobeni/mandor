@@ -11,4 +11,9 @@ test_mode: string, setup_command: string | null, start_command: string | null, p
 /**
  * Kunci `.env` yang diteruskan ke app (nilai tidak pernah dikirim).
  */
-env_keys: Array<string>, browser_tests: boolean, };
+env_keys: Array<string>, browser_tests: boolean, 
+/**
+ * Restart app otomatis dari kode terbaru sebelum review berbrowser
+ * (opt-in; kode agent berjalan tanpa konfirmasi perubahan).
+ */
+auto_restart: boolean, };

@@ -440,6 +440,10 @@ pub struct RepoAppView {
     /// Kunci `.env` yang diteruskan ke app (nilai tidak pernah dikirim).
     pub env_keys: Vec<String>,
     pub browser_tests: bool,
+    /// Restart app otomatis dari kode terbaru sebelum review berbrowser
+    /// (opt-in; kode agent berjalan tanpa konfirmasi perubahan).
+    #[serde(default)]
+    pub auto_restart: bool,
 }
 
 /// Parameter `repos.add`.

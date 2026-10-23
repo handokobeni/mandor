@@ -19,6 +19,7 @@ pub(super) fn repo_app_view(a: &AppSettings) -> RepoAppView {
         app_url: a.app_url.clone(),
         env_keys: a.env_keys.clone(),
         browser_tests: a.browser_tests,
+        auto_restart: a.auto_restart,
     }
 }
 
@@ -52,6 +53,7 @@ pub(super) fn app_settings_from(v: &RepoAppView) -> Result<AppSettings, RpcError
         app_url: trim(&v.app_url),
         env_keys: v.env_keys.clone(),
         browser_tests: v.browser_tests,
+        auto_restart: v.auto_restart,
     })
 }
 
@@ -158,6 +160,7 @@ mod tests {
             app_url: None,
             env_keys: vec!["API_URL".to_owned()],
             browser_tests: true,
+            auto_restart: true,
         }
     }
 
@@ -167,6 +170,7 @@ mod tests {
         assert_eq!(a.setup_command, None);
         assert_eq!(a.start_command.as_deref(), Some("bun run dev"));
         assert_eq!(repo_app_view(&a).test_mode, "web");
+        assert!(a.auto_restart && repo_app_view(&a).auto_restart);
         let mut bad = view();
         bad.env_keys = vec!["API URL".to_owned()];
         assert!(app_settings_from(&bad).is_err());

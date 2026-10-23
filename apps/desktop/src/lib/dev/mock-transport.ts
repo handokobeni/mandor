@@ -333,7 +333,8 @@ const repos: unknown[] = setup
           port: 5173,
           app_url: null,
           env_keys: ['VITE_API_URL'],
-          browser_tests: true
+          browser_tests: true,
+          auto_restart: false
         }
       },
       {
@@ -352,7 +353,8 @@ const repos: unknown[] = setup
           port: null,
           app_url: null,
           env_keys: [],
-          browser_tests: true
+          browser_tests: true,
+          auto_restart: false
         }
       }
     ];
@@ -416,7 +418,8 @@ function handle(method: string, params: Record<string, unknown>): unknown {
           port: null,
           app_url: null,
           env_keys: [],
-          browser_tests: true
+          browser_tests: true,
+          auto_restart: false
         }
       });
       return repos.at(-1);

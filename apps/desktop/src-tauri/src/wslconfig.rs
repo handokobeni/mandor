@@ -114,14 +114,24 @@ pub fn enable(text: &str) -> String {
 }
 
 /// Isi `.wslconfig` tanpa kedua kunci Mandor; isi lain tidak diubah.
+///
+/// `original` adalah isi sebelum `enable` pertama (cadangan), bila ada.
+/// Bagian yang kosong setelah kunci dihapus hanya ikut dihapus bila tidak
+/// ada di `original`, yaitu bila bagian itu dibuat Mandor.
 #[must_use]
-pub fn disable(text: &str) -> String {
+pub fn disable(text: &str, original: Option<&str>) -> String {
     let crlf = text.contains("\r\n");
     let mut lines = split_lines(text);
+    let kept = original.map(split_lines).unwrap_or_default();
     for (section, key) in KEYS {
         if let Some(i) = find_key(&lines, section, key) {
             lines.remove(i);
-            drop_empty_section(&mut lines, section);
+            if !kept
+                .iter()
+                .any(|l| section_of(l).as_deref() == Some(section))
+            {
+                drop_empty_section(&mut lines, section);
+            }
         }
     }
     join_lines(&lines, crlf)
@@ -219,14 +229,18 @@ fn write(path: &Path, text: &str) -> Result<(), WslConfigError> {
     })
 }
 
-/// Cadangan `.wslconfig.mandor-bak`, dibuat sekali bila berkas asli ada.
-fn backup_once(path: &Path) -> Result<(), WslConfigError> {
-    let bak = path.with_extension("wslconfig.mandor-bak");
-    let bak = if path.extension().is_none() {
+/// Path cadangan `.wslconfig.mandor-bak`.
+fn backup_path(path: &Path) -> PathBuf {
+    if path.extension().is_none() {
         PathBuf::from(format!("{}.mandor-bak", path.display()))
     } else {
-        bak
-    };
+        path.with_extension("wslconfig.mandor-bak")
+    }
+}
+
+/// Cadangan `.wslconfig.mandor-bak`, dibuat sekali bila berkas asli ada.
+fn backup_once(path: &Path) -> Result<(), WslConfigError> {
+    let bak = backup_path(path);
     if bak.exists() || !path.exists() {
         return Ok(());
     }
@@ -261,7 +275,13 @@ pub fn enable_at(path: &Path) -> Result<(), WslConfigError> {
 /// Berkas tidak bisa dibaca atau ditulis.
 pub fn disable_at(path: &Path) -> Result<(), WslConfigError> {
     let text = read(path)?;
-    let next = disable(&text);
+    let bak = backup_path(path);
+    let original = if bak.exists() {
+        Some(read(&bak)?)
+    } else {
+        None
+    };
+    let next = disable(&text, original.as_deref());
     if next == text {
         return Ok(());
     }
@@ -290,7 +310,11 @@ mod tests {
             out,
             "# pengaturan saya\n[wsl2]\nmemory=8GB\nswap=0 # tanpa swap\nvmIdleTimeout=-1\n\n[experimental]\nautoMemoryReclaim=gradual\n\n[general]\ninstanceIdleTimeout=-1\n"
         );
-        assert_eq!(disable(&out), text, "kembali persis seperti semula");
+        assert_eq!(
+            disable(&out, Some(text)),
+            text,
+            "kembali persis seperti semula"
+        );
     }
 
     #[test]
@@ -332,7 +356,18 @@ mod tests {
         let out = enable(text);
         assert!(out.starts_with("[experimental]\nvmIdleTimeout=5\n"));
         assert!(is_enabled(&out));
-        assert_eq!(disable(&out), text);
+        assert_eq!(disable(&out, Some(text)), text);
+    }
+
+    #[test]
+    fn bagian_yang_sudah_ada_sebelum_enable_tidak_dihapus() {
+        // Kasus nyata uji U9: `.wslconfig` hanya berisi `[wsl2]` tanpa baris baru.
+        let text = "[wsl2]";
+        let out = enable(text);
+        assert!(is_enabled(&out));
+        assert_eq!(disable(&out, Some(text)), "[wsl2]\n");
+        // Tanpa cadangan (berkas dibuat Mandor), bagian kosong ikut dihapus.
+        assert_eq!(disable(&enable(""), None), "");
     }
 
     #[test]
@@ -376,6 +411,16 @@ mod tests {
             std::fs::read_to_string(&path).unwrap(),
             "[wsl2]\nmemory=8GB\n"
         );
+    }
+
+    #[test]
+    fn disable_memakai_cadangan_untuk_mempertahankan_bagian_asli() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join(".wslconfig");
+        std::fs::write(&path, "[wsl2]").unwrap();
+        enable_at(&path).unwrap();
+        disable_at(&path).unwrap();
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "[wsl2]\n");
     }
 
     #[test]

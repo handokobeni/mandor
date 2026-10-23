@@ -70,3 +70,9 @@ Daemon versi lama tanpa `daemon.drain` (jalur `runs.list`) teruji langsung saat 
 | Pelepasan keep-awake | lulus: `busy: false` sejak 17:44:16, `keep_awake: off` sejak 17:49:25 (masa tenggang 5 menit); `mandor-keepawake.exe` tidak lagi berjalan di Windows (17:53). |
 
 Temuan: penjaga juga mengambil permintaan `AWAYMODE` (crate `keepawake`), sehingga selama agent bekerja tombol Sleep manual memasukkan PC ke away mode, bukan sleep. Menunggu keputusan pemilik produk apakah dipertahankan.
+| AE7: uninstall dari Windows (tidak ada agent bekerja) | lulus sebagian: service `inactive`/`not-found`, unit dan `~/.local/bin/mandord` terhapus, tidak ada proses `mandord`, `~/.mandor` (database, `lark.json`) tetap, folder app di Program Files terhapus, cadangan `.wslconfig.mandor-bak` tetap. **Bug**: `.wslconfig` menjadi kosong, padahal isi awalnya `[wsl2]` (bagian milik pengguna ikut dihapus karena kosong setelah kunci Mandor dibuang); melanggar "isi lain tetap". `%LOCALAPPDATA%\Mandor\keepawake` tertinggal (sesuai runbook: dibersihkan manual). |
+
+### Perbaikan dari uji Windows
+
+- `disable` `.wslconfig` memakai isi cadangan: bagian yang sudah ada sebelum `enable` pertama tidak dihapus walau kosong; hanya bagian buatan Mandor yang ikut dibuang. Test kasus nyata (`[wsl2]` tanpa baris baru) dan mutation check.
+- Penjaga keep-awake hanya `idle(true)` (`ES_SYSTEM_REQUIRED`, sesuai A4); `sleep(true)` yang menambah `ES_AWAYMODE_REQUIRED` dibuang, sehingga Sleep yang dipilih pengguna tetap menidurkan PC. Perlu diverifikasi ulang dengan `powercfg /requests` (hanya `SYSTEM`) pada installer berikutnya.

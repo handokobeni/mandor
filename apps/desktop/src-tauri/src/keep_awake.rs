@@ -1,7 +1,8 @@
 //! Mode penjaga keep-awake (KTD-45 plan service OS): `mandor --keep-awake`
-//! menahan sleep dan idle sistem (bukan layar) sampai stdin ditutup. Daemon
-//! `mandord` di WSL menjalankan salinan exe ini lewat interop selama ada run
-//! yang bekerja; bila daemon mati, stdin tertutup dan pegangan ikut lepas.
+//! menahan sleep karena idle (bukan layar, bukan Sleep pilihan pengguna)
+//! sampai stdin ditutup. Daemon `mandord` di WSL menjalankan salinan exe ini
+//! lewat interop selama ada run yang bekerja; bila daemon mati, stdin tertutup
+//! dan pegangan ikut lepas.
 //!
 //! Juga pegangan sementara milik app saat daemon yang tersambung belum
 //! mendukung keep-awake.
@@ -67,9 +68,10 @@ struct Hold;
 
 #[cfg(windows)]
 fn hold() -> Result<Hold, String> {
+    // Hanya sleep karena idle (`ES_SYSTEM_REQUIRED`, A4 plan service OS); tanpa
+    // `sleep(true)` (away mode), sehingga Sleep yang dipilih pengguna tetap tidur.
     keepawake::Builder::default()
         .idle(true)
-        .sleep(true)
         .reason("Mandor agents are working")
         .app_name("Mandor")
         .app_reverse_domain("dev.mandor.app")

@@ -27,11 +27,12 @@ use crate::app::App;
 use crate::prod::{emit, now_ms};
 use crate::session::LarkSession;
 use crate::views::{
-    card_view, notice_view, run_view, sprint_view, task_details_view, team_card_view,
+    apply_group, card_view, notice_view, run_view, sprint_view, task_details_view, team_card_view,
 };
 
 mod app_run;
 mod design;
+mod group;
 mod review;
 mod workspaces;
 
@@ -210,14 +211,18 @@ impl AppDispatch {
     async fn board(&self) -> Result<Value, RpcError> {
         let s = self.session().await?;
         let cached = s.sync.board().await.map_err(sync_error)?;
-        let runs: HashMap<String, _> = s
-            .runs
-            .active_runs()
-            .await
-            .map_err(run_error)?
-            .into_iter()
-            .map(|r| (r.record_id.clone(), r))
-            .collect();
+        let active = s.runs.active_runs().await.map_err(run_error)?;
+        let groups = group::group_views(&s, &active).await?;
+        // Run grup tampil di setiap kartunya yang masih disertakan.
+        let mut runs: HashMap<String, _> = HashMap::new();
+        for r in active {
+            if let Some(cards) = groups.get(&r.id) {
+                for c in cards.iter().filter(|c| !c.state.starts_with("removed")) {
+                    runs.insert(c.record_id.clone(), r.clone());
+                }
+            }
+            runs.insert(r.record_id.clone(), r);
+        }
         let now = now_ms();
         let team = s.sync.team_board();
         let summaries = self.ac_summaries().await?;
@@ -228,6 +233,9 @@ impl AppDispatch {
                 let mut card = card_view(c, run, &s.me, now);
                 if let (Some(view), Some(r)) = (card.run.as_mut(), run) {
                     view.ac = summaries.get(&r.id).cloned();
+                }
+                if let Some(cards) = run.and_then(|r| groups.get(&r.id)) {
+                    apply_group(&mut card, cards);
                 }
                 card
             })
@@ -263,11 +271,14 @@ impl AppDispatch {
     async fn runs_list(&self) -> Result<Value, RpcError> {
         let s = self.session().await?;
         let summaries = self.ac_summaries().await?;
+        let active = s.runs.active_runs().await.map_err(run_error)?;
+        let mut groups = group::group_views(&s, &active).await?;
         let mut out = Vec::new();
-        for r in s.runs.active_runs().await.map_err(run_error)? {
+        for r in active {
             let task = s.sync.cached(&r.record_id).await.map_err(sync_error)?;
             let mut view = run_view(&r, task.as_ref().map(|c| &c.task));
             view.ac = summaries.get(&r.id).cloned();
+            view.cards = groups.remove(&r.id).unwrap_or_default();
             out.push(view);
         }
         ok(&out)
@@ -744,6 +755,7 @@ impl AppDispatch {
             other if Self::is_design_method(other) => self.design_call(other, v).await,
             other if Self::is_app_method(other) => self.app_call(other, v).await,
             other if Self::is_review_method(other) => self.review_call(other, v).await,
+            other if Self::is_group_method(other) => self.group_call(other, v).await,
             other => self.run_action(other, v).await,
         }
     }

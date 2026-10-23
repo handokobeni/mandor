@@ -32,6 +32,7 @@ function row(id: string, verdict: string, extra: Partial<AcRowView> = {}): AcRow
     decided_by: null,
     in_gate: true,
     selectable: verdict === 'fail',
+    card: null,
     ...extra
   };
 }

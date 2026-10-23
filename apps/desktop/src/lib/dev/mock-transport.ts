@@ -55,6 +55,7 @@ function run(id: string, key: string, title: string, state: string, extra: Parti
     started_at_ms: Date.now() - 42 * 60_000,
     updated_at_ms: Date.now() - 60_000,
     ac: null,
+    cards: [],
     ...extra
   };
 }

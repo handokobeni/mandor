@@ -19,7 +19,8 @@ function row(id: string, verdict: string): AcRowView {
     reason: null,
     decided_by: null,
     in_gate: true,
-    selectable: false
+    selectable: false,
+    card: null
   };
 }
 

@@ -16,7 +16,8 @@ function row(id: string, design: string, status = 'active'): AcRowView {
     reason: null,
     decided_by: null,
     in_gate: true,
-    selectable: false
+    selectable: false,
+    card: null
   };
 }
 

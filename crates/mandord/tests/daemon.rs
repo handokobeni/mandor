@@ -301,6 +301,41 @@ fn rpc_pengaturan_login_dan_repo_tanpa_sesi_lark() {
 }
 
 #[test]
+fn method_run_grup_dikenal_dan_butuh_sesi_lark() {
+    let home = tempfile::tempdir().unwrap();
+    let mut daemon = serve(home.path());
+    let token = wait_for_info(home.path())["token"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let replies = connect_roundtrip(
+        home.path(),
+        &[
+            hello(&token),
+            rpc(2, "groups.candidates", &json!({"record_id": "rec1"})),
+            rpc(
+                3,
+                "runs.start_group",
+                &json!({"record_ids": ["a", "b"], "repo_id": "r", "note": null}),
+            ),
+            rpc(4, "runs.next_card", &json!({"run_id": "r1"})),
+            rpc(
+                5,
+                "runs.gate_card_decision",
+                &json!({"run_id": "r1", "record_id": "a", "decision": "keep", "reason": "x"}),
+            ),
+            rpc(6, "groups.tidak_ada", &Value::Null),
+        ],
+    );
+    for r in &replies[1..5] {
+        assert_eq!(r["error"]["code"], "unauthorized", "{r}");
+    }
+    assert_eq!(replies[5]["error"]["code"], "method_not_found");
+    stop(home.path());
+    let _ = daemon.wait();
+}
+
+#[test]
 fn jeda_tenang_diatur_terpisah_dan_tidak_direset_saat_simpan_pengaturan_lark() {
     let home = tempfile::tempdir().unwrap();
     let mut daemon = serve(home.path());

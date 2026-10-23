@@ -28,4 +28,9 @@ in_gate: boolean,
 /**
  * Boleh dipilih untuk Send to agent.
  */
-selectable: boolean, };
+selectable: boolean, 
+/**
+ * Kartu asal AC di run grup (`record_id`, kunci ada di `RunView.cards`);
+ * `None` untuk run tunggal.
+ */
+card: string | null, };

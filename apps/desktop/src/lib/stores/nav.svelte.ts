@@ -2,7 +2,7 @@
 
 import { workspace } from '#lib/stores/workspace.svelte.ts';
 
-export type SettingsSection = 'general' | 'lark' | 'repos' | 'workspaces' | 'design-sources' | 'about';
+export type SettingsSection = 'general' | 'lark' | 'repos' | 'workspaces' | 'design-sources' | 'background' | 'about';
 
 class Nav {
   page = $state<'board' | 'settings'>('board');

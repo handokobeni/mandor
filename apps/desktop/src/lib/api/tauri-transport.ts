@@ -2,12 +2,15 @@
 
 import { invoke } from '@tauri-apps/api/core';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
+import { background } from '#lib/stores/background.svelte.ts';
 import type { Transport } from './client';
 
 export class TauriTransport implements Transport {
   private unlisten: UnlistenFn[] = [];
 
-  token(): Promise<{ token: string; protocol: string }> {
+  async token(): Promise<{ token: string; protocol: string }> {
+    // Daemon dipasang atau diperbarui dulu (sekali per sesi app).
+    await background.ensureProvisioned();
     return invoke('daemon_token');
   }
 

@@ -80,13 +80,15 @@ pub fn wslpath_args(distro: Option<&str>, windows_path: &str) -> Vec<String> {
 struct CheckReport {
     service: String,
     systemd: bool,
+    #[serde(default)]
+    linger: bool,
 }
 
 /// Keputusan dari probe.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Probe {
     /// Biner terpasang identik dan service sesuai: langsung tersambung.
-    Ready,
+    Ready { systemd: bool, linger: bool },
     /// Biner tidak ada, berbeda, versi lama, atau service belum sesuai.
     NeedsInstall,
 }
@@ -104,7 +106,10 @@ pub fn parse_probe(stdout: &str, expected_sha256: &str) -> Probe {
     }
     let check = lines.find_map(|l| serde_json::from_str::<CheckReport>(l).ok());
     match check {
-        Some(c) if !c.systemd || c.service == "matches" => Probe::Ready,
+        Some(c) if !c.systemd || c.service == "matches" => Probe::Ready {
+            systemd: c.systemd,
+            linger: c.linger,
+        },
         _ => Probe::NeedsInstall,
     }
 }
@@ -153,7 +158,11 @@ pub enum ProvisionState {
     NotNeeded,
     /// Build tanpa biner daemon (build dev).
     NotBundled,
-    UpToDate,
+    /// Daemon terpasang sudah sesuai. `systemd: false` berarti fallback setsid.
+    UpToDate {
+        systemd: bool,
+        linger: bool,
+    },
     Installed {
         report: InstallReport,
     },
@@ -296,8 +305,8 @@ pub async fn provision(inputs: &Inputs, keep_awake: &str) -> ProvisionState {
         Ok(out) => {
             let text = String::from_utf8_lossy(&out.stdout);
             let text: String = text.chars().take(PROBE_OUTPUT_MAX).collect();
-            if parse_probe(&text, DAEMON_SHA256) == Probe::Ready {
-                return ProvisionState::UpToDate;
+            if let Probe::Ready { systemd, linger } = parse_probe(&text, DAEMON_SHA256) {
+                return ProvisionState::UpToDate { systemd, linger };
             }
         }
         Err(message) => return ProvisionState::CannotCheck { message },
@@ -334,7 +343,10 @@ pub async fn provision(inputs: &Inputs, keep_awake: &str) -> ProvisionState {
     match parse_install(&String::from_utf8_lossy(&out.stdout)) {
         Ok(report) => match report.result.as_str() {
             "installed" | "updated" | "service_only" => ProvisionState::Installed { report },
-            "up_to_date" => ProvisionState::UpToDate,
+            "up_to_date" => ProvisionState::UpToDate {
+                systemd: report.service == "systemd",
+                linger: report.linger,
+            },
             "deferred" => ProvisionState::Deferred { report },
             _ => ProvisionState::Failed {
                 message: report
@@ -388,14 +400,24 @@ mod tests {
         let ok = format!(
             "{H}  /home/u/.local/bin/mandord\n{{\"binary\":\"same\",\"installed_version\":\"0.1.0\",\"service\":\"matches\",\"systemd\":true,\"linger\":true,\"running\":\"systemd\"}}\n"
         );
-        assert_eq!(parse_probe(&ok, H), Probe::Ready);
+        let ready = Probe::Ready {
+            systemd: true,
+            linger: true,
+        };
+        assert_eq!(parse_probe(&ok, H), ready);
         let upper = ok.replacen(H, &H.to_uppercase(), 1);
-        assert_eq!(parse_probe(&upper, H), Probe::Ready);
+        assert_eq!(parse_probe(&upper, H), ready);
 
         let no_systemd = format!(
             "{H}  /x\n{{\"binary\":\"same\",\"service\":\"unavailable\",\"systemd\":false,\"linger\":false,\"running\":\"no\"}}\n"
         );
-        assert_eq!(parse_probe(&no_systemd, H), Probe::Ready);
+        assert_eq!(
+            parse_probe(&no_systemd, H),
+            Probe::Ready {
+                systemd: false,
+                linger: false
+            }
+        );
 
         let unit_missing = format!("{H}  /x\n{{\"service\":\"missing\",\"systemd\":true}}\n");
         assert_eq!(parse_probe(&unit_missing, H), Probe::NeedsInstall);

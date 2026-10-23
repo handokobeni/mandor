@@ -6,7 +6,7 @@ use std::sync::Arc;
 
 use mandor_domain::app_run::{AppRunState, is_flagged_change};
 
-use crate::ports::{Deps, PortError};
+use crate::ports::{Clock, Deps, PortError};
 use crate::run::{RunError, RunService};
 use crate::run_ports::{
     AppMember, AppMemberRecord, AppProcesses, AppRecord, AppRecords, GitPort, Notifier, Repos,
@@ -23,6 +23,60 @@ pub struct AppChanges {
     pub files: Vec<String>,
     /// Manifest paket, lockfile, skrip, dan berkas perintah start.
     pub flagged: Vec<String>,
+}
+
+/// Batas restart app otomatis sebelum review (setup dan menunggu port).
+const APP_RESTART_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(300);
+
+/// Hasil `fut`, atau `None` bila `deadline` selesai lebih dulu. Usecase tidak
+/// bergantung pada runtime; tenggat datang dari [`crate::ports::Clock`].
+async fn within<T>(
+    deadline: impl std::future::Future<Output = ()>,
+    fut: impl std::future::Future<Output = T>,
+) -> Option<T> {
+    use std::task::Poll;
+    let mut fut = std::pin::pin!(fut);
+    let mut deadline = std::pin::pin!(deadline);
+    std::future::poll_fn(|cx| {
+        if let Poll::Ready(v) = fut.as_mut().poll(cx) {
+            return Poll::Ready(Some(v));
+        }
+        if deadline.as_mut().poll(cx).is_ready() {
+            return Poll::Ready(None);
+        }
+        Poll::Pending
+    })
+    .await
+}
+
+/// Catatan app baru yang sedang dinyalakan. `keep_confirmations`: restart oleh
+/// Mandor mempertahankan konfirmasi database dan login dev; Run app oleh dev
+/// memintanya lagi.
+fn starting_record(
+    run_id: &str,
+    members: &[AppMember],
+    snapshot: BTreeMap<String, String>,
+    prev: AppRecord,
+    keep_confirmations: bool,
+) -> AppRecord {
+    AppRecord {
+        run_id: run_id.to_owned(),
+        state: AppRunState::Starting,
+        members: members
+            .iter()
+            .map(|m| AppMemberRecord {
+                repo_id: m.repo_id.clone(),
+                url: m.settings.canonical_url(),
+                pgid: None,
+                state: AppRunState::Off,
+            })
+            .collect(),
+        snapshot,
+        setup_hashes: prev.setup_hashes,
+        database_confirmed: keep_confirmations && prev.database_confirmed,
+        login_confirmed: keep_confirmations && prev.login_confirmed,
+        error: None,
+    }
 }
 
 fn rejected(message: &str) -> RunError {
@@ -169,24 +223,7 @@ impl<D: Deps> RunService<D> {
         self.stop_other_app(run_id).await?;
         self.apps.stop(run_id).await;
         self.apps.set_app_owner(Some(run_id)).await?;
-        let rec = AppRecord {
-            run_id: run_id.to_owned(),
-            state: AppRunState::Starting,
-            members: members
-                .iter()
-                .map(|m| AppMemberRecord {
-                    repo_id: m.repo_id.clone(),
-                    url: m.settings.canonical_url(),
-                    pgid: None,
-                    state: AppRunState::Off,
-                })
-                .collect(),
-            snapshot,
-            setup_hashes: prev.setup_hashes,
-            database_confirmed: false,
-            login_confirmed: false,
-            error: None,
-        };
+        let rec = starting_record(run_id, &members, snapshot, prev, false);
         self.apps.save_app_record(&rec).await?;
         let svc = Arc::clone(self);
         let started = rec.clone();
@@ -194,6 +231,65 @@ impl<D: Deps> RunService<D> {
             svc.start_members(started, members).await;
         });
         Ok(rec)
+    }
+
+    /// Menyalakan ulang app run ini dari `snapshot` (kode terbaru) sebelum
+    /// review berbrowser, tanpa konfirmasi perubahan: dev mengaktifkan restart
+    /// otomatis di repo. Konfirmasi login dipertahankan karena cookie di
+    /// browser tetap ada. Hasilnya catatan untuk chat run; gagal atau lewat
+    /// batas waktu = review berjalan tanpa browser.
+    pub(crate) async fn restart_app_for_review(
+        &self,
+        run_id: &str,
+        snapshot: &BTreeMap<String, String>,
+    ) -> String {
+        match self.restart_app(run_id, snapshot).await {
+            Ok(()) => "Restarted the app with the latest code before the review.".to_owned(),
+            Err(why) => format!(
+                "Could not restart the app ({why}); the review continues without the browser."
+            ),
+        }
+    }
+
+    async fn restart_app(
+        &self,
+        run_id: &str,
+        snapshot: &BTreeMap<String, String>,
+    ) -> Result<(), String> {
+        let members = self.app_members(run_id).await.map_err(|e| e.to_string())?;
+        let prev = self.app_status(run_id).await.map_err(|e| e.to_string())?;
+        let wanted = members
+            .iter()
+            .filter_map(|m| Some((m.repo_id.clone(), snapshot.get(&m.repo_id)?.clone())))
+            .collect();
+        self.apps.stop(run_id).await;
+        let rec = starting_record(run_id, &members, wanted, prev, true);
+        self.apps
+            .save_app_record(&rec)
+            .await
+            .map_err(|e| e.to_string())?;
+        let started = within(
+            self.sync.clock.sleep(APP_RESTART_TIMEOUT),
+            self.start_members(rec, members),
+        )
+        .await;
+        if started.is_none() {
+            self.apps.stop(run_id).await;
+            if let Ok(mut rec) = self.app_status(run_id).await {
+                rec.state = AppRunState::Failed;
+                rec.error = Some("the restart timed out".to_owned());
+                self.save_quietly(&rec).await;
+            }
+            return Err("it did not start in time".to_owned());
+        }
+        let after = self.app_status(run_id).await.map_err(|e| e.to_string())?;
+        if after.state == AppRunState::Running {
+            Ok(())
+        } else {
+            Err(after
+                .error
+                .unwrap_or_else(|| "the app did not start".to_owned()))
+        }
     }
 
     /// App run lain yang menyala dihentikan dan ditandai `StoppedByOtherRun`.
@@ -384,5 +480,22 @@ impl<D: Deps> RunService<D> {
         }
         self.app_stop(&owner).await?;
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::within;
+
+    #[tokio::test]
+    async fn tenggat_menang_bila_pekerjaan_belum_selesai() {
+        let out = within(std::future::ready(()), std::future::pending::<u8>()).await;
+        assert_eq!(out, None);
+    }
+
+    #[tokio::test]
+    async fn pekerjaan_yang_selesai_menang_atas_tenggat() {
+        let out = within(std::future::pending::<()>(), std::future::ready(7)).await;
+        assert_eq!(out, Some(7));
     }
 }

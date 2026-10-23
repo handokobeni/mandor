@@ -114,6 +114,8 @@ struct StoredApp {
     env_keys: Vec<String>,
     #[serde(default = "browser_tests_default")]
     browser_tests: bool,
+    #[serde(default)]
+    auto_restart: bool,
 }
 
 fn browser_tests_default() -> bool {
@@ -130,6 +132,7 @@ impl Default for StoredApp {
             app_url: None,
             env_keys: Vec::new(),
             browser_tests: true,
+            auto_restart: false,
         }
     }
 }
@@ -154,6 +157,7 @@ pub fn app_settings_of(settings: &serde_json::Value) -> AppSettings {
         app_url: stored.app_url.filter(|u| !u.trim().is_empty()),
         env_keys: stored.env_keys,
         browser_tests: stored.browser_tests,
+        auto_restart: stored.auto_restart,
     }
 }
 
@@ -168,6 +172,7 @@ pub fn app_settings_json(app: &AppSettings) -> serde_json::Value {
         app_url: app.app_url.clone(),
         env_keys: app.env_keys.clone(),
         browser_tests: app.browser_tests,
+        auto_restart: app.auto_restart,
     })
     .unwrap_or(serde_json::Value::Null)
 }

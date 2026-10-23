@@ -431,3 +431,155 @@ async fn skill_reviewer_dari_start_dipakai_kecuali_ada_skill_eksplisit() {
         .unwrap();
     assert_eq!(rec.skill.as_deref(), Some("lain"));
 }
+
+/// Run Web yang menunggu dev, app-nya pernah menyala dari kode lama dengan
+/// login dikonfirmasi, dan ekstensi tersambung. `auto` = setelan restart
+/// otomatis repo.
+async fn app_lama(auto: bool) -> (FakeLark, FakeClock, Station, String) {
+    let (lark, clock) = setup();
+    let st = station(&lark, &clock, "ou_me");
+    st.repos.repos.lock().unwrap()[0].app = AppSettings {
+        test_mode: TestMode::Web,
+        start_command: Some("bun run dev".to_owned()),
+        port: Some(5173),
+        browser_tests: true,
+        auto_restart: auto,
+        ..AppSettings::default()
+    };
+    *st.reviews.chrome.lock().unwrap() = true;
+    st.svc.start("rec1", "repo1", None).await.unwrap();
+    st.agent.last().done();
+    eventually(|| st.runs.only().state == RunState::AwaitingDev).await;
+    let run = st.runs.only().id;
+    let wt: PathBuf = st.runs.only().worktree.unwrap();
+    st.git.st().trees.insert(wt, "tree-baru".to_owned());
+    let app = AppRecord {
+        run_id: run.clone(),
+        state: AppRunState::Running,
+        members: vec![AppMemberRecord {
+            repo_id: "repo1".to_owned(),
+            url: Some("http://localhost:5173".to_owned()),
+            pgid: Some(1),
+            state: AppRunState::Running,
+        }],
+        snapshot: [("repo1".to_owned(), "tree-lama".to_owned())].into(),
+        login_confirmed: true,
+        ..AppRecord::default()
+    };
+    st.apps.save_app_record(&app).await.unwrap();
+    st.apps.set_app_owner(Some(&run)).await.unwrap();
+    (lark, clock, st, run)
+}
+
+fn system_notes(st: &Station) -> Vec<String> {
+    st.runs
+        .chat
+        .lock()
+        .unwrap()
+        .iter()
+        .filter_map(|(_, item)| match item {
+            mandor_usecase::run_ports::ChatItem::System(t) => Some(t.clone()),
+            _ => None,
+        })
+        .collect()
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn restart_otomatis_menyalakan_ulang_app_dari_kode_terbaru_sebelum_review() {
+    let (_lark, _clock, st, run) = app_lama(true).await;
+    // Review otomatis setelah Waiting Fix memakai jalur yang sama.
+    st.svc
+        .start_review(&run, ReviewTrigger::Manual, None)
+        .await
+        .unwrap();
+    let calls = st.apps.calls();
+    assert!(calls.contains(&format!("stop:{run}")), "{calls:?}");
+    assert!(calls.contains(&"spawn:repo1".to_owned()), "{calls:?}");
+    let rec = st.apps.record(&run).unwrap();
+    assert_eq!(rec.state, AppRunState::Running);
+    assert_eq!(
+        rec.snapshot.get("repo1").map(String::as_str),
+        Some("tree-baru")
+    );
+    assert!(
+        rec.login_confirmed,
+        "restart oleh Mandor tidak mereset login"
+    );
+    let review = st.agent.last().req.review.unwrap();
+    assert!(review.chrome, "browser dipakai setelah restart");
+    assert!(
+        system_notes(&st)
+            .iter()
+            .any(|n| n.contains("Restarted the app")),
+        "{:?}",
+        system_notes(&st)
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn tanpa_setelan_restart_otomatis_app_lama_tidak_disentuh() {
+    let (_lark, _clock, st, run) = app_lama(false).await;
+    st.svc
+        .start_review(&run, ReviewTrigger::Manual, None)
+        .await
+        .unwrap();
+    assert!(!st.apps.calls().iter().any(|c| c.starts_with("spawn:")));
+    assert!(
+        st.agent
+            .last()
+            .req
+            .message
+            .contains("REASON:app running older code")
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn restart_otomatis_tidak_merebut_app_run_lain_dan_butuh_login_terkonfirmasi() {
+    // App run lain sedang menyala: tidak dihentikan.
+    let (_lark, _clock, st, run) = app_lama(true).await;
+    st.apps.set_app_owner(Some("run-lain")).await.unwrap();
+    st.svc
+        .start_review(&run, ReviewTrigger::Manual, None)
+        .await
+        .unwrap();
+    let calls = st.apps.calls();
+    assert!(!calls.iter().any(|c| c.starts_with("spawn:")), "{calls:?}");
+    assert!(!calls.contains(&"stop:run-lain".to_owned()), "{calls:?}");
+    st.agent.last().done();
+    eventually(|| st.runs.only().state == RunState::AwaitingDev).await;
+
+    // Login belum pernah dikonfirmasi: restart tidak berguna, dilewati.
+    let (_lark, _clock, st, run) = app_lama(true).await;
+    let mut rec = st.apps.record(&run).unwrap();
+    rec.login_confirmed = false;
+    st.apps.save_app_record(&rec).await.unwrap();
+    st.svc
+        .start_review(&run, ReviewTrigger::Manual, None)
+        .await
+        .unwrap();
+    assert!(!st.apps.calls().iter().any(|c| c.starts_with("spawn:")));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn restart_otomatis_gagal_review_tetap_berjalan_tanpa_browser() {
+    let (_lark, _clock, st, run) = app_lama(true).await;
+    st.apps
+        .st
+        .lock()
+        .unwrap()
+        .fail_ready
+        .insert("repo1".to_owned());
+    st.svc
+        .start_review(&run, ReviewTrigger::Manual, None)
+        .await
+        .unwrap();
+    let review = st.agent.last().req.review.unwrap();
+    assert!(!review.chrome);
+    assert!(
+        system_notes(&st)
+            .iter()
+            .any(|n| n.contains("Could not restart the app")),
+        "{:?}",
+        system_notes(&st)
+    );
+}

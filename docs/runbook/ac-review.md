@@ -40,6 +40,7 @@ Pagar yang berlaku selama review:
 | App URL | Opsional. Alamat tempat Anda login (cookie login terikat ke host ini) |
 | .env keys | Nama kunci yang diteruskan dari `.env` repo. Nilai tidak pernah ditampilkan dan tidak disalin ke worktree |
 | Browser testing | Izinkan reviewer menguji app di browser (run satu repo). Run workspace memakai setelan workspace |
+| Restart the app before reviews | Opsional, bawaan mati. Bila app run ini menjalankan kode lama, Mandor menyalakannya ulang dari kode terbaru sebelum review berbrowser, termasuk review otomatis setelah Waiting Fix. Kode agent berjalan dengan kunci `.env` terpilih **tanpa** konfirmasi perubahan, jadi aktifkan hanya untuk repo dengan kredensial lokal/dev |
 | Push & PR gate | Use workspace, Block, atau Warn. Run multi-repo memakai yang paling ketat |
 
 Catatan:
@@ -50,6 +51,15 @@ Catatan:
 - Snapshot app mengikuti `.gitignore`. Berkas ignored yang ditulis agent (mis. di `node_modules`) tidak masuk konfirmasi perubahan.
 
 **Run app** di workspace run menyalakan app dari worktree run itu. Sebelum review pertama dengan browser, dialog kesiapan meminta Anda membuka app, login, lalu menandai **I'm logged in**.
+
+Restart otomatis sebelum review hanya berjalan bila semuanya terpenuhi:
+- setelan **Restart the app before reviews** aktif di semua repo Web run itu;
+- app run itu sedang menyala tetapi dengan kode lama;
+- tidak ada app run lain yang sedang menyala (app run lain tidak pernah dihentikan);
+- Anda pernah menandai **I'm logged in**;
+- ekstensi Chrome tersambung.
+
+Konfirmasi login dipertahankan karena cookie di browser tetap ada. Bila app butuh login ulang setelah restart, reviewer akan menilai AC tampilan Can't verify. Hasil restart dicatat di chat run. Bila restart gagal atau melewati 5 menit, review tetap berjalan tanpa browser. Stop app oleh Anda atau restart daemon mereset konfirmasi, jadi restart otomatis baru aktif lagi setelah Anda login dan mengonfirmasi ulang.
 
 ## 4. Sumber desain
 

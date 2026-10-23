@@ -436,7 +436,14 @@ async fn deskripsi_pr_diberi_tahu_keputusan_ac() {
         let mut ledgers = st.reviews.ledgers.lock().unwrap();
         let row = ledgers.values_mut().next().unwrap().first_mut().unwrap();
         row.design = mandor_domain::Design::FollowDesign;
-        row.display_label().to_owned()
+        let title = row
+            .text
+            .lines()
+            .next()
+            .unwrap_or_default()
+            .trim()
+            .to_owned();
+        format!("{} ({title})", row.display_label())
     };
     st.svc.publish(&st.runs.only().id).await.unwrap();
     let ctx = st.agent.pr_contexts.lock().unwrap()[0].clone();

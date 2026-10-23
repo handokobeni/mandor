@@ -153,6 +153,7 @@ async fn pengaturan_app_repo_dan_state_app_per_run() {
     let app = repos.repo("repo1").await.unwrap().unwrap().app;
     assert_eq!(app.test_mode, TestMode::NoApp);
     assert!(app.browser_tests);
+    assert!(!app.auto_restart, "restart otomatis mati secara bawaan");
 
     let wanted = AppSettings {
         test_mode: TestMode::Web,
@@ -162,6 +163,7 @@ async fn pengaturan_app_repo_dan_state_app_per_run() {
         app_url: None,
         env_keys: vec!["API_URL".to_owned()],
         browser_tests: false,
+        auto_restart: true,
     };
     s.set_repo_settings(
         "repo1",

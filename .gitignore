@@ -17,3 +17,6 @@ apps/desktop/.svelte-kit/
 coverage/
 lcov.info
 *.profraw
+
+# Biner daemon untuk installer Windows (diunduh workflow release)
+apps/desktop/src-tauri/resources/mandord

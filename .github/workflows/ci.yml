@@ -34,7 +34,7 @@ jobs:
           tool: cargo-deny,cargo-llvm-cov,sqlx-cli
       # Drive C: runner Windows lambat; database SQLite test di sana melewati
       # batas acquire 5 detik. Direktori sementara dipindah ke D:.
-      - name: Direktori sementara di D:
+      - name: "Direktori sementara di D:"
         if: runner.os == 'Windows'
         shell: bash
         run: |

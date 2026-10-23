@@ -35,6 +35,9 @@ jobs:
       - name: make check
         shell: bash
         run: make check
+      - name: Versi app dan daemon sama
+        if: runner.os == 'Linux'
+        run: ./scripts/check-versions.sh
       - name: Pembuktian lapisan (dependensi terlarang membuat gerbang merah)
         if: runner.os == 'Linux'
         run: make red-check
@@ -63,6 +66,10 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y libwebkit2gtk-4.1-dev librsvg2-dev libayatana-appindicator3-dev
       - run: bun install --frozen-lockfile
         working-directory: apps/desktop
+      - name: Placeholder biner daemon (resource installer Windows)
+        if: runner.os == 'Windows'
+        shell: bash
+        run: printf 'placeholder\n' > apps/desktop/src-tauri/resources/mandord
       - run: bun run check
         working-directory: apps/desktop
       - run: bun run test

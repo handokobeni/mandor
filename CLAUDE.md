@@ -54,8 +54,9 @@ mandord (app) ──► mandor-api, mandor-store, mandor-lark, mandor-git, mando
 | `fd-lock` | Lock file eksklusif single-instance lintas OS | `mandord` |
 | `subtle` | Perbandingan token waktu-konstan | `mandor-api` |
 | `tokio-tungstenite` | Client WebSocket untuk relay `mandord connect` dan test; sudah ada di graf lewat fitur `ws` axum | `mandor-api` |
-| `sha2`, `base64` | PKCE S256 untuk OAuth Lark (hash dan base64url) | `mandor-lark` |
-| `tempfile` (dev) | Direktori sementara untuk test | test semua crate |
+| `sha2`, `base64` | PKCE S256 untuk OAuth Lark (hash dan base64url); `sha2` juga untuk hash biner daemon yang dibawa installer Windows (build script dan verifikasi saat pasang) | `mandor-lark`; `sha2` di `apps/desktop/src-tauri` |
+| `tempfile` (dev) | Direktori sementara untuk test | test semua crate, termasuk `apps/desktop/src-tauri` |
+| `keepawake` | Menahan sleep dan idle Windows untuk penjaga keep-awake (`SetThreadExecutionState`) tanpa `unsafe` di kode kita; MIT; hanya target Windows | `apps/desktop/src-tauri` |
 
 Crate lain di luar allow list skill: sebutkan alasannya, cek `cargo deny`, lalu tambahkan ke tabel ini **dalam perubahan yang sama**. Crate Tauri hanya boleh di `apps/desktop/src-tauri`.
 

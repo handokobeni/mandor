@@ -6,6 +6,7 @@ pub mod keep_awake;
 mod oauth_callback;
 mod provision;
 mod tray;
+pub mod uninstall;
 mod wslconfig;
 
 use std::path::PathBuf;
@@ -229,6 +230,17 @@ async fn oauth_login(
 )]
 fn tray_update(app: AppHandle, waiting: Vec<tray::WaitingRun>) -> Result<(), String> {
     tray::update(&app, &waiting).map_err(|e| e.to_string())
+}
+
+/// Mode pembersihan uninstall (`--uninstall-cleanup`), dipanggil hook NSIS.
+#[must_use]
+pub fn run_uninstall_cleanup() -> ExitCode {
+    let cfg = ClientConfig::from_env();
+    let distro = match &cfg.mode {
+        LinkMode::Wsl { distro } => distro.clone(),
+        LinkMode::Local { .. } => return ExitCode::SUCCESS,
+    };
+    uninstall::run(distro.as_deref(), cfg.user_profile.as_deref())
 }
 
 /// Menjalankan aplikasi desktop.

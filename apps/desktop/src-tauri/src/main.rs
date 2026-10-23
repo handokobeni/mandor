@@ -6,5 +6,9 @@ fn main() -> std::process::ExitCode {
     if mandor_desktop_lib::keep_awake::requested(std::env::args()) {
         return mandor_desktop_lib::keep_awake::run();
     }
+    // Pembersihan WSL oleh hook uninstall NSIS.
+    if mandor_desktop_lib::uninstall::requested(std::env::args()) {
+        return mandor_desktop_lib::run_uninstall_cleanup();
+    }
     mandor_desktop_lib::run()
 }

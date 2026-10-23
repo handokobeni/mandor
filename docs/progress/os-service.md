@@ -76,3 +76,5 @@ Temuan: penjaga juga mengambil permintaan `AWAYMODE` (crate `keepawake`), sehing
 
 - `disable` `.wslconfig` memakai isi cadangan: bagian yang sudah ada sebelum `enable` pertama tidak dihapus walau kosong; hanya bagian buatan Mandor yang ikut dibuang. Test kasus nyata (`[wsl2]` tanpa baris baru) dan mutation check.
 - Penjaga keep-awake hanya `idle(true)` (`ES_SYSTEM_REQUIRED`, sesuai A4); `sleep(true)` yang menambah `ES_AWAYMODE_REQUIRED` dibuang, sehingga Sleep yang dipilih pengguna tetap menidurkan PC. Perlu diverifikasi ulang dengan `powercfg /requests` (hanya `SYSTEM`) pada installer berikutnya.
+| Uji ulang uninstall (20:25) | tidak sah: yang terpasang ternyata installer pertama (`mandor-uji\mandor_0.1.0_x64-setup.exe`, exe `2168ec2f…`), bukan `92a8b25` (exe `51e47f51…`); dibuktikan dengan mengekstrak exe dari tiap installer (7-Zip) dan membandingkan dengan salinan penjaga. Service dan biner tetap terlepas bersih. |
+| `--uninstall-cleanup` exe `92a8b25` langsung di Windows, `USERPROFILE` ke folder uji | lulus: `.wslconfig` aktif + cadangan `[wsl2]` → `[wsl2]`; dengan kunci lain → `[wsl2]` `memory=8GB`; tanpa cadangan (berkas dibuat Mandor) → kosong. |

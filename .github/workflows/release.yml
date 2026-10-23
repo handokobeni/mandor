@@ -115,8 +115,17 @@ jobs:
           }
           x=$(mktemp -d)
           for f in target/release/bundle/deb/*.deb; do mkdir -p "$x/deb"; dpkg-deb -x "$f" "$x/deb"; check "$x/deb" "$(basename "$f")"; done
-          for f in target/release/bundle/rpm/*.rpm; do mkdir -p "$x/rpm"; (cd "$x/rpm" && rpm2cpio "$OLDPWD/$f" | cpio -idm --quiet); check "$x/rpm" "$(basename "$f")"; done
-          for f in target/release/bundle/appimage/*.AppImage; do (cd "$x" && "$OLDPWD/$f" --appimage-extract >/dev/null); check "$x/squashfs-root" "$(basename "$f")"; done
+          # rpm: digest berkas dari header paket (tanpa mengekstrak payload).
+          for f in target/release/bundle/rpm/*.rpm; do
+            digest=$(rpm -qp --dump "$f" | awk '$1 ~ /resources\/mandord$/ {print $4}')
+            [ "$digest" = "$hash" ] || { echo "hash mandord di $(basename "$f") berbeda: '$digest'"; rpm -qp --dump "$f" | grep mandord || true; exit 1; }
+            echo "$(basename "$f"): mandord $digest"
+          done
+          for f in target/release/bundle/appimage/*.AppImage; do
+            app=$(realpath "$f")
+            (cd "$x" && "$app" --appimage-extract >/dev/null)
+            check "$x/squashfs-root" "$(basename "$f")"
+          done
       - name: SHA256SUMS
         working-directory: apps/desktop/src-tauri/target/release/bundle
         run: |

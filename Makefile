@@ -37,7 +37,7 @@ test:
 # agar target/llvm-cov-target tidak terus membesar di setiap run.
 cover-check:
 	cargo llvm-cov clean --workspace
-	CARGO_INCREMENTAL=0 cargo llvm-cov --workspace --locked --summary-only \
+	CARGO_INCREMENTAL=0 cargo llvm-cov --workspace --locked --no-fail-fast --summary-only \
 		--ignore-filename-regex 'crates/mandord/' \
 		--fail-under-lines $(COVER_MIN)
 

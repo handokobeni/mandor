@@ -1091,7 +1091,7 @@ mod tests {
         assert!(cfg["mcpServers"].get("mandor").is_some());
 
         let spec = agent.spec(&req, Some(path));
-        let state = agent.review_state_path("rv1").display().to_string();
+        let state = shell_quote(&agent.review_state_path("rv1").display().to_string());
         assert_eq!(
             spec.hook_command,
             format!("/opt/mandord hook --mcp mandor --review {state}")

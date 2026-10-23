@@ -28,6 +28,7 @@
   import { startParams } from '#lib/workspaces.ts';
   import PlanningPicker from './PlanningPicker.svelte';
   import ReviewPicker from './ReviewPicker.svelte';
+  import GroupCardPicker from './GroupCardPicker.svelte';
   import { REVIEW_KEY, restoreReview, type ReviewChoice } from '#lib/planning.ts';
   import type { DesignSourceView } from '#lib/protocol/DesignSourceView.ts';
 
@@ -56,6 +57,9 @@
   }
   let repoId = $state(initialRepo());
   let note = $state('');
+  // Start together: kartu satu flow dalam urutan pengerjaan; satu kartu = Start biasa.
+  let groupOrder = $state<string[]>([]);
+  const grouped = $derived(action === 'start' && groupOrder.length > 1);
   let phase = $state<'form' | 'running' | 'done' | 'failed'>('form');
   let steps = $state<Step[]>([]);
   let runId = $state<string | null>(null);
@@ -123,9 +127,10 @@
     phase = 'running';
     current = 'claiming';
     steps = stepsAt(defs, current);
+    const progressId = grouped ? groupOrder[0] : card.record_id;
     const off = rpc.on('start.progress', (p) => {
       const ev = p as StartProgressView;
-      if (ev.record_id !== card.record_id || phase !== 'running') return;
+      if (ev.record_id !== progressId || phase !== 'running') return;
       current = ev.step;
       steps = stepsAt(defs, current);
     });
@@ -134,7 +139,7 @@
       remember(REVIEW_KEY, review);
     }
     try {
-      const params =
+      const base =
         action === 'start'
           ? {
               ...startParams({
@@ -148,7 +153,14 @@
               reviewer_skill: review.reviewerSkill || null
             }
           : { record_id: card.record_id, repo_id: repoId };
-      const run = await rpc.request<{ id: string }>(action === 'start' ? 'runs.start' : 'runs.takeover', params);
+      let method = action === 'start' ? 'runs.start' : 'runs.takeover';
+      let params: object = base;
+      if (grouped) {
+        const { record_id: _first, ...rest } = base;
+        method = 'runs.start_group';
+        params = { ...rest, record_ids: groupOrder };
+      }
+      const run = await rpc.request<{ id: string }>(method, params);
       steps = stepsAt(defs, 'done');
       runId = run.id;
       phase = 'done';
@@ -263,6 +275,7 @@
         </div>
         {/if}
         {#if action === 'start'}
+          <GroupCardPicker {rpc} recordId={card.record_id} bind:order={groupOrder} />
           <PlanningPicker {skills} bind:choice={planning} />
           <ReviewPicker {sources} {skills} {dropped} bind:choice={review} />
           <div class="grid gap-1.5">
@@ -291,7 +304,7 @@
       {#if phase === 'form'}
         <Button variant="ghost" onclick={onclose}>Cancel</Button>
         <Button disabled={!canGo} onclick={go}>
-          {#if action === 'start'}<Play />Start{:else}<ArrowLeftRight />Take over{/if}
+          {#if action === 'start'}<Play />{grouped ? `Start ${groupOrder.length} cards` : 'Start'}{:else}<ArrowLeftRight />Take over{/if}
         </Button>
       {:else if phase === 'running'}
         <Button disabled><LoaderCircle class="spin" />{action === 'start' ? 'Starting' : 'Taking over'}</Button>

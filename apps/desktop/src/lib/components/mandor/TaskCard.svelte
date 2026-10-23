@@ -1,6 +1,8 @@
 <script lang="ts">
   import { acChip, runLabel } from '#lib/board.ts';
   import ListChecks from '@lucide/svelte/icons/list-checks';
+  import Layers from '@lucide/svelte/icons/layers';
+  import { progress, progressText } from '#lib/group.ts';
   import Palette from '@lucide/svelte/icons/palette';
   import ArrowLeftRight from '@lucide/svelte/icons/arrow-left-right';
   import ArrowRight from '@lucide/svelte/icons/arrow-right';
@@ -120,6 +122,11 @@
         {#if chip}
           <span class="tc-ac" data-tone={chip.tone} title="Acceptance criteria review">
             <ListChecks class="icon-sm" aria-hidden="true" />{chip.text}
+          </span>
+        {/if}
+        {#if card.run.cards.length > 0}
+          <span class="tc-ac" title={card.start_blocked ?? 'Group run'}>
+            <Layers class="icon-sm" aria-hidden="true" />{progressText(progress(card.run.cards))}
           </span>
         {/if}
         {#if card.run.ac && card.run.ac.design_gaps > 0}

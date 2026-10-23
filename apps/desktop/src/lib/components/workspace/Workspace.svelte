@@ -74,6 +74,13 @@
   import RunAppControl from './RunAppControl.svelte';
   import TaskDetails from './TaskDetails.svelte';
   import TaskTab from './TaskTab.svelte';
+  import GroupProgress from './GroupProgress.svelte';
+  import ChangedCardsDialog from './ChangedCardsDialog.svelte';
+  import SkipForward from '@lucide/svelte/icons/skip-forward';
+  import CircleCheck from '@lucide/svelte/icons/circle-check';
+  import Play from '@lucide/svelte/icons/play';
+  import OctagonX from '@lucide/svelte/icons/octagon-x';
+  import { cardKey, changedCards, groupAction } from '#lib/group.ts';
 
   let { rpc, run }: { rpc: Rpc; run: RunView } = $props();
 
@@ -93,6 +100,58 @@
   let gateDialog = $state<'manual' | 'anyway' | 'warn' | null>(null);
   let blockedOpen = $state(false);
   let syncWarning = $state<string | null>(null);
+
+  // Run grup (plan run grup U9).
+  const grouped = $derived(run.cards.length > 0);
+  const nextAction = $derived(groupAction(run));
+  // Kunci kartu dari hasil Push yang tertahan; run.cards bisa belum diperbarui.
+  let changedKeys = $state<string[]>([]);
+  const changedOpen = $derived(changedKeys.length > 0);
+  const changedList = $derived.by(() => {
+    const fromRun = changedCards(run.cards);
+    return fromRun.length > 0 ? fromRun : run.cards.filter((c) => changedKeys.includes(cardKey(c)));
+  });
+  const nextKey = $derived.by(() => {
+    const next = run.cards.find((c) => c.state === 'pending');
+    return next ? cardKey(next) : null;
+  });
+
+  async function groupStep(): Promise<void> {
+    if (nextAction === 'continue') {
+      await act(() => rpc.request('runs.continue_group', { run_id: run.id }));
+    } else {
+      await act(
+        () => rpc.request('runs.next_card', { run_id: run.id }),
+        nextAction === 'finish' ? 'Card committed. Review the AC, then Push & PR.' : undefined
+      );
+    }
+  }
+
+  async function decideCard(recordId: string, decision: 'revert' | 'keep', reason: string | null): Promise<void> {
+    const c = run.cards.find((x) => x.record_id === recordId);
+    const k = c ? cardKey(c) : recordId;
+    busy = true;
+    try {
+      const res = await rpc.request<{ outcome: string }>('runs.gate_card_decision', {
+        run_id: run.id,
+        record_id: recordId,
+        decision,
+        reason
+      });
+      if (res.outcome === 'revert_conflict') {
+        toast.error(`Revert conflict on ${k}`, { description: 'Nothing changed in the branch. Resolve it there, or keep the card.' });
+        return;
+      }
+      toast.success(res.outcome === 'reverted' ? `Reverted ${k}. Review the AC again.` : `Kept ${k} in the PR`);
+      changedKeys = changedKeys.filter((x) => x !== k);
+      if (changedList.length <= 1) changedKeys = [];
+      await ledger.load();
+    } catch (err) {
+      toast.error('Something went wrong', { description: message(err) });
+    } finally {
+      busy = false;
+    }
+  }
 
   // Buku AC run (Rilis 2): dimuat ulang saat run berganti.
   const ledger = new LedgerStore();
@@ -283,6 +342,12 @@
           toast.error(`Push blocked by ${res.failed.join(', ')}`);
           await ledger.load();
           break;
+        case 'cards_changed':
+          toast.warning(`${res.changed_cards.join(', ')} changed in Lark`, {
+            description: 'Decide whether to revert or keep each card before the AC review and the PR.'
+          });
+          changedKeys = res.changed_cards;
+          break;
         default:
           toast.warning(`Needs your check: ${res.unverified.join(', ')}`);
           await ledger.load();
@@ -438,6 +503,12 @@
     <span class="run" data-tone="working"><LoaderCircle class="spin" aria-hidden="true" /><span class="lbl">Reviewing the AC. Messages you send now are queued.</span></span>
   {:else if working}
     <span class="muted">Agent is working. Messages you send now are queued.</span>
+  {:else if run.state === 'awaiting_dev' && nextAction === 'next'}
+    <span class="muted">Card turn finished. Reply, or press Next card to commit it and start {nextKey}.</span>
+  {:else if run.state === 'awaiting_dev' && nextAction === 'finish'}
+    <span class="muted">Last card turn finished. Reply, or finish the card to commit it before Push &amp; PR.</span>
+  {:else if run.state === 'awaiting_dev' && nextAction === 'continue'}
+    <span class="muted">A card left the group. Continue with {nextKey}, or stop the group.</span>
   {:else if run.state === 'awaiting_dev'}
     <span class="muted">Turn finished. Reply, or push when the changes look right.</span>
   {:else if run.state === 'publishing'}
@@ -478,6 +549,10 @@
       <Button size="sm" disabled={busy} onclick={continueToPlan}><ClipboardList />Continue to plan</Button>
     {:else if planning && run.state === 'awaiting_dev'}
       <Button size="sm" disabled={busy || !run.plan} onclick={approvePlan}><ListChecks />Approve plan &amp; implement</Button>
+    {:else if nextAction}
+      <Button size="sm" disabled={busy} onclick={() => void groupStep()}>
+        {#if nextAction === 'next'}<SkipForward />Next card{:else if nextAction === 'finish'}<CircleCheck />Finish card{:else}<Play />Continue with {nextKey}{/if}
+      </Button>
     {:else if run.state === 'awaiting_dev'}
       {#if files !== null && files.length === 0}<span class="muted" style="font-size:12px">No changes to push yet</span>{/if}
       <Popover.Root bind:open={blockedOpen}>
@@ -538,6 +613,13 @@
         {/if}
         <DropdownMenu.Item onSelect={() => copyText(key, `Copied ${key}`)}><Copy />Copy task key</DropdownMenu.Item>
         <DropdownMenu.Separator />
+        {#if grouped && !working}
+          <DropdownMenu.Item
+            variant="destructive"
+            onSelect={() => act(() => rpc.request('runs.stop_group', { run_id: run.id }), 'Group stopped. Finished cards were pushed without a PR.')}
+            ><OctagonX />Stop group</DropdownMenu.Item
+          >
+        {/if}
         <DropdownMenu.Item variant="destructive" onSelect={() => (closeOpen = true)}><CircleX />Close run</DropdownMenu.Item>
       </DropdownMenu.Content>
     </DropdownMenu.Root>
@@ -580,6 +662,14 @@
       </Alert.Root>
     {/if}
   </div>
+{/if}
+
+{#if grouped}
+  <GroupProgress
+    cards={run.cards}
+    busy={busy || working}
+    onremove={(id) => act(() => rpc.request('runs.remove_card', { run_id: run.id, record_id: id }), 'Card removed. Move it back to To Do in Lark.')}
+  />
 {/if}
 
 <Tabs.Root bind:value={tab} class="ws-tabs">
@@ -673,6 +763,7 @@
           onreview={() => void requestReview('manual')}
           onsend={sendFindings}
           onfile={(p) => void openFile(p)}
+          cards={run.cards}
         />
       </section>
     {/if}
@@ -747,6 +838,15 @@
     {syncWarning}
     oncancel={() => (gateDialog = null)}
     onconfirm={(p) => void push(p)}
+  />
+{/if}
+
+{#if changedOpen && changedList.length > 0}
+  <ChangedCardsDialog
+    cards={changedList}
+    {busy}
+    oncancel={() => (changedKeys = [])}
+    ondecide={(id, d, reason) => void decideCard(id, d, reason)}
   />
 {/if}
 

@@ -140,4 +140,4 @@ Build dev app di Windows atau Linux tanpa biner daemon butuh placeholder; app bu
 printf 'placeholder\n' > apps/desktop/src-tauri/resources/mandord
 ```
 
-Untuk Windows dengan daemon di WSL, ikuti `docs/runbook/setup-wsl.md`.
+Untuk Windows dengan daemon di WSL, ikuti `docs/runbook/setup-wsl.md`. Untuk Linux dari paket `.deb`, `.rpm`, atau AppImage, ikuti `docs/runbook/setup-linux.md`.

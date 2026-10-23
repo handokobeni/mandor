@@ -33,6 +33,10 @@ pub struct Config {
     /// Pengelola proses daemon, dari `INVOCATION_ID` yang di-set systemd.
     pub managed_by: ManagedBy,
     /// `mandord install`: direktori biner terpasang (`~/.local/bin`).
+    #[cfg_attr(
+        not(target_os = "linux"),
+        allow(dead_code, reason = "hanya dipakai `mandord install` (Linux)")
+    )]
     pub bin_dir: PathBuf,
     /// `mandord install`: direktori unit systemd user
     /// (`$XDG_CONFIG_HOME/systemd/user`, default `~/.config/systemd/user`).
@@ -40,8 +44,16 @@ pub struct Config {
     /// Program `systemctl` (`MANDOR_SYSTEMCTL`, default `systemctl`).
     pub systemctl: PathBuf,
     /// Program `loginctl` (`MANDOR_LOGINCTL`, default `loginctl`).
+    #[cfg_attr(
+        not(target_os = "linux"),
+        allow(dead_code, reason = "hanya dipakai `mandord install` (Linux)")
+    )]
     pub loginctl: PathBuf,
     /// Nama pengguna untuk status linger (`USER`).
+    #[cfg_attr(
+        not(target_os = "linux"),
+        allow(dead_code, reason = "hanya dipakai `mandord install` (Linux)")
+    )]
     pub user: Option<String>,
     /// Penjaga keep-awake (`MANDOR_KEEP_AWAKE_CMD`, array JSON argv).
     /// `Err` bila nilainya tidak valid; daemon tetap start dan melaporkan

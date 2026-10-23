@@ -1,7 +1,7 @@
 //! Skenario U3 (plan service OS): `mandord install`, `install --check`, dan
 //! `mandord uninstall` dengan HOME sementara serta `systemctl`/`loginctl` palsu.
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
-#![cfg(unix)]
+#![cfg(target_os = "linux")]
 
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};

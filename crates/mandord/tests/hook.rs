@@ -61,6 +61,7 @@ fn input_rusak_menolak_dan_tanpa_konfigurasi_tetap_bekerja() {
     assert_eq!(hook(&bash("cargo test"), true).0, 0);
 }
 
+#[cfg(unix)]
 fn file_tool(tool: &str, path: &std::path::Path) -> String {
     serde_json::json!({"hook_event_name": "PreToolUse", "tool_name": tool, "tool_input": {"file_path": path}}).to_string()
 }

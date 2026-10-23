@@ -222,11 +222,13 @@ mod tests {
 
     const G: i64 = 60_000;
 
+    /// Proses masih ada (Linux dan macOS; `/proc` tidak ada di macOS).
     fn alive(pid: u32) -> bool {
-        std::path::Path::new(&format!("/proc/{pid}")).exists()
-            && !std::fs::read_to_string(format!("/proc/{pid}/stat"))
-                .unwrap_or_default()
-                .contains(") Z ")
+        std::process::Command::new("kill")
+            .args(["-0", &pid.to_string()])
+            .stderr(std::process::Stdio::null())
+            .status()
+            .is_ok_and(|s| s.success())
     }
 
     /// Penjaga tiruan: menahan sampai stdin EOF, seperti `--keep-awake`.
@@ -264,7 +266,11 @@ mod tests {
 
     #[tokio::test]
     async fn penjaga_yang_keluar_dijalankan_ulang_lalu_failing() {
-        let argv = Some(Ok(vec!["/bin/true".to_owned()]));
+        let argv = Some(Ok(vec![
+            "/bin/sh".to_owned(),
+            "-c".to_owned(),
+            "exit 0".to_owned(),
+        ]));
         let mut m = Monitor::new(argv, G);
         let mut now = 0;
         for _ in 0..12 {

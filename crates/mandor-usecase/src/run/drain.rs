@@ -114,6 +114,12 @@ impl DrainGate {
         Ok(DrainOutcome::Idle)
     }
 
+    /// Jendela drain sedang aktif.
+    #[must_use]
+    pub fn is_draining(&self, now_ms: i64) -> bool {
+        lock(&self.state).draining(now_ms)
+    }
+
     /// Membatalkan drain; kerja baru kembali diterima.
     pub fn undrain(&self) {
         lock(&self.state).draining_until = None;

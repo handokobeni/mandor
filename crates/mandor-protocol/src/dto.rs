@@ -35,6 +35,10 @@ pub struct StatusResult {
     #[serde(default)]
     #[ts(optional)]
     pub managed_by: Option<String>,
+    /// Daemon sedang bersiap untuk pembaruan dan menolak kerja baru.
+    #[serde(default)]
+    #[ts(optional)]
+    pub draining: Option<bool>,
     /// Keadaan keep-awake: `not_configured`, `off`, `held`, atau `failing`.
     #[serde(default)]
     #[ts(optional)]

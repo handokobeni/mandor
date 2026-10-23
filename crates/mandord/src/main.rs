@@ -7,6 +7,8 @@
 //!   client yang tidak bisa membaca `daemon.json` langsung (mode WSL).
 //! - `mcp`: server MCP ledger (stdio) untuk satu giliran agent.
 //! - `hook`: hook `PreToolUse` Claude Code untuk agent; fail-closed (exit 2).
+//! - `install [--check] [--keep-awake-cmd <json>]` dan `uninstall [--force]`:
+//!   memasang atau melepas daemon sebagai service systemd user.
 
 mod app;
 mod apps;
@@ -15,6 +17,7 @@ mod connect;
 mod discovery;
 mod dispatch;
 mod hook;
+mod install;
 mod mcp;
 mod prereq;
 mod prod;
@@ -59,12 +62,24 @@ async fn run(args: Vec<String>) -> ExitCode {
         Some("token") => connect::print_token(&cfg).await,
         Some("mcp") => mcp::run(&cfg).await,
         Some("--version") => print_version().await,
+        Some("install") => return exit(install::run_install(&cfg, &args[1..]).await),
+        Some("uninstall") => return exit(install::run_uninstall(&cfg, &args[1..]).await),
         Some(other) => Err(anyhow::anyhow!(
-            "unknown subcommand: {other} (use serve, connect, token, mcp, or hook)"
+            "unknown subcommand: {other} (use serve, connect, token, mcp, install, uninstall, or hook)"
         )),
     };
     match result {
         Ok(()) => ExitCode::SUCCESS,
+        Err(err) => fail(&err),
+    }
+}
+
+/// Kode keluar `install`/`uninstall`: hasilnya sudah tercetak sebagai JSON;
+/// hasil `error` keluar dengan kode 1.
+fn exit(result: anyhow::Result<bool>) -> ExitCode {
+    match result {
+        Ok(true) => ExitCode::SUCCESS,
+        Ok(false) => ExitCode::FAILURE,
         Err(err) => fail(&err),
     }
 }

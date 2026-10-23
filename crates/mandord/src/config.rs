@@ -32,6 +32,17 @@ pub struct Config {
     pub base_env: Vec<(String, String)>,
     /// Pengelola proses daemon, dari `INVOCATION_ID` yang di-set systemd.
     pub managed_by: ManagedBy,
+    /// `mandord install`: direktori biner terpasang (`~/.local/bin`).
+    pub bin_dir: PathBuf,
+    /// `mandord install`: direktori unit systemd user
+    /// (`$XDG_CONFIG_HOME/systemd/user`, default `~/.config/systemd/user`).
+    pub systemd_user_dir: PathBuf,
+    /// Program `systemctl` (`MANDOR_SYSTEMCTL`, default `systemctl`).
+    pub systemctl: PathBuf,
+    /// Program `loginctl` (`MANDOR_LOGINCTL`, default `loginctl`).
+    pub loginctl: PathBuf,
+    /// Nama pengguna untuk status linger (`USER`).
+    pub user: Option<String>,
 }
 
 /// Siapa yang mengelola siklus hidup proses daemon (KTD-44).
@@ -100,6 +111,20 @@ impl Config {
             .collect();
         let managed_by =
             ManagedBy::from_invocation_id(std::env::var("INVOCATION_ID").ok().as_deref());
+        let bin_dir = user_home.join(".local").join("bin");
+        let systemd_user_dir = std::env::var_os("XDG_CONFIG_HOME")
+            .filter(|v| !v.is_empty())
+            .map_or_else(|| user_home.join(".config"), PathBuf::from)
+            .join("systemd")
+            .join("user");
+        let program = |key: &str, default: &str| {
+            std::env::var_os(key)
+                .filter(|v| !v.is_empty())
+                .map_or_else(|| PathBuf::from(default), PathBuf::from)
+        };
+        let systemctl = program("MANDOR_SYSTEMCTL", "systemctl");
+        let loginctl = program("MANDOR_LOGINCTL", "loginctl");
+        let user = std::env::var("USER").ok().filter(|u| !u.is_empty());
         Ok(Self {
             home,
             user_home,
@@ -113,6 +138,11 @@ impl Config {
             mcp_token,
             base_env,
             managed_by,
+            bin_dir,
+            systemd_user_dir,
+            systemctl,
+            loginctl,
+            user,
         })
     }
 

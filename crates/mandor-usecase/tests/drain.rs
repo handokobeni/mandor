@@ -123,7 +123,9 @@ async fn drain_kedua_tidak_memperpanjang_jendela() {
 async fn undrain_membuka_kembali_kerja_baru() {
     let (_lark, clock, st) = setup();
     assert_eq!(drain(&st, &clock).await, DrainOutcome::Idle);
+    assert!(st.svc.drain_gate().is_draining(clock.now_ms()));
     st.svc.drain_gate().undrain();
+    assert!(!st.svc.drain_gate().is_draining(clock.now_ms()));
     st.svc.start("rec1", "repo1", None).await.unwrap();
 }
 

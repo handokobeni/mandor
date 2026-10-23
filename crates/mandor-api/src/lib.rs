@@ -7,11 +7,13 @@
 //!
 //! Crate ini satu-satunya pengguna `axum` selain `mandord`.
 
+mod client;
 mod mcp;
 mod mcp_client;
 mod relay;
 mod server;
 
+pub use client::DaemonClient;
 pub use mcp::{LedgerRpc, McpSession};
 pub use mcp_client::mcp_lines;
 pub use relay::{RelayError, relay_lines};

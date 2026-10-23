@@ -15,6 +15,10 @@ busy?: boolean,
  */
 managed_by?: string, 
 /**
+ * Daemon sedang bersiap untuk pembaruan dan menolak kerja baru.
+ */
+draining?: boolean, 
+/**
  * Keadaan keep-awake: `not_configured`, `off`, `held`, atau `failing`.
  */
 keep_awake?: string, };

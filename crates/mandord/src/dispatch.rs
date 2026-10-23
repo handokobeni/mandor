@@ -184,6 +184,7 @@ impl AppDispatch {
                 active.iter().map(|r| r.state),
             )),
             managed_by: Some(self.app.cfg.managed_by.as_str().to_owned()),
+            draining: Some(self.app.drain.is_draining(now_ms())),
             keep_awake: Some("not_configured".to_owned()),
         })
     }

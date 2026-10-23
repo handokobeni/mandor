@@ -14,6 +14,7 @@ pub mod hook_review;
 pub mod kanban;
 pub mod push_gate;
 pub mod run;
+pub mod service;
 pub mod task;
 pub mod trust;
 

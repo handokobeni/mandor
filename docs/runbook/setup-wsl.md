@@ -13,7 +13,10 @@ Windows (R16, KTD-2, KTD-18). UI bicara ke daemon lewat relay stdio
 sudo apt-get update && sudo apt-get install -y git build-essential pkg-config
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 
-# Bangun dan pasang daemon
+# Pasang daemon (pilih salah satu):
+# a) Dari GitHub Release (tag v*): unduh mandord-linux-x86_64.tar.gz, lalu
+mkdir -p ~/.local/bin && tar -xzf mandord-linux-x86_64.tar.gz -C ~/.local/bin
+# b) Bangun sendiri
 git clone <repo mandor> ~/src/mandor && cd ~/src/mandor
 cargo build --release --locked --bin mandord
 install -m 0755 target/release/mandord ~/.local/bin/mandord
@@ -33,7 +36,11 @@ Repo yang dikerjakan harus berada di sistem berkas WSL (mis. `~/work/app`), buka
 
 ## 2. Di Windows
 
-1. Pasang app mandor (installer Tauri).
+1. Pasang app mandor dengan installer Windows (`mandor_<versi>_x64-setup.exe`).
+   Installer dibuat workflow `release` di GitHub Actions: lampiran GitHub Release
+   untuk tag `v*`, atau artifact **mandor-windows-installer** dari run manual
+   (Actions → release → Run workflow). Installer belum ditandatangani, jadi
+   Windows SmartScreen menampilkan peringatan: pilih **More info → Run anyway**.
 2. Bila distro bukan default, set variabel environment pengguna
    `MANDOR_LINK=wsl:Ubuntu-24.04` (nama dari `wsl -l -v`). Default: distro WSL
    default.

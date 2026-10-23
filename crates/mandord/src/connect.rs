@@ -84,7 +84,7 @@ async fn start_detached(cfg: &Config) -> anyhow::Result<DaemonInfo> {
 /// tidak ada atau `systemctl` gagal; pemanggil lalu memakai setsid.
 async fn start_service(cfg: &Config) -> bool {
     let unit = cfg.systemd_user_dir.join(UNIT_NAME);
-    if tokio::fs::metadata(&unit).await.is_err() {
+    if !cfg.uses_default_home() || tokio::fs::metadata(&unit).await.is_err() {
         return false;
     }
     let started = mandor_proc::run(

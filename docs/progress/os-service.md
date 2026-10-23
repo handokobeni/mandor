@@ -13,6 +13,10 @@ Plan: `docs/plans/2026-10-23-001-feat-daemon-os-service-installer-plan.md`. Caku
 
 `docs/runbook/setup-wsl.md` diperbarui: aktifkan systemd, `mandord install` dari biner rilis atau hasil build, arti setiap `result`, `install --check`, pembaruan, migrasi dari daemon setsid, `uninstall` (dan `--force`), serta pemecahan masalah. `uninstall` kini melaporkan status linger yang sebenarnya.
 
+## Temuan saat uji
+
+- `connect` dan `install` dengan `MANDOR_HOME` selain `~/.mandor` sempat memakai unit systemd global, yang melayani `~/.mandor`; `connect` lalu menunggu daemon yang tidak pernah muncul (terlihat dari test `daemon.rs` setelah service sungguhan terpasang). Kini service hanya dipakai untuk direktori data bawaan; `install` dengan `MANDOR_HOME` lain hanya menyalin biner dan memberi peringatan.
+
 ## Gerbang
 
 `make check` hijau (cakupan baris 89,9%), `bun run check` dan `bun run test` (100) hijau, TS protokol diregenerasi (`StatusResult` opsional `busy`, `managed_by`, `draining`, `keep_awake`; `DrainResult` baru).

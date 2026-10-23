@@ -146,6 +146,14 @@ impl Config {
         })
     }
 
+    /// Direktori data adalah `~/.mandor` bawaan. Unit systemd hanya melayani
+    /// direktori ini, jadi `install` dan `connect` dengan `MANDOR_HOME` lain
+    /// tidak memakai service.
+    #[must_use]
+    pub fn uses_default_home(&self) -> bool {
+        self.home == self.user_home.join(".mandor")
+    }
+
     /// Path database `SQLite`.
     #[must_use]
     pub fn db_path(&self) -> PathBuf {

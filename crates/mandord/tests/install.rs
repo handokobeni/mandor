@@ -561,3 +561,35 @@ fn connect_ke_daemon_yang_sudah_berjalan_tidak_menyalakan_apa_pun() {
     let _ = daemon.kill();
     let _ = daemon.wait();
 }
+
+#[test]
+fn connect_dengan_mandor_home_lain_tidak_memakai_service_global() {
+    let e = env();
+    e.run(&["install"], &[]);
+    e.clear_calls();
+    let other = e.home.join("data-lain");
+    let mut c = e.cmd(&["token"]);
+    let out = c.env("MANDOR_HOME", &other).output().unwrap();
+    assert!(out.status.success());
+    assert!(
+        !e.calls().contains("start mandord.service"),
+        "{}",
+        e.calls()
+    );
+    let info: Value =
+        serde_json::from_slice(&std::fs::read(other.join("daemon.json")).unwrap()).unwrap();
+    let pid = info["pid"].as_u64().unwrap().to_string();
+    let _ = Command::new("kill").args(["-TERM", &pid]).status();
+}
+
+#[test]
+fn install_dengan_mandor_home_lain_tidak_menulis_service() {
+    let e = env();
+    let other = e.home.join("data-lain");
+    let (out, raw) = e.run(&["install"], &[("MANDOR_HOME", other.to_str().unwrap())]);
+    assert!(raw.status.success());
+    assert_eq!(out["service"], "none");
+    assert!(!out["warnings"].as_array().unwrap().is_empty());
+    assert!(!e.unit().exists());
+    assert!(e.installed().exists());
+}

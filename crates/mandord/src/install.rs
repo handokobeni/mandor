@@ -198,7 +198,13 @@ async fn install(
 ) -> anyhow::Result<Report> {
     ensure_safe_dir(&paths.target, &cfg.user_home).await?;
     let (binary, _) = observe_binary(paths).await?;
-    let systemd = systemd_available(cfg).await;
+    let systemd = systemd_available(cfg).await && cfg.uses_default_home();
+    if !cfg.uses_default_home() {
+        warnings.push(
+            "MANDOR_HOME is not the default ~/.mandor; the systemd service was not set up"
+                .to_owned(),
+        );
+    }
     let expected = unit_text(&paths.target.display().to_string(), keep_awake)?;
     let service = observe_service(systemd, &paths.unit, &expected).await;
     let live = observe_running(cfg).await;

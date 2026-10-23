@@ -38,7 +38,7 @@ test:
 cover-check:
 	cargo llvm-cov clean --workspace
 	CARGO_INCREMENTAL=0 cargo llvm-cov --workspace --locked --no-fail-fast --summary-only \
-		--ignore-filename-regex 'crates/mandord/' \
+		--ignore-filename-regex 'crates[/\\]mandord[/\\]' \
 		--fail-under-lines $(COVER_MIN)
 
 build:

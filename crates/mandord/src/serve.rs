@@ -57,6 +57,12 @@ pub async fn run(cfg: Config) -> anyhow::Result<()> {
         token: SecretString::from(token),
         daemon_version: VERSION.to_owned(),
     };
+    let power = crate::power::start(
+        cfg.keep_awake_cmd.clone(),
+        store.clone(),
+        &tracker,
+        shutdown.clone(),
+    );
     let app = Arc::new(App::new(
         cfg.clone(),
         store,
@@ -64,6 +70,7 @@ pub async fn run(cfg: Config) -> anyhow::Result<()> {
         tracker.clone(),
         shutdown.clone(),
         port,
+        power,
     ));
     let booting = Arc::clone(&app);
     tracker.spawn(async move { booting.boot().await });

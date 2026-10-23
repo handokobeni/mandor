@@ -81,7 +81,8 @@ impl Env {
             .env_remove("FAKE_LINGER")
             .env_remove("FAKE_LINGER_FAIL")
             .env_remove("FAKE_START_FAIL")
-            .env_remove("FAKE_START_BIN");
+            .env_remove("FAKE_START_BIN")
+            .env_remove("MANDOR_KEEP_AWAKE_CMD");
         c
     }
 
@@ -672,6 +673,67 @@ fn run_publish_juga_menunda_install() {
     let (out, _) = e.run(&["install"], &[]);
     assert_eq!(out["result"], "deferred");
     assert!(!e.installed().exists());
+    let _ = daemon.kill();
+    let _ = daemon.wait();
+}
+
+#[test]
+fn daemon_memegang_keep_awake_selama_run_bekerja_dan_melepas_saat_berhenti() {
+    let e = env();
+    seed_run(&e.data, mandor_domain::RunState::Running);
+    let pidfile = e.home.join("penjaga.pid");
+    let guard = e.home.join("penjaga.sh");
+    std::fs::write(
+        &guard,
+        format!(
+            "#!/bin/sh\necho $$ > '{}'\ncat > /dev/null\n",
+            pidfile.display()
+        ),
+    )
+    .unwrap();
+    std::fs::set_permissions(&guard, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let cmd =
+        serde_json::to_string(&[guard.display().to_string(), "--keep-awake".to_owned()]).unwrap();
+
+    let mut c = e.cmd(&["serve"]);
+    let mut daemon = c
+        .env("MANDOR_KEEP_AWAKE_CMD", &cmd)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .unwrap();
+    let deadline = Instant::now() + Duration::from_secs(15);
+    while !pidfile.exists() || !e.data.join("daemon.json").exists() {
+        assert!(Instant::now() < deadline, "penjaga tidak dijalankan");
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    let guard_pid = std::fs::read_to_string(&pidfile).unwrap().trim().to_owned();
+    let info: Value =
+        serde_json::from_slice(&std::fs::read(e.data.join("daemon.json")).unwrap()).unwrap();
+    let s = status(&e, info["token"].as_str().unwrap());
+    assert_eq!(s["keep_awake"], "held");
+    assert_eq!(s["busy"], true);
+
+    let _ = Command::new("kill")
+        .args(["-TERM", &info["pid"].as_u64().unwrap().to_string()])
+        .status();
+    let _ = daemon.wait();
+    std::thread::sleep(Duration::from_millis(300));
+    assert!(
+        !Path::new(&format!("/proc/{guard_pid}")).exists(),
+        "penjaga berhenti bersama daemon"
+    );
+}
+
+#[test]
+fn tanpa_perintah_keep_awake_status_not_configured() {
+    let e = env();
+    let mut daemon = e.serve(None);
+    let info: Value =
+        serde_json::from_slice(&std::fs::read(e.data.join("daemon.json")).unwrap()).unwrap();
+    let s = status(&e, info["token"].as_str().unwrap());
+    assert_eq!(s["keep_awake"], "not_configured");
     let _ = daemon.kill();
     let _ = daemon.wait();
 }

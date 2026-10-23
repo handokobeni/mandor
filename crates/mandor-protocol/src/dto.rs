@@ -43,6 +43,10 @@ pub struct StatusResult {
     #[serde(default)]
     #[ts(optional)]
     pub keep_awake: Option<String>,
+    /// Pesan error penjaga keep-awake terakhir (untuk `failing`).
+    #[serde(default)]
+    #[ts(optional)]
+    pub keep_awake_error: Option<String>,
 }
 
 /// Hasil `daemon.drain`: `idle` (kerja baru ditolak sampai restart) atau

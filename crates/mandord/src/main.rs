@@ -19,6 +19,7 @@ mod dispatch;
 mod hook;
 mod install;
 mod mcp;
+mod power;
 mod prereq;
 mod prod;
 mod review_state;

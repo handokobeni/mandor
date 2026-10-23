@@ -37,6 +37,8 @@ pub struct App {
     pub apps: Arc<crate::apps::ProcApps>,
     /// Gerbang drain untuk pembaruan; hidup sepanjang daemon, bukan sesi Lark.
     pub drain: Arc<mandor_usecase::run::DrainGate>,
+    /// Status keep-awake dari pemantau (KTD-45).
+    pub power: crate::power::PowerStatus,
     settings: RwLock<Option<LarkSettings>>,
     session: RwLock<Option<Arc<LarkSession>>>,
     /// Nama akun Lark yang login (token lama tidak menyimpannya).
@@ -58,6 +60,7 @@ impl App {
         tracker: TaskTracker,
         shutdown: CancellationToken,
         rpc_port: u16,
+        power: crate::power::PowerStatus,
     ) -> Self {
         let apps = Arc::new(crate::apps::ProcApps::new(
             cfg.shell.clone(),
@@ -66,6 +69,7 @@ impl App {
         Self {
             apps,
             drain: Arc::default(),
+            power,
             cfg,
             store,
             events,

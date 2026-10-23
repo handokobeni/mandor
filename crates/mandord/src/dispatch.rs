@@ -175,6 +175,7 @@ impl AppDispatch {
             .list_active()
             .await
             .map_err(internal)?;
+        let power = self.app.power.get();
         ok(&StatusResult {
             version: VERSION.to_owned(),
             uptime_ms: u64::try_from(self.app.started.elapsed().as_millis()).unwrap_or(u64::MAX),
@@ -185,7 +186,8 @@ impl AppDispatch {
             )),
             managed_by: Some(self.app.cfg.managed_by.as_str().to_owned()),
             draining: Some(self.app.drain.is_draining(now_ms())),
-            keep_awake: Some("not_configured".to_owned()),
+            keep_awake: Some(power.state.as_str().to_owned()),
+            keep_awake_error: power.error,
         })
     }
 

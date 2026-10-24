@@ -4,7 +4,7 @@ import type { Notification } from '#lib/protocol/Notification.ts';
 import type { Response } from '#lib/protocol/Response.ts';
 import type { RpcError } from '#lib/protocol/RpcError.ts';
 
-export const PROTOCOL_VERSION = '1.0';
+export const PROTOCOL_VERSION = '1.1';
 
 /** Saluran baris JSON ke daemon (relay stdio lewat Tauri, atau fake di test). */
 export interface Transport {
@@ -15,7 +15,7 @@ export interface Transport {
 
 export type ConnectionState =
   | { kind: 'connecting' }
-  | { kind: 'ready'; daemonVersion: string }
+  | { kind: 'ready'; daemonVersion: string; protocol: string }
   | { kind: 'error'; message: string; fatal: boolean };
 
 /** Error dari daemon atau dari koneksi. */
@@ -74,10 +74,10 @@ export class RpcClient {
         token,
         protocol: PROTOCOL_VERSION,
         client: 'mandor-desktop'
-      }, true)) as { daemon_version: string };
+      }, true)) as { daemon_version: string; protocol: string };
       this.ready = true;
       this.attempt = 0;
-      this.setState({ kind: 'ready', daemonVersion: ok.daemon_version });
+      this.setState({ kind: 'ready', daemonVersion: ok.daemon_version, protocol: ok.protocol });
     } catch (err) {
       const failure = toFailure(err);
       const fatal = failure.code === 'version_mismatch';

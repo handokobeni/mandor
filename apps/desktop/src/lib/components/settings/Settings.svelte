@@ -6,6 +6,7 @@
   import Layers from '@lucide/svelte/icons/layers';
   import Frame from '@lucide/svelte/icons/frame';
   import Link from '@lucide/svelte/icons/link';
+  import Server from '@lucide/svelte/icons/server';
   import DesignSourceSettings from './DesignSourceSettings.svelte';
   import type { Rpc } from '#lib/rpc.ts';
   import { nav, type SettingsSection } from '#lib/stores/nav.svelte.ts';
@@ -15,6 +16,7 @@
   import LarkSettings from './LarkSettings.svelte';
   import RepoSettings from './RepoSettings.svelte';
   import WorkspaceSettings from './WorkspaceSettings.svelte';
+  import VmSettings from './VmSettings.svelte';
 
   let { rpc }: { rpc: Rpc } = $props();
 
@@ -25,6 +27,7 @@
     { id: 'design-sources', label: 'Design sources', icon: Frame },
     { id: 'general', label: 'General', icon: Bolt },
     { id: 'background', label: 'Background work', icon: MoonStar },
+    { id: 'vm', label: 'Overnight VM', icon: Server },
     { id: 'about', label: 'About', icon: Info }
   ];
 </script>
@@ -56,6 +59,8 @@
       <GeneralSettings {rpc} />
     {:else if nav.section === 'background'}
       <BackgroundSettings />
+    {:else if nav.section === 'vm'}
+      <VmSettings />
     {:else}
       <AboutSettings {rpc} />
     {/if}

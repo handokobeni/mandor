@@ -2,7 +2,9 @@ use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
 /// Versi protokol `MAJOR.MINOR`. Mayor berbeda ditolak saat handshake.
-pub const PROTOCOL_VERSION: &str = "1.0";
+/// Minor 1: klaim membawa id daemon (KTD-55 plan VM); app hanya mengaktifkan
+/// link VM bila daemon laptop melaporkan minor 1 atau lebih.
+pub const PROTOCOL_VERSION: &str = "1.1";
 /// Bagian mayor dari [`PROTOCOL_VERSION`].
 pub const PROTOCOL_MAJOR: u32 = 1;
 

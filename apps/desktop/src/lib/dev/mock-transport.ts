@@ -400,7 +400,7 @@ function larkStatus(): unknown {
 function handle(method: string, params: Record<string, unknown>): unknown {
   switch (method) {
     case 'hello':
-      return { daemon_version: '0.1.0-mock', protocol: '1.0' };
+      return { daemon_version: '0.1.0-mock', protocol: '1.1' };
     case 'status':
       return {
         version: '0.1.0-mock',
@@ -766,7 +766,7 @@ export class MockTransport implements Transport {
   }
 
   async token(): Promise<{ token: string; protocol: string }> {
-    return { token: 'mock', protocol: '1.0' };
+    return { token: 'mock', protocol: '1.1' };
   }
 
   async open(onLine: (line: string) => void): Promise<void> {

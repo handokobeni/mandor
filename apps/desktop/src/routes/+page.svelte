@@ -23,6 +23,8 @@
   import type { Rpc } from '#lib/rpc.ts';
   import { board } from '#lib/stores/board.svelte.ts';
   import { connection } from '#lib/stores/connection.svelte.ts';
+  import { vm } from '#lib/stores/vm.svelte.ts';
+  import { supportsVmLink } from '#lib/vm.ts';
   import { lark } from '#lib/stores/lark.svelte.ts';
   import { nav } from '#lib/stores/nav.svelte.ts';
   import { notifications } from '#lib/stores/notifications.svelte.ts';
@@ -73,6 +75,15 @@
       stop = () => client.stop();
     })();
     return () => stop();
+  });
+
+  // Link VM dibuka setelah daemon laptop siap dan mendukung klaim per daemon
+  // (KTD-55 plan VM); tidak di mode contoh.
+  $effect(() => {
+    const s = connection.state;
+    if (s.kind === 'ready' && supportsVmLink(s.protocol) && !location.search.includes('mock')) {
+      untrack(() => void vm.load());
+    }
   });
 
   // Store disambungkan ulang setiap kali koneksi siap (termasuk setelah reconnect).

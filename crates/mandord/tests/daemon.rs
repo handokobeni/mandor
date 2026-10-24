@@ -129,7 +129,7 @@ fn connect_menjalankan_daemon_terlepas_dan_tetap_hidup_setelah_relay_ditutup() {
             json!({"jsonrpc": "2.0", "id": 2, "method": "status", "params": null}),
         ],
     );
-    assert_eq!(replies[0]["result"]["protocol"], "1.0");
+    assert_eq!(replies[0]["result"]["protocol"], "1.1");
     assert_eq!(replies[1]["result"]["repos"], 0);
     assert_eq!(replies[1]["result"]["busy"], false);
     assert_eq!(replies[1]["result"]["managed_by"], "detached");

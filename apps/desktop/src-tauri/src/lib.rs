@@ -7,6 +7,7 @@ mod oauth_callback;
 mod provision;
 mod tray;
 pub mod uninstall;
+mod vm_link;
 mod wslconfig;
 
 use std::path::PathBuf;
@@ -14,10 +15,11 @@ use std::process::ExitCode;
 use std::sync::Arc;
 use std::time::Duration;
 
-use daemon_link::{DaemonLink, LinkError, LinkMode, TokenInfo};
+use daemon_link::{DaemonLink, LinkError, LinkMode, SshVia, TokenInfo};
 use oauth_callback::CallbackError;
 use tauri::{AppHandle, Manager, RunEvent, State, WindowEvent};
 use tauri_plugin_opener::OpenerExt;
+use vm_link::{HostScan, Links, VmError};
 
 /// Konfigurasi client, dibaca sekali saat start.
 #[derive(Debug, Clone)]
@@ -95,9 +97,10 @@ struct ProvisionView {
 #[tauri::command]
 async fn provision_run(
     app: AppHandle,
-    link: State<'_, Arc<DaemonLink>>,
+    links: State<'_, Arc<Links>>,
     prov: State<'_, Arc<Provisioner>>,
 ) -> Result<ProvisionView, String> {
+    let link = &links.laptop;
     let mut last = prov.last.lock().await;
     let runner = match link.mode() {
         LinkMode::Wsl { distro } => provision::Runner::Wsl {
@@ -110,7 +113,7 @@ async fn provision_run(
                 .clone()
                 .ok_or_else(|| "HOME is not set".to_owned())?,
         },
-        LinkMode::Local { .. } => {
+        LinkMode::Local { .. } | LinkMode::Ssh { .. } => {
             return Ok(ProvisionView {
                 runner: None,
                 state: provision::ProvisionState::NotNeeded,
@@ -175,10 +178,10 @@ async fn keep_awake_for(inputs: &provision::Inputs, cfg: &ClientConfig) -> Optio
 /// (KTD-L6 plan paket Linux).
 #[tauri::command]
 async fn daemon_uninstall(
-    link: State<'_, Arc<DaemonLink>>,
+    links: State<'_, Arc<Links>>,
     prov: State<'_, Arc<Provisioner>>,
 ) -> Result<provision::InstallReport, String> {
-    if *link.mode() != LinkMode::LocalInstalled {
+    if *links.laptop.mode() != LinkMode::LocalInstalled {
         return Err("the background service is managed elsewhere on this system".to_owned());
     }
     let home = prov
@@ -267,19 +270,63 @@ async fn wsl_keepalive_set(enabled: bool, prov: State<'_, Arc<Provisioner>>) -> 
     .map_err(|e| e.to_string())
 }
 
+/// Token `hello` daemon pada link `key` (`laptop` atau `vm`).
 #[tauri::command]
-async fn daemon_token(link: State<'_, Arc<DaemonLink>>) -> Result<TokenInfo, LinkError> {
-    link.token().await
+async fn daemon_token(key: String, links: State<'_, Arc<Links>>) -> Result<TokenInfo, LinkError> {
+    links.get(&key).await?.token().await
 }
 
 #[tauri::command]
-async fn daemon_open(app: AppHandle, link: State<'_, Arc<DaemonLink>>) -> Result<(), LinkError> {
-    link.open(app).await
+async fn daemon_open(
+    app: AppHandle,
+    key: String,
+    links: State<'_, Arc<Links>>,
+) -> Result<(), LinkError> {
+    links.get(&key).await?.open(app).await
 }
 
 #[tauri::command]
-async fn daemon_send(message: String, bridge: State<'_, Arc<DaemonLink>>) -> Result<(), LinkError> {
-    bridge.send(&message).await
+async fn daemon_send(
+    key: String,
+    message: String,
+    links: State<'_, Arc<Links>>,
+) -> Result<(), LinkError> {
+    links.get(&key).await?.send(&message).await
+}
+
+/// Direktori konfigurasi app (setelan VM).
+fn config_dir(app: &AppHandle) -> Result<PathBuf, VmError> {
+    app.path()
+        .app_config_dir()
+        .map_err(|e| VmError::Store(e.to_string()))
+}
+
+/// Host VM tersimpan, bila ada.
+#[tauri::command]
+async fn vm_host(app: AppHandle, links: State<'_, Arc<Links>>) -> Result<Option<String>, VmError> {
+    Ok(links.host(&config_dir(&app)?).await)
+}
+
+/// Membaca host key VM untuk dikonfirmasi developer (KTD-67).
+#[tauri::command]
+async fn vm_scan(host: String, links: State<'_, Arc<Links>>) -> Result<HostScan, VmError> {
+    links.scan(host.trim()).await
+}
+
+/// Mempin host key yang dikonfirmasi dan menyimpan VM.
+#[tauri::command]
+async fn vm_trust(
+    app: AppHandle,
+    host: String,
+    links: State<'_, Arc<Links>>,
+) -> Result<(), VmError> {
+    links.trust(host.trim(), &config_dir(&app)?).await
+}
+
+/// Melepas VM.
+#[tauri::command]
+async fn vm_remove(app: AppHandle, links: State<'_, Arc<Links>>) -> Result<(), VmError> {
+    links.remove(&config_dir(&app)?).await
 }
 
 /// Batas waktu pengguna menyelesaikan login Lark di browser.
@@ -317,7 +364,9 @@ pub fn run_uninstall_cleanup() -> ExitCode {
     let cfg = ClientConfig::from_env();
     let distro = match &cfg.mode {
         LinkMode::Wsl { distro } => distro.clone(),
-        LinkMode::Local { .. } | LinkMode::LocalInstalled => return ExitCode::SUCCESS,
+        LinkMode::Local { .. } | LinkMode::LocalInstalled | LinkMode::Ssh { .. } => {
+            return ExitCode::SUCCESS;
+        }
     };
     uninstall::run(distro.as_deref(), cfg.user_profile.as_deref())
 }
@@ -329,7 +378,15 @@ pub fn run() -> ExitCode {
         .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
         .init();
     let cfg = ClientConfig::from_env();
-    let link = Arc::new(DaemonLink::new(cfg.mode.clone()));
+    let link = Arc::new(DaemonLink::new("laptop", cfg.mode.clone()));
+    // Di Windows ssh ke VM berjalan di distro WSL yang sama dengan daemon laptop.
+    let via = match &cfg.mode {
+        LinkMode::Wsl { distro } => SshVia::Wsl {
+            distro: distro.clone(),
+        },
+        _ => SshVia::Native,
+    };
+    let links = Arc::new(Links::new(Arc::clone(&link), via));
     let prov = Arc::new(Provisioner {
         cfg,
         last: tokio::sync::Mutex::new(None),
@@ -338,13 +395,17 @@ pub fn run() -> ExitCode {
     let app = tauri::Builder::default()
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_opener::init())
-        .manage(Arc::clone(&link))
+        .manage(Arc::clone(&links))
         .manage(prov)
         .manage(keep_awake::AppHold::start())
         .invoke_handler(tauri::generate_handler![
             daemon_token,
             daemon_open,
             daemon_send,
+            vm_host,
+            vm_scan,
+            vm_trust,
+            vm_remove,
             oauth_login,
             tray_update,
             provision_run,
@@ -357,6 +418,10 @@ pub fn run() -> ExitCode {
             tray::setup(app)?;
             let link = Arc::clone(&link);
             tauri::async_runtime::spawn(async move { link.start_keeper().await });
+            if let Ok(dir) = app.path().app_config_dir() {
+                let links = Arc::clone(&links);
+                tauri::async_runtime::spawn(async move { links.load(&dir).await });
+            }
             Ok(())
         })
         .on_window_event(|window, event| {
@@ -378,8 +443,8 @@ pub fn run() -> ExitCode {
     };
     app.run(|handle, event| {
         if let RunEvent::Exit = event {
-            let link = Arc::clone(handle.state::<Arc<DaemonLink>>().inner());
-            tauri::async_runtime::block_on(async move { link.shutdown().await });
+            let links = Arc::clone(handle.state::<Arc<Links>>().inner());
+            tauri::async_runtime::block_on(async move { links.shutdown().await });
         }
     });
     ExitCode::SUCCESS

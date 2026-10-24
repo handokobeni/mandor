@@ -331,13 +331,20 @@ fn remote_db_host(words: &[String]) -> Option<String> {
                     .split(',')
                     .map(|h| h.split(':').next().unwrap_or_default().to_owned()),
             );
-            // `?host=` atau `?hostaddr=` di query URL juga host tujuan.
-            if let Some((_, query)) = after.split_once('?') {
-                hosts.extend(query.split('&').filter_map(|kv| {
-                    kv.strip_prefix("host=")
-                        .or_else(|| kv.strip_prefix("hostaddr="))
-                        .map(str::to_owned)
+            // Gagal-tertutup: setiap `host=`/`hostaddr=` di mana pun dalam URL
+            // dianggap host tujuan, dan URL ber-percent-encoding (kunci atau
+            // nilai bisa tersamar) ditolak karena tidak bisa diperiksa pasti.
+            for key in ["host=", "hostaddr="] {
+                hosts.extend(after.match_indices(key).map(|(i, _)| {
+                    after[i + key.len()..]
+                        .split(['&', ' '])
+                        .next()
+                        .unwrap_or_default()
+                        .to_owned()
                 }));
+            }
+            if after.contains('%') {
+                hosts.push("an encoded address".to_owned());
             }
         }
     }
@@ -817,6 +824,8 @@ mod tests {
             "psql 'postgres:///x?host=db.prod.internal'",
             "psql 'postgres://u?x@db.prod.internal/kelola'",
             "psql 'postgres://localhost,db.prod.internal/kelola'",
+            "psql 'postgres://u?x@localhost/db?host=db.prod.internal'",
+            "psql 'postgres://localhost/db?%68ost=db.prod.internal'",
             "git config \\\ncore.pager evil",
             "git -C . config --add include.path ../x",
             "echo x >> .git/worktrees/pgs-1/config.worktree",

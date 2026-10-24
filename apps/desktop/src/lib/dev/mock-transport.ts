@@ -10,6 +10,7 @@ import type { Transport } from '#lib/api/client.ts';
 import type { AcRowView } from '#lib/protocol/AcRowView.ts';
 import type { AppRunView } from '#lib/protocol/AppRunView.ts';
 import { activeRows, gate } from '#lib/ac-review.ts';
+import { background } from '#lib/stores/background.svelte.ts';
 import { history, ledger, scenarioFor, scenarioRows } from './mock-ac.ts';
 
 /** State Run app tiruan per run. */
@@ -681,6 +682,13 @@ function handle(method: string, params: Record<string, unknown>): unknown {
 
 export class MockTransport implements Transport {
   private onLine: ((line: string) => void) | null = null;
+
+  constructor() {
+    // `/?mock&linux`: Background work seperti paket Linux (daemon dipasang app lokal).
+    if (typeof location !== 'undefined' && location.search.includes('linux')) {
+      background.provision = { state: 'up_to_date', systemd: true, linger: true, runner: 'local' };
+    }
+  }
 
   private emit(method: string, params: unknown): void {
     this.onLine?.(JSON.stringify({ jsonrpc: '2.0', method, params }));

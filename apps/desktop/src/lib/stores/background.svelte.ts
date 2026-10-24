@@ -5,8 +5,10 @@ import { invoke } from '@tauri-apps/api/core';
 import {
   appShouldHoldKeepAwake,
   shouldRetryProvision,
+  type InstallReport,
   type KeepAliveView,
-  type ProvisionState
+  type ProvisionView,
+  type Runner
 } from '#lib/background.ts';
 import type { StatusResult } from '#lib/protocol/StatusResult.ts';
 import type { Rpc } from '#lib/rpc.ts';
@@ -19,32 +21,36 @@ function message(err: unknown): string {
 }
 
 class Background {
-  provision = $state<ProvisionState | null>(null);
+  provision = $state<ProvisionView | null>(null);
   status = $state<StatusResult | null>(null);
   keepAlive = $state<KeepAliveView | null>(null);
   keepAliveError = $state<string | null>(null);
-  private running: Promise<ProvisionState> | null = null;
+  private running: Promise<ProvisionView> | null = null;
   private appHold = false;
 
-  /** App memakai daemon di WSL (provisioning berjalan). */
+  /** Tempat app memasang daemon; `null` bila tidak memasang (build dev). */
+  get runner(): Runner | null {
+    return this.provision?.runner ?? null;
+  }
+
+  /** App memakai daemon di WSL. */
   get wsl(): boolean {
-    const s = this.provision?.state;
-    return s !== undefined && s !== 'not_needed';
+    return this.runner === 'wsl';
   }
 
   /** Memasang atau memperbarui daemon sekali; dipanggil sebelum tersambung. */
-  ensureProvisioned(): Promise<ProvisionState> {
+  ensureProvisioned(): Promise<ProvisionView> {
     this.running ??= this.run();
     return this.running;
   }
 
-  private async run(): Promise<ProvisionState> {
+  private async run(): Promise<ProvisionView> {
     try {
-      const p = await invoke<ProvisionState>('provision_run');
+      const p = await invoke<ProvisionView>('provision_run');
       this.provision = p;
       return p;
     } catch (err) {
-      const p: ProvisionState = { state: 'failed', message: message(err) };
+      const p: ProvisionView = { state: 'failed', message: message(err), runner: this.runner };
       this.provision = p;
       return p;
     }
@@ -82,6 +88,22 @@ class Background {
       this.appHold = hold;
     } catch {
       // Di luar Tauri (mode mock) tidak ada pegangan app.
+    }
+  }
+
+  /** Melepas service daemon di Linux sebelum paket dihapus. */
+  async removeService(): Promise<InstallReport> {
+    try {
+      return await invoke<InstallReport>('daemon_uninstall');
+    } catch (err) {
+      return {
+        result: 'error',
+        service: 'none',
+        linger: false,
+        apps_stopped: false,
+        warnings: [],
+        message: message(err)
+      };
     }
   }
 

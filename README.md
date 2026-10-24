@@ -22,10 +22,12 @@ Di WSL, jendela app tampil lewat WSLg (bawaan Windows 11), jadi tidak perlu buil
 
 ## Menjalankan app (mode pengembangan)
 
-1. Pasang dependensi frontend (sekali):
+1. Pasang dependensi frontend dan placeholder daemon (sekali):
    ```bash
    bun install
+   printf 'placeholder\n' > apps/desktop/src-tauri/resources/mandord
    ```
+   Build Tauri di Linux dan Windows mewajibkan berkas resource itu ada; placeholder tidak pernah dipasang app.
 2. Build daemon:
    ```bash
    cargo build --bin mandord
@@ -122,17 +124,20 @@ Sumber desain, app web untuk diuji di Chrome, gerbang Push & PR, view "Design ga
 
 ```bash
 cargo build --release --bin mandord          # daemon
-cd apps/desktop && bun run tauri build       # installer app desktop
+cp target/release/mandord apps/desktop/src-tauri/resources/mandord
+cd apps/desktop && bun run tauri build       # installer/paket app desktop
 ```
 
-Installer Windows tidak bisa dibangun dari WSL. Workflow `release` di GitHub Actions membangun biner `mandord` untuk WSL, lalu installer Windows (NSIS) yang membawa biner itu sebagai resource dengan SHA-256 tertanam di app; app memasang dan memperbarui daemon di WSL sendiri. Jalankan manual dari tab Actions (hasil berupa artifact), atau push tag `v*` untuk membuat GitHub Release beserta lampirannya.
+Build release app (Windows atau Linux) tanpa biner daemon asli di `resources/mandord` gagal.
+
+Installer Windows tidak bisa dibangun dari WSL. Workflow `release` di GitHub Actions membangun biner `mandord` untuk Linux, lalu installer Windows (NSIS) dan paket Linux (`.deb`, `.rpm`, AppImage, ditambah `SHA256SUMS`) yang membawa biner itu sebagai resource dengan SHA-256 tertanam di app; app memasang dan memperbarui daemon sendiri (di WSL untuk Windows, di `~/.local/bin` untuk Linux). Jalankan manual dari tab Actions (hasil berupa artifact), atau push tag `v*` untuk membuat GitHub Release beserta lampirannya.
 
 Versi app (`tauri.conf.json`, `package.json`, `apps/desktop/src-tauri/Cargo.toml`) dan `mandord` harus sama: `./scripts/check-versions.sh` (dijalankan CI).
 
-Build app di Windows tanpa biner daemon (pengembangan) butuh placeholder; app build dev tidak pernah memasangnya:
+Build dev app di Windows atau Linux tanpa biner daemon butuh placeholder; app build dev tidak pernah memasangnya:
 
 ```bash
 printf 'placeholder\n' > apps/desktop/src-tauri/resources/mandord
 ```
 
-Untuk Windows dengan daemon di WSL, ikuti `docs/runbook/setup-wsl.md`.
+Untuk Windows dengan daemon di WSL, ikuti `docs/runbook/setup-wsl.md`. Untuk Linux dari paket `.deb`, `.rpm`, atau AppImage, ikuti `docs/runbook/setup-linux.md`.

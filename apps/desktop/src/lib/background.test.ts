@@ -2,7 +2,9 @@ import { describe, expect, it } from 'vitest';
 import {
   appShouldHoldKeepAwake,
   backgroundView,
+  canRemoveService,
   shouldRetryProvision,
+  uninstallMessage,
   type BackgroundInput,
   type ProvisionState
 } from './background';
@@ -31,7 +33,7 @@ const report = (over: Record<string, unknown> = {}) => ({
 });
 
 const input = (over: Partial<BackgroundInput> = {}): BackgroundInput => ({
-  wsl: true,
+  runner: 'wsl',
   provision: { state: 'up_to_date', systemd: true, linger: true },
   status: status(),
   keepAlive: { status: 'enabled', windows_build: 26200 },
@@ -110,7 +112,7 @@ describe('backgroundView', () => {
   });
 
   it('mode lokal tidak menampilkan keep-alive WSL', () => {
-    const v = backgroundView(input({ wsl: false, keepAlive: null }));
+    const v = backgroundView(input({ runner: null, keepAlive: null }));
     expect(row(v, 'keep_alive')).toBeUndefined();
   });
 
@@ -132,6 +134,59 @@ describe('backgroundView', () => {
     const v = backgroundView(input({ provision: { state: 'failed', message: 'the bundled daemon does not match this app' } }));
     expect(v.notices[0]).toMatchObject({ id: 'provision_failed', tone: 'error' });
     expect(v.notices[0]?.text).toContain('does not match');
+  });
+});
+
+describe('Linux (paket, pelaksana lokal)', () => {
+  const linux = (over: Partial<BackgroundInput> = {}) =>
+    input({ runner: 'local', keepAlive: null, ...over });
+
+  it('service, linger, dan keep-awake siap tanpa baris WSL', () => {
+    const v = backgroundView(linux());
+    expect(v.rows.map((r) => r.id)).toEqual(['service', 'linger', 'keep_awake']);
+    expect(v.ready).toBe(true);
+  });
+
+  it('runner local dengan state apa pun tidak menampilkan baris WSL', () => {
+    for (const provision of [
+      { state: 'installed', report: report({ result: 'installed' }) },
+      { state: 'deferred', report: report({ result: 'deferred' }) },
+      { state: 'cannot_check', message: 'x' }
+    ] as ProvisionState[]) {
+      expect(backgroundView(linux({ provision })).rows.some((r) => r.id === 'keep_alive')).toBe(false);
+    }
+  });
+
+  it('tanpa systemd memberi panduan Linux, bukan WSL', () => {
+    const v = backgroundView(
+      linux({ provision: { state: 'up_to_date', systemd: false, linger: false }, status: status({ managed_by: 'detached' }) })
+    );
+    const s = v.rows.find((r) => r.id === 'service');
+    expect(s?.detail).not.toMatch(/wsl/i);
+    expect(s?.detail).toContain('systemd');
+  });
+
+  it('keep-awake tidak tersedia menyebut program penahan', () => {
+    const v = backgroundView(linux({ status: status({ keep_awake: 'not_configured' }) }));
+    const k = v.rows.find((r) => r.id === 'keep_awake');
+    expect(k?.detail).toContain('gnome-session-inhibit');
+    expect(k?.detail).not.toMatch(/reopen mandor/i);
+  });
+
+  it('tombol melepas service hanya untuk paket Linux', () => {
+    expect(canRemoveService('local')).toBe(true);
+    expect(canRemoveService('wsl')).toBe(false);
+    expect(canRemoveService(null)).toBe(false);
+  });
+
+  it('hasil melepas service menjadi pesan', () => {
+    expect(uninstallMessage(report({ result: 'uninstalled' }))).toMatchObject({ tone: 'ok' });
+    expect(uninstallMessage(report({ result: 'uninstalled' })).text).toMatch(/quit mandor/i);
+    expect(uninstallMessage(report({ result: 'deferred' }))).toMatchObject({ tone: 'warn' });
+    expect(uninstallMessage(report({ result: 'error', message: 'boom' }))).toMatchObject({
+      tone: 'error'
+    });
+    expect(uninstallMessage(report({ result: 'error', message: 'boom' })).text).toContain('boom');
   });
 });
 

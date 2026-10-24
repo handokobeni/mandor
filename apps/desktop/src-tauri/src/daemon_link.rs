@@ -26,6 +26,9 @@ pub const EVENT_CLOSED: &str = "daemon://closed";
 pub enum LinkMode {
     /// Daemon di mesin yang sama.
     Local { bin: PathBuf },
+    /// Daemon bawaan paket Linux yang dipasang app di `~/.local/bin`
+    /// (KTD-L3 plan paket Linux); `mandord` dari PATH bila belum terpasang.
+    LocalInstalled,
     /// Daemon di dalam distro WSL; `None` berarti distro default.
     Wsl { distro: Option<String> },
 }
@@ -38,14 +41,15 @@ impl LinkMode {
     pub fn command(&self, sub: &str, keep_awake: Option<&str>) -> (String, Vec<String>) {
         match self {
             Self::Local { bin } => (bin.to_string_lossy().into_owned(), vec![sub.to_owned()]),
+            Self::LocalInstalled => {
+                let script = relay_script(sub);
+                let args = ["-c", script.as_str(), "sh", keep_awake.unwrap_or("")];
+                ("/bin/sh".to_owned(), args.map(str::to_owned).to_vec())
+            }
             Self::Wsl { distro } => {
                 // Shell login agar PATH dari ~/.profile terbaca untuk daemon yang
-                // dinyalakan `connect`. Biner terpasang di ~/.local/bin dipakai
-                // dengan jalur absolut (KTD-49); setup lama memakai PATH.
-                let script = format!(
-                    "b=\"$HOME/.local/bin/mandord\"; [ -x \"$b\" ] || b=mandord; \
-                     [ -n \"$1\" ] && export MANDOR_KEEP_AWAKE_CMD=\"$1\"; exec \"$b\" {sub}"
-                );
+                // dinyalakan `connect`.
+                let script = relay_script(sub);
                 let shell = ["sh", "-lc", script.as_str(), "sh", keep_awake.unwrap_or("")];
                 let args = crate::provision::wsl_args(distro.as_deref(), &shell);
                 ("wsl.exe".to_owned(), args)
@@ -57,7 +61,7 @@ impl LinkMode {
     #[must_use]
     pub fn keeper(&self) -> Option<(String, Vec<String>)> {
         match self {
-            Self::Local { .. } => None,
+            Self::Local { .. } | Self::LocalInstalled => None,
             Self::Wsl { distro } => {
                 let mut args = Vec::new();
                 if let Some(d) = distro {
@@ -69,6 +73,16 @@ impl LinkMode {
             }
         }
     }
+}
+
+/// Skrip relay: biner terpasang di `~/.local/bin` dipakai dengan jalur
+/// absolut (KTD-49), setup lama memakai PATH; `$1` (perintah keep-awake, JSON)
+/// diteruskan ke daemon yang dinyalakan `connect`.
+fn relay_script(sub: &str) -> String {
+    format!(
+        "b=\"$HOME/.local/bin/mandord\"; [ -x \"$b\" ] || b=mandord; \
+         [ -n \"$1\" ] && export MANDOR_KEEP_AWAKE_CMD=\"$1\"; exec \"$b\" {sub}"
+    )
 }
 
 /// Kegagalan jembatan daemon; dikirim ke webview sebagai teks.
@@ -275,6 +289,45 @@ mod tests {
             ("/opt/mandord".to_owned(), vec!["connect".to_owned()])
         );
         assert_eq!(mode.keeper(), None);
+    }
+
+    /// Daemon bawaan paket Linux: biner terpasang di ~/.local/bin dipakai,
+    /// perintah keep-awake sampai ke environment `connect` (mode setsid), dan
+    /// bila biner belum terpasang `mandord` dari PATH dipakai.
+    #[cfg(unix)]
+    #[test]
+    fn perintah_lokal_terpasang_memakai_biner_home_atau_path() {
+        use std::os::unix::fs::PermissionsExt;
+        let fake = |dir: &std::path::Path, tag: &str| {
+            std::fs::create_dir_all(dir).unwrap();
+            let f = dir.join("mandord");
+            std::fs::write(
+                &f,
+                format!("#!/bin/sh\necho \"{tag}|$1|$MANDOR_KEEP_AWAKE_CMD\"\n"),
+            )
+            .unwrap();
+            std::fs::set_permissions(&f, std::fs::Permissions::from_mode(0o755)).unwrap();
+        };
+        let home = tempfile::tempdir().unwrap();
+        let path_dir = home.path().join("path");
+        fake(&path_dir, "path");
+        let mode = LinkMode::LocalInstalled;
+        assert_eq!(mode.keeper(), None);
+        let json = r#"["/usr/bin/systemd-inhibit","--what=idle","/usr/bin/cat"]"#;
+        let run = |sub: &str, ka: Option<&str>| {
+            let (program, args) = mode.command(sub, ka);
+            let out = std::process::Command::new(program)
+                .args(&args)
+                .env("HOME", home.path())
+                .env("PATH", format!("{}:/usr/bin:/bin", path_dir.display()))
+                .output()
+                .unwrap();
+            String::from_utf8_lossy(&out.stdout).trim().to_owned()
+        };
+        assert_eq!(run("token", None), "path|token|", "belum terpasang: PATH");
+        fake(&home.path().join(".local/bin"), "home");
+        assert_eq!(run("connect", Some(json)), format!("home|connect|{json}"));
+        assert_eq!(run("token", None), "home|token|");
     }
 
     #[test]

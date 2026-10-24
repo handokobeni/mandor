@@ -1,8 +1,9 @@
-//! Pemasangan dan pembaruan daemon di WSL saat app dibuka (KTD-49 plan service
-//! OS). App membawa biner `mandord` Linux sebagai resource dengan SHA-256 yang
-//! ditanam saat build; bytes yang sudah diverifikasi dialirkan lewat stdin ke
-//! WSL lalu `mandord install` dijalankan dari sana. Daemon tidak pernah
-//! dieksekusi dari `/mnt/c`.
+//! Pemasangan dan pembaruan daemon saat app dibuka (KTD-49 plan service OS,
+//! KTD-L2 plan paket Linux). App membawa biner `mandord` Linux sebagai resource
+//! dengan SHA-256 yang ditanam saat build; bytes yang sudah diverifikasi
+//! dialirkan lewat stdin ke skrip pasang lalu `mandord install` dijalankan dari
+//! `~/.cache/mandor`. Skripnya sama untuk WSL (lewat `wsl.exe`) dan Linux
+//! (langsung). Daemon tidak pernah dieksekusi dari `/mnt/c`.
 
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
@@ -17,12 +18,37 @@ use tokio::process::Command;
 /// membawa biner asli (build dev atau OS selain Windows).
 pub const DAEMON_SHA256: &str = env!("MANDOR_DAEMON_SHA256");
 
-/// Batas waktu probe (cold boot WSL bisa lambat).
-const PROBE_TIMEOUT: Duration = Duration::from_secs(45);
-/// Batas waktu salin dan `install` (termasuk drain dan restart daemon).
-const INSTALL_TIMEOUT: Duration = Duration::from_secs(150);
-/// Batas waktu `wslpath`.
-const WSLPATH_TIMEOUT: Duration = Duration::from_secs(30);
+/// Header resource daemon di paket Linux: biner ELF yang dibungkus tidak
+/// diubah `linuxdeploy` (`AppImage` menambahkan `RUNPATH` ke setiap ELF). Sama
+/// dengan konstanta di `build.rs`.
+pub const RESOURCE_MAGIC: &[u8] = b"MANDORD-RESOURCE\n";
+
+/// Biner daemon dari isi resource: header paket Linux dilepas bila ada.
+#[must_use]
+pub fn unwrap_resource(bytes: &[u8]) -> &[u8] {
+    bytes.strip_prefix(RESOURCE_MAGIC).unwrap_or(bytes)
+}
+
+/// Batas waktu langkah provisioning.
+#[derive(Debug, Clone, Copy)]
+pub struct Timeouts {
+    /// Probe (cold boot WSL bisa lambat).
+    pub probe: Duration,
+    /// Salin dan `install` (termasuk drain dan restart daemon).
+    pub install: Duration,
+    /// `wslpath`.
+    pub wslpath: Duration,
+}
+
+impl Default for Timeouts {
+    fn default() -> Self {
+        Self {
+            probe: Duration::from_secs(45),
+            install: Duration::from_secs(150),
+            wslpath: Duration::from_secs(30),
+        }
+    }
+}
 /// Keluaran probe yang dibaca paling banyak (byte).
 const PROBE_OUTPUT_MAX: usize = 16 * 1024;
 
@@ -38,6 +64,7 @@ sha256sum "$b"
 const INSTALL_SCRIPT: &str = r#"set -C
 umask 077
 d="$HOME/.cache/mandor"
+[ -L "$d" ] && exit 89
 mkdir -p "$d" && chmod 700 "$d" || exit 90
 f="$d/mandord.$$"
 cat > "$f" || { rm -f "$f"; exit 91; }
@@ -46,6 +73,47 @@ chmod 700 "$f"
 rc=$?
 rm -f "$f"
 exit $rc"#;
+
+/// Tempat skrip provisioning dijalankan.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Runner {
+    /// Di distro WSL lewat `wsl.exe`; `None` berarti distro default.
+    Wsl { distro: Option<String> },
+    /// Langsung di mesin ini (paket Linux), dengan `HOME` pengguna.
+    Local { home: PathBuf },
+}
+
+impl Runner {
+    /// Nama pelaksana untuk UI (`wsl` atau `local`).
+    #[must_use]
+    pub fn kind(&self) -> &'static str {
+        match self {
+            Self::Wsl { .. } => "wsl",
+            Self::Local { .. } => "local",
+        }
+    }
+
+    /// Perintah yang menjalankan `script` dengan `$1` = `arg`, tanpa shell
+    /// tambahan di sisi pemanggil.
+    fn command(&self, script: &str, arg: &str) -> Command {
+        match self {
+            Self::Wsl { distro } => {
+                let mut cmd = Command::new("wsl.exe");
+                cmd.args(wsl_args(
+                    distro.as_deref(),
+                    &["sh", "-c", script, "sh", arg],
+                ));
+                crate::daemon_link::hide_console(&mut cmd);
+                cmd
+            }
+            Self::Local { home } => {
+                let mut cmd = Command::new("/bin/sh");
+                cmd.args(["-c", script, "sh", arg]).env("HOME", home);
+                cmd
+            }
+        }
+    }
+}
 
 /// Argumen `wsl.exe` untuk menjalankan `argv` tanpa shell default Windows/WSL.
 #[must_use]
@@ -58,16 +126,6 @@ pub fn wsl_args(distro: Option<&str>, argv: &[&str]) -> Vec<String> {
     out.push("-e".to_owned());
     out.extend(argv.iter().map(|a| (*a).to_owned()));
     out
-}
-
-#[must_use]
-pub fn probe_args(distro: Option<&str>, keep_awake_json: &str) -> Vec<String> {
-    wsl_args(distro, &["sh", "-c", PROBE_SCRIPT, "sh", keep_awake_json])
-}
-
-#[must_use]
-pub fn install_args(distro: Option<&str>, keep_awake_json: &str) -> Vec<String> {
-    wsl_args(distro, &["sh", "-c", INSTALL_SCRIPT, "sh", keep_awake_json])
 }
 
 #[must_use]
@@ -185,6 +243,52 @@ pub fn keep_awake_json(wsl_exe_path: &str) -> String {
     serde_json::json!([wsl_exe_path, crate::keep_awake::FLAG]).to_string()
 }
 
+/// Alasan penahan keep-awake yang tampil di daftar penahan desktop.
+const KEEP_AWAKE_REASON: &str = "Mandor agents are working";
+
+/// Perintah keep-awake di Linux (KTD-L4 plan paket Linux): penahan suspend
+/// karena idle, dipilih menurut desktop, membungkus `cat` yang keluar saat
+/// daemon menutup stdin. GNOME memakai `gnome-session-inhibit` (suspend
+/// otomatis GNOME memeriksa penahan gnome-session), desktop lain
+/// `systemd-inhibit --what=idle`. Tidak ada jenis `sleep`, sehingga Suspend
+/// pilihan pengguna tetap jalan. `None` bila program penahan tidak ada.
+#[must_use]
+pub fn linux_keep_awake_json(
+    desktop: Option<&str>,
+    exists: &dyn Fn(&Path) -> bool,
+) -> Option<String> {
+    let find = |name: &str| {
+        ["/usr/bin", "/bin"]
+            .iter()
+            .map(|dir| PathBuf::from(format!("{dir}/{name}")))
+            .find(|p| exists(p))
+            .map(|p| p.to_string_lossy().into_owned())
+    };
+    let cat = find("cat")?;
+    let gnome = desktop.is_some_and(|d| d.split(':').any(|p| p.eq_ignore_ascii_case("gnome")));
+    let argv = match find("gnome-session-inhibit").filter(|_| gnome) {
+        Some(gsi) => vec![
+            gsi,
+            "--inhibit".to_owned(),
+            "suspend:idle".to_owned(),
+            "--app-id".to_owned(),
+            "dev.mandor.app".to_owned(),
+            "--reason".to_owned(),
+            KEEP_AWAKE_REASON.to_owned(),
+            cat,
+        ],
+        None => vec![
+            find("systemd-inhibit")?,
+            "--what=idle".to_owned(),
+            "--mode=block".to_owned(),
+            "--who=Mandor".to_owned(),
+            format!("--why={KEEP_AWAKE_REASON}"),
+            cat,
+        ],
+    };
+    Some(serde_json::Value::from(argv).to_string())
+}
+
 /// Lokasi salinan penjaga keep-awake per versi:
 /// `<LOCALAPPDATA>\Mandor\keepawake\<versi>\mandor-keepawake.exe`.
 #[must_use]
@@ -215,26 +319,24 @@ pub fn prepare_helper(source: &Path, target: &Path) -> std::io::Result<()> {
     std::fs::rename(&tmp, target)
 }
 
-/// Menjalankan `wsl.exe` dengan batas waktu dan stdin opsional.
-async fn run_wsl(
-    args: &[String],
+/// Menjalankan `cmd` dengan batas waktu dan stdin opsional.
+async fn run_with(
+    mut cmd: Command,
     stdin: Option<Vec<u8>>,
     timeout: Duration,
 ) -> Result<std::process::Output, String> {
-    let mut cmd = Command::new("wsl.exe");
-    cmd.args(args)
-        .stdin(if stdin.is_some() {
-            Stdio::piped()
-        } else {
-            Stdio::null()
-        })
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .kill_on_drop(true);
-    crate::daemon_link::hide_console(&mut cmd);
+    cmd.stdin(if stdin.is_some() {
+        Stdio::piped()
+    } else {
+        Stdio::null()
+    })
+    .stdout(Stdio::piped())
+    .stderr(Stdio::piped())
+    .kill_on_drop(true);
+    let program = cmd.as_std().get_program().to_string_lossy().into_owned();
     let mut child = cmd
         .spawn()
-        .map_err(|e| format!("cannot run wsl.exe: {e}"))?;
+        .map_err(|e| format!("cannot run {program}: {e}"))?;
     let pipe = child.stdin.take();
     let writer = async move {
         if let (Some(mut pipe), Some(data)) = (pipe, stdin) {
@@ -248,15 +350,36 @@ async fn run_wsl(
         tokio::join!(writer, child.wait_with_output())
     })
     .await
-    .map_err(|_| format!("wsl.exe did not finish within {timeout:?}"))?;
+    .map_err(|_| format!("{program} did not finish within {timeout:?}"))?;
     fed?;
     out.map_err(|e| e.to_string())
+}
+
+/// Skrip melepas service lokal: `uninstall` dari biner terpasang (tanpa
+/// `--force`, sehingga run yang bekerja menghasilkan `deferred`).
+const UNINSTALL_SCRIPT: &str = r#"b="$HOME/.local/bin/mandord"
+if [ ! -x "$b" ]; then
+  echo '{"result":"uninstalled","service":"none","linger":false,"apps_stopped":false,"warnings":[]}'
+  exit 0
+fi
+exec "$b" uninstall"#;
+
+/// Melepas service daemon yang dipasang app di Linux (KTD-L6 plan paket Linux).
+///
+/// # Errors
+/// Perintah tidak bisa dijalankan, melewati batas waktu, atau tidak melapor.
+pub async fn uninstall_local(home: &Path, timeout: Duration) -> Result<InstallReport, String> {
+    let runner = Runner::Local {
+        home: home.to_owned(),
+    };
+    let out = run_with(runner.command(UNINSTALL_SCRIPT, ""), None, timeout).await?;
+    parse_install(&String::from_utf8_lossy(&out.stdout))
 }
 
 /// Masukan provisioning.
 #[derive(Debug, Clone)]
 pub struct Inputs {
-    pub distro: Option<String>,
+    pub runner: Runner,
     /// Biner daemon dari resource installer.
     pub resource: PathBuf,
     /// Exe app ini (sumber salinan penjaga).
@@ -271,6 +394,9 @@ pub struct Inputs {
 /// # Errors
 /// Salinan atau konversi jalur gagal.
 pub async fn keep_awake_command(inputs: &Inputs) -> Result<String, String> {
+    let Runner::Wsl { distro } = &inputs.runner else {
+        return Err("the Windows keep-awake helper needs WSL".to_owned());
+    };
     let base = inputs
         .local_app_data
         .clone()
@@ -282,12 +408,10 @@ pub async fn keep_awake_command(inputs: &Inputs) -> Result<String, String> {
         .map_err(|e| e.to_string())?
         .map_err(|e| format!("cannot copy the keep-awake helper: {e}"))?;
     let windows_path = target.display().to_string();
-    let out = run_wsl(
-        &wslpath_args(inputs.distro.as_deref(), &windows_path),
-        None,
-        WSLPATH_TIMEOUT,
-    )
-    .await?;
+    let mut cmd = Command::new("wsl.exe");
+    cmd.args(wslpath_args(distro.as_deref(), &windows_path));
+    crate::daemon_link::hide_console(&mut cmd);
+    let out = run_with(cmd, None, Timeouts::default().wslpath).await?;
     let wsl_path = String::from_utf8_lossy(&out.stdout).trim().to_owned();
     if !out.status.success() || !wsl_path.starts_with('/') {
         return Err("wslpath could not convert the helper path".to_owned());
@@ -300,12 +424,22 @@ pub async fn provision(inputs: &Inputs, keep_awake: &str) -> ProvisionState {
     if DAEMON_SHA256.len() != 64 {
         return ProvisionState::NotBundled;
     }
-    let distro = inputs.distro.as_deref();
-    match run_wsl(&probe_args(distro, keep_awake), None, PROBE_TIMEOUT).await {
+    provision_with(inputs, keep_awake, DAEMON_SHA256, &Timeouts::default()).await
+}
+
+/// Probe lalu pasang bila perlu, terhadap hash `expected` (heks SHA-256).
+pub async fn provision_with(
+    inputs: &Inputs,
+    keep_awake: &str,
+    expected: &str,
+    timeouts: &Timeouts,
+) -> ProvisionState {
+    let probe = inputs.runner.command(PROBE_SCRIPT, keep_awake);
+    match run_with(probe, None, timeouts.probe).await {
         Ok(out) => {
             let text = String::from_utf8_lossy(&out.stdout);
             let text: String = text.chars().take(PROBE_OUTPUT_MAX).collect();
-            if let Probe::Ready { systemd, linger } = parse_probe(&text, DAEMON_SHA256) {
+            if let Probe::Ready { systemd, linger } = parse_probe(&text, expected) {
                 return ProvisionState::UpToDate { systemd, linger };
             }
         }
@@ -325,18 +459,14 @@ pub async fn provision(inputs: &Inputs, keep_awake: &str) -> ProvisionState {
             };
         }
     };
-    if !sha256_hex(&bytes).eq_ignore_ascii_case(DAEMON_SHA256) {
+    let bytes = unwrap_resource(&bytes).to_vec();
+    if !sha256_hex(&bytes).eq_ignore_ascii_case(expected) {
         return ProvisionState::Failed {
             message: "the bundled daemon does not match this app; reinstall Mandor".to_owned(),
         };
     }
-    let out = match run_wsl(
-        &install_args(distro, keep_awake),
-        Some(bytes),
-        INSTALL_TIMEOUT,
-    )
-    .await
-    {
+    let install = inputs.runner.command(INSTALL_SCRIPT, keep_awake);
+    let out = match run_with(install, Some(bytes), timeouts.install).await {
         Ok(out) => out,
         Err(message) => return ProvisionState::Failed { message },
     };
@@ -369,7 +499,18 @@ mod tests {
     #[test]
     fn argumen_wsl_tanpa_shell_dan_satu_argumen_per_nilai() {
         let json = r#"["/mnt/c/Users/A B/AppData/Local/Mandor/keepawake/0.1.0/mandor-keepawake.exe","--keep-awake"]"#;
-        let args = probe_args(Some("Ubuntu 24.04"), json);
+        let args_of = |runner: &Runner, script: &str| -> Vec<String> {
+            runner
+                .command(script, json)
+                .as_std()
+                .get_args()
+                .map(|a| a.to_string_lossy().into_owned())
+                .collect()
+        };
+        let wsl = Runner::Wsl {
+            distro: Some("Ubuntu 24.04".to_owned()),
+        };
+        let args = args_of(&wsl, PROBE_SCRIPT);
         assert_eq!(&args[..4], ["-d", "Ubuntu 24.04", "-e", "sh"]);
         assert_eq!(args[4], "-c");
         assert_eq!(args[5], PROBE_SCRIPT);
@@ -377,9 +518,19 @@ mod tests {
         assert_eq!(args[7], json, "JSON tetap satu argumen");
         assert_eq!(args.len(), 8);
 
-        let args = install_args(None, json);
+        let args = args_of(&Runner::Wsl { distro: None }, INSTALL_SCRIPT);
         assert_eq!(&args[..2], ["-e", "sh"]);
         assert_eq!(args[3], INSTALL_SCRIPT);
+
+        let local = Runner::Local {
+            home: PathBuf::from("/home/u"),
+        };
+        assert_eq!(
+            args_of(&local, PROBE_SCRIPT),
+            ["-c", PROBE_SCRIPT, "sh", json]
+        );
+        assert_eq!(local.kind(), "local");
+        assert_eq!(wsl.kind(), "wsl");
 
         assert_eq!(
             wslpath_args(None, r"C:\Users\A B\x.exe"),
@@ -451,6 +602,58 @@ mod tests {
     }
 
     #[test]
+    fn perintah_keep_awake_linux_menurut_desktop() {
+        let all = |p: &Path| {
+            [
+                "/usr/bin/gnome-session-inhibit",
+                "/usr/bin/systemd-inhibit",
+                "/usr/bin/cat",
+                "/bin/cat",
+            ]
+            .contains(&p.to_str().unwrap_or(""))
+        };
+        let parse = |json: Option<String>| -> Vec<String> {
+            serde_json::from_str(&json.expect("ada perintah")).unwrap()
+        };
+
+        let gnome = parse(linux_keep_awake_json(Some("ubuntu:GNOME"), &all));
+        assert_eq!(gnome[0], "/usr/bin/gnome-session-inhibit");
+        assert!(gnome.windows(2).any(|w| w == ["--inhibit", "suspend:idle"]));
+        assert!(gnome.iter().any(|a| a == "--app-id"));
+        assert!(gnome.iter().any(|a| a == "--reason"));
+        assert_eq!(gnome.last().map(String::as_str), Some("/usr/bin/cat"));
+
+        let kde = parse(linux_keep_awake_json(Some("KDE"), &all));
+        assert_eq!(kde[0], "/usr/bin/systemd-inhibit");
+        for flag in ["--what=idle", "--mode=block", "--who=Mandor"] {
+            assert!(kde.iter().any(|a| a == flag), "{flag}");
+        }
+        assert_eq!(kde.last().map(String::as_str), Some("/usr/bin/cat"));
+
+        // GNOME tanpa gnome-session-inhibit: systemd-inhibit.
+        let no_gsi = |p: &Path| all(p) && !p.ends_with("gnome-session-inhibit");
+        assert_eq!(
+            parse(linux_keep_awake_json(Some("GNOME"), &no_gsi))[0],
+            "/usr/bin/systemd-inhibit"
+        );
+        // Tidak ada jenis `sleep` (Suspend pilihan pengguna tetap jalan).
+        for argv in [&gnome, &kde] {
+            assert!(!argv.iter().any(|a| a.contains("sleep")), "{argv:?}");
+            assert!(argv.iter().all(|a| !a.chars().any(char::is_control)));
+            assert!(argv[0].starts_with('/'));
+        }
+        // Program penahan tidak ada: tanpa keep-awake.
+        assert_eq!(
+            linux_keep_awake_json(Some("GNOME"), &|_: &Path| false),
+            None
+        );
+        assert_eq!(
+            linux_keep_awake_json(None, &|p: &Path| p == Path::new("/usr/bin/cat")),
+            None
+        );
+    }
+
+    #[test]
     fn perintah_keep_awake_json() {
         assert_eq!(
             keep_awake_json("/mnt/c/Users/A B/k.exe"),
@@ -488,6 +691,190 @@ mod tests {
         );
     }
 
+    /// Daemon palsu: `install --check` melapor service sesuai, `install`
+    /// mencatat argumennya lalu melapor `result`.
+    #[cfg(unix)]
+    fn fake_daemon(result: &str, check_sleep: u32) -> Vec<u8> {
+        format!(
+            "#!/bin/sh\n\
+             if [ \"$2\" = \"--check\" ]; then sleep {check_sleep}; \
+             echo '{{\"service\":\"matches\",\"systemd\":true,\"linger\":true}}'; exit 0; fi\n\
+             echo \"$*\" > \"$HOME/installed-args\"\n\
+             echo '{{\"result\":\"{result}\",\"service\":\"systemd\",\"linger\":true,\"apps_stopped\":false,\"warnings\":[]}}'\n"
+        )
+        .into_bytes()
+    }
+
+    #[cfg(unix)]
+    fn local_inputs(home: &Path, resource: &Path) -> Inputs {
+        Inputs {
+            runner: Runner::Local {
+                home: home.to_owned(),
+            },
+            resource: resource.to_owned(),
+            current_exe: PathBuf::from("/tidak/ada"),
+            local_app_data: None,
+            version: "0.1.0".to_owned(),
+        }
+    }
+
+    #[cfg(unix)]
+    fn place_installed(home: &Path, bytes: &[u8]) {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = home.join(".local/bin");
+        std::fs::create_dir_all(&dir).unwrap();
+        let bin = dir.join("mandord");
+        std::fs::write(&bin, bytes).unwrap();
+        std::fs::set_permissions(&bin, std::fs::Permissions::from_mode(0o755)).unwrap();
+    }
+
+    /// Pelaksana lokal (paket Linux, KTD-L2): keputusan sama dengan WSL, perintah
+    /// dijalankan langsung.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn pelaksana_lokal_memasang_memperbarui_atau_membiarkan() {
+        let home = tempfile::tempdir().unwrap();
+        let resource = home.path().join("resource-mandord");
+        let bytes = fake_daemon("installed", 0);
+        std::fs::write(&resource, &bytes).unwrap();
+        let expected = sha256_hex(&bytes);
+        let inputs = local_inputs(home.path(), &resource);
+        let ka = r#"["/usr/bin/systemd-inhibit","--what=idle","/usr/bin/cat"]"#;
+        let t = Timeouts::default();
+
+        // Belum terpasang: bytes dialirkan dan `install` dijalankan dengan perintah keep-awake.
+        let state = provision_with(&inputs, ka, &expected, &t).await;
+        assert!(
+            matches!(state, ProvisionState::Installed { .. }),
+            "{state:?}"
+        );
+        let args = std::fs::read_to_string(home.path().join("installed-args")).unwrap();
+        assert_eq!(args.trim(), format!("install --keep-awake-cmd {ka}"));
+        let cache = home.path().join(".cache/mandor");
+        assert_eq!(
+            std::fs::read_dir(&cache).unwrap().count(),
+            0,
+            "berkas sementara dihapus"
+        );
+
+        // Terpasang identik dan service sesuai: tidak ada install.
+        std::fs::remove_file(home.path().join("installed-args")).unwrap();
+        place_installed(home.path(), &bytes);
+        let state = provision_with(&inputs, ka, &expected, &t).await;
+        assert_eq!(
+            state,
+            ProvisionState::UpToDate {
+                systemd: true,
+                linger: true
+            }
+        );
+        assert!(!home.path().join("installed-args").exists());
+
+        // Covers AE3. Terpasang berbeda: install; pekerjaan berjalan → Deferred.
+        let busy = fake_daemon("deferred", 0);
+        std::fs::write(&resource, &busy).unwrap();
+        let state = provision_with(&inputs, ka, &sha256_hex(&busy), &t).await;
+        assert!(
+            matches!(state, ProvisionState::Deferred { .. }),
+            "{state:?}"
+        );
+    }
+
+    /// Paket Linux membawa daemon dengan header agar `linuxdeploy` (`AppImage`) tidak
+    /// mengubah biner ELF-nya; header dilepas sebelum verifikasi dan pemasangan.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn resource_berheader_dilepas_sebelum_dipasang() {
+        let home = tempfile::tempdir().unwrap();
+        let daemon = fake_daemon("installed", 0);
+        let mut wrapped = RESOURCE_MAGIC.to_vec();
+        wrapped.extend_from_slice(&daemon);
+        let resource = home.path().join("resource-mandord");
+        std::fs::write(&resource, &wrapped).unwrap();
+        let inputs = local_inputs(home.path(), &resource);
+        let state = provision_with(&inputs, "", &sha256_hex(&daemon), &Timeouts::default()).await;
+        assert!(
+            matches!(state, ProvisionState::Installed { .. }),
+            "{state:?}"
+        );
+        assert_eq!(unwrap_resource(&wrapped), &daemon[..]);
+        assert_eq!(
+            unwrap_resource(&daemon),
+            &daemon[..],
+            "tanpa header: apa adanya"
+        );
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn pelaksana_lokal_menolak_resource_palsu_symlink_dan_probe_lambat() {
+        let home = tempfile::tempdir().unwrap();
+        let resource = home.path().join("resource-mandord");
+        std::fs::write(&resource, fake_daemon("installed", 0)).unwrap();
+        let inputs = local_inputs(home.path(), &resource);
+        let t = Timeouts::default();
+
+        // Resource tidak cocok dengan hash tertanam: tidak ada yang dijalankan.
+        let state = provision_with(&inputs, "", &"0".repeat(64), &t).await;
+        assert!(matches!(state, ProvisionState::Failed { .. }), "{state:?}");
+        assert!(!home.path().join("installed-args").exists());
+
+        // ~/.cache/mandor berupa symlink: tidak diikuti.
+        let elsewhere = home.path().join("elsewhere");
+        std::fs::create_dir_all(&elsewhere).unwrap();
+        std::fs::create_dir_all(home.path().join(".cache")).unwrap();
+        std::os::unix::fs::symlink(&elsewhere, home.path().join(".cache/mandor")).unwrap();
+        let bytes = std::fs::read(&resource).unwrap();
+        let state = provision_with(&inputs, "", &sha256_hex(&bytes), &t).await;
+        assert!(matches!(state, ProvisionState::Failed { .. }), "{state:?}");
+        assert_eq!(std::fs::read_dir(&elsewhere).unwrap().count(), 0);
+        assert!(!home.path().join("installed-args").exists());
+
+        // Probe melewati batas waktu: tidak bisa dicek.
+        let slow = fake_daemon("installed", 5);
+        place_installed(home.path(), &slow);
+        let quick = Timeouts {
+            probe: Duration::from_millis(300),
+            ..Timeouts::default()
+        };
+        let state = provision_with(&inputs, "", &sha256_hex(&slow), &quick).await;
+        assert!(
+            matches!(state, ProvisionState::CannotCheck { .. }),
+            "{state:?}"
+        );
+    }
+
+    /// Tombol melepas service (KTD-L6): `uninstall` tanpa `--force` dari biner
+    /// terpasang; biner tidak ada berarti tidak ada yang dilepas.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn melepas_service_lokal() {
+        let home = tempfile::tempdir().unwrap();
+        let t = Duration::from_secs(10);
+        let state = uninstall_local(home.path(), t).await.unwrap();
+        assert_eq!(state.result, "uninstalled", "tidak terpasang");
+
+        place_installed(
+            home.path(),
+            b"#!/bin/sh
+echo \"$*\" > \"$HOME/args\"
+echo '{\"result\":\"deferred\",\"service\":\"systemd\",\"linger\":true,\"apps_stopped\":false,\"warnings\":[]}'
+",
+        );
+        let state = uninstall_local(home.path(), t).await.unwrap();
+        assert_eq!(state.result, "deferred");
+        let args = std::fs::read_to_string(home.path().join("args")).unwrap();
+        assert_eq!(args.trim(), "uninstall", "tanpa --force");
+
+        place_installed(
+            home.path(),
+            b"#!/bin/sh
+echo rusak
+",
+        );
+        assert!(uninstall_local(home.path(), t).await.is_err());
+    }
+
     #[cfg(unix)]
     #[tokio::test]
     async fn build_tanpa_biner_daemon_tidak_memasang_apa_pun() {
@@ -495,7 +882,7 @@ mod tests {
             return;
         }
         let inputs = Inputs {
-            distro: None,
+            runner: Runner::Wsl { distro: None },
             resource: PathBuf::from("/tidak/ada"),
             current_exe: PathBuf::from("/tidak/ada"),
             local_app_data: None,

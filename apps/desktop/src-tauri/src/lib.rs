@@ -27,13 +27,26 @@ struct ClientConfig {
     local_app_data: Option<PathBuf>,
     /// `%UserProfile%` (berkas `.wslconfig`).
     user_profile: Option<PathBuf>,
+    /// `$HOME` (pemasangan daemon lokal di Linux).
+    home: Option<PathBuf>,
+    /// `$XDG_CURRENT_DESKTOP` (pilihan penahan keep-awake di Linux).
+    desktop: Option<String>,
 }
 
 impl ClientConfig {
-    /// `MANDOR_LINK=wsl[:distro]` atau `local[:path]`. Default: WSL di Windows,
-    /// biner `mandord` di PATH pada OS lain.
     fn from_env() -> Self {
-        let raw = std::env::var("MANDOR_LINK").unwrap_or_default();
+        Self::from_vars(
+            &|key: &str| std::env::var(key).ok(),
+            cfg!(windows),
+            provision::DAEMON_SHA256.len() == 64,
+        )
+    }
+
+    /// `MANDOR_LINK=wsl[:distro]` atau `local[:path]`. Default: WSL di Windows;
+    /// di OS lain biner terpasang di `~/.local/bin` bila app membawa daemon
+    /// (paket Linux), selain itu `mandord` dari PATH.
+    fn from_vars(var: &dyn Fn(&str) -> Option<String>, windows: bool, bundled: bool) -> Self {
+        let raw = var("MANDOR_LINK").unwrap_or_default();
         let mode = match raw
             .split_once(':')
             .map_or((raw.as_str(), ""), |(a, b)| (a, b))
@@ -44,20 +57,19 @@ impl ClientConfig {
             ("local", path) if !path.is_empty() => LinkMode::Local {
                 bin: PathBuf::from(path),
             },
-            _ if cfg!(windows) => LinkMode::Wsl { distro: None },
+            _ if windows => LinkMode::Wsl { distro: None },
+            _ if bundled => LinkMode::LocalInstalled,
             _ => LinkMode::Local {
                 bin: PathBuf::from("mandord"),
             },
         };
-        let dir = |key: &str| {
-            std::env::var_os(key)
-                .filter(|v| !v.is_empty())
-                .map(PathBuf::from)
-        };
+        let text = |key: &str| var(key).filter(|v| !v.is_empty());
         Self {
             mode,
-            local_app_data: dir("LOCALAPPDATA"),
-            user_profile: dir("USERPROFILE"),
+            local_app_data: text("LOCALAPPDATA").map(PathBuf::from),
+            user_profile: text("USERPROFILE").map(PathBuf::from),
+            home: text("HOME").map(PathBuf::from),
+            desktop: text("XDG_CURRENT_DESKTOP"),
         }
     }
 }
@@ -65,21 +77,45 @@ impl ClientConfig {
 /// State provisioning: satu proses pada satu waktu, hasil terakhir disimpan.
 struct Provisioner {
     cfg: ClientConfig,
-    last: tokio::sync::Mutex<Option<provision::ProvisionState>>,
+    last: tokio::sync::Mutex<Option<ProvisionView>>,
 }
 
-/// Memasang atau memperbarui daemon di WSL lalu menyiapkan penjaga
-/// keep-awake (KTD-49). Dipanggil UI sebelum tersambung dan saat mencoba
-/// ulang pembaruan yang tertunda.
+/// Hasil provisioning untuk UI: keadaan dan pelaksananya (`wsl` atau `local`;
+/// tidak ada bila app tidak memasang daemon).
+#[derive(Debug, Clone, serde::Serialize)]
+struct ProvisionView {
+    runner: Option<&'static str>,
+    #[serde(flatten)]
+    state: provision::ProvisionState,
+}
+
+/// Memasang atau memperbarui daemon (di WSL, atau lokal di Linux) lalu
+/// menyiapkan penjaga keep-awake (KTD-49, KTD-L2). Dipanggil UI sebelum
+/// tersambung dan saat mencoba ulang pembaruan yang tertunda.
 #[tauri::command]
 async fn provision_run(
     app: AppHandle,
     link: State<'_, Arc<DaemonLink>>,
     prov: State<'_, Arc<Provisioner>>,
-) -> Result<provision::ProvisionState, String> {
+) -> Result<ProvisionView, String> {
     let mut last = prov.last.lock().await;
-    let LinkMode::Wsl { distro } = link.mode().clone() else {
-        return Ok(provision::ProvisionState::NotNeeded);
+    let runner = match link.mode() {
+        LinkMode::Wsl { distro } => provision::Runner::Wsl {
+            distro: distro.clone(),
+        },
+        LinkMode::LocalInstalled => provision::Runner::Local {
+            home: prov
+                .cfg
+                .home
+                .clone()
+                .ok_or_else(|| "HOME is not set".to_owned())?,
+        },
+        LinkMode::Local { .. } => {
+            return Ok(ProvisionView {
+                runner: None,
+                state: provision::ProvisionState::NotNeeded,
+            });
+        }
     };
     let resource = app
         .path()
@@ -87,27 +123,70 @@ async fn provision_run(
         .map_err(|e| e.to_string())?;
     let current_exe = std::env::current_exe().map_err(|e| e.to_string())?;
     let inputs = provision::Inputs {
-        distro,
+        runner,
         resource,
         current_exe,
         local_app_data: prov.cfg.local_app_data.clone(),
         version: app.package_info().version.to_string(),
     };
-    let keep_awake = if provision::DAEMON_SHA256.len() == 64 {
-        match provision::keep_awake_command(&inputs).await {
+    let keep_awake = keep_awake_for(&inputs, &prov.cfg).await;
+    link.set_keep_awake(keep_awake.clone());
+    let state = provision::provision(&inputs, keep_awake.as_deref().unwrap_or("")).await;
+    let view = ProvisionView {
+        runner: Some(inputs.runner.kind()),
+        state,
+    };
+    *last = Some(view.clone());
+    Ok(view)
+}
+
+/// Perintah penjaga keep-awake untuk daemon, bila app membawa daemon.
+async fn keep_awake_for(inputs: &provision::Inputs, cfg: &ClientConfig) -> Option<String> {
+    if provision::DAEMON_SHA256.len() != 64 {
+        return None;
+    }
+    match &inputs.runner {
+        provision::Runner::Wsl { .. } => match provision::keep_awake_command(inputs).await {
             Ok(json) => Some(json),
             Err(e) => {
                 tracing::warn!(error = %e, "penjaga keep-awake tidak bisa disiapkan");
                 None
             }
+        },
+        provision::Runner::Local { .. } => {
+            let desktop = cfg.desktop.clone();
+            let json = tokio::task::spawn_blocking(move || {
+                provision::linux_keep_awake_json(desktop.as_deref(), &|p| p.is_file())
+            })
+            .await
+            .ok()
+            .flatten();
+            if json.is_none() {
+                tracing::warn!(
+                    "tidak ada program penahan keep-awake (gnome-session-inhibit atau systemd-inhibit)"
+                );
+            }
+            json
         }
-    } else {
-        None
-    };
-    link.set_keep_awake(keep_awake.clone());
-    let state = provision::provision(&inputs, keep_awake.as_deref().unwrap_or("")).await;
-    *last = Some(state.clone());
-    Ok(state)
+    }
+}
+
+/// Melepas service daemon yang dipasang app di Linux, sebelum paket dihapus
+/// (KTD-L6 plan paket Linux).
+#[tauri::command]
+async fn daemon_uninstall(
+    link: State<'_, Arc<DaemonLink>>,
+    prov: State<'_, Arc<Provisioner>>,
+) -> Result<provision::InstallReport, String> {
+    if *link.mode() != LinkMode::LocalInstalled {
+        return Err("the background service is managed elsewhere on this system".to_owned());
+    }
+    let home = prov
+        .cfg
+        .home
+        .clone()
+        .ok_or_else(|| "HOME is not set".to_owned())?;
+    provision::uninstall_local(&home, Duration::from_secs(150)).await
 }
 
 /// Keep-awake milik app saat daemon yang tersambung belum mendukungnya.
@@ -238,7 +317,7 @@ pub fn run_uninstall_cleanup() -> ExitCode {
     let cfg = ClientConfig::from_env();
     let distro = match &cfg.mode {
         LinkMode::Wsl { distro } => distro.clone(),
-        LinkMode::Local { .. } => return ExitCode::SUCCESS,
+        LinkMode::Local { .. } | LinkMode::LocalInstalled => return ExitCode::SUCCESS,
     };
     uninstall::run(distro.as_deref(), cfg.user_profile.as_deref())
 }
@@ -269,6 +348,7 @@ pub fn run() -> ExitCode {
             oauth_login,
             tray_update,
             provision_run,
+            daemon_uninstall,
             power_app_hold,
             wsl_keepalive_status,
             wsl_keepalive_set
@@ -303,4 +383,64 @@ pub fn run() -> ExitCode {
         }
     });
     ExitCode::SUCCESS
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn vars(pairs: &[(&str, &str)]) -> impl Fn(&str) -> Option<String> {
+        let map: std::collections::HashMap<String, String> = pairs
+            .iter()
+            .map(|(k, v)| ((*k).to_owned(), (*v).to_owned()))
+            .collect();
+        move |k: &str| map.get(k).cloned()
+    }
+
+    #[test]
+    fn mode_link_dari_environment() {
+        let linux = ClientConfig::from_vars(&vars(&[("HOME", "/home/u")]), false, true);
+        assert_eq!(
+            linux.mode,
+            LinkMode::LocalInstalled,
+            "paket Linux membawa daemon"
+        );
+        assert_eq!(linux.home.as_deref(), Some(std::path::Path::new("/home/u")));
+
+        let dev = ClientConfig::from_vars(&vars(&[]), false, false);
+        assert_eq!(
+            dev.mode,
+            LinkMode::Local {
+                bin: PathBuf::from("mandord")
+            },
+            "build dev tanpa daemon bawaan: PATH"
+        );
+
+        let explicit =
+            ClientConfig::from_vars(&vars(&[("MANDOR_LINK", "local:/opt/mandord")]), false, true);
+        assert_eq!(
+            explicit.mode,
+            LinkMode::Local {
+                bin: PathBuf::from("/opt/mandord")
+            },
+            "MANDOR_LINK menang"
+        );
+
+        let windows = ClientConfig::from_vars(&vars(&[]), true, true);
+        assert_eq!(windows.mode, LinkMode::Wsl { distro: None });
+        let distro = ClientConfig::from_vars(&vars(&[("MANDOR_LINK", "wsl:Ubuntu")]), false, true);
+        assert_eq!(
+            distro.mode,
+            LinkMode::Wsl {
+                distro: Some("Ubuntu".to_owned())
+            }
+        );
+
+        let gnome = ClientConfig::from_vars(
+            &vars(&[("XDG_CURRENT_DESKTOP", "ubuntu:GNOME")]),
+            false,
+            true,
+        );
+        assert_eq!(gnome.desktop.as_deref(), Some("ubuntu:GNOME"));
+    }
 }

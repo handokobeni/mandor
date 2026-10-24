@@ -338,6 +338,16 @@ impl<D: Deps> RunService<D> {
                 .await;
         }
         run.state = RunState::AwaitingDev;
+        if self.is_vm()
+            && run.queue.is_empty()
+            && record
+                .as_ref()
+                .is_some_and(|r| r.trigger == ReviewTrigger::PushAndPr)
+        {
+            self.runs.save(&run, generation, self.now()).await?;
+            let finished = status == ReviewStatus::Finished;
+            return self.vm_after_review(run, finished, &summary).await;
+        }
         if !run.queue.is_empty() {
             let next = run.queue.remove(0);
             let req = self.resume_request(&mut run, next.clone()).await?;

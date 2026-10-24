@@ -137,8 +137,11 @@ impl<D: Deps> RunService<D> {
         self.gate_mode(&run).await
     }
 
-    /// Mode gerbang run (KTD-37).
+    /// Mode gerbang run (KTD-37). Di daemon VM selalu Block (KTD-61 plan VM).
     pub(crate) async fn gate_mode(&self, run: &RunRecord) -> Result<GateMode, RunError> {
+        if self.is_vm() {
+            return Ok(GateMode::Block);
+        }
         let overrides: Vec<_> = self
             .members(run)
             .await?

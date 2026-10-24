@@ -345,3 +345,217 @@ async fn setelan_jam_lembur_divalidasi() {
     bad.offset = "7".to_owned();
     assert!(st.svc.set_overnight_settings(&bad).await.is_err());
 }
+
+// --- Kartu tertahan dan gerbang AC VM (U4 plan VM) ---
+
+/// Daemon VM dengan kartu `a` (AC `ac1` bila `with_ac`) dan `b` di antrean;
+/// kartu `a` sudah dimulai.
+async fn vm_started(with_ac: bool) -> (FakeLark, FakeClock, Station) {
+    let (lark, clock, st) = vm_with(&["a", "b"], wib(0, 20, 0)).await;
+    if with_ac {
+        lark.acs.lock().unwrap().insert(
+            "ac1".to_owned(),
+            mandor_usecase::AcItem {
+                record_id: "ac1".to_owned(),
+                label: Some("AC-1".to_owned()),
+                text: "Tombol simpan".to_owned(),
+                ..Default::default()
+            },
+        );
+        lark.edit("a", |t| t.ac_ids = vec!["ac1".to_owned()]);
+        st.svc.sync().poll(true, &[]).await.unwrap();
+    }
+    queue(&st, &["a", "b"]).await;
+    assert_eq!(
+        st.svc.overnight_tick().await.unwrap().started.as_deref(),
+        Some("a")
+    );
+    (lark, clock, st)
+}
+
+fn run_of(st: &Station, record: &str) -> RunRecord {
+    st.runs
+        .all()
+        .into_iter()
+        .find(|r| r.record_id == record)
+        .unwrap()
+}
+
+fn changed(st: &Station, record: &str, file: &str) {
+    let wt = run_of(st, record).worktree.unwrap();
+    st.git.set_changes(
+        &wt,
+        mandor_usecase::run_ports::WorkChanges {
+            dirty: true,
+            unpushed: 0,
+            files: vec![file.to_owned()],
+            diff: "+x".to_owned(),
+        },
+    );
+}
+
+fn report_verdict(st: &Station, ac: &str, v: mandor_domain::Verdict) {
+    let token = st.agent.last().req.ledger.unwrap().token;
+    let scope = st.svc.verify_capability(token.expose()).unwrap();
+    let rt = tokio::runtime::Handle::current();
+    tokio::task::block_in_place(|| {
+        rt.block_on(st.svc.ledger_set_verdict(&scope, ac, v, Some("x")))
+    })
+    .unwrap();
+}
+
+fn held(st: &Station, record: &str) -> Option<mandor_domain::HoldReason> {
+    let r = run_of(st, record);
+    (r.state == RunState::Held).then(|| r.hold.unwrap().reason)
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn covers_ae6_cant_verify_menahan_ac_gate_tanpa_push_lalu_kartu_berikutnya() {
+    let (_lark, _clock, st) = vm_started(true).await;
+    changed(&st, "a", "src/form.rs");
+    st.agent.last().done();
+    eventually(|| run_of(&st, "a").state == RunState::Reviewing).await;
+    report_verdict(&st, "ac1", mandor_domain::Verdict::CantVerify);
+    st.agent.last().done();
+    eventually(|| held(&st, "a").is_some()).await;
+    assert_eq!(held(&st, "a"), Some(mandor_domain::HoldReason::AcGate));
+    assert!(
+        st.git.st().pushes.is_empty(),
+        "VM tidak push melewati gerbang"
+    );
+    assert_eq!(
+        st.svc.overnight_tick().await.unwrap().started.as_deref(),
+        Some("b")
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn covers_ae12_konfirmasi_dev_pada_kartu_tertahan_langsung_push_tanpa_agent() {
+    let (_lark, _clock, st) = vm_started(true).await;
+    changed(&st, "a", "src/form.rs");
+    st.agent.last().done();
+    eventually(|| run_of(&st, "a").state == RunState::Reviewing).await;
+    report_verdict(&st, "ac1", mandor_domain::Verdict::CantVerify);
+    st.agent.last().done();
+    eventually(|| held(&st, "a").is_some()).await;
+
+    let turns = st.agent.count();
+    let run_id = run_of(&st, "a").id;
+    let decision = mandor_domain::GateDecision {
+        confirmed: vec!["ac1".to_owned()],
+        push_anyway_reason: None,
+        decided_by: Some("Beni".to_owned()),
+    };
+    let out = st.svc.publish_gated(&run_id, &decision).await.unwrap();
+    assert!(
+        matches!(out, mandor_usecase::run::PublishOutcome::Published { .. }),
+        "{out:?}"
+    );
+    assert_eq!(st.git.st().pushes.len(), 1);
+    assert_eq!(st.git.st().created_prs.len(), 1);
+    assert_eq!(st.agent.count(), turns, "tanpa menjalankan agent");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn agent_buntu_menahan_stuck_dengan_pertanyaan_lalu_kartu_berikutnya() {
+    let (_lark, _clock, st) = vm_started(false).await;
+    st.agent.last().finish("Warna tombol primer atau sekunder?");
+    eventually(|| held(&st, "a").is_some()).await;
+    let r = run_of(&st, "a");
+    assert_eq!(
+        r.hold.as_ref().unwrap().reason,
+        mandor_domain::HoldReason::Stuck
+    );
+    assert_eq!(
+        r.hold.unwrap().note.as_deref(),
+        Some("Warna tombol primer atau sekunder?")
+    );
+    assert_eq!(
+        st.svc.overnight_tick().await.unwrap().started.as_deref(),
+        Some("b")
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn perubahan_ci_menahan_needs_confirmation() {
+    let (_lark, _clock, st) = vm_started(false).await;
+    changed(&st, "a", ".github/workflows/ci.yml");
+    st.agent.last().done();
+    eventually(|| held(&st, "a").is_some()).await;
+    assert_eq!(
+        held(&st, "a"),
+        Some(mandor_domain::HoldReason::NeedsConfirmation)
+    );
+    assert!(st.git.st().pushes.is_empty());
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn tanpa_ac_kartu_vm_langsung_push_dan_pr() {
+    let (_lark, _clock, st) = vm_started(false).await;
+    changed(&st, "a", "src/form.rs");
+    st.agent.last().done();
+    eventually(|| !st.git.st().created_prs.is_empty()).await;
+    assert_eq!(held(&st, "a"), None);
+}
+
+#[tokio::test]
+async fn gerbang_selalu_block_di_vm_dan_tetap_warn_di_laptop() {
+    let warn_repo = |st: &Station| {
+        let mut r = st.repos.repos.lock().unwrap()[0].clone();
+        r.gate_mode = Some(mandor_domain::GateMode::Warn);
+        st.repos.repos.lock().unwrap()[0] = r;
+        let mut run = RunRecord::new("r1".to_owned(), "repo1".to_owned(), "x".to_owned());
+        run.worktree = Some(PathBuf::from("/wt/x"));
+        st.runs.insert(run);
+    };
+    let (_lark, _clock, on_vm) = vm_with(&[], wib(0, 20, 0)).await;
+    warn_repo(&on_vm);
+    assert_eq!(
+        on_vm.svc.gate_mode_for("r1").await.unwrap(),
+        mandor_domain::GateMode::Block
+    );
+    let lark = FakeLark::default();
+    let clock = FakeClock::default();
+    let laptop = station(&lark, &clock, "ou_me");
+    warn_repo(&laptop);
+    assert_eq!(
+        laptop.svc.gate_mode_for("r1").await.unwrap(),
+        mandor_domain::GateMode::Warn
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn waiting_fix_vm_dengan_ac_fail_ditahan_ac_gate_dan_tercatat_masuk_waiting_fix() {
+    let (lark, _clock, st) = vm_with(&[], wib(1, 11, 0)).await;
+    vm_waiting_fix(&lark, &st, wib(1, 11, 0));
+    let mut row =
+        mandor_domain::AcRow::new("ac1", Some("AC-1"), "x", mandor_domain::RowStatus::Active);
+    row.verdict = mandor_domain::Verdict::Pass;
+    st.reviews
+        .ledgers
+        .lock()
+        .unwrap()
+        .insert("run7".to_owned(), vec![row]);
+    lark.edit("rec7", |t| t.ac_ids = vec!["ac1".to_owned()]);
+    lark.acs.lock().unwrap().insert(
+        "ac1".to_owned(),
+        mandor_usecase::AcItem {
+            record_id: "ac1".to_owned(),
+            label: Some("AC-1".to_owned()),
+            text: "x".to_owned(),
+            ..Default::default()
+        },
+    );
+    st.svc.sync().poll(true, &[]).await.unwrap();
+    let report = st.svc.tick_waiting_fix(QUIET).await.unwrap();
+    assert_eq!(report.started, ["rec7"]);
+    assert!(run_of(&st, "rec7").entered_waiting_fix_ms.is_some());
+    changed(&st, "rec7", "src/form.rs");
+    st.agent.last().done();
+    eventually(|| run_of(&st, "rec7").state == RunState::Reviewing).await;
+    report_verdict(&st, "ac1", mandor_domain::Verdict::Fail);
+    st.agent.last().done();
+    eventually(|| held(&st, "rec7").is_some()).await;
+    assert_eq!(held(&st, "rec7"), Some(mandor_domain::HoldReason::AcGate));
+    assert!(st.git.st().pushes.is_empty());
+}

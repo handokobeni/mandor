@@ -69,6 +69,10 @@ impl<D: Deps> RunService<D> {
     ) -> Result<GroupStep, RunError> {
         let mut cards = self.runs.cards(&run.id).await?;
         let step = self.update_fix_cards(&run, &mut cards, &tasks).await?;
+        if !step.entered.is_empty() && run.entered_waiting_fix_ms.is_none() {
+            run.entered_waiting_fix_ms = Some(self.sync.clock.now_ms());
+            self.runs.save(&run, run.generation, self.now()).await?;
+        }
         if run.state.is_working() || run.state.is_parked() {
             // Kartu baru ikut giliran berikutnya setelah giliran ini selesai.
             return Ok(step);

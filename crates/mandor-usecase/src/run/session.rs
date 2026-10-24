@@ -157,12 +157,20 @@ impl<D: Deps> RunService<D> {
         match end {
             TurnEnd::Ok(result) => {
                 if run.phase == RunPhase::Plan && !result.trim().is_empty() {
-                    run.plan = Some(result);
+                    run.plan = Some(result.clone());
                 }
                 if !run.queue.is_empty() {
                     let next = run.queue.remove(0);
                     let req = self.resume_request(&mut run, next.clone()).await?;
                     return self.spawn_turn_boxed(run, req, next).await;
+                }
+                // VM: kartu dikerjakan sampai PR atau tertahan dengan alasan (U4 plan VM).
+                // Run grup di VM menyusul di U10 plan run grup.
+                if self.is_vm()
+                    && run.phase == RunPhase::Implement
+                    && self.runs.cards(&run.id).await?.is_empty()
+                {
+                    return self.vm_after_turn(run, result).await;
                 }
                 run.state = RunState::AwaitingDev;
                 self.runs.save(&run, generation, self.now()).await?;

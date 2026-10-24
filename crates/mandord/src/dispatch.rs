@@ -44,6 +44,7 @@ const RUN_METHODS: &[&str] = &[
     method::RUNS_SEND_NOW,
     method::RUNS_STOP,
     method::RUNS_PUBLISH,
+    method::OVERNIGHT_GATE_DECIDE,
     method::RUNS_RESUME,
     method::RUNS_START_FIX,
     method::RUNS_TAKEOVER,
@@ -794,7 +795,9 @@ impl AppDispatch {
                 runs.stop(&p.run_id).await.map_err(run_error)?;
                 ok(&json!({}))
             }
-            method::RUNS_PUBLISH => self.publish(&s, params(v)?).await,
+            method::RUNS_PUBLISH | method::OVERNIGHT_GATE_DECIDE => {
+                self.publish(&s, params(v)?).await
+            }
             method::RUNS_RESUME => {
                 let p: SendParams = params(v)?;
                 let text = Some(p.text.as_str()).filter(|t| !t.trim().is_empty());

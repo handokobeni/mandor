@@ -4,6 +4,7 @@
 //! Penjadwal hanya memutuskan dan memulai; eksekusi memakai jalur Start,
 //! lanjutan sesi, dan mesin Waiting Fix yang sudah ada.
 
+mod flow;
 mod ports;
 
 use std::sync::Arc;

@@ -124,6 +124,9 @@ pub mod method {
     /// Revert atau tetap untuk kartu yang berubah di Lark.
     /// `GateCardDecisionParams` → `GateCardDecisionResult`.
     pub const RUNS_GATE_CARD_DECISION: &str = "runs.gate_card_decision";
+    /// Keputusan AC dev untuk kartu VM yang tertahan `ac_gate` (R12a plan VM):
+    /// push dan PR tanpa menjalankan agent. `PublishParams` → `PublishResult`.
+    pub const OVERNIGHT_GATE_DECIDE: &str = "overnight.gate_decide";
     /// Skill Claude yang bisa dipakai untuk planning (nama dan deskripsi).
     pub const AGENT_SKILLS: &str = "agent.skills";
     pub const REPOS_LIST: &str = "repos.list";

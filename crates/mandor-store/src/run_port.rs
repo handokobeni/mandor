@@ -8,8 +8,8 @@ use mandor_domain::app_run::{AppSettings, TestMode};
 use mandor_usecase::PortError;
 use mandor_usecase::review::DesignRoot;
 use mandor_usecase::run_ports::{
-    ChatItem, GroupCardRow, Journal, RepoInfo, Repos, RunMember, RunPhase, RunRecord, RunStore,
-    RunWorkspace, WorkspaceInfo,
+    ChatItem, GroupCardRow, Hold, Journal, RepoInfo, Repos, RunMember, RunPhase, RunRecord,
+    RunStore, RunWorkspace, WorkspaceInfo,
 };
 use serde::{Deserialize, Serialize};
 
@@ -61,6 +61,13 @@ struct RunExtra {
     /// Run grup dengan plan per kartu; `None` untuk run lain.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     group_plan: Option<bool>,
+    /// Alasan run `Held` (plan VM KTD-60).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    hold_reason: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    hold_note: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    entered_waiting_fix_ms: Option<i64>,
 }
 
 /// Bentuk simpan [`RunWorkspace`].
@@ -221,6 +228,9 @@ fn extra_of(r: &RunRecord) -> Result<String, StoreError> {
         plan: r.plan.clone(),
         plan_skill: r.plan_skill.clone(),
         group_plan: r.group_plan.then_some(true),
+        hold_reason: r.hold.as_ref().map(|h| h.reason.as_str().to_owned()),
+        hold_note: r.hold.as_ref().and_then(|h| h.note.clone()),
+        entered_waiting_fix_ms: r.entered_waiting_fix_ms,
     })
     .map_err(StoreError::internal)
 }
@@ -310,6 +320,15 @@ fn to_record(row: Row) -> Result<RunRecord, StoreError> {
         plan: extra.plan,
         plan_skill: extra.plan_skill,
         group_plan: extra.group_plan.unwrap_or(false),
+        hold: extra
+            .hold_reason
+            .as_deref()
+            .and_then(mandor_domain::HoldReason::parse)
+            .map(|reason| Hold {
+                reason,
+                note: extra.hold_note,
+            }),
+        entered_waiting_fix_ms: extra.entered_waiting_fix_ms,
         created_at_ms: row.created_at_ms,
         updated_at_ms: row.updated_at_ms,
     })

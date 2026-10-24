@@ -30,5 +30,5 @@ pub use gate::GateRejection;
 pub use kanban::{Column, TaskStatus, column_of};
 pub use push_gate::{GateDecision, GateMode, GateOutcome};
 pub use role::DaemonRole;
-pub use run::{ClaimLoss, RunState};
+pub use run::{ClaimLoss, HoldReason, RunState};
 pub use task::{AppField, CardFlag, FlagKind, Task, WriteOp, WriteRejected};

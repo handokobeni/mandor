@@ -364,10 +364,22 @@ pub struct RunRecord {
     pub review_id: Option<String>,
     /// Skill reviewer pilihan dev saat Start; `None` = prompt bawaan.
     pub reviewer_skill: Option<String>,
+    /// Alasan dan catatan run `Held` (KTD-60 plan VM).
+    pub hold: Option<Hold>,
+    /// Waktu kartu pertama kali masuk Waiting Fix; metrik "lolos tanpa
+    /// Waiting Fix" (R18 plan VM).
+    pub entered_waiting_fix_ms: Option<i64>,
     /// Diisi store saat membaca; diabaikan saat menyimpan.
     pub created_at_ms: i64,
     /// Diisi store saat membaca; diabaikan saat menyimpan.
     pub updated_at_ms: i64,
+}
+
+/// Run VM yang tertahan: alasannya dan pertanyaan atau catatan untuk dev.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Hold {
+    pub reason: mandor_domain::HoldReason,
+    pub note: Option<String>,
 }
 
 impl RunRecord {
@@ -402,6 +414,8 @@ impl RunRecord {
             design: Vec::new(),
             review_id: None,
             reviewer_skill: None,
+            hold: None,
+            entered_waiting_fix_ms: None,
             created_at_ms: 0,
             updated_at_ms: 0,
         }

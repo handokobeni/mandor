@@ -30,6 +30,8 @@
   import type { AcRowView } from '#lib/protocol/AcRowView.ts';
   import type { LedgerStore } from '#lib/stores/ledger.svelte.ts';
   import AcRow from './AcRow.svelte';
+  import { cardKey, rowsByCard } from '#lib/group.ts';
+  import type { GroupCardView } from '#lib/protocol/GroupCardView.ts';
   import ReviewHistory from './ReviewHistory.svelte';
 
   interface Props {
@@ -42,8 +44,10 @@
     onreview: () => void;
     onsend: (acIds: string[]) => void;
     onfile: (path: string) => void;
+    /** Kartu run grup; baris AC dikelompokkan per kartu. Kosong untuk run tunggal. */
+    cards?: GroupCardView[];
   }
-  let { taskKey, store, reviewing, agentBusy, now, onreview, onsend, onfile }: Props = $props();
+  let { taskKey, store, reviewing, agentBusy, now, onreview, onsend, onfile, cards = [] }: Props = $props();
 
   let focusIdx = $state(0);
   let expanded = $state<Record<string, boolean>>({});
@@ -69,6 +73,15 @@
         })
       : rows
   );
+  // Run grup: baris urut per kartu, dengan judul kartu di atas barisnya.
+  const ordered = $derived(cards.length > 0 ? rowsByCard(shown, cards).flatMap((g) => g.rows) : shown);
+  function cardHeader(i: number): string | null {
+    if (cards.length === 0) return null;
+    const r = ordered[i];
+    if (i > 0 && ordered[i - 1].card === r.card) return null;
+    const c = cards.find((x) => x.record_id === r.card);
+    return c ? `${cardKey(c)} · ${c.title}` : 'Other';
+  }
   // Pilihan yang tidak lagi Fail dibuang (mis. setelah review baru).
   $effect(() => {
     const ids = new Set(rows.filter((r) => r.verdict === 'fail').map((r) => r.ac_id));
@@ -84,7 +97,7 @@
   function onkey(e: KeyboardEvent, r: AcRowView): void {
     if (['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(e.key)) {
       e.preventDefault();
-      focusIdx = moveFocus(focusIdx, e.key, shown.length);
+      focusIdx = moveFocus(focusIdx, e.key, ordered.length);
     } else if (e.key === ' ') {
       e.preventDefault();
       if (!view) selected = toggleSelection(selected, r);
@@ -239,12 +252,16 @@
         <span class="ac-c ac-v" role="columnheader">Verdict</span>
         <span class="ac-c ac-x" role="columnheader"><span class="sr-only">Expand</span></span>
       </div>
-      {#each shown as r, i (r.ac_id)}
+      {#each ordered as r, i (r.ac_id)}
+        {@const head = cardHeader(i)}
+        {#if head}
+          <div class="ac-card-head" role="row"><span class="mono" role="gridcell">{head}</span></div>
+        {/if}
         <AcRow
           row={r}
           expanded={!!expanded[r.ac_id]}
           selected={selected.has(r.ac_id)}
-          focused={i === Math.min(focusIdx, shown.length - 1)}
+          focused={i === Math.min(focusIdx, ordered.length - 1)}
           readonly={!!view}
           reviewing={reviewing && !view}
           {noSource}
@@ -270,3 +287,7 @@
     <ReviewHistory history={store.history} {viewing} {now} onview={(id) => (viewing = id)} />
   </div>
 {/if}
+
+<style>
+  .ac-card-head { padding: 10px 12px 4px; font-size: var(--text-sm); color: var(--muted-foreground); border-top: 1px solid var(--border); }
+</style>

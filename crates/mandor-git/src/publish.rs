@@ -40,6 +40,25 @@ impl Git {
         Ok(Some(head.stdout.trim().to_owned()))
     }
 
+    /// Revert satu commit (mis. commit kartu run grup). `true` bila berhasil;
+    /// `false` bila konflik, dan revert dibatalkan sehingga worktree kembali
+    /// seperti semula.
+    ///
+    /// # Errors
+    /// [`GitError`] bila git gagal di luar konflik revert.
+    pub async fn revert_commit(&self, worktree: &Path, sha: &str) -> Result<bool, GitError> {
+        let out = run(&self.git(worktree).args(["revert", "--no-edit", sha])).await?;
+        if out.success() {
+            return Ok(true);
+        }
+        self.ok(
+            "revert --abort",
+            self.git(worktree).args(["revert", "--abort"]),
+        )
+        .await?;
+        Ok(false)
+    }
+
     /// Push HEAD ke `origin/<task_branch>`. Ditolak sebelum memanggil git bila
     /// branch worktree saat ini bukan branch task.
     ///

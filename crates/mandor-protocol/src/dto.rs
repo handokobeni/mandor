@@ -151,6 +151,88 @@ pub struct RunView {
     pub updated_at_ms: i64,
     /// Ringkasan buku AC (Rilis 2); `None` bila task tanpa AC.
     pub ac: Option<AcSummaryView>,
+    /// Kartu run grup, urut posisi; kosong untuk run tunggal.
+    pub cards: Vec<GroupCardView>,
+}
+
+/// Satu kartu run grup.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+pub struct GroupCardView {
+    pub record_id: String,
+    pub key: Option<String>,
+    pub title: String,
+    /// `pending`, `active`, `done`, `removed_changed`, `removed_by_dev`,
+    /// `removed_reverted`, atau `removed_follow_up`.
+    pub state: String,
+    /// Kartu selesai yang berubah di Lark; menunggu keputusan di gerbang.
+    pub changed_in_lark: bool,
+    /// Alasan dev tetap menyertakan kartu yang berubah.
+    pub kept_reason: Option<String>,
+    /// Kartu sedang dalam loop perbaikan Waiting Fix.
+    pub in_fix: bool,
+}
+
+/// Parameter `groups.candidates`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+pub struct GroupCandidatesParams {
+    /// Kartu awal; kandidat diambil dari epic kartu ini.
+    pub record_id: String,
+}
+
+/// Satu kandidat grup.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+pub struct GroupCandidateView {
+    pub record_id: String,
+    pub key: Option<String>,
+    pub title: String,
+    /// Alasan kartu tidak bisa dipilih; `None` bila bisa.
+    pub blocked: Option<String>,
+}
+
+/// Parameter `runs.start_group`: kartu dalam urutan pengerjaan.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+pub struct StartGroupParams {
+    pub record_ids: Vec<String>,
+    /// Repo untuk grup satu repo; diabaikan bila `workspace` diisi.
+    pub repo_id: String,
+    pub note: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub workspace: Option<StartWorkspace>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub planning: Option<StartPlanning>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub design_sources: Option<Vec<String>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub reviewer_skill: Option<String>,
+}
+
+/// Parameter aksi pada satu kartu run grup.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+pub struct GroupCardRef {
+    pub run_id: String,
+    pub record_id: String,
+}
+
+/// Parameter `runs.gate_card_decision`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+pub struct GateCardDecisionParams {
+    pub run_id: String,
+    pub record_id: String,
+    /// `revert` atau `keep`.
+    pub decision: String,
+    /// Wajib untuk `keep`; dicatat di PR.
+    pub reason: Option<String>,
+}
+
+/// Hasil `runs.gate_card_decision`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+pub struct GateCardDecisionResult {
+    /// `kept`, `reverted`, atau `revert_conflict`.
+    pub outcome: String,
 }
 
 /// Ringkasan buku AC untuk kartu dan sidebar.
@@ -355,7 +437,8 @@ pub struct StartFixParams {
 /// Hasil `runs.publish`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
 pub struct PublishResult {
-    /// `published`, `review_started`, `blocked`, atau `needs_confirmation`.
+    /// `published`, `review_started`, `blocked`, `needs_confirmation`, atau
+    /// `cards_changed` (run grup).
     pub outcome: String,
     pub pr_url: Option<String>,
     /// Label AC gagal (Blocked).
@@ -368,6 +451,9 @@ pub struct PublishResult {
     pub sync_warning: Option<String>,
     /// Review yang dimulai (`review_started`).
     pub review_id: Option<String>,
+    /// Kunci kartu grup yang berubah di Lark dan menunggu keputusan revert
+    /// atau tetap (`cards_changed`).
+    pub changed_cards: Vec<String>,
 }
 
 /// Parameter `runs.publish` dengan keputusan dev (KTD-35).
@@ -738,6 +824,9 @@ pub struct AcRowView {
     pub in_gate: bool,
     /// Boleh dipilih untuk Send to agent.
     pub selectable: bool,
+    /// Kartu asal AC di run grup (`record_id`, kunci ada di `RunView.cards`);
+    /// `None` untuk run tunggal.
+    pub card: Option<String>,
 }
 
 /// Hasil `ledger.get`: buku AC run setelah refresh dari tracker.

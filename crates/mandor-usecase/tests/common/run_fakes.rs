@@ -10,9 +10,9 @@ use std::time::Duration;
 use mandor_domain::AgentEvent;
 use mandor_usecase::PortError;
 use mandor_usecase::run_ports::{
-    AgentPort, AgentRequest, AgentRunHandle, ChatItem, GitPort, Journal, Notice, Notifier,
-    PrContext, PrRef, RepoInfo, Repos, RunRecord, RunStore, Spawner, Stopper, WorkChanges,
-    WorkspaceInfo,
+    AgentPort, AgentRequest, AgentRunHandle, ChatItem, GitPort, GroupCardRow, Journal, Notice,
+    Notifier, PrContext, PrRef, RepoInfo, Repos, RunRecord, RunStore, Spawner, Stopper,
+    WorkChanges, WorkspaceInfo,
 };
 use tokio::sync::mpsc;
 
@@ -35,6 +35,12 @@ pub struct GitState {
     pub commits: Vec<(PathBuf, String)>,
     pub pushes: Vec<String>,
     pub prs: HashMap<String, String>,
+    /// Commit yang di-revert (run grup).
+    pub reverts: Vec<String>,
+    /// Commit yang revert-nya konflik.
+    pub revert_conflicts: Vec<String>,
+    /// URL PR yang sudah di-merge.
+    pub merged_prs: Vec<String>,
     pub created_prs: Vec<(String, String)>,
     pub pr_bodies: Vec<String>,
     /// Badan PR saat ini per URL, seperti yang dikembalikan `gh pr view`.
@@ -144,14 +150,22 @@ impl GitPort for FakeGit {
         self.state.lock().unwrap().reverted.push(path.to_owned());
         Ok(())
     }
-    async fn commit_all(&self, wt: &Path, message: &str) -> Result<(), PortError> {
+    async fn commit_all(&self, wt: &Path, message: &str) -> Result<Option<String>, PortError> {
         let mut st = self.state.lock().unwrap();
         st.commits.push((wt.to_path_buf(), message.to_owned()));
         if let Some(c) = st.changes.get_mut(wt) {
             c.dirty = false;
             c.unpushed += 1;
         }
-        Ok(())
+        Ok(Some(format!("sha{}", st.commits.len())))
+    }
+    async fn revert_commit(&self, _wt: &Path, sha: &str) -> Result<bool, PortError> {
+        let mut st = self.state.lock().unwrap();
+        if st.revert_conflicts.iter().any(|s| s == sha) {
+            return Ok(false);
+        }
+        st.reverts.push(sha.to_owned());
+        Ok(true)
     }
     async fn push(&self, _r: &RepoInfo, wt: &Path, branch: &str) -> Result<(), PortError> {
         let mut st = self.state.lock().unwrap();
@@ -173,16 +187,15 @@ impl GitPort for FakeGit {
             .unwrap_or_else(|| "+diff pr".to_owned()))
     }
     async fn find_pr(&self, r: &RepoInfo, branch: &str) -> Result<Option<PrRef>, PortError> {
-        Ok(self
-            .state
-            .lock()
-            .unwrap()
-            .prs
-            .get(&pr_key(r, branch))
-            .map(|u| PrRef {
+        let state = self.state.lock().unwrap();
+        Ok(state.prs.get(&pr_key(r, branch)).map(|u| {
+            let merged = state.merged_prs.contains(u);
+            PrRef {
                 url: u.clone(),
-                open: true,
-            }))
+                open: !merged,
+                merged,
+            }
+        }))
     }
     async fn create_pr(
         &self,
@@ -445,6 +458,27 @@ pub struct FakeRuns {
     pub chat: Arc<Mutex<Vec<(String, ChatItem)>>>,
     /// (record, reply) → `pending` / `delivered`.
     pub journal: Arc<Mutex<Vec<(String, String, String)>>>,
+    /// Kartu run grup per run.
+    pub cards: Arc<Mutex<HashMap<String, Vec<GroupCardRow>>>>,
+}
+
+impl FakeRuns {
+    /// Run terbuka yang memuat kartu terbuka `record_id`.
+    fn group_of(&self, record_id: &str) -> Option<String> {
+        let rows = self.rows.lock().unwrap();
+        self.cards
+            .lock()
+            .unwrap()
+            .iter()
+            .find(|(run_id, cards)| {
+                rows.get(*run_id).is_some_and(|(_, closed)| !closed)
+                    && cards.iter().any(|c| {
+                        c.record_id == record_id
+                            && !matches!(c.state, mandor_domain::group::CardState::Removed(_))
+                    })
+            })
+            .map(|(id, _)| id.clone())
+    }
 }
 
 impl Journal for FakeRuns {
@@ -465,6 +499,14 @@ impl Journal for FakeRuns {
         for e in self.journal.lock().unwrap().iter_mut() {
             if e.0 == record && e.1 == reply {
                 "delivered".clone_into(&mut e.2);
+            }
+        }
+        Ok(())
+    }
+    async fn journal_requeue(&self, record: &str, reply: &str) -> Result<(), PortError> {
+        for e in self.journal.lock().unwrap().iter_mut() {
+            if e.0 == record && e.1 == reply {
+                "pending".clone_into(&mut e.2);
             }
         }
         Ok(())
@@ -527,7 +569,64 @@ impl FakeRuns {
 }
 
 impl RunStore for FakeRuns {
+    async fn create_group(
+        &self,
+        run: &RunRecord,
+        cards: &[GroupCardRow],
+        _now: i64,
+    ) -> Result<(), PortError> {
+        for c in cards {
+            if self.group_of(&c.record_id).is_some()
+                || self
+                    .rows
+                    .lock()
+                    .unwrap()
+                    .values()
+                    .any(|(r, closed)| !closed && r.record_id == c.record_id)
+            {
+                return Err(PortError::Conflict);
+            }
+        }
+        self.rows
+            .lock()
+            .unwrap()
+            .insert(run.id.clone(), (run.clone(), false));
+        self.cards
+            .lock()
+            .unwrap()
+            .insert(run.id.clone(), cards.to_vec());
+        Ok(())
+    }
+    async fn cards(&self, run_id: &str) -> Result<Vec<GroupCardRow>, PortError> {
+        Ok(self
+            .cards
+            .lock()
+            .unwrap()
+            .get(run_id)
+            .cloned()
+            .unwrap_or_default())
+    }
+    async fn save_cards(
+        &self,
+        run_id: &str,
+        cards: &[GroupCardRow],
+        primary: Option<&str>,
+    ) -> Result<(), PortError> {
+        self.cards
+            .lock()
+            .unwrap()
+            .insert(run_id.to_owned(), cards.to_vec());
+        if let Some(p) = primary
+            && let Some((r, _)) = self.rows.lock().unwrap().get_mut(run_id)
+        {
+            p.clone_into(&mut r.record_id);
+        }
+        Ok(())
+    }
     async fn create(&self, run: &RunRecord, _now: i64) -> Result<(), PortError> {
+        if self.group_of(&run.record_id).is_some() {
+            return Err(PortError::Conflict);
+        }
         let mut rows = self.rows.lock().unwrap();
         if rows
             .values()
@@ -542,6 +641,9 @@ impl RunStore for FakeRuns {
         Ok(self.rows.lock().unwrap().get(id).map(|(r, _)| r.clone()))
     }
     async fn active_for(&self, record_id: &str) -> Result<Option<RunRecord>, PortError> {
+        if let Some(id) = self.group_of(record_id) {
+            return Ok(self.rows.lock().unwrap().get(&id).map(|(r, _)| r.clone()));
+        }
         Ok(self
             .rows
             .lock()

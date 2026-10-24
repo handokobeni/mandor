@@ -8,8 +8,8 @@ use std::time::Duration;
 
 use mandor_domain::{AppField, CardFlag, Task, TaskStatus, WriteOp};
 use mandor_usecase::{
-    AcItem, CachedTask, Clock, Deps, Ids, LarkTasks, Outbox, PortError, QueuedWrite, SprintItem,
-    SyncService, TaskCache,
+    AcItem, CachedTask, Clock, Deps, EpicItem, Ids, LarkTasks, Outbox, PortError, QueuedWrite,
+    SprintItem, SyncService, TaskCache,
 };
 
 /// Satu tulisan yang diterima Lark tiruan.
@@ -32,6 +32,8 @@ pub struct FakeLark {
     pub replies_fail: Arc<Mutex<bool>>,
     pub names: Arc<Mutex<HashMap<String, String>>>,
     pub sprints: Arc<Mutex<HashMap<String, SprintItem>>>,
+    /// Epic per ID record.
+    pub epics: Arc<Mutex<HashMap<String, EpicItem>>>,
     /// ID sprint yang diminta per panggilan.
     pub sprint_calls: Arc<Mutex<Vec<Vec<String>>>>,
     /// `true`: tabel sprint tidak bisa dibaca.
@@ -72,6 +74,10 @@ impl LarkTasks for FakeLark {
         }
         let s = self.sprints.lock().unwrap();
         Ok(ids.iter().filter_map(|i| s.get(i).cloned()).collect())
+    }
+    async fn epics(&self, ids: &[String]) -> Result<Vec<EpicItem>, PortError> {
+        let e = self.epics.lock().unwrap();
+        Ok(ids.iter().filter_map(|i| e.get(i).cloned()).collect())
     }
     async fn user_names(&self, ids: &[String]) -> Result<HashMap<String, String>, PortError> {
         self.name_calls.lock().unwrap().push(ids.to_vec());

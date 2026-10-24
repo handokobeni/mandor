@@ -1,0 +1,50 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT record_id, state, data_json FROM run_cards WHERE run_id = ? ORDER BY position",
+  "describe": {
+    "columns": [
+      {
+        "name": "record_id",
+        "ordinal": 0,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "run_cards",
+            "name": "record_id"
+          }
+        }
+      },
+      {
+        "name": "state",
+        "ordinal": 1,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "run_cards",
+            "name": "state"
+          }
+        }
+      },
+      {
+        "name": "data_json",
+        "ordinal": 2,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "run_cards",
+            "name": "data_json"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "c8c40f28976e9c392bc6c0e23f9cca51ceeb8b9e70735dff7e565d64ca43c3ab"
+}

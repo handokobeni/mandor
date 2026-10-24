@@ -3,11 +3,12 @@
 use std::sync::Arc;
 
 use mandor_domain::push_gate::{apply_decision, evaluate};
-use mandor_domain::{AppField, GateDecision, GateMode, GateOutcome, RunState, TaskStatus, WriteOp};
+use mandor_domain::{GateDecision, GateMode, GateOutcome, RunState};
 
+use super::group_gate::labelled_rows;
 use super::{RunError, RunService};
 use crate::notify::notice;
-use crate::ports::{Clock, Deps};
+use crate::ports::Deps;
 use crate::review::settings::{resolve_gate_mode, utc_minutes};
 use crate::run_ports::{
     GitPort, LedgerStore, NoticeKind, Notifier, Repos, ReviewTrigger, RunPhase, RunRecord, RunStore,
@@ -29,6 +30,9 @@ pub enum PublishOutcome {
     Blocked { failed: Vec<String> },
     /// Mode blokir: AC Can't verify belum dikonfirmasi.
     NeedsConfirmation { unverified: Vec<String> },
+    /// Run grup: kartu yang berubah di Lark menunggu keputusan revert atau
+    /// tetap (R13). Berisi kunci kartu.
+    CardsChanged { cards: Vec<String> },
 }
 
 /// Kursor komentar yang menandai "sejak sekarang" (detik epoch, tanpa reply).
@@ -51,6 +55,9 @@ impl<D: Deps> RunService<D> {
             PublishOutcome::Blocked { .. } | PublishOutcome::NeedsConfirmation { .. } => Err(
                 RunError::InvalidState("the acceptance criteria gate holds the push"),
             ),
+            PublishOutcome::CardsChanged { .. } => Err(RunError::InvalidState(
+                "a card changed in Lark; decide to revert or keep it",
+            )),
         }
     }
 
@@ -73,6 +80,14 @@ impl<D: Deps> RunService<D> {
         if run.state.is_busy() || run.state.is_parked() || run.state == RunState::Preparing {
             return Err(RunError::InvalidState(run.state.as_str()));
         }
+        let group = self.group_gate(&mut run).await?;
+        if let Some((holds, _)) = &group
+            && !holds.is_empty()
+        {
+            return Ok(PublishOutcome::CardsChanged {
+                cards: holds.clone(),
+            });
+        }
         let refresh = self.refresh_ledger(run_id).await?;
         let sync_warning = refresh.error.as_ref().map(|_| {
             let at = refresh
@@ -83,7 +98,11 @@ impl<D: Deps> RunService<D> {
         self.mark_stale_if_changed(&run).await;
         let mut rows = self.reviews.ac_rows(run_id).await?;
         let mode = self.gate_mode(&run).await?;
-        let warnings = match evaluate(&rows, mode, decision) {
+        let shown = match &group {
+            Some((_, keys)) => labelled_rows(&rows, keys),
+            None => rows.clone(),
+        };
+        let warnings = match evaluate(&shown, mode, decision) {
             GateOutcome::NeedsReview => {
                 let rec = self
                     .start_review(run_id, ReviewTrigger::PushAndPr, None)
@@ -172,28 +191,10 @@ impl<D: Deps> RunService<D> {
         url: &str,
         cursor_now_too: bool,
     ) -> Result<(), RunError> {
-        let task = self.task_of(&run.record_id).await?;
-        let mut fields = vec![AppField::PrUrl(url.to_owned())];
-        if task.status == TaskStatus::WaitingReview {
-            if task.pr_url.as_deref() != Some(url) {
-                self.sync
-                    .request_write(&run.record_id, &WriteOp::Fields(fields))
-                    .await?;
-            }
+        if self.runs.cards(&run.id).await?.is_empty() {
+            self.mark_card(&run.record_id, url, cursor_now_too).await?;
         } else {
-            // Bila status sudah diubah manusia, revalidasi outbox membatalkan
-            // tulisan ini dan menandai kartu (KTD-7).
-            if cursor_now_too {
-                fields.push(AppField::CommentCursor(cursor_now(
-                    self.sync.clock.now_ms(),
-                )));
-            }
-            let op = WriteOp::Transition {
-                from: TaskStatus::InProgress,
-                to: TaskStatus::WaitingReview,
-                fields,
-            };
-            self.sync.request_write(&run.record_id, &op).await?;
+            self.mark_group_cards(&run.id, url, cursor_now_too).await?;
         }
         // Run workspace menyimpan link per anggota (lihat `publish_members`).
         if run.workspace.is_none() {

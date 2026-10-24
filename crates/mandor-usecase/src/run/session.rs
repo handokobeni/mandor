@@ -244,9 +244,27 @@ impl<D: Deps> RunService<D> {
             return Ok(());
         }
         self.reviews.save_ac_rows(run_id, &rows).await?;
-        let gaps = design_gaps_text(&rows, DESIGN_GAPS_LIMIT);
+        // Run grup: selisih desain milik kartu yang sedang dikerjakan.
+        let active = self
+            .runs
+            .cards(run_id)
+            .await?
+            .into_iter()
+            .find(|c| c.state == mandor_domain::group::CardState::Active)
+            .map(|c| c.record_id);
+        let (target, card_rows): (String, Vec<_>) = match &active {
+            Some(card) => (
+                card.clone(),
+                rows.iter()
+                    .filter(|r| r.card.as_deref() == Some(card.as_str()))
+                    .cloned()
+                    .collect(),
+            ),
+            None => (run.record_id.clone(), rows),
+        };
+        let gaps = design_gaps_text(&card_rows, DESIGN_GAPS_LIMIT);
         let op = WriteOp::Fields(vec![AppField::DesignGaps(gaps)]);
-        self.sync.request_write(&run.record_id, &op).await?;
+        self.sync.request_write(&target, &op).await?;
         Ok(())
     }
 

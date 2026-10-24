@@ -23,8 +23,8 @@ impl Store {
             let stale = i64::from(r.stale);
             sqlx::query!(
                 "INSERT INTO ac_rows (run_id, ac_id, position, label, text, design, design_note,
-                                      verdict, evidence, stale, status, reason, decided_by)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                                      verdict, evidence, stale, status, reason, decided_by, card)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 run_id,
                 r.ac_id,
                 position,
@@ -37,7 +37,8 @@ impl Store {
                 stale,
                 status,
                 r.reason,
-                r.decided_by
+                r.decided_by,
+                r.card
             )
             .execute(&mut *tx)
             .await
@@ -54,7 +55,7 @@ impl Store {
     pub async fn ac_rows(&self, run_id: &str) -> Result<Vec<AcRow>, StoreError> {
         let rows = sqlx::query!(
             "SELECT ac_id, label, text, design, design_note, verdict, evidence, stale, status,
-                    reason, decided_by
+                    reason, decided_by, card
              FROM ac_rows WHERE run_id = ? ORDER BY position",
             run_id
         )
@@ -75,6 +76,7 @@ impl Store {
                     status: r.status,
                     reason: r.reason,
                     decided_by: r.decided_by,
+                    card: r.card,
                 })
             })
             .collect()
@@ -88,7 +90,7 @@ impl Store {
     pub async fn active_ac_rows(&self) -> Result<Vec<(String, AcRow)>, StoreError> {
         let rows = sqlx::query!(
             "SELECT a.run_id, a.ac_id, a.label, a.text, a.design, a.design_note, a.verdict,
-                    a.evidence, a.stale, a.status, a.reason, a.decided_by
+                    a.evidence, a.stale, a.status, a.reason, a.decided_by, a.card
              FROM ac_rows a JOIN runs r ON r.id = a.run_id
              WHERE r.closed = 0 ORDER BY a.run_id, a.position"
         )
@@ -109,6 +111,7 @@ impl Store {
                     status: r.status,
                     reason: r.reason,
                     decided_by: r.decided_by,
+                    card: r.card,
                 })?;
                 Ok((r.run_id, row))
             })
@@ -129,6 +132,7 @@ struct Raw {
     status: String,
     reason: Option<String>,
     decided_by: Option<String>,
+    card: Option<String>,
 }
 
 fn to_row(r: Raw) -> Result<AcRow, StoreError> {
@@ -144,6 +148,7 @@ fn to_row(r: Raw) -> Result<AcRow, StoreError> {
         status: RowStatus::parse(&r.status).ok_or_else(|| corrupt("status", &r.status))?,
         reason: r.reason,
         decided_by: r.decided_by,
+        card: r.card,
     })
 }
 

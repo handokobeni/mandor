@@ -78,6 +78,8 @@ impl WorkChanges {
 pub struct PrRef {
     pub url: String,
     pub open: bool,
+    /// PR sudah di-merge (bukan sekadar ditutup).
+    pub merged: bool,
 }
 
 /// Buku AC per run (KTD-25).
@@ -131,11 +133,20 @@ pub trait GitPort: Send + Sync {
         worktree: &Path,
         path: &str,
     ) -> impl Future<Output = Result<(), PortError>> + Send;
+    /// Commit semua perubahan; hash commit, atau `None` bila tidak ada yang
+    /// di-commit.
     fn commit_all(
         &self,
         worktree: &Path,
         message: &str,
-    ) -> impl Future<Output = Result<(), PortError>> + Send;
+    ) -> impl Future<Output = Result<Option<String>, PortError>> + Send;
+    /// Revert satu commit; `false` bila konflik (revert dibatalkan, worktree
+    /// tidak berubah).
+    fn revert_commit(
+        &self,
+        worktree: &Path,
+        sha: &str,
+    ) -> impl Future<Output = Result<bool, PortError>> + Send;
     fn push(
         &self,
         repo: &RepoInfo,
@@ -331,6 +342,9 @@ pub struct RunRecord {
     pub plan: Option<String>,
     /// Skill plan yang dipakai setelah brainstorm; `None` = prompt bawaan.
     pub plan_skill: Option<String>,
+    /// Run grup: setiap kartu berikutnya diawali giliran plan yang menunggu
+    /// persetujuan (Planning dipilih sekali saat mulai).
+    pub group_plan: bool,
     /// Akhir jeda tenang (ms epoch); hanya bermakna saat state `WfQuiet`.
     pub quiet_until_ms: Option<i64>,
     /// `open_id` yang memindahkan task ke Waiting Fix pada siklus ini (pengubah
@@ -380,6 +394,7 @@ impl RunRecord {
             phase: RunPhase::Implement,
             plan: None,
             plan_skill: None,
+            group_plan: false,
             quiet_until_ms: None,
             fix_requested_by: None,
             pr_body_hashes: BTreeMap::new(),
@@ -439,6 +454,61 @@ pub enum ChatItem {
     System(String),
 }
 
+/// Commit lokal satu kartu run grup di satu repo.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CardCommit {
+    pub repo_id: String,
+    pub sha: String,
+}
+
+/// Satu kartu run grup yang tersimpan (KTD-G1 plan run grup), urut posisi.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GroupCardRow {
+    pub record_id: String,
+    pub state: mandor_domain::group::CardState,
+    /// Kartu `Done` yang berubah status atau PIC di Lark (R13).
+    pub changed_in_lark: bool,
+    /// Alasan dev tetap menyertakan kartu yang berubah di Lark (R13).
+    pub kept_reason: Option<String>,
+    /// Commit lokal kartu, satu per repo yang berubah.
+    pub commits: Vec<CardCommit>,
+    /// Plan kartu yang disetujui atau ditulis agent.
+    pub plan: Option<String>,
+    /// Orang yang memindah kartu ke Waiting Fix (aturan Feedback QA, KTD-41).
+    pub fix_requested_by: Option<String>,
+    /// Jeda tenang Waiting Fix kartu.
+    pub quiet_until_ms: Option<i64>,
+    /// Kartu sedang dalam loop perbaikan.
+    pub in_fix: bool,
+    /// Balasan yang diteruskan ke agent pada siklus perbaikan kartu ini.
+    pub fix_replies: Vec<String>,
+}
+
+impl GroupCardRow {
+    /// Kartu baru yang belum dikerjakan.
+    #[must_use]
+    pub fn pending(record_id: &str) -> Self {
+        Self {
+            record_id: record_id.to_owned(),
+            state: mandor_domain::group::CardState::Pending,
+            changed_in_lark: false,
+            kept_reason: None,
+            commits: Vec::new(),
+            plan: None,
+            fix_requested_by: None,
+            quiet_until_ms: None,
+            in_fix: false,
+            fix_replies: Vec::new(),
+        }
+    }
+
+    /// Kartu masih bagian grup (belum dikeluarkan).
+    #[must_use]
+    pub fn is_open(&self) -> bool {
+        !matches!(self.state, mandor_domain::group::CardState::Removed(_))
+    }
+}
+
 /// Penyimpanan run dan chat.
 pub trait RunStore: Send + Sync {
     /// Membuat run; `PortError::Conflict` bila record sudah punya run aktif.
@@ -446,6 +516,27 @@ pub trait RunStore: Send + Sync {
         &self,
         run: &RunRecord,
         now_ms: i64,
+    ) -> impl Future<Output = Result<(), PortError>> + Send;
+    /// Membuat run grup beserta kartunya secara atomik; `PortError::Conflict`
+    /// bila salah satu kartu sudah ada di run terbuka (KTD-G2).
+    fn create_group(
+        &self,
+        run: &RunRecord,
+        cards: &[GroupCardRow],
+        now_ms: i64,
+    ) -> impl Future<Output = Result<(), PortError>> + Send;
+    /// Kartu run grup, urut posisi; kosong untuk run tunggal.
+    fn cards(
+        &self,
+        run_id: &str,
+    ) -> impl Future<Output = Result<Vec<GroupCardRow>, PortError>> + Send;
+    /// Menyimpan seluruh kartu run grup. Kartu `Removed` tidak lagi menahan
+    /// keunikan. `primary` memindah `record_id` run ke kartu lain.
+    fn save_cards(
+        &self,
+        run_id: &str,
+        cards: &[GroupCardRow],
+        primary: Option<&str>,
     ) -> impl Future<Output = Result<(), PortError>> + Send;
     fn get(&self, id: &str) -> impl Future<Output = Result<Option<RunRecord>, PortError>> + Send;
     fn active_for(
@@ -481,6 +572,12 @@ pub trait Journal: Send + Sync {
         now_ms: i64,
     ) -> impl Future<Output = Result<(), PortError>> + Send;
     fn journal_delivered(
+        &self,
+        record_id: &str,
+        reply_id: &str,
+    ) -> impl Future<Output = Result<(), PortError>> + Send;
+    /// Balasan `delivered` kembali `pending` untuk dikirim ke run lain.
+    fn journal_requeue(
         &self,
         record_id: &str,
         reply_id: &str,
@@ -557,6 +654,9 @@ pub struct FixContext<'a> {
     pub comments: &'a [Reply],
     /// Instruksi dev (tepercaya), dari "Mulai perbaikan".
     pub instruction: Option<&'a str>,
+    /// Run grup: kartu yang diperbaiki; komentar diberi label kartunya.
+    /// Kosong untuk run tunggal.
+    pub cards: &'a [Task],
 }
 
 /// Penyusun pesan agent: instruksi operator di luar blok, data Lark di dalam
@@ -707,6 +807,9 @@ pub struct ReviewBrief<'a> {
     pub skill: Option<&'a str>,
     /// Run workspace: folder repo anggota.
     pub repos: &'a [String],
+    /// Run grup: semua kartu yang disertakan, urut posisi (R12). Kosong untuk
+    /// run tunggal.
+    pub cards: &'a [Task],
 }
 
 /// Pemicu review.

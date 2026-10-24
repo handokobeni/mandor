@@ -444,6 +444,60 @@ async fn feedback_qa_dan_pengubah_terakhir_ac_ikut_dibaca() {
     assert_eq!(acs[1].last_modified_by, None);
 }
 
+#[test]
+fn field_epic_dipetakan_ke_daftar_record_epic() {
+    let with_epic = json!({"record_id": "recE", "fields": {
+        "Task Status": "To Do",
+        "Epic": {"link_record_ids": ["recEpic1"]}
+    }, "last_modified_time": 1});
+    assert_eq!(to_task(&raw(&with_epic)).epic_ids, ["recEpic1"]);
+    let without =
+        json!({"record_id": "recN", "fields": {"Task Status": "To Do"}, "last_modified_time": 1});
+    assert!(to_task(&raw(&without)).epic_ids.is_empty());
+}
+
+#[tokio::test]
+async fn epic_dibaca_dari_tabel_tertaut_field_epic() {
+    let mock = Mock::start(Arc::new(|r: &Req| {
+        if r.path().ends_with("/tables/tbl1/fields") {
+            return (
+                200,
+                json!({"code": 0, "msg": "ok", "data": {"has_more": false, "items": [
+                    {"field_name": "Epic", "type": 21,
+                     "property": {"multiple": true, "table_id": "tblEP", "table_name": "Epic Pegasus"}}
+                ]}})
+                .to_string(),
+            );
+        }
+        if r.path().ends_with("/tables/tblEP/records/batch_get") {
+            return (
+                200,
+                json!({"code": 0, "msg": "ok", "data": {"records": [
+                    {"record_id": "ep1", "fields": {
+                        "Epic Name": [{"type": "text", "text": "Job & Position"}],
+                        "ID": [{"type": "text", "text": "E-PGS43"}]
+                    }, "last_modified_time": 1},
+                    {"record_id": "ep2", "fields": {}, "last_modified_time": 1}
+                ]}})
+                .to_string(),
+            );
+        }
+        (404, "{}".to_owned())
+    }))
+    .await;
+    let (gw, _store, _dir) = gateway(&mock, Some(tokens(now_ms() + 3_600_000))).await;
+
+    let epics = gw
+        .epics(&["ep1".to_owned(), "ep2".to_owned()])
+        .await
+        .unwrap();
+    assert_eq!(epics.len(), 2);
+    assert_eq!(epics[0].name, "Job & Position");
+    assert_eq!(epics[0].key.as_deref(), Some("E-PGS43"));
+    assert_eq!(epics[1].name, "ep2", "nama kosong memakai ID record");
+    assert!(gw.epics(&[]).await.unwrap().is_empty());
+}
+
 #[tokio::test]
 async fn sprint_dibaca_dari_tabel_tertaut_field_sprint() {
     let mock = Mock::start(Arc::new(|r: &Req| {

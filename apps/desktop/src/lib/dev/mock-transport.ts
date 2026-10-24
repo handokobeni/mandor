@@ -56,6 +56,7 @@ function run(id: string, key: string, title: string, state: string, extra: Parti
     started_at_ms: Date.now() - 42 * 60_000,
     updated_at_ms: Date.now() - 60_000,
     ac: null,
+    cards: [],
     ...extra
   };
 }
@@ -130,8 +131,21 @@ const RUNS: RunView[] = [
       { repo_id: 'pegasus-web', pr_url: 'https://github.com/pegasus/pegasus-web/pull/483' }
     ]
   }),
-  run('10', 'PGS-1347', 'Overtime approval reminders', 'awaiting_dev', { phase: 'brainstorm' })
+  run('10', 'PGS-1347', 'Overtime approval reminders', 'awaiting_dev', { phase: 'brainstorm' }),
+  // Run grup satu flow (plan run grup): kartu 2 dari 4 baru selesai gilirannya.
+  run('11', 'PGS-1401', 'Job list', 'awaiting_dev', {
+    branch: 'mandor/pgs-1401-1404-job-position',
+    cards: [
+      { record_id: 'rec11', key: 'PGS-1401', title: 'Job list', state: 'done', changed_in_lark: false, kept_reason: null, in_fix: false },
+      { record_id: 'recG2', key: 'PGS-1402', title: 'Job card', state: 'active', changed_in_lark: false, kept_reason: null, in_fix: false },
+      { record_id: 'recG3', key: 'PGS-1403', title: 'Create job', state: 'pending', changed_in_lark: false, kept_reason: null, in_fix: false },
+      { record_id: 'recG4', key: 'PGS-1404', title: 'Position mapping', state: 'pending', changed_in_lark: false, kept_reason: null, in_fix: false }
+    ]
+  })
 ];
+
+const GROUP = RUNS[10];
+const GROUP_REASON = 'In group PGS-1401–PGS-1404';
 
 // Sumber desain dan setelan reviewer tiruan (Rilis 2 U14).
 let designSources: DesignSourceView[] = [
@@ -212,6 +226,9 @@ const CARDS: CardView[] = [
   card(RUNS[4], { status: 'Waiting Review', column: 'review' }),
   card(RUNS[8], { status: 'Waiting Review', column: 'review', pr_url: RUNS[8].pr_url }),
   card(RUNS[9], {}),
+  ...GROUP.cards.map((g) =>
+    card(GROUP, { record_id: g.record_id, key: g.key, title: g.title, start_blocked: GROUP_REASON })
+  ),
   card(null, { record_id: 'recE', key: 'PGS-1340', title: 'Sort employees by join date', status: 'Delivered', column: 'done' }),
   card(null, {
     record_id: 'recT1',
@@ -574,6 +591,21 @@ function handle(method: string, params: Record<string, unknown>): unknown {
     case 'runs.start':
     case 'runs.takeover':
       return RUNS[0];
+    case 'groups.candidates':
+      return [
+        { record_id: 'recA', key: 'PGS-1410', title: 'Bulk approve overtime requests', blocked: null },
+        { record_id: 'recF', key: 'PGS-1412', title: 'Overtime approval history', blocked: null },
+        { record_id: 'recH', key: 'PGS-1413', title: 'Overtime export', blocked: 'Task already has an active run' }
+      ];
+    case 'runs.start_group':
+      return GROUP;
+    case 'runs.next_card':
+    case 'runs.continue_group':
+    case 'runs.remove_card':
+    case 'runs.stop_group':
+      return {};
+    case 'runs.gate_card_decision':
+      return { outcome: params.decision === 'revert' ? 'reverted' : 'kept' };
     case 'app.run':
       return appView(String(params.run_id), 'starting');
     case 'app.status':
@@ -669,7 +701,7 @@ function handle(method: string, params: Record<string, unknown>): unknown {
         scenarioFor(id) === 'warn' ? 'warn' : 'block',
         false
       );
-      const base = { pr_url: null, failed: [], unverified: [], warnings: [], sync_warning: null, review_id: null };
+      const base = { pr_url: null, failed: [], unverified: [], warnings: [], sync_warning: null, review_id: null, changed_cards: [] };
       if (g.state === 'review_needed') return { ...base, outcome: 'review_started', review_id: 'rv-mock' };
       if (g.state === 'blocked') return { ...base, outcome: 'blocked', failed: ['AC-3'] };
       if (g.state === 'needs_confirmation') return { ...base, outcome: 'needs_confirmation', unverified: ['AC-4'] };
@@ -739,19 +771,21 @@ export class MockTransport implements Transport {
 
   async send(line: string): Promise<void> {
     const req = JSON.parse(line) as { id: number; method: string; params?: Record<string, unknown> };
-    if (req.method === 'runs.start') {
+    if (req.method === 'runs.start' || req.method === 'runs.start_group') {
+      const ids = req.params?.record_ids;
+      const progressId = Array.isArray(ids) ? ids[0] : req.params?.record_id;
       ['claiming', 'creating_worktree', 'starting_agent', 'moving_status'].forEach((step, i) =>
         setTimeout(
           () =>
             this.onLine?.(
-              JSON.stringify({ jsonrpc: '2.0', method: 'start.progress', params: { record_id: req.params?.record_id, step } })
+              JSON.stringify({ jsonrpc: '2.0', method: 'start.progress', params: { record_id: progressId, step } })
             ),
           i * 280
         )
       );
     }
     const result = handle(req.method, req.params ?? {});
-    const delay = req.method === 'runs.start' || req.method === 'runs.takeover' ? 1200 : 120;
+    const delay = ['runs.start', 'runs.start_group', 'runs.takeover'].includes(req.method) ? 1200 : 120;
     setTimeout(() => {
       this.onLine?.(JSON.stringify({ jsonrpc: '2.0', id: req.id, result }));
       if (req.method === 'board.refresh') {

@@ -3,6 +3,7 @@
 mod engine;
 mod feedback_qa;
 mod fix_notes;
+mod group;
 
 pub use engine::{CommentView, DEFAULT_QUIET_SECS, FixReport};
 pub use feedback_qa::feedback_qa_replies;

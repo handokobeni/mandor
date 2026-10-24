@@ -108,6 +108,22 @@ pub mod method {
     pub const RUNS_APPROVE_PLAN: &str = "runs.approve_plan";
     /// Mengakhiri brainstorm dan meminta agent menulis plan.
     pub const RUNS_CONTINUE_TO_PLAN: &str = "runs.continue_to_plan";
+    /// Kandidat run grup dari epic kartu. `GroupCandidatesParams` →
+    /// `GroupCandidateView[]`.
+    pub const GROUPS_CANDIDATES: &str = "groups.candidates";
+    /// `StartGroupParams` → `RunView`.
+    pub const RUNS_START_GROUP: &str = "runs.start_group";
+    /// Commit kartu aktif lalu kartu berikutnya. `RunRef` → `{}`.
+    pub const RUNS_NEXT_CARD: &str = "runs.next_card";
+    /// Lanjut setelah kartu dikeluarkan. `RunRef` → `{}`.
+    pub const RUNS_CONTINUE_GROUP: &str = "runs.continue_group";
+    /// Mengeluarkan kartu yang belum dimulai. `GroupCardRef` → `{}`.
+    pub const RUNS_REMOVE_CARD: &str = "runs.remove_card";
+    /// Menghentikan grup tanpa PR. `RunRef` → `{}`.
+    pub const RUNS_STOP_GROUP: &str = "runs.stop_group";
+    /// Revert atau tetap untuk kartu yang berubah di Lark.
+    /// `GateCardDecisionParams` → `GateCardDecisionResult`.
+    pub const RUNS_GATE_CARD_DECISION: &str = "runs.gate_card_decision";
     /// Skill Claude yang bisa dipakai untuk planning (nama dan deskripsi).
     pub const AGENT_SKILLS: &str = "agent.skills";
     pub const REPOS_LIST: &str = "repos.list";
@@ -249,7 +265,41 @@ pub fn ts_bindings() -> Result<Vec<(&'static str, String)>, String> {
     ]
     .into_iter()
     .chain(review_bindings()?)
+    .chain(group_bindings()?)
     .collect())
+}
+
+/// Tipe run grup (plan run grup U8).
+fn group_bindings() -> Result<Vec<(&'static str, String)>, String> {
+    use ts_rs::{Config, TS};
+    let cfg = Config::new();
+    let one = |name: &'static str, s: Result<String, ts_rs::ExportError>| {
+        s.map(|body| (name, body)).map_err(|e| e.to_string())
+    };
+    Ok(vec![
+        one("GroupCardView.ts", GroupCardView::export_to_string(&cfg))?,
+        one(
+            "GroupCandidatesParams.ts",
+            GroupCandidatesParams::export_to_string(&cfg),
+        )?,
+        one(
+            "GroupCandidateView.ts",
+            GroupCandidateView::export_to_string(&cfg),
+        )?,
+        one(
+            "StartGroupParams.ts",
+            StartGroupParams::export_to_string(&cfg),
+        )?,
+        one("GroupCardRef.ts", GroupCardRef::export_to_string(&cfg))?,
+        one(
+            "GateCardDecisionParams.ts",
+            GateCardDecisionParams::export_to_string(&cfg),
+        )?,
+        one(
+            "GateCardDecisionResult.ts",
+            GateCardDecisionResult::export_to_string(&cfg),
+        )?,
+    ])
 }
 
 /// Tipe Rilis 2: buku AC dan sumber desain.

@@ -1,7 +1,10 @@
 //! Orkestrasi task run (U10): Start, sesi agent, publish, rekonsiliasi.
 
 mod drain;
+mod group;
+mod group_gate;
 pub use drain::{DRAIN_WINDOW_MS, DrainGate, DrainOutcome, WorkGuard};
+pub use group_gate::CardOutcome;
 mod members;
 mod ownership;
 mod publish;
@@ -220,14 +223,24 @@ impl<D: Deps> RunService<D> {
     /// # Errors
     /// Error penyimpanan.
     pub async fn fix_loop_records(&self) -> Result<Vec<String>, RunError> {
-        Ok(self
-            .runs
-            .list_active()
-            .await?
-            .into_iter()
-            .filter(|r| r.state.in_fix_loop())
-            .map(|r| r.record_id)
-            .collect())
+        let mut out = Vec::new();
+        for run in self.runs.list_active().await? {
+            let cards = self.runs.cards(&run.id).await?;
+            if cards.is_empty() {
+                if run.state.in_fix_loop() {
+                    out.push(run.record_id);
+                }
+            } else {
+                // Run grup: kartu yang sedang dalam loop perbaikan (KTD-G8).
+                out.extend(
+                    cards
+                        .into_iter()
+                        .filter(|c| c.is_open() && c.in_fix)
+                        .map(|c| c.record_id),
+                );
+            }
+        }
+        Ok(out)
     }
 
     /// Run aktif untuk tampilan "agent aktif" (R1).

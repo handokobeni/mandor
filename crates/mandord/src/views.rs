@@ -3,9 +3,10 @@
 use mandor_domain::gate::check_start;
 use mandor_domain::{Task, TaskStatus};
 use mandor_protocol::{
-    AcView, CardView, FlagView, NoticeView, RunRepoView, RunView, SprintView, TaskDetailsView,
+    AcView, CardView, FlagView, GroupCardView, NoticeView, RunRepoView, RunView, SprintView,
+    TaskDetailsView,
 };
-use mandor_usecase::run_ports::RunRecord;
+use mandor_usecase::run_ports::{GroupCardRow, RunRecord};
 use mandor_usecase::{CachedTask, SprintItem, TaskDetails};
 
 #[must_use]
@@ -40,6 +41,43 @@ pub fn run_view(run: &RunRecord, task: Option<&Task>) -> RunView {
         started_at_ms: run.created_at_ms,
         updated_at_ms: run.updated_at_ms,
         ac: None,
+        cards: Vec::new(),
+    }
+}
+
+/// Kartu run grup untuk UI; kunci dan judul dari task bila ada di cache.
+#[must_use]
+pub fn group_card_view(c: &GroupCardRow, task: Option<&Task>) -> GroupCardView {
+    GroupCardView {
+        record_id: c.record_id.clone(),
+        key: task.and_then(|t| t.key.clone()),
+        title: task.map(|t| t.title.clone()).unwrap_or_default(),
+        state: c.state.as_str().to_owned(),
+        changed_in_lark: c.changed_in_lark,
+        kept_reason: c.kept_reason.clone(),
+        in_fix: c.in_fix,
+    }
+}
+
+/// Kartu papan yang menjadi bagian run grup: Start nonaktif dengan alasan
+/// grupnya dan run membawa daftar kartu (U8 plan run grup).
+pub fn apply_group(card: &mut CardView, cards: &[GroupCardView]) {
+    if cards.is_empty() {
+        return;
+    }
+    let keys: Vec<&str> = cards
+        .iter()
+        .filter(|c| !c.state.starts_with("removed"))
+        .map(|c| c.key.as_deref().unwrap_or(&c.record_id))
+        .collect();
+    let label = match keys.as_slice() {
+        [] => String::new(),
+        [one] => (*one).to_owned(),
+        [first, .., last] => format!("{first}–{last}"),
+    };
+    card.start_blocked = Some(format!("In group {label}"));
+    if let Some(run) = card.run.as_mut() {
+        run.cards = cards.to_vec();
     }
 }
 
@@ -203,6 +241,7 @@ pub fn ac_row_view(r: &mandor_domain::AcRow) -> mandor_protocol::AcRowView {
         decided_by: r.decided_by.clone(),
         in_gate: r.in_gate(),
         selectable: r.selectable(),
+        card: r.card.clone(),
     }
 }
 
@@ -239,6 +278,45 @@ mod tests {
         assert!(active.start_blocked.unwrap().contains("ou_b"));
         let stale = card_view(&cached(t), None, "ou_a", STALE_MS + 1);
         assert!(stale.can_takeover);
+    }
+
+    #[test]
+    fn kartu_grup_menampilkan_run_grup_dan_alasan_start() {
+        let mut t = Task::new("c2", TaskStatus::InProgress);
+        t.key = Some("PGS-1402".to_owned());
+        let mut r = RunRecord::new("g".to_owned(), "repo1".to_owned(), "c1".to_owned());
+        r.state = mandor_domain::RunState::Running;
+        let mut card = card_view(&cached(t.clone()), Some(&r), "ou_me", 0);
+        let rows: Vec<GroupCardRow> = ["c1", "c2", "c3"]
+            .iter()
+            .map(|id| GroupCardRow::pending(id))
+            .collect();
+        let views: Vec<GroupCardView> = rows
+            .iter()
+            .enumerate()
+            .map(|(i, c)| {
+                let mut task = Task::new(&c.record_id, TaskStatus::InProgress);
+                task.key = Some(format!("PGS-140{}", i + 1));
+                group_card_view(c, Some(&task))
+            })
+            .collect();
+        apply_group(&mut card, &views);
+        assert_eq!(
+            card.start_blocked.as_deref(),
+            Some("In group PGS-1401–PGS-1403")
+        );
+        let run = card.run.unwrap();
+        assert_eq!(run.cards.len(), 3);
+        assert_eq!(run.cards[1].key.as_deref(), Some("PGS-1402"));
+        assert_eq!(run.cards[1].state, "pending");
+
+        let mut single = card_view(&cached(t), Some(&r), "ou_me", 0);
+        apply_group(&mut single, &[]);
+        assert_eq!(
+            single.start_blocked.as_deref(),
+            Some("Task already has an active run"),
+            "run tunggal tidak berubah"
+        );
     }
 
     #[test]

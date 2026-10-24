@@ -1,0 +1,21 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT COUNT(*) FROM run_cards c JOIN runs r ON r.id = c.run_id\n         WHERE c.record_id = ? AND c.open = 1 AND r.closed = 0",
+  "describe": {
+    "columns": [
+      {
+        "name": "COUNT(*)",
+        "ordinal": 0,
+        "type_info": "Integer",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "075dc4ac0f2c336596932002975f44cdfd85be596d77fa5db55dc6cf0e721bb7"
+}

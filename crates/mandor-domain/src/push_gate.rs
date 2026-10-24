@@ -1,6 +1,8 @@
 //! Gerbang Push & PR (R19–R22, KTD-35) dan ringkasan per AC untuk deskripsi PR
 //! (R31, R33). Fungsi murni atas baris buku AC.
 
+use std::fmt::Write as _;
+
 use crate::ac_ledger::{AcRow, Design, RowStatus, Verdict};
 
 /// Ketatnya gerbang per workspace atau repo (R19).
@@ -153,6 +155,60 @@ pub fn pr_summary(rows: &[AcRow], ac_synced_at: Option<&str>) -> String {
     out
 }
 
+/// Kartu run grup di deskripsi PR (R16, KTD-G7).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PrCard<'a> {
+    pub record_id: &'a str,
+    pub key: &'a str,
+    pub title: &'a str,
+    /// Kartu dikeluarkan dari grup, dengan alasannya.
+    pub removed: Option<&'a str>,
+    /// Alasan dev tetap menyertakan kartu yang berubah di Lark.
+    pub kept_reason: Option<&'a str>,
+}
+
+/// Ringkasan AC run grup per kartu, ditambah kartu yang dikeluarkan (R16).
+#[must_use]
+pub fn group_pr_summary(
+    rows: &[AcRow],
+    cards: &[PrCard<'_>],
+    ac_synced_at: Option<&str>,
+) -> String {
+    let mut out = String::from("## Acceptance criteria review\n");
+    for c in cards.iter().filter(|c| c.removed.is_none()) {
+        let _ = write!(out, "\n### {}: {}\n\n", c.key, c.title);
+        if let Some(reason) = c.kept_reason {
+            let _ = write!(
+                out,
+                "Changed in Lark after its code was committed; kept because: {reason}\n\n"
+            );
+        }
+        let shown: Vec<&AcRow> = rows
+            .iter()
+            .filter(|r| r.status != RowStatus::Removed && r.card.as_deref() == Some(c.record_id))
+            .collect();
+        if shown.is_empty() {
+            out.push_str("No acceptance criteria.\n");
+        }
+        for r in shown {
+            let _ = writeln!(out, "- {}: {}", r.display_label(), row_result(r));
+        }
+    }
+    let removed: Vec<&PrCard<'_>> = cards.iter().filter(|c| c.removed.is_some()).collect();
+    if !removed.is_empty() {
+        out.push_str("\n### Removed from this group\n\n");
+        for c in removed {
+            let why = c.removed.unwrap_or_default();
+            let _ = writeln!(out, "- {}: {} ({why})", c.key, c.title);
+        }
+    }
+    out.push_str("\nVerdicts are the AI reviewer's findings, not a sign-off.\n");
+    if let Some(at) = ac_synced_at {
+        let _ = write!(out, "\nAC last synced at {at}.\n");
+    }
+    out
+}
+
 /// AC yang sudah punya keputusan dev (Follows design, Skipped dengan alasan,
 /// atau Checked manually), dalam format baris ringkasan PR. Penulis deskripsi
 /// PR memakainya agar tidak menyebut AC itu belum terpenuhi.
@@ -201,6 +257,43 @@ mod tests {
     use pretty_assertions::assert_eq;
 
     use super::*;
+
+    #[test]
+    fn ringkasan_pr_grup_per_kartu() {
+        let mut a = row("AC-1", Verdict::Pass);
+        a.card = Some("c1".to_owned());
+        let mut b = row("AC-1", Verdict::Fail);
+        b.card = Some("c2".to_owned());
+        let card = |id, key, removed, kept| PrCard {
+            record_id: id,
+            key,
+            title: "Judul",
+            removed,
+            kept_reason: kept,
+        };
+        let got = group_pr_summary(
+            &[a, b],
+            &[
+                card("c1", "PGS-1", None, Some("QA butuh")),
+                card("c2", "PGS-2", None, None),
+                card("c3", "PGS-3", Some("reverted"), None),
+            ],
+            Some("2026-10-23 10:00 UTC"),
+        );
+        assert_eq!(
+            got,
+            "## Acceptance criteria review\n\n\
+             ### PGS-1: Judul\n\n\
+             Changed in Lark after its code was committed; kept because: QA butuh\n\n\
+             - AC-1: Pass\n\n\
+             ### PGS-2: Judul\n\n\
+             - AC-1: Fail\n\n\
+             ### Removed from this group\n\n\
+             - PGS-3: Judul (reverted)\n\n\
+             Verdicts are the AI reviewer's findings, not a sign-off.\n\n\
+             AC last synced at 2026-10-23 10:00 UTC.\n"
+        );
+    }
 
     fn row(label: &str, verdict: Verdict) -> AcRow {
         let mut r = AcRow::new(

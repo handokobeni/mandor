@@ -40,7 +40,7 @@ pub enum Planning {
 
 /// Ringkasan Start untuk chat dev. Prompt lengkap (dengan blok data Lark)
 /// hanya dikirim ke agent.
-fn start_summary(planning: &Planning, dev_note: Option<&str>) -> String {
+pub(super) fn start_summary(planning: &Planning, dev_note: Option<&str>) -> String {
     let skill = |s: &Option<String>| s.clone().unwrap_or_else(|| "Mandor built-in".to_owned());
     let mut out = match planning {
         Planning::Skip => "Started: implement the task.".to_owned(),
@@ -59,10 +59,10 @@ fn start_summary(planning: &Planning, dev_note: Option<&str>) -> String {
 }
 
 /// Target yang sudah divalidasi: repo dalam urutan workspace, repo utama pertama.
-struct Plan {
-    repos: Vec<RepoInfo>,
-    workspace: Option<WorkspaceInfo>,
-    design: Vec<DesignRoot>,
+pub(super) struct Plan {
+    pub(super) repos: Vec<RepoInfo>,
+    pub(super) workspace: Option<WorkspaceInfo>,
+    pub(super) design: Vec<DesignRoot>,
 }
 
 /// Langkah Start yang dilaporkan ke client (dialog Start).
@@ -157,7 +157,7 @@ impl<D: Deps> RunService<D> {
         }
     }
 
-    async fn resolve(&self, target: &StartTarget) -> Result<Plan, RunError> {
+    pub(super) async fn resolve(&self, target: &StartTarget) -> Result<Plan, RunError> {
         let (ids, workspace) = match target {
             StartTarget::Repo(id) => (vec![id.clone()], None),
             StartTarget::Workspace { id, repo_ids } => {
@@ -317,7 +317,7 @@ impl<D: Deps> RunService<D> {
     }
 
     /// Worktree untuk setiap repo; kegagalan menghapus yang sudah dibuat.
-    async fn prepare_all(
+    pub(super) async fn prepare_all(
         &self,
         repos: &[RepoInfo],
         branch: &str,

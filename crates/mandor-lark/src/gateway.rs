@@ -5,7 +5,7 @@ use std::collections::HashMap;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use mandor_domain::{AppField, Claim, Reply, Task, TaskStatus};
-use mandor_usecase::{AcItem, LarkTasks, PortError, SprintItem};
+use mandor_usecase::{AcItem, EpicItem, LarkTasks, PortError, SprintItem};
 use secrecy::SecretString;
 use serde_json::{Map, Value, json};
 use tokio::sync::Mutex;
@@ -27,6 +27,7 @@ pub mod field {
     pub const REPORTER: &str = "Reporter/Request";
     pub const AC: &str = "Acceptance Criteria";
     pub const SPRINT: &str = "Sprint";
+    pub const EPIC: &str = "Epic";
     pub const KANBAN: &str = "kanban_column";
     pub const BRANCH: &str = "mandor_branch";
     pub const PR: &str = "mandor_pr";
@@ -48,6 +49,8 @@ pub mod field {
     /// Catatan QA per AC; sumber Waiting Fix selain komentar (R11f).
     pub const AC_FEEDBACK_QA: &str = "Feedback QA";
     /// Field di tabel sprint tertaut.
+    pub const EPIC_NAME: &str = "Epic Name";
+    pub const EPIC_KEY: &str = "ID";
     pub const SPRINT_NAME: &str = "Sprint";
     pub const SPRINT_STATUS: &str = "Sprint Status";
     pub const SPRINT_START: &str = "Start Date";
@@ -115,6 +118,7 @@ pub fn to_task(r: &RawRecord) -> Task {
     t.reporter = user_ids(f(field::REPORTER)).into_iter().next();
     t.ac_ids = link_ids(f(field::AC));
     t.sprint_ids = link_ids(f(field::SPRINT));
+    t.epic_ids = link_ids(f(field::EPIC));
     t.branch = text_of(f(field::BRANCH));
     t.pr_url = url_text(f(field::PR));
     t.claim = text_of(f(field::OWNER)).as_deref().and_then(Claim::parse);
@@ -144,6 +148,17 @@ pub fn to_ac(r: &RawRecord) -> AcItem {
         feedback_qa: text_of(f(field::AC_FEEDBACK_QA)).filter(|t| !t.trim().is_empty()),
         last_modified_ms: r.last_modified_ms,
         last_modified_by: r.last_modified_by.clone(),
+    }
+}
+
+/// Memetakan record tabel epic ke [`EpicItem`]. Nama kosong memakai ID record.
+#[must_use]
+pub fn to_epic(r: &RawRecord) -> EpicItem {
+    let f = |name: &str| r.fields.get(name);
+    EpicItem {
+        record_id: r.record_id.clone(),
+        key: text_of(f(field::EPIC_KEY)),
+        name: text_of(f(field::EPIC_NAME)).unwrap_or_else(|| r.record_id.clone()),
     }
 }
 
@@ -448,6 +463,28 @@ impl LarkTasks for LarkGateway {
             .iter()
             .filter_map(|id| records.iter().find(|r| &r.record_id == id))
             .map(to_sprint)
+            .collect())
+    }
+
+    async fn epics(&self, ids: &[String]) -> Result<Vec<EpicItem>, PortError> {
+        if ids.is_empty() {
+            return Ok(Vec::new());
+        }
+        let records = with_retry(self.retry, || async {
+            let access = self.access().await?;
+            let schema = self.schema(&access).await?;
+            let Some(table_id) = linked_table(&schema, field::EPIC) else {
+                return Ok(Vec::new());
+            };
+            self.client
+                .batch_get(&access, &self.table.app_token, &table_id, ids)
+                .await
+        })
+        .await?;
+        Ok(ids
+            .iter()
+            .filter_map(|id| records.iter().find(|r| &r.record_id == id))
+            .map(to_epic)
             .collect())
     }
 

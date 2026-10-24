@@ -328,9 +328,18 @@ impl ClaudeAgent {
             hook_command.push_str(" --design ");
             hook_command.push_str(&shell_quote(&d.path.display().to_string()));
         }
+        // Origin app ikut argv hook: ditulis daemon di `--settings`, jadi tidak
+        // bisa diubah agent walau berkas state bisa ditulis user agent di VM.
+        let mut origins = String::new();
+        for o in &review.origins {
+            origins.push_str(" --origin ");
+            origins.push_str(&shell_quote(o));
+        }
         hook_command.push_str(" --review ");
         hook_command.push_str(&state);
-        let post_hook_command = format!("{} --review {state} --post", self.cfg.hook_command);
+        hook_command.push_str(&origins);
+        let post_hook_command =
+            format!("{} --review {state}{origins} --post", self.cfg.hook_command);
         let wt = req.worktree.display().to_string();
         let listing: Vec<(String, String)> = req.workspace.as_ref().map_or_else(Vec::new, |ws| {
             ws.repos
@@ -465,8 +474,20 @@ impl ClaudeAgent {
             None => wt_key(&req.worktree),
         };
         let path = self.cfg.mcp_dir.join(format!("{name}.json"));
-        tokio::fs::write(&path, config).await.map_err(io)?;
-        restrict(&path, self.file_mode(0o640)).await.map_err(io)?;
+        let mode = self.file_mode(0o640);
+        let target = path.clone();
+        let write = tokio::task::spawn_blocking(move || {
+            review_state::write_atomic(&target, config.as_bytes(), mode)
+        });
+        match tokio::time::timeout(FILE_TIMEOUT, write).await {
+            Ok(Ok(written)) => written.map_err(io)?,
+            Ok(Err(e)) => return Err(PortError::Storage(e.to_string())),
+            Err(_) => {
+                return Err(PortError::Storage(
+                    "writing the MCP config timed out".to_owned(),
+                ));
+            }
+        }
         Ok(Some(path))
     }
 
@@ -865,15 +886,33 @@ fn wt_key(path: &Path) -> String {
         .collect()
 }
 
+/// Menyetel mode direktori berkas run di VM lewat fd, setelah memastikan
+/// jalurnya direktori asli (bukan symlink yang ditanam user agent di
+/// direktori grup) dan tidak berganti di antara pemeriksaan dan chmod.
+/// Direktori milik user lain gagal di chmod (gagal-tertutup).
 #[cfg(unix)]
-async fn restrict(path: &Path, mode: u32) -> std::io::Result<()> {
-    use std::os::unix::fs::PermissionsExt;
-    tokio::fs::set_permissions(path, std::fs::Permissions::from_mode(mode)).await
+fn secure_dir(dir: &Path, mode: u32) -> std::io::Result<()> {
+    use std::os::unix::fs::{MetadataExt, PermissionsExt};
+    let link = std::fs::symlink_metadata(dir)?;
+    if !link.file_type().is_dir() {
+        return Err(std::io::Error::other(format!(
+            "{} is not a plain directory",
+            dir.display()
+        )));
+    }
+    let f = std::fs::File::open(dir)?;
+    let opened = f.metadata()?;
+    if (opened.dev(), opened.ino()) != (link.dev(), link.ino()) {
+        return Err(std::io::Error::other(format!(
+            "{} changed while it was prepared",
+            dir.display()
+        )));
+    }
+    f.set_permissions(std::fs::Permissions::from_mode(mode))
 }
 
 #[cfg(not(unix))]
-#[allow(clippy::unused_async, reason = "tanda tangan sama dengan versi Unix")]
-async fn restrict(_path: &Path, _mode: u32) -> std::io::Result<()> {
+fn secure_dir(_dir: &Path, _mode: u32) -> std::io::Result<()> {
     Ok(())
 }
 
@@ -981,7 +1020,14 @@ impl ClaudeAgent {
     async fn prepare_dir(&self, dir: &Path, vm_mode: u32) -> std::io::Result<()> {
         tokio::fs::create_dir_all(dir).await?;
         if self.shared_with_agent() {
-            restrict(dir, vm_mode).await?;
+            let dir = dir.to_owned();
+            tokio::time::timeout(
+                FILE_TIMEOUT,
+                tokio::task::spawn_blocking(move || secure_dir(&dir, vm_mode)),
+            )
+            .await
+            .map_err(|_| std::io::Error::other("preparing the run directory timed out"))?
+            .map_err(std::io::Error::other)??;
         }
         Ok(())
     }
@@ -1332,6 +1378,24 @@ mod tests {
         assert_eq!(mode(&agent.review_state_path("rv1")), 0o660);
         assert_eq!(mode(&dir.path().join("mcp/review")), 0o2770);
 
+        // Symlink yang ditanam di direktori grup tidak diikuti.
+        let target = dir.path().join("milik-daemon.json");
+        std::fs::write(&target, "rahasia").unwrap();
+        let before = mode(&target);
+        std::fs::remove_file(&path).unwrap();
+        std::os::unix::fs::symlink(&target, &path).unwrap();
+        agent.prepare_workspace(&req).await.unwrap();
+        assert_eq!(std::fs::read_to_string(&target).unwrap(), "rahasia");
+        assert_eq!(mode(&target), before, "mode target tidak diubah");
+        let mcp = dir.path().join("mcp");
+        std::fs::rename(&mcp, dir.path().join("mcp-lama")).unwrap();
+        std::fs::create_dir(dir.path().join("lain")).unwrap();
+        std::os::unix::fs::symlink(dir.path().join("lain"), &mcp).unwrap();
+        assert!(
+            agent.prepare_workspace(&req).await.is_err(),
+            "direktori MCP berupa symlink ditolak"
+        );
+
         // Laptop tetap privat.
         let laptop = test_agent(dir.path().join("laptop"));
         let path = laptop.prepare_workspace(&req).await.unwrap().unwrap();
@@ -1442,12 +1506,14 @@ mod tests {
         let state = shell_quote(&agent.review_state_path("rv1").display().to_string());
         assert_eq!(
             spec.hook_command,
-            format!("/opt/mandord hook --mcp mandor --review {state}")
+            format!(
+                "/opt/mandord hook --mcp mandor --review {state} --origin http://localhost:5173"
+            )
         );
         let flags = spec.review.clone().unwrap();
         assert_eq!(
             flags.post_hook_command,
-            format!("/opt/mandord hook --review {state} --post")
+            format!("/opt/mandord hook --review {state} --origin http://localhost:5173 --post")
         );
         assert!(flags.chrome);
         assert_eq!(flags.budget_usd, "2.50");

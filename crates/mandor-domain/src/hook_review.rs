@@ -284,11 +284,10 @@ fn playwright_verdict(tool: &str, call: &ToolCall, state: &ReviewState) -> Verdi
         Kind::Context | Kind::Close => Verdict::Allow,
         _ => match &state.page {
             None => deny("open the app with browser_navigate first"),
-            Some(_) if kind == Kind::Wait => Verdict::Allow,
             Some(page) if !allowed(state, page.url.as_deref()) => deny(
                 "the page is not on the allowed app (or its address is unknown); navigate to the app first",
             ),
-            Some(page) if !page.settled => deny(
+            Some(page) if !page.settled && kind != Kind::Wait => deny(
                 "the page may have changed after your last action; call browser_wait_for first",
             ),
             Some(_) => Verdict::Allow,
@@ -1319,6 +1318,10 @@ mod tests {
         );
         assert!(!allows("browser_snapshot", &s));
         assert!(!allows("browser_click", &s));
+        assert!(
+            !allows("browser_wait_for", &s),
+            "wait_for juga mengembalikan isi halaman"
+        );
         // Navigasi kembali ke app memulihkan.
         pw_post(
             "browser_navigate",

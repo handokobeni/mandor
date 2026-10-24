@@ -41,6 +41,15 @@ fn planning(args: &[String]) -> bool {
     args.iter().any(|a| a == "--plan")
 }
 
+/// `--origin <origin>` (berulang): origin app review dari daemon. Menang atas
+/// isi berkas state, yang di VM bisa ditulis user agent.
+fn review_origins(args: &[String]) -> Vec<String> {
+    args.windows(2)
+        .filter(|w| w[0] == "--origin")
+        .filter_map(|w| mandor_domain::hook_review::origin_of(&w[1]))
+        .collect()
+}
+
 /// `--review <berkas>`: berkas state pagar sesi reviewer.
 fn review_state_path(args: &[String]) -> Option<PathBuf> {
     args.windows(2)
@@ -50,8 +59,9 @@ fn review_state_path(args: &[String]) -> Option<PathBuf> {
 
 /// Keputusan `PreToolUse` sesi reviewer; tool yang diizinkan dan bisa
 /// memindah halaman menandai tab belum terkonfirmasi sebelum berjalan.
-fn review_pre(path: &Path, call: &ToolCall, allowed: &[String]) -> Verdict {
+fn review_pre(path: &Path, origins: &[String], call: &ToolCall, allowed: &[String]) -> Verdict {
     let outcome = review_state::with_locked(path, |state| {
+        pin_origins(state, origins);
         let verdict = classify_review(call, state, allowed);
         if verdict == Verdict::Allow {
             mark_before(call, state);
@@ -61,9 +71,19 @@ fn review_pre(path: &Path, call: &ToolCall, allowed: &[String]) -> Verdict {
     outcome.unwrap_or_else(|e| Verdict::Deny(format!("mandor: {e}; tool call denied")))
 }
 
+/// Origin dari argv menggantikan isi berkas state bila ada.
+fn pin_origins(state: &mut mandor_domain::hook_review::ReviewState, origins: &[String]) {
+    if !origins.is_empty() {
+        origins.clone_into(&mut state.origins);
+    }
+}
+
 /// `PostToolUse` sesi reviewer: mencatat hasil tool browser.
-fn review_post(path: &Path, call: &ToolCall) -> Verdict {
-    match review_state::with_locked(path, |state| record_post(call, state)) {
+fn review_post(path: &Path, origins: &[String], call: &ToolCall) -> Verdict {
+    match review_state::with_locked(path, |state| {
+        pin_origins(state, origins);
+        record_post(call, state);
+    }) {
         Ok(()) => Verdict::Allow,
         Err(e) => Verdict::Deny(format!("mandor: {e}")),
     }
@@ -98,13 +118,14 @@ pub fn run(args: &[String]) -> u8 {
     let plan = planning(args);
     let roots = design_roots(args);
     let review = review_state_path(args);
+    let origins = review_origins(args);
     let post = args.iter().any(|a| a == "--post");
     let stdin = std::io::stdin();
     let mut stderr = std::io::stderr();
     run_hook(stdin.lock(), &mut stderr, |call| {
         if post {
             return match &review {
-                Some(path) => review_post(path, call),
+                Some(path) => review_post(path, &origins, call),
                 None => Verdict::Deny("mandor: --post needs --review".to_owned()),
             };
         }
@@ -118,7 +139,7 @@ pub fn run(args: &[String]) -> u8 {
             }
         }
         match &review {
-            Some(path) => review_pre(path, call, &allowed),
+            Some(path) => review_pre(path, &origins, call, &allowed),
             None if plan => classify_planning(call, &allowed),
             None => classify_with_mcp(call, &allowed),
         }
@@ -128,6 +149,29 @@ pub fn run(args: &[String]) -> u8 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn origin_review_dari_argumen_menang_atas_berkas_state() {
+        let args: Vec<String> = [
+            "--review",
+            "/s.json",
+            "--origin",
+            "http://localhost:5173/x",
+            "--origin",
+            "bukan-url",
+        ]
+        .iter()
+        .map(|s| (*s).to_owned())
+        .collect();
+        let origins = review_origins(&args);
+        assert_eq!(origins, ["http://localhost:5173"]);
+        let mut state = mandor_domain::hook_review::ReviewState {
+            origins: vec!["https://evil.example:443".to_owned()],
+            ..Default::default()
+        };
+        pin_origins(&mut state, &origins);
+        assert_eq!(state.origins, ["http://localhost:5173"]);
+    }
 
     #[test]
     fn argumen_mcp_menjadi_daftar_server() {

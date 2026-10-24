@@ -8,7 +8,7 @@ pub mod prompt;
 pub mod skills;
 
 pub use backend::{AgentBackend, AgentRun, ClaudeBackend, RunEvent, RunStopper};
-pub use claude::command::{Session, SessionSpec};
+pub use claude::command::{AgentRunner, Session, SessionSpec};
 pub use port::{
     ClaudeAgent, ClaudeConfig, ClaudeRun, LEDGER_SERVER_NAME, LedgerServer, mcp_server_names,
 };

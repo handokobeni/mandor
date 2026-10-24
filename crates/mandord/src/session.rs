@@ -7,7 +7,7 @@ use std::time::{Duration, Instant};
 
 use anyhow::Context;
 use mandor_agent::claude::guardrails::{agent_env, prepare_agent_home};
-use mandor_agent::{ClaudeAgent, ClaudeConfig, ClaudePrompts, LedgerServer};
+use mandor_agent::{AgentRunner, ClaudeAgent, ClaudeConfig, ClaudePrompts, LedgerServer};
 use mandor_git::{Git, GitAdapter, GitConfig};
 use mandor_lark::{FileTokenStore, LarkClient, LarkConfig, LarkGateway, TableRef};
 use mandor_protocol::{Notification, SyncStatusView, event};
@@ -17,7 +17,7 @@ use tokio::sync::{Notify, broadcast};
 use tokio_util::sync::CancellationToken;
 use tokio_util::task::TaskTracker;
 
-use crate::config::Config;
+use crate::config::{self, Config};
 use crate::prod::{
     BroadcastReviews, BroadcastRuns, BroadcastTasks, DaemonNotifier, Prod, SystemClock,
     TrackerSpawner, UuidIds,
@@ -120,7 +120,10 @@ pub async fn start(
     let scope = format!("{}/{}", settings.app_token, settings.table_id);
     let tasks = TaskStore::new(env.store.clone(), scope);
     let agent = build_agent(env.cfg, env.rpc_port).await?;
-    let git = Git::new(GitConfig::new(env.cfg.workspaces_dir()));
+    let mut git_cfg = GitConfig::new(env.cfg.workspaces_dir());
+    // Di VM konfigurasi repo yang bisa diubah agent tidak dipercaya (KTD-65).
+    git_cfg.distrust_repo_config = env.cfg.vm_agent.is_some();
+    let git = Git::new(git_cfg);
 
     let sync = Arc::new(
         SyncService::<Prod>::new(
@@ -198,14 +201,24 @@ async fn build_agent(cfg: &Config, rpc_port: u16) -> anyhow::Result<ClaudeAgent>
     let agent_home = prepare_agent_home(&cfg.home)
         .await
         .context("menyiapkan config agent")?;
+    // Di VM berkas run ada di direktori grup yang bisa dibaca user agent (KTD-62).
+    let files = cfg
+        .vm_agent
+        .as_ref()
+        .map_or_else(|| cfg.home.join("agent"), config::VmAgent::run_dir);
     Ok(ClaudeAgent::new(ClaudeConfig {
         claude_bin: cfg.claude_bin.clone(),
         hook_command: cfg.hook_command.clone(),
         env: agent_env(&login_env, &agent_home),
         model: None,
         commit_model: "haiku".to_owned(),
-        mcp_dir: cfg.home.join("agent").join("mcp"),
-        review_dir: cfg.home.join("agent").join("review"),
+        mcp_dir: files.join("mcp"),
+        review_dir: files.join("review"),
+        runner: cfg.vm_agent.as_ref().map(|v| AgentRunner {
+            exe: cfg.exe.clone(),
+            user: v.user.clone(),
+            run_dir: v.run_dir(),
+        }),
         ledger_server: Some(LedgerServer {
             command: cfg.exe.clone(),
             port: rpc_port,

@@ -65,6 +65,52 @@ pub struct Config {
     /// Id daemon di klaim (`MANDOR_DAEMON_ID`, default dari user, host, dan
     /// peran; KTD-55).
     pub daemon_id: String,
+    /// Peran VM: user Linux agent (`MANDOR_AGENT_USER`) dan direktori grup
+    /// developer untuk clone, worktree, dan berkas run (`MANDOR_GROUP_DIR`,
+    /// KTD-62).
+    pub vm_agent: Option<VmAgent>,
+}
+
+/// Agent di VM sebagai user Linux terpisah (KTD-62 plan VM).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct VmAgent {
+    pub user: String,
+    pub group_dir: PathBuf,
+}
+
+impl VmAgent {
+    /// Berkas run yang bisa dibaca user agent, di luar `~/.mandor`.
+    #[must_use]
+    pub fn run_dir(&self) -> PathBuf {
+        self.group_dir.join("runs")
+    }
+}
+
+/// Peran VM wajib punya user agent dan direktori grup; peran laptop
+/// mengabaikannya.
+///
+/// # Errors
+/// Pesan untuk admin bila peran VM tanpa salah satunya.
+pub fn vm_agent_of(
+    role: DaemonRole,
+    user: Option<&str>,
+    group_dir: Option<&str>,
+) -> Result<Option<VmAgent>, String> {
+    if role != DaemonRole::Vm {
+        return Ok(None);
+    }
+    let user = user.map(str::trim).filter(|u| !u.is_empty());
+    let dir = group_dir.map(str::trim).filter(|d| !d.is_empty());
+    match (user, dir) {
+        (Some(u), Some(d)) if d.starts_with('/') => Ok(Some(VmAgent {
+            user: u.to_owned(),
+            group_dir: PathBuf::from(d),
+        })),
+        _ => Err(
+            "MANDOR_ROLE=vm needs MANDOR_AGENT_USER and an absolute MANDOR_GROUP_DIR (see docs/runbook/setup-vm.md)"
+                .to_owned(),
+        ),
+    }
 }
 
 /// Peran dari `MANDOR_ROLE`; kosong berarti laptop.
@@ -200,6 +246,16 @@ impl Config {
         let user = std::env::var("USER").ok().filter(|u| !u.is_empty());
         let role =
             parse_role(std::env::var("MANDOR_ROLE").ok().as_deref()).map_err(anyhow::Error::msg)?;
+        let vm_agent = vm_agent_of(
+            role,
+            std::env::var("MANDOR_AGENT_USER").ok().as_deref(),
+            std::env::var("MANDOR_GROUP_DIR").ok().as_deref(),
+        )
+        .map_err(anyhow::Error::msg)?;
+        // Di VM clone dan worktree ada di direktori grup developer.
+        let workspaces_dir = vm_agent
+            .as_ref()
+            .map_or(workspaces_dir, |v| v.group_dir.join("workspaces"));
         let daemon_id = default_daemon_id(
             std::env::var("MANDOR_DAEMON_ID").ok().as_deref(),
             user.as_deref(),
@@ -231,6 +287,7 @@ impl Config {
             keep_awake_cmd,
             role,
             daemon_id,
+            vm_agent,
         })
     }
 
@@ -348,6 +405,19 @@ mod tests {
         shell_quote, workspaces_dir_for,
     };
     use mandor_domain::DaemonRole;
+
+    #[test]
+    fn peran_vm_wajib_user_agent_dan_direktori_grup() {
+        use super::vm_agent_of;
+        assert_eq!(vm_agent_of(DaemonRole::Laptop, None, None), Ok(None));
+        assert!(vm_agent_of(DaemonRole::Vm, None, Some("/srv/m/beni")).is_err());
+        assert!(vm_agent_of(DaemonRole::Vm, Some("beni-agent"), Some("rel")).is_err());
+        let v = vm_agent_of(DaemonRole::Vm, Some("beni-agent"), Some("/srv/m/beni"))
+            .unwrap()
+            .unwrap();
+        assert_eq!(v.user, "beni-agent");
+        assert_eq!(v.run_dir(), std::path::Path::new("/srv/m/beni/runs"));
+    }
 
     #[test]
     fn peran_dan_id_daemon_dari_environment() {

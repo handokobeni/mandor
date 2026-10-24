@@ -7,9 +7,12 @@
 //!   client yang tidak bisa membaca `daemon.json` langsung (mode WSL).
 //! - `mcp`: server MCP ledger (stdio) untuk satu giliran agent.
 //! - `hook`: hook `PreToolUse` Claude Code untuk agent; fail-closed (exit 2).
+//! - `agent-exec`: pengawas agent sebagai user Linux terpisah di VM (plan VM U6).
 //! - `install [--check] [--keep-awake-cmd <json>]` dan `uninstall [--force]`:
 //!   memasang atau melepas daemon sebagai service systemd user.
 
+#[cfg(unix)]
+mod agent_exec;
 mod app;
 mod apps;
 mod config;
@@ -54,6 +57,14 @@ fn main() -> ExitCode {
 }
 
 async fn run(args: Vec<String>) -> ExitCode {
+    // Pengawas agent berjalan sebagai user agent tanpa konfigurasi daemon.
+    #[cfg(unix)]
+    if args.first().map(String::as_str) == Some("agent-exec") {
+        return match agent_exec::run(&args[1..]).await {
+            Ok(code) => ExitCode::from(u8::try_from(code).unwrap_or(1)),
+            Err(err) => fail(&err),
+        };
+    }
     let cfg = match Config::from_env() {
         Ok(cfg) => cfg,
         Err(err) => return fail(&err),

@@ -36,6 +36,43 @@ pub struct SessionSpec {
     pub plan_mode: bool,
     /// Sesi reviewer: hook `PostToolUse`, browser, dan batas biaya.
     pub review: Option<ReviewFlags>,
+    /// Daemon VM: agent dijalankan sebagai user Linux terpisah lewat
+    /// `sudo -n -u <user> mandord agent-exec` (KTD-62 plan VM).
+    pub runner: Option<AgentRunner>,
+}
+
+/// Cara menjalankan agent sebagai user agent di VM.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AgentRunner {
+    /// Biner `mandord` yang bisa dieksekusi user agent.
+    pub exe: PathBuf,
+    /// User Linux agent, mis. `beni-agent`.
+    pub user: String,
+    /// Direktori berkas run yang bisa dibaca user agent.
+    pub run_dir: PathBuf,
+}
+
+/// `sudo` absolut: environment eksplisit tanpa `PATH` warisan.
+const SUDO: &str = "/usr/bin/sudo";
+
+/// Argumen `sudo` sampai `--` sebelum program agent.
+#[must_use]
+pub fn runner_args(r: &AgentRunner, env: &[(String, String)]) -> Vec<String> {
+    let mut a = vec![
+        "-n".to_owned(),
+        "-u".to_owned(),
+        r.user.clone(),
+        r.exe.display().to_string(),
+        "agent-exec".to_owned(),
+        "--run-dir".to_owned(),
+        r.run_dir.display().to_string(),
+    ];
+    for (k, v) in env {
+        a.push("--env".to_owned());
+        a.push(format!("{k}={v}"));
+    }
+    a.push("--".to_owned());
+    a
 }
 
 /// Argumen tambahan sesi reviewer (KTD-29–KTD-31).
@@ -127,10 +164,19 @@ pub fn args(spec: &SessionSpec) -> Vec<String> {
 /// [`Cmd`] siap dijalankan dengan environment eksplisit.
 #[must_use]
 pub fn build(spec: &SessionSpec) -> Cmd {
-    Cmd::new(&spec.claude_bin)
-        .args(args(spec))
-        .cwd(&spec.worktree)
-        .env_policy(EnvPolicy::Explicit(spec.env.clone()))
+    match &spec.runner {
+        None => Cmd::new(&spec.claude_bin)
+            .args(args(spec))
+            .cwd(&spec.worktree)
+            .env_policy(EnvPolicy::Explicit(spec.env.clone())),
+        // `agent-exec` menyaring environment lagi di sisi user agent.
+        Some(r) => Cmd::new(SUDO)
+            .args(runner_args(r, &spec.env))
+            .arg(&spec.claude_bin)
+            .args(args(spec))
+            .cwd(&spec.worktree)
+            .env_policy(EnvPolicy::Explicit(Vec::new())),
+    }
 }
 
 #[cfg(test)]
@@ -152,7 +198,43 @@ mod tests {
             mcp_config: None,
             plan_mode: false,
             review: None,
+            runner: None,
         }
+    }
+
+    #[test]
+    fn peran_vm_membungkus_agent_dengan_sudo_dan_agent_exec() {
+        let mut s = spec(Session::New("u-1".to_owned()));
+        s.env = vec![("PATH".to_owned(), "/usr/bin".to_owned())];
+        s.runner = Some(AgentRunner {
+            exe: "/home/beni/.local/bin/mandord".into(),
+            user: "beni-agent".to_owned(),
+            run_dir: "/srv/mandor/beni/runs".into(),
+        });
+        let cmd = build(&s);
+        assert_eq!(cmd.program_name(), "/usr/bin/sudo");
+        let a = runner_args(s.runner.as_ref().unwrap(), &s.env);
+        assert_eq!(
+            a,
+            [
+                "-n",
+                "-u",
+                "beni-agent",
+                "/home/beni/.local/bin/mandord",
+                "agent-exec",
+                "--run-dir",
+                "/srv/mandor/beni/runs",
+                "--env",
+                "PATH=/usr/bin",
+                "--"
+            ]
+        );
+        s.runner = None;
+        assert_eq!(
+            build(&s).program_name(),
+            "claude",
+            "peran laptop tidak berubah"
+        );
     }
 
     #[test]

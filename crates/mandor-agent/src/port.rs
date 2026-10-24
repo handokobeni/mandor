@@ -97,6 +97,8 @@ pub struct ClaudeConfig {
     /// Folder berkas state pagar reviewer (`~/.mandor/agent/review`), ditolak
     /// bagi agent.
     pub review_dir: PathBuf,
+    /// Daemon VM: agent sebagai user Linux terpisah (KTD-62 plan VM).
+    pub runner: Option<crate::claude::command::AgentRunner>,
 }
 
 /// Cara agent menjangkau server MCP ledger milik daemon (KTD-26).
@@ -208,6 +210,7 @@ impl ClaudeAgent {
             mcp_config,
             plan_mode: req.plan_mode,
             review: None,
+            runner: self.cfg.runner.clone(),
         }
     }
 
@@ -321,6 +324,7 @@ impl ClaudeAgent {
                     review.budget_cents % 100
                 ),
             }),
+            runner: self.cfg.runner.clone(),
         }
     }
 
@@ -547,6 +551,8 @@ pub struct ClaudeRun {
     /// Batas waktu sesi reviewer (KTD-30).
     deadline: Option<(tokio::time::Instant, Duration)>,
     timed_out: bool,
+    /// User agent di VM, untuk pesan penolakan sudo.
+    agent_user: Option<String>,
 }
 
 /// Penghenti run untuk port.
@@ -557,6 +563,21 @@ impl Stopper for ClaudeStopper {
     async fn stop(&self) {
         let outcome = self.0.stop(STOP_GRACE).await;
         tracing::info!(?outcome, "run agent dihentikan");
+    }
+}
+
+/// Penolakan `sudo` saat menjalankan agent sebagai user agent: run gagal
+/// dengan pesan yang menunjuk runbook, tanpa jatuh ke user daemon (KTD-62).
+fn sudo_refusal(ev: AgentEvent, agent_user: Option<&str>) -> AgentEvent {
+    match (ev, agent_user) {
+        (AgentEvent::Failed { message }, Some(user)) if message.contains("sudo:") => {
+            AgentEvent::Failed {
+                message: format!(
+                    "sudo refused to run the agent as {user}; follow docs/runbook/setup-vm.md ({message})"
+                ),
+            }
+        }
+        (ev, _) => ev,
     }
 }
 
@@ -585,7 +606,7 @@ impl AgentRunHandle for ClaudeRun {
             if self.timed_out && matches!(ev, AgentEvent::Done { .. } | AgentEvent::Failed { .. }) {
                 continue;
             }
-            return Some(ev);
+            return Some(sudo_refusal(ev, self.agent_user.as_deref()));
         }
     }
 
@@ -617,6 +638,7 @@ impl AgentPort for ClaudeAgent {
             run,
             deadline,
             timed_out: false,
+            agent_user: self.cfg.runner.as_ref().map(|r| r.user.clone()),
         })
     }
 
@@ -680,6 +702,20 @@ impl AgentPort for ClaudeAgent {
     }
 
     async fn reap(&self, pid: u32) {
+        // Di VM agent milik user agent: hanya `agent-exec` sebagai user itu
+        // yang boleh menghentikannya (KTD-62).
+        if let Some(r) = &self.cfg.runner {
+            let cmd = Cmd::new("/usr/bin/sudo")
+                .args(["-n", "-u", &r.user])
+                .arg(&r.exe)
+                .args(["agent-exec", "--reap", &pid.to_string(), "claude"])
+                .env_policy(EnvPolicy::Explicit(Vec::new()))
+                .timeout(REAP_TIMEOUT);
+            if let Err(e) = run(&cmd).await {
+                tracing::warn!(pid, error = %e, "reap agent lewat agent-exec gagal");
+            }
+            return;
+        }
         if reap_group(pid, "claude").await {
             tracing::info!(pid, "process group agent yatim dihentikan");
         }
@@ -823,6 +859,8 @@ pub fn chrome_check_result(stdout: &str, stderr: &str) -> ChromeCheck {
 const REVIEW_WRITE_TOOLS: &[&str] = &["Edit", "Write", "MultiEdit", "NotebookEdit"];
 /// Batas waktu menulis atau menghapus berkas state review.
 const FILE_TIMEOUT: Duration = Duration::from_secs(5);
+/// Batas `agent-exec --reap` (termasuk jeda TERM→KILL).
+const REAP_TIMEOUT: Duration = Duration::from_secs(20);
 /// Batas `claude auth status`.
 const LOGIN_CHECK_TIMEOUT: Duration = Duration::from_secs(20);
 
@@ -860,6 +898,28 @@ impl ClaudeAgent {
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn penolakan_sudo_menunjuk_runbook() {
+        let failed = AgentEvent::Failed {
+            message: "agent stopped without a result (exit 1): sudo: a password is required"
+                .to_owned(),
+        };
+        let AgentEvent::Failed { message } =
+            super::sudo_refusal(failed.clone(), Some("beni-agent"))
+        else {
+            panic!()
+        };
+        assert!(
+            message.contains("beni-agent") && message.contains("setup-vm.md"),
+            "{message}"
+        );
+        assert_eq!(
+            super::sudo_refusal(failed.clone(), None),
+            failed,
+            "laptop tidak berubah"
+        );
+    }
 
     #[test]
     fn status_login_claude_dari_json() {
@@ -917,6 +977,7 @@ mod tests {
             model: None,
             commit_model: "haiku".to_owned(),
             review_dir: mcp_dir.join("review"),
+            runner: None,
             mcp_dir,
             ledger_server: Some(LedgerServer {
                 command: "/opt/mandord".into(),

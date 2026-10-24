@@ -127,6 +127,12 @@ impl Cmd {
     }
 
     /// Nama program untuk pesan error dan log.
+    /// Direktori kerja perintah, bila diatur.
+    #[must_use]
+    pub fn cwd_path(&self) -> Option<&Path> {
+        self.cwd.as_deref()
+    }
+
     #[must_use]
     pub fn program_name(&self) -> String {
         self.program.to_string_lossy().into_owned()

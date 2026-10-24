@@ -44,6 +44,10 @@ pub struct GitConfig {
     pub gh_bin: PathBuf,
     /// Induk semua worktree (`~/.mandor/workspaces`).
     pub workspaces_dir: PathBuf,
+    /// Daemon VM: konfigurasi repo yang bisa diubah agent tidak dipercaya
+    /// (KTD-65 plan VM). Konfigurasi sistem diabaikan dan repo dengan kunci
+    /// yang bisa mengeksekusi atau mengalihkan ditolak.
+    pub distrust_repo_config: bool,
 }
 
 impl GitConfig {
@@ -53,6 +57,7 @@ impl GitConfig {
             git_bin: PathBuf::from("git"),
             gh_bin: PathBuf::from("gh"),
             workspaces_dir,
+            distrust_repo_config: false,
         }
     }
 }
@@ -80,6 +85,33 @@ pub enum GitError {
     Parse(String),
     #[error("file I/O failed: {0}")]
     Io(String),
+    #[error(
+        "refusing to run git: the repo config sets {0}, which can run commands or redirect git"
+    )]
+    UnsafeConfig(String),
+}
+
+/// Kunci konfigurasi repo yang bisa mengeksekusi perintah atau mengalihkan
+/// git (KTD-65 plan VM). `key` dalam huruf kecil.
+#[must_use]
+pub fn unsafe_config_key(key: &str) -> bool {
+    const EXACT: &[&str] = &[
+        "core.sshcommand",
+        "core.pager",
+        "core.askpass",
+        "core.editor",
+        "core.hookspath",
+        "core.fsmonitor",
+        "diff.external",
+        "gpg.program",
+        "sequence.editor",
+    ];
+    const PREFIX: &[&str] = &["credential.", "url.", "include.", "includeif.", "filter."];
+    const SUFFIX: &[&str] = &[".command", ".textconv", ".driver", ".program"];
+    EXACT.contains(&key)
+        || PREFIX.iter().any(|p| key.starts_with(p))
+        || ((key.starts_with("diff.") || key.starts_with("merge.") || key.starts_with("gpg."))
+            && SUFFIX.iter().any(|s| key.ends_with(s)))
 }
 
 /// Adapter git.
@@ -94,6 +126,31 @@ impl Git {
         Self { cfg }
     }
 
+    /// Menolak repo di `dir` bila konfigurasi lokal atau worktree-nya memuat
+    /// kunci berbahaya. Direktori yang bukan repo tidak diperiksa.
+    async fn check_repo_config(&self, dir: &Path) -> Result<(), GitError> {
+        let cmd = Cmd::new(&self.cfg.git_bin)
+            .cwd(dir)
+            .args(["config", "--list", "--show-scope", "--name-only"])
+            .env("GIT_CONFIG_NOSYSTEM", "1")
+            .scrub_tokens()
+            .timeout(LOCAL_TIMEOUT);
+        let out = run(&cmd).await?;
+        if !out.success() {
+            return Ok(());
+        }
+        for line in out.stdout.lines() {
+            let Some((scope, key)) = line.split_once('\t') else {
+                continue;
+            };
+            let key = key.trim().to_ascii_lowercase();
+            if matches!(scope, "local" | "worktree") && unsafe_config_key(&key) {
+                return Err(GitError::UnsafeConfig(key));
+            }
+        }
+        Ok(())
+    }
+
     /// `git` dengan hook repo dinonaktifkan, di direktori `dir`.
     fn git(&self, dir: &Path) -> Cmd {
         Cmd::new(&self.cfg.git_bin)
@@ -104,8 +161,20 @@ impl Git {
             .timeout(LOCAL_TIMEOUT)
     }
 
+    /// Menjalankan perintah git atau gh milik daemon. Di VM konfigurasi repo
+    /// diperiksa dulu dan konfigurasi sistem diabaikan (KTD-65).
+    async fn exec(&self, cmd: &Cmd) -> Result<Output, GitError> {
+        if !self.cfg.distrust_repo_config {
+            return Ok(run(cmd).await?);
+        }
+        if let Some(dir) = cmd.cwd_path() {
+            self.check_repo_config(dir).await?;
+        }
+        Ok(run(&cmd.clone().env("GIT_CONFIG_NOSYSTEM", "1")).await?)
+    }
+
     async fn ok(&self, op: &'static str, cmd: Cmd) -> Result<Output, GitError> {
-        let out = run(&cmd).await?;
+        let out = self.exec(&cmd).await?;
         if out.success() {
             Ok(out)
         } else {

@@ -592,3 +592,50 @@ async fn revert_commit_bersih_atau_konflik_dibatalkan() {
         "revert dibatalkan bersih"
     );
 }
+
+#[tokio::test]
+async fn git_daemon_vm_menolak_repo_dengan_konfigurasi_yang_bisa_mengeksekusi() {
+    for (key, value) in [
+        ("core.sshCommand", "touch /tmp/x"),
+        ("credential.helper", "!evil"),
+        ("include.path", "../../evil.cfg"),
+    ] {
+        let f = fixture();
+        sh(&f.repo, &["config", key, value]);
+        let mut cfg = GitConfig::new(f.root.join("workspaces"));
+        cfg.distrust_repo_config = true;
+        let guarded = Git::new(cfg);
+        let err = guarded.default_branch(&f.repo).await.unwrap_err();
+        assert!(
+            matches!(err, mandor_git::GitError::UnsafeConfig(ref k) if k == &key.to_ascii_lowercase()),
+            "{key}: {err:?}"
+        );
+        // Daemon laptop tidak memeriksa (perilaku lama).
+        assert!(f.git.default_branch(&f.repo).await.is_ok(), "{key}");
+    }
+}
+
+#[test]
+fn kunci_konfigurasi_berbahaya() {
+    use mandor_git::unsafe_config_key;
+    for k in [
+        "core.sshcommand",
+        "credential.https://github.com.helper",
+        "url.git@evil:.insteadof",
+        "includeif.gitdir:/x.path",
+        "filter.lfs.process",
+        "diff.pdf.textconv",
+        "merge.ours.driver",
+        "gpg.ssh.program",
+    ] {
+        assert!(unsafe_config_key(k), "{k}");
+    }
+    for k in [
+        "user.name",
+        "remote.origin.url",
+        "branch.main.remote",
+        "core.autocrlf",
+    ] {
+        assert!(!unsafe_config_key(k), "{k}");
+    }
+}

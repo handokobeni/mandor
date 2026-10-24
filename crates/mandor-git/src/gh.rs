@@ -1,6 +1,6 @@
 use std::path::Path;
 
-use mandor_proc::{Cmd, run};
+use mandor_proc::Cmd;
 use secrecy::{ExposeSecret, SecretString};
 use serde::{Deserialize, Serialize};
 
@@ -139,10 +139,13 @@ impl Git {
         url: &str,
         token: Option<&SecretString>,
     ) -> Result<Option<String>, GitError> {
-        let out = run(&self
-            .gh(repo, token)
-            .args(["pr", "view", url, "--json", "body"]))
-        .await?;
+        let out = self
+            .exec(
+                &self
+                    .gh(repo, token)
+                    .args(["pr", "view", url, "--json", "body"]),
+            )
+            .await?;
         if !out.success() {
             if out.stderr.contains("Could not resolve")
                 || out.stderr.contains("no pull requests found")
@@ -210,14 +213,15 @@ impl Git {
         branch: &str,
         token: Option<&SecretString>,
     ) -> Result<Option<PrInfo>, GitError> {
-        let out = run(&self.gh(repo, token).args([
-            "pr",
-            "view",
-            branch,
-            "--json",
-            "number,url,state,statusCheckRollup",
-        ]))
-        .await?;
+        let out = self
+            .exec(&self.gh(repo, token).args([
+                "pr",
+                "view",
+                branch,
+                "--json",
+                "number,url,state,statusCheckRollup",
+            ]))
+            .await?;
         if !out.success() {
             if out.stderr.contains("no pull requests found") {
                 return Ok(None);

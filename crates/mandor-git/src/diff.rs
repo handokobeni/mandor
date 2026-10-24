@@ -1,6 +1,5 @@
 use std::path::Path;
 
-use mandor_proc::run;
 use serde::Serialize;
 
 use crate::{Git, GitError};
@@ -32,7 +31,9 @@ pub struct ChangedFile {
 impl Git {
     async fn merge_base(&self, worktree: &Path, base: &str) -> Result<String, GitError> {
         let remote = format!("origin/{base}");
-        let out = run(&self.git(worktree).args(["merge-base", &remote, "HEAD"])).await?;
+        let out = self
+            .exec(&self.git(worktree).args(["merge-base", &remote, "HEAD"]))
+            .await?;
         Ok(if out.success() {
             out.stdout.trim().to_owned()
         } else {
@@ -107,17 +108,23 @@ impl Git {
             return Ok(out.stdout);
         }
         // Berkas untracked: tampilkan sebagai berkas baru tanpa memalsukan diff berkas terlacak.
-        let tracked = run(&self
-            .git(worktree)
-            .args(["ls-files", "--error-unmatch", "--", path]))
-        .await?;
+        let tracked = self
+            .exec(
+                &self
+                    .git(worktree)
+                    .args(["ls-files", "--error-unmatch", "--", path]),
+            )
+            .await?;
         if tracked.success() {
             return Ok(String::new());
         }
-        let out = run(&self
-            .git(worktree)
-            .args(["diff", "--no-index", "--", null_path(), path]))
-        .await?;
+        let out = self
+            .exec(
+                &self
+                    .git(worktree)
+                    .args(["diff", "--no-index", "--", null_path(), path]),
+            )
+            .await?;
         Ok(out.stdout)
     }
 
@@ -143,7 +150,8 @@ impl Git {
 
     async fn restore_to(&self, worktree: &Path, mb: &str, path: &str) -> Result<(), GitError> {
         let spec = format!("{mb}:{path}");
-        let in_base = run(&self.git(worktree).args(["cat-file", "-e", &spec]))
+        let in_base = self
+            .exec(&self.git(worktree).args(["cat-file", "-e", &spec]))
             .await?
             .success();
         if in_base {
@@ -154,11 +162,14 @@ impl Git {
             .await?;
             return Ok(());
         }
-        let tracked = run(&self
-            .git(worktree)
-            .args(["ls-files", "--error-unmatch", "--", path]))
-        .await?
-        .success();
+        let tracked = self
+            .exec(
+                &self
+                    .git(worktree)
+                    .args(["ls-files", "--error-unmatch", "--", path]),
+            )
+            .await?
+            .success();
         if tracked {
             self.ok(
                 "rm",
@@ -261,10 +272,12 @@ impl Git {
         base: &str,
     ) -> Result<u32, GitError> {
         let remote = format!("origin/{branch}");
-        let has_remote =
-            run(&self
-                .git(worktree)
-                .args(["rev-parse", "--verify", "--quiet", &remote]))
+        let has_remote = self
+            .exec(
+                &self
+                    .git(worktree)
+                    .args(["rev-parse", "--verify", "--quiet", &remote]),
+            )
             .await?
             .success();
         let range = if has_remote {

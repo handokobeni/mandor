@@ -203,8 +203,19 @@ pub fn classify_vm(call: &ToolCall, run_dir: &str) -> Option<String> {
     if let Some(reason) = vm_text_violation(&lower, &run_dir) {
         return Some(reason);
     }
-    lower
-        .split([';', '&', '|', '\n'])
+    // Sambungan baris shell (`\` lalu baris baru) adalah satu perintah.
+    let flat = lower.replace("\\\n", " ");
+    let all = words(&flat);
+    // Klien database: seluruh perintah diperiksa (gagal-tertutup), karena
+    // host bisa datang dari assignment atau segmen lain.
+    if all.iter().any(|w| DB_CLIENTS.contains(&program_name(w))) {
+        if let Some(host) = remote_db_host(&all) {
+            return Some(format!(
+                "mandor: overnight work only uses local databases, not {host}"
+            ));
+        }
+    }
+    flat.split([';', '&', '|', '\n'])
         .find_map(|segment| vm_command_violation(&words(segment)))
 }
 
@@ -256,13 +267,6 @@ fn vm_command_violation(ws: &[String]) -> Option<String> {
         if prog == "git" && git_subcommand(rest) == Some("config") && !git_config_read_only(rest) {
             return Some("mandor: changing git configuration is denied on the VM".to_owned());
         }
-        if DB_CLIENTS.contains(&prog) {
-            if let Some(host) = remote_db_host(ws) {
-                return Some(format!(
-                    "mandor: overnight work only uses local databases, not {host}"
-                ));
-            }
-        }
     }
     None
 }
@@ -307,6 +311,8 @@ fn remote_db_host(words: &[String]) -> Option<String> {
         } else if let Some(h) = a
             .strip_prefix("--host=")
             .or_else(|| a.strip_prefix("host="))
+            .or_else(|| a.strip_prefix("hostaddr="))
+            .or_else(|| a.strip_prefix("pghostaddr="))
             .or_else(|| a.strip_prefix("pghost="))
             .or_else(|| a.strip_prefix("mysql_host="))
             .or_else(|| a.strip_prefix("rediscli_host="))
@@ -315,9 +321,17 @@ fn remote_db_host(words: &[String]) -> Option<String> {
         } else if let Some(h) = a.strip_prefix("-h").filter(|h| !h.is_empty()) {
             hosts.push(h.to_owned());
         } else if let Some((_, after)) = a.split_once("://") {
-            let authority = after.split('/').next().unwrap_or_default();
+            let authority = after.split(['/', '?']).next().unwrap_or_default();
             let host = authority.rsplit('@').next().unwrap_or_default();
             hosts.push(host.split(':').next().unwrap_or_default().to_owned());
+            // `?host=` atau `?hostaddr=` di query URL juga host tujuan.
+            if let Some((_, query)) = after.split_once('?') {
+                hosts.extend(query.split('&').filter_map(|kv| {
+                    kv.strip_prefix("host=")
+                        .or_else(|| kv.strip_prefix("hostaddr="))
+                        .map(str::to_owned)
+                }));
+            }
         }
     }
     hosts.into_iter().find(|h| !local_host(h))
@@ -791,6 +805,10 @@ mod tests {
             "psql 'host=db.prod.internal dbname=x'",
             "PGHOST=db.prod.internal psql",
             "psql -h db",
+            "PGHOST=10.0.0.9; psql",
+            "psql 'hostaddr=10.0.0.9 dbname=x'",
+            "psql 'postgres:///x?host=db.prod.internal'",
+            "git config \\\ncore.pager evil",
             "git -C . config --add include.path ../x",
             "echo x >> .git/worktrees/pgs-1/config.worktree",
             "cat /srv/mandor/beni/runs/mcp/review-rv1.json",

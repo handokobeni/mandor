@@ -278,6 +278,8 @@ Keputusan "boleh mulai kartu berikutnya?" (fungsi murni, U2):
 
 U1 → U2 → U4 → U13 → U3 → U14 → U5 → U6 → U7 → U8 → U11, lalu U9 setelah U8, dan U10 setelah U2, U3, U4, U5, U9, dan U13. U12 terakhir. U6 boleh dikerjakan paralel setelah U1. Semua setelah U1–U4 plan service OS.
 
+Lanjutan setelah plan ini: **U10 plan run grup** (`docs/plans/2026-10-23-004-feat-grouped-card-runs-plan.md`, grup kartu sebagai satu item antrean VM) menunggu antrean, siklus, "Send to review", dan "Take over" dari plan ini. Kerjakan sebagai PR terpisah setelah plan ini masuk; bagian laptop run grup sudah ada (PR #12). Jangan tertukar dengan U10 plan ini (tab Overnight).
+
 ---
 
 ## Implementation Units
@@ -611,6 +613,7 @@ U1 → U2 → U4 → U13 → U3 → U14 → U5 → U6 → U7 → U8 → U11, lal
 - Login yang dipandu dari app.
 - Pembatasan jaringan agent berbasis allowlist (sandbox Claude Code `strictAllowlist` di user agent) sebagai lapisan tambahan.
 - Backoff adaptif polling Lark bila dua daemon per developer memicu throttle.
+- Run grup di VM (U10 plan `2026-10-23-004`): item antrean bertipe grup, kartu berlanjut otomatis, parkir dan Take over sebagai satu kesatuan, laporan per kartu, "Send to review" grup, dan test antrean untuk AE4 (VM), AE6, AE7, R20–R23 plan itu. Dikerjakan setelah plan ini.
 
 ### Risks
 

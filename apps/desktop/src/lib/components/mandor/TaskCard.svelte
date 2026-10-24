@@ -20,6 +20,10 @@
   import Play from '@lucide/svelte/icons/play';
   import RefreshCw from '@lucide/svelte/icons/refresh-cw';
   import UserRound from '@lucide/svelte/icons/user-round';
+  import MoonStar from '@lucide/svelte/icons/moon-star';
+  import { vmBadge } from '#lib/overnight.ts';
+  import { nav } from '#lib/stores/nav.svelte.ts';
+  import { overnight } from '#lib/stores/overnight.svelte.ts';
   import { prLinks } from '#lib/workspaces.ts';
   import { assigneeLabel, cardAction, cardReason, flagMeta, isReadOnly, isReady, ownerLabel } from '#lib/board.ts';
   import { Badge } from '#lib/components/ui/badge/index.ts';
@@ -42,7 +46,9 @@
   let { card, onstart, onopen, ontakeover, onretry, onclose }: Props = $props();
 
   const key = $derived(card.key ?? card.record_id);
-  const action = $derived(cardAction(card));
+  // Kartu VM: "On VM" atau "Queued for VM" menggantikan Start (R17, R25).
+  const badge = $derived(vmBadge(card, overnight.queuedIds));
+  const action = $derived(badge ? null : cardAction(card));
   const reason = $derived(cardReason(card));
   const readOnly = $derived(isReadOnly(card));
   const owner = $derived(ownerLabel(card, (id) => people.name(id)));
@@ -146,6 +152,16 @@
 
   {#if card.flag}<CardFlagBadge flag={card.flag} />{/if}
 
+  {#if badge === 'on_vm'}
+    <button type="button" class="tc-vm" title="Your VM holds this card. Open the Overnight tab." onclick={() => nav.overnight()}>
+      <MoonStar class="icon-sm" aria-hidden="true" />On VM
+    </button>
+  {:else if badge === 'queued'}
+    <span class="tc-vm" title="This card is in your VM's overnight queue. Remove it there to start it here.">
+      <MoonStar class="icon-sm" aria-hidden="true" />Queued for VM
+    </span>
+  {/if}
+
   {#if reason}
     <div class="tc-reason">
       <ReasonIcon aria-hidden="true" />
@@ -173,3 +189,22 @@
     </span>
   </div>
 </article>
+
+<style>
+  .tc-vm {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    align-self: flex-start;
+    font-size: 12px;
+    padding: 2px 6px;
+    border-radius: 6px;
+    background: var(--muted);
+    color: var(--foreground);
+    border: 0;
+    cursor: default;
+  }
+  button.tc-vm {
+    cursor: pointer;
+  }
+</style>

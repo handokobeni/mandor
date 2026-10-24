@@ -34,6 +34,13 @@ class VmLink {
     }
   }
 
+  /** Mode contoh (`/?mock`): VM tiruan tanpa Tauri. */
+  useMock(host: string, transport: import('#lib/api/client.ts').Transport): void {
+    this.loaded = true;
+    this.host = host;
+    vmConnection.start(transport);
+  }
+
   private connect(): void {
     vmConnection.start(new TauriTransport('vm'));
   }

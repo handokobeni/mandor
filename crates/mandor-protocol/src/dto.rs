@@ -1161,6 +1161,7 @@ pub struct ReportCardView {
     pub key: Option<String>,
     pub title: String,
     pub run_id: String,
+    pub repo_id: String,
     /// `draft`, `sent_to_review`, `held`, `failed`, atau `working`.
     pub outcome: String,
     /// Untuk `held`: `stuck`, `ac_gate`, `needs_confirmation`, `usage_limit`.

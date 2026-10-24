@@ -229,6 +229,7 @@ fn report_card_view(c: &ReportCard, task: Option<&Task>) -> ReportCardView {
         key: task.and_then(|t| t.key.clone()),
         title: task.map(|t| t.title.clone()).unwrap_or_default(),
         run_id: c.run_id.clone(),
+        repo_id: c.repo_id.clone(),
         outcome: outcome.to_owned(),
         hold_reason,
         hold_note: c.hold_note.clone(),
@@ -269,6 +270,7 @@ mod tests {
         let card = ReportCard {
             record_id: "rec1".to_owned(),
             run_id: "run-1".to_owned(),
+            repo_id: "repo1".to_owned(),
             outcome: CardOutcome::Held(HoldReason::AcGate),
             hold_note: Some("AC-2 can't be checked".to_owned()),
             pr_url: None,

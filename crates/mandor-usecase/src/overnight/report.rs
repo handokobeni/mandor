@@ -26,6 +26,7 @@ pub enum CardOutcome {
 pub struct ReportCard {
     pub record_id: String,
     pub run_id: String,
+    pub repo_id: String,
     pub outcome: CardOutcome,
     /// Pertanyaan atau alasan tertahan.
     pub hold_note: Option<String>,
@@ -89,6 +90,7 @@ impl<D: Deps> RunService<D> {
             let card = ReportCard {
                 record_id: run.record_id.clone(),
                 run_id: run.id.clone(),
+                repo_id: run.repo_id.clone(),
                 outcome: outcome_of(&run),
                 hold_note: run.hold.as_ref().and_then(|h| h.note.clone()),
                 pr_url: run.pr_url.clone(),

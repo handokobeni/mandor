@@ -3,7 +3,7 @@
 /**
  * Satu kartu VM di laporan siklus.
  */
-export type ReportCardView = { record_id: string, key: string | null, title: string, run_id: string, 
+export type ReportCardView = { record_id: string, key: string | null, title: string, run_id: string, repo_id: string, 
 /**
  * `draft`, `sent_to_review`, `held`, `failed`, atau `working`.
  */

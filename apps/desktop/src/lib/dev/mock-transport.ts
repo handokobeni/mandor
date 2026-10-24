@@ -232,6 +232,14 @@ const CARDS: CardView[] = [
   ),
   card(null, { record_id: 'recE', key: 'PGS-1340', title: 'Sort employees by join date', status: 'Delivered', column: 'done' }),
   card(null, {
+    record_id: 'recV3',
+    key: 'PGS-1423',
+    title: 'Reminder email for pending approvals',
+    owner: 'ou_7f3a91',
+    mine: true,
+    holder: 'own_other_daemon'
+  }),
+  card(null, {
     record_id: 'recT1',
     key: 'PGS-1468',
     title: 'Integro: email notification for new users',

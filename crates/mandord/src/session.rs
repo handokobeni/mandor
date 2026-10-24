@@ -121,6 +121,7 @@ pub async fn start(
     let tasks = TaskStore::new(env.store.clone(), scope);
     let agent = build_agent(env.cfg, env.rpc_port).await?;
     let mut git_cfg = GitConfig::new(env.cfg.workspaces_dir());
+    git_cfg.gh_bin.clone_from(&env.cfg.gh_bin);
     // Di VM konfigurasi repo yang bisa diubah agent tidak dipercaya (KTD-65).
     git_cfg.distrust_repo_config = env.cfg.vm_agent.is_some();
     let git = Git::new(git_cfg);

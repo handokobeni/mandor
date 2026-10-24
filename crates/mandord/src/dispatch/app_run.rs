@@ -59,6 +59,19 @@ pub(super) fn app_settings_from(v: &RepoAppView) -> Result<AppSettings, RpcError
     })
 }
 
+/// Di VM bersama port app repo harus di rentang port developer (R5 plan VM).
+pub(super) fn check_app_port(
+    ports: Option<crate::config::PortRange>,
+    app: &AppSettings,
+) -> Result<(), RpcError> {
+    match (ports, app.port) {
+        (Some(range), Some(port)) if !range.contains(port) => Err(rejected(format!(
+            "On this VM your ports are {range}; port {port} is outside it"
+        ))),
+        _ => Ok(()),
+    }
+}
+
 fn app_view(r: AppRecord) -> AppRunView {
     AppRunView {
         run_id: r.run_id,
@@ -165,6 +178,18 @@ mod tests {
             auto_restart: true,
             unattended_login: true,
         }
+    }
+
+    #[test]
+    fn port_app_di_vm_harus_di_rentang_developer() {
+        let range = crate::config::PortRange::parse("6100-6199").ok();
+        let mut a = app_settings_from(&view()).unwrap();
+        assert!(check_app_port(range, &a).is_err(), "5173 di luar rentang");
+        assert!(check_app_port(None, &a).is_ok(), "laptop tidak dibatasi");
+        a.port = Some(6150);
+        assert!(check_app_port(range, &a).is_ok());
+        a.port = None;
+        assert!(check_app_port(range, &a).is_ok());
     }
 
     #[test]

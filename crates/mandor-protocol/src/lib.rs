@@ -197,6 +197,7 @@ pub fn ts_bindings() -> Result<Vec<(&'static str, String)>, String> {
         one("LarkStatus.ts", LarkStatus::export_to_string(&cfg))?,
         one("StatusResult.ts", StatusResult::export_to_string(&cfg))?,
         one("DrainResult.ts", DrainResult::export_to_string(&cfg))?,
+        one("LoginCheck.ts", LoginCheck::export_to_string(&cfg))?,
         one("DrainResult.ts", DrainResult::export_to_string(&cfg))?,
         one(
             "LarkSettingsView.ts",

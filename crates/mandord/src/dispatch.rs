@@ -179,11 +179,16 @@ impl AppDispatch {
             .await
             .map_err(internal)?;
         let power = self.app.power.get();
+        let lark = self.app.lark_status().await;
+        let logins = match &self.app.cfg.vm_agent {
+            Some(vm) => Some(crate::logins::check(&self.app.cfg, vm, &lark).await),
+            None => None,
+        };
         ok(&StatusResult {
             version: VERSION.to_owned(),
             uptime_ms: u64::try_from(self.app.started.elapsed().as_millis()).unwrap_or(u64::MAX),
             repos: repos.len() as u64,
-            lark: self.app.lark_status().await,
+            lark,
             busy: Some(mandor_domain::run::any_working(
                 active.iter().map(|r| r.state),
             )),
@@ -191,6 +196,7 @@ impl AppDispatch {
             draining: Some(self.app.drain.is_draining(now_ms())),
             keep_awake: Some(power.state.as_str().to_owned()),
             keep_awake_error: power.error,
+            logins,
         })
     }
 
@@ -507,6 +513,7 @@ impl AppDispatch {
             Some(view) => app_run::app_settings_from(view)?,
             None => mandor_store::app_settings_of(&current.settings),
         };
+        app_run::check_app_port(self.app.cfg.vm_agent.as_ref().map(|v| v.ports), &app)?;
         let gate_mode = match p.gate_mode.as_deref() {
             None => current
                 .settings

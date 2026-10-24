@@ -47,6 +47,22 @@ pub struct StatusResult {
     #[serde(default)]
     #[ts(optional)]
     pub keep_awake_error: Option<String>,
+    /// Daemon VM: login Lark, gh, dan Claude user agent beserta langkah
+    /// perbaikannya (KTD-66 plan VM). Daemon laptop tidak mengirimnya.
+    #[serde(default)]
+    #[ts(optional)]
+    pub logins: Option<Vec<LoginCheck>>,
+}
+
+/// Satu login yang dibutuhkan daemon VM.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+pub struct LoginCheck {
+    /// `lark`, `gh`, atau `claude`.
+    pub service: String,
+    /// `ok`, `missing`, atau `expired`.
+    pub state: String,
+    /// Langkah perbaikan untuk developer; `None` bila `ok`.
+    pub fix: Option<String>,
 }
 
 /// Hasil `daemon.drain`: `idle` (kerja baru ditolak sampai restart) atau

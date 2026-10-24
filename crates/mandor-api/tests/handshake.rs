@@ -382,3 +382,25 @@ async fn mcp_stdio_daemon_tidak_terjangkau_menjadi_error_tool_tanpa_hang() {
             .contains("unreachable")
     );
 }
+
+/// Notifikasi daemon di koneksi yang sama dilewati client RPC berurutan
+/// (mis. `mandord login lark` setelah sesi Lark mulai mengirim event).
+#[tokio::test]
+async fn client_rpc_melewati_notifikasi_di_antara_jawaban() {
+    let d = start().await;
+    let client =
+        mandor_api::DaemonClient::new(d.addr, SecretString::from("rahasia-uji".to_owned()), "uji");
+    assert_eq!(
+        client.request("status", Value::Null).await.unwrap(),
+        json!({"ok": true})
+    );
+    d.events
+        .send(Notification::new("sync.status", json!({"state": "ok"})))
+        .ok();
+    tokio::time::sleep(Duration::from_millis(50)).await;
+    assert_eq!(
+        client.request("echo", json!({"x": 1})).await.unwrap(),
+        json!({"x": 1})
+    );
+    d.shutdown.cancel();
+}

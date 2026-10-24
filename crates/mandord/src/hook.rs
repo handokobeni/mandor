@@ -41,8 +41,8 @@ fn planning(args: &[String]) -> bool {
     args.iter().any(|a| a == "--plan")
 }
 
-/// `--origin <origin>` (berulang): origin app review dari daemon. Menang atas
-/// isi berkas state, yang di VM bisa ditulis user agent.
+/// `--origin <origin>` (berulang): origin app review dari daemon, satu-satunya
+/// sumber origin (berkas state di VM bisa ditulis user agent).
 fn review_origins(args: &[String]) -> Vec<String> {
     args.windows(2)
         .filter(|w| w[0] == "--origin")
@@ -71,11 +71,10 @@ fn review_pre(path: &Path, origins: &[String], call: &ToolCall, allowed: &[Strin
     outcome.unwrap_or_else(|e| Verdict::Deny(format!("mandor: {e}; tool call denied")))
 }
 
-/// Origin dari argv menggantikan isi berkas state bila ada.
+/// Origin dari argv adalah satu-satunya sumber; tanpa `--origin`, semua
+/// halaman ditolak (gagal-tertutup).
 fn pin_origins(state: &mut mandor_domain::hook_review::ReviewState, origins: &[String]) {
-    if !origins.is_empty() {
-        origins.clone_into(&mut state.origins);
-    }
+    origins.clone_into(&mut state.origins);
 }
 
 /// `PostToolUse` sesi reviewer: mencatat hasil tool browser.
@@ -171,6 +170,8 @@ mod tests {
         };
         pin_origins(&mut state, &origins);
         assert_eq!(state.origins, ["http://localhost:5173"]);
+        pin_origins(&mut state, &[]);
+        assert!(state.origins.is_empty(), "tanpa --origin tidak ada halaman");
     }
 
     #[test]

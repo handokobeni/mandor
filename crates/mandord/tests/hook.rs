@@ -133,8 +133,10 @@ fn mode_review_memakai_state_dan_gagal_tertutup_tanpa_state() {
     let dir = tempfile::tempdir().unwrap();
     let state = dir.path().join("r1.json");
     let state_s = state.to_str().unwrap();
-    let pre = ["--review", state_s];
-    let post = ["--review", state_s, "--post"];
+    // Origin selalu dari argv yang ditulis daemon.
+    let origin = "http://localhost:5173";
+    let pre = ["--review", state_s, "--origin", origin];
+    let post = ["--review", state_s, "--origin", origin, "--post"];
     let nav_app = browser(
         "navigate",
         &serde_json::json!({"url": "http://localhost:5173/orders", "tabId": 7}),

@@ -1,6 +1,8 @@
 //! Jam lembur, siklus pemakaian, dan keputusan penjadwal VM (KTD-57, KTD-58
 //! plan VM). Fungsi murni atas waktu epoch dan offset UTC tetap.
 
+use std::fmt::Write as _;
+
 const MIN_MS: i64 = 60_000;
 const DAY_MIN: i64 = 24 * 60;
 
@@ -114,6 +116,79 @@ pub enum Slot {
     Free,
 }
 
+impl Window {
+    /// Akhir jam lembur pada siklus yang dimulai `cycle_start_ms`.
+    #[must_use]
+    pub fn cycle_end(&self, cycle_start_ms: i64) -> i64 {
+        let len = (self.end - self.start).rem_euclid(DAY_MIN);
+        cycle_start_ms + len * MIN_MS
+    }
+
+    /// DM laporan siklus berjalan boleh dikirim: jam lembur sudah berakhir dan
+    /// tidak ada run VM yang masih bekerja (R24).
+    #[must_use]
+    pub fn report_due(&self, now_ms: i64, running: bool) -> bool {
+        !running && now_ms >= self.cycle_end(self.cycle_start(now_ms))
+    }
+}
+
+/// Ringkasan satu siklus untuk DM laporan (R24). Hanya kunci kartu dan
+/// jumlah; tidak pernah isi kode atau komentar.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct CycleReport {
+    pub drafts: Vec<String>,
+    pub held_ac_gate: Vec<String>,
+    pub held_other: Vec<String>,
+    pub dequeued: Vec<String>,
+    pub failed: Vec<String>,
+    /// Token terhitung siklus dan batasnya.
+    pub used: u64,
+    pub limit: Option<u64>,
+}
+
+/// Tautan ke tab Overnight di app.
+pub const OVERNIGHT_LINK: &str = "mandor://overnight";
+
+/// Teks DM laporan siklus.
+#[must_use]
+pub fn report_text(r: &CycleReport) -> String {
+    let mut out = String::from("Mandor overnight report\n");
+    let ran = r.drafts.len() + r.held_ac_gate.len() + r.held_other.len() + r.failed.len();
+    if ran == 0 && r.dequeued.is_empty() {
+        out.push_str("No cards ran this cycle.\n");
+    } else {
+        for (label, cards) in [
+            ("Draft PRs ready", &r.drafts),
+            ("Parked (AC gate)", &r.held_ac_gate),
+            ("Parked (other)", &r.held_other),
+            ("Removed from queue", &r.dequeued),
+            ("Failed", &r.failed),
+        ] {
+            let _ = writeln!(out, "{label}: {}", cards.len());
+        }
+        let decide: Vec<&str> = r
+            .drafts
+            .iter()
+            .chain(&r.held_ac_gate)
+            .chain(&r.held_other)
+            .map(String::as_str)
+            .collect();
+        if !decide.is_empty() {
+            let _ = writeln!(out, "Needs your decision: {}", decide.join(", "));
+        }
+    }
+    match r.limit {
+        Some(l) => {
+            let _ = writeln!(out, "Usage: {} of {l} tokens", r.used);
+        }
+        None => {
+            let _ = writeln!(out, "Usage: {} tokens", r.used);
+        }
+    }
+    let _ = write!(out, "Open: {OVERNIGHT_LINK}");
+    out
+}
+
 /// Bahan keputusan penjadwal pada satu tick.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct TickState<'a> {
@@ -221,6 +296,42 @@ mod tests {
         );
         assert_eq!(w.cycle_start(wib(1, 18, 59)), wib(0, 19, 0));
         assert_eq!(w.cycle_start(wib(1, 19, 0)), wib(1, 19, 0));
+    }
+
+    #[test]
+    fn laporan_jatuh_tempo_setelah_jam_lembur_dan_run_selesai() {
+        let w = Window::parse("19:00", "06:00", "+07:00").unwrap();
+        assert_eq!(w.cycle_end(wib(0, 19, 0)), wib(1, 6, 0));
+        assert!(!w.report_due(wib(1, 5, 59), false), "masih jam lembur");
+        assert!(
+            !w.report_due(wib(1, 6, 0), true),
+            "kartu terakhir masih jalan"
+        );
+        assert!(w.report_due(wib(1, 6, 20), false));
+        assert!(w.report_due(wib(1, 18, 59), false));
+        assert!(!w.report_due(wib(1, 19, 0), false), "siklus baru dimulai");
+    }
+
+    #[test]
+    fn teks_laporan_tanpa_isi_kode() {
+        let r = CycleReport {
+            drafts: vec!["PGS-1".to_owned()],
+            held_ac_gate: vec!["PGS-2".to_owned()],
+            held_other: vec![],
+            dequeued: vec!["PGS-3".to_owned()],
+            failed: vec![],
+            used: 1200,
+            limit: Some(5000),
+        };
+        let t = report_text(&r);
+        assert!(t.contains("Draft PRs ready: 1"));
+        assert!(t.contains("Parked (AC gate): 1"));
+        assert!(t.contains("Removed from queue: 1"));
+        assert!(t.contains("Needs your decision: PGS-1, PGS-2"));
+        assert!(t.contains("Usage: 1200 of 5000 tokens"));
+        assert!(t.ends_with("Open: mandor://overnight"));
+        let empty = report_text(&CycleReport::default());
+        assert!(empty.contains("No cards ran this cycle."));
     }
 
     fn state<'a>() -> TickState<'a> {

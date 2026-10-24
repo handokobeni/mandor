@@ -731,3 +731,70 @@ async fn login_claude_tidak_valid_tidak_memulai_kartu() {
     assert!(tick.blocked.unwrap().contains("not logged in"));
     assert_eq!(st.overnight.ids(), ["a"], "kartu tetap di antrean");
 }
+
+// --- DM laporan pagi (U14 plan VM) ---
+
+#[tokio::test(flavor = "multi_thread")]
+async fn covers_ae14_dm_sekali_setelah_jam_lembur_dan_kartu_terakhir_selesai() {
+    let (lark, clock, st) = vm_with(&["a"], wib(1, 5, 40)).await;
+    lark.edit("a", |t| t.key = Some("PGS-9".to_owned()));
+    st.svc.sync().poll(true, &[]).await.unwrap();
+    queue(&st, &["a"]).await;
+    st.svc.overnight_tick().await.unwrap();
+    assert!(
+        lark.dms.lock().unwrap().is_empty(),
+        "tidak selama jam lembur"
+    );
+
+    at(&lark, &clock, wib(1, 6, 0));
+    st.svc.overnight_tick().await.unwrap();
+    assert!(
+        lark.dms.lock().unwrap().is_empty(),
+        "kartu terakhir masih jalan"
+    );
+
+    at(&lark, &clock, wib(1, 6, 20));
+    changed(&st, "a", "src/form.rs");
+    st.agent.last().done();
+    eventually(|| run_of(&st, "a").draft_pending.is_some()).await;
+    st.svc.overnight_tick().await.unwrap();
+    st.svc.overnight_tick().await.unwrap();
+    let dms = lark.dms.lock().unwrap().clone();
+    assert_eq!(dms.len(), 1, "sekali per siklus");
+    assert!(dms[0].contains("Draft PRs ready: 1"), "{}", dms[0]);
+    assert!(dms[0].contains("Needs your decision: PGS-9"), "{}", dms[0]);
+    assert!(dms[0].contains("mandor://overnight"));
+    assert!(!dms[0].contains("+x"), "tanpa isi kode");
+}
+
+#[tokio::test]
+async fn siklus_tanpa_kartu_tetap_mengirim_ringkasan() {
+    let (lark, _clock, st) = vm_with(&[], wib(1, 6, 30)).await;
+    st.svc.overnight_tick().await.unwrap();
+    let dms = lark.dms.lock().unwrap().clone();
+    assert_eq!(dms.len(), 1);
+    assert!(dms[0].contains("No cards ran this cycle."));
+}
+
+#[tokio::test]
+async fn dm_gagal_dicoba_lagi_dan_tidak_menahan_antrean() {
+    let (lark, _clock, st) = vm_with(&["a"], wib(1, 9, 0)).await;
+    *lark.dm_fail.lock().unwrap() = 2;
+    queue(&st, &["a"]).await;
+    st.svc.queue_start_now("a").await.unwrap();
+    let tick = st.svc.overnight_tick().await.unwrap();
+    assert_eq!(
+        tick.started.as_deref(),
+        Some("a"),
+        "DM gagal, antrean tetap jalan"
+    );
+    assert!(lark.dms.lock().unwrap().is_empty());
+    st.agent.last().done();
+    eventually(|| running(&st).is_empty()).await;
+    st.svc.overnight_tick().await.unwrap();
+    assert!(lark.dms.lock().unwrap().is_empty(), "percobaan kedua gagal");
+    st.svc.overnight_tick().await.unwrap();
+    assert_eq!(lark.dms.lock().unwrap().len(), 1);
+    st.svc.overnight_tick().await.unwrap();
+    assert_eq!(lark.dms.lock().unwrap().len(), 1, "tidak terkirim dua kali");
+}

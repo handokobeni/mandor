@@ -2,7 +2,9 @@
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
 use mandor_store::{OvernightsStore, Store};
-use mandor_usecase::overnight::{CycleUsage, OvernightSettings, OvernightStore, QueueItem};
+use mandor_usecase::overnight::{
+    CycleUsage, OvernightSettings, OvernightStore, QueueItem, ReportState,
+};
 use mandor_usecase::{PortError, StartTarget};
 use pretty_assertions::assert_eq;
 
@@ -99,4 +101,23 @@ async fn hanya_laptop_setelan_dan_pemakaian_siklus() {
     assert_eq!(got.counted(), 30);
     assert_eq!(got.cache_read_tokens, 200);
     assert_eq!(s.cycle_usage(200).await.unwrap(), CycleUsage::default());
+
+    assert_eq!(s.report_state(100).await.unwrap(), ReportState::default());
+    s.record_report(100, false, 5).await.unwrap();
+    s.record_report(100, true, 6).await.unwrap();
+    s.record_report(100, false, 7).await.unwrap();
+    assert_eq!(
+        s.report_state(100).await.unwrap(),
+        ReportState {
+            sent: true,
+            attempts: 3
+        }
+    );
+    assert_eq!(
+        s.cycle_usage(100).await.unwrap().counted(),
+        30,
+        "pemakaian tidak berubah"
+    );
+    s.record_report(300, true, 1).await.unwrap();
+    assert!(s.report_state(300).await.unwrap().sent);
 }

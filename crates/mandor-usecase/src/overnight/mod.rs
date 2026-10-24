@@ -10,14 +10,17 @@ mod ports;
 use std::sync::Arc;
 
 use mandor_domain::gate::check_start;
-use mandor_domain::overnight::{Next, Slot, TickState, Window, decide};
-use mandor_domain::{DaemonRole, RunState, TaskStatus};
-pub use ports::{CycleUsage, Dequeued, OvernightSettings, OvernightStore, QueueItem};
+use mandor_domain::overnight::{CycleReport, Next, Slot, TickState, Window, decide, report_text};
+use mandor_domain::{DaemonRole, HoldReason, RunState, TaskStatus};
+pub use ports::{CycleUsage, Dequeued, OvernightSettings, OvernightStore, QueueItem, ReportState};
 
-use crate::ports::{Clock, Deps, PortError};
+use crate::ports::{Clock, Deps, LarkTasks, PortError, TaskCache};
 use crate::run::{RunError, RunService};
 use crate::run_ports::{AgentPort, RunRecord, RunStore};
 use crate::{Planning, StartTarget};
+
+/// Batas percobaan kirim DM laporan per siklus.
+const REPORT_ATTEMPTS: u32 = 5;
 
 /// Pesan lanjutan untuk kartu tertahan yang diantre ulang tanpa catatan.
 const CONTINUE: &str = "Continue the previous work from where you left off.";
@@ -47,6 +50,10 @@ impl<D: Deps> RunService<D> {
         let ready = self.overnight_ready(now).await?;
         let active = self.runs.list_active().await?;
         let running = active.iter().any(|r| r.state.is_working());
+        // DM laporan tidak pernah menahan antrean (R24).
+        if let Err(e) = self.maybe_report(now, running, &active).await {
+            tracing::warn!(error = %e, "laporan lembur gagal diproses");
+        }
         let fix_ready = active.iter().any(|r| fix_waiting(r, now));
         let in_window = self.window().await?.is_some_and(|w| w.is_open(now));
         // Kartu yang gagal cek ulang dikeluarkan, lalu kartu berikutnya dicoba.
@@ -86,6 +93,80 @@ impl<D: Deps> RunService<D> {
                 }
                 Err(reason) => out.dequeued.push((item.record_id, reason)),
             }
+        }
+    }
+
+    /// DM laporan siklus sekali setelah jam lembur berakhir dan tidak ada run
+    /// VM berjalan (R24, KTD-69). Kegagalan kirim dicoba lagi pada tick
+    /// berikutnya sampai [`REPORT_ATTEMPTS`].
+    async fn maybe_report(
+        &self,
+        now: i64,
+        running: bool,
+        active: &[RunRecord],
+    ) -> Result<(), RunError> {
+        let Some(settings) = self.overnight.settings().await? else {
+            return Ok(());
+        };
+        let Some(window) = window_of(&settings) else {
+            return Ok(());
+        };
+        if !window.report_due(now, running) {
+            return Ok(());
+        }
+        let start = window.cycle_start(now);
+        let state = self.overnight.report_state(start).await?;
+        if state.sent || state.attempts >= REPORT_ATTEMPTS {
+            return Ok(());
+        }
+        let report = self.cycle_report(start, &settings, active).await?;
+        let sent = match self.sync.lark.message_me(&report_text(&report)).await {
+            Ok(()) => true,
+            Err(e) => {
+                tracing::warn!(error = %e, "DM laporan lembur gagal dikirim");
+                false
+            }
+        };
+        self.overnight.record_report(start, sent, now).await?;
+        Ok(())
+    }
+
+    /// Ringkasan siklus: kartu VM yang menunggu dev, yang dikeluarkan dari
+    /// antrean, dan pemakaian.
+    async fn cycle_report(
+        &self,
+        start: i64,
+        settings: &OvernightSettings,
+        active: &[RunRecord],
+    ) -> Result<CycleReport, RunError> {
+        let mut report = CycleReport {
+            used: self.overnight.cycle_usage(start).await?.counted(),
+            limit: settings.token_limit,
+            ..CycleReport::default()
+        };
+        for run in active {
+            let key = self.key_of_record(&run.record_id).await;
+            match (&run.state, &run.hold) {
+                (RunState::Held, Some(h)) if h.reason == HoldReason::AcGate => {
+                    report.held_ac_gate.push(key);
+                }
+                (RunState::Held, _) => report.held_other.push(key),
+                (RunState::Failed, _) => report.failed.push(key),
+                _ if run.draft_pending.is_some() => report.drafts.push(key),
+                _ => {}
+            }
+        }
+        for d in self.overnight.dequeued_since(start).await? {
+            report.dequeued.push(self.key_of_record(&d.record_id).await);
+        }
+        Ok(report)
+    }
+
+    /// Kunci kartu dari cache; `record_id` bila tidak ada.
+    async fn key_of_record(&self, record_id: &str) -> String {
+        match self.sync.cache.get(record_id).await {
+            Ok(Some(c)) => c.task.key.unwrap_or_else(|| record_id.to_owned()),
+            _ => record_id.to_owned(),
         }
     }
 

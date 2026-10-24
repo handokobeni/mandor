@@ -30,5 +30,6 @@ CREATE TABLE overnight_cycles (
     output_tokens       INTEGER NOT NULL DEFAULT 0,
     cache_read_tokens   INTEGER NOT NULL DEFAULT 0,
     cache_write_tokens  INTEGER NOT NULL DEFAULT 0,
-    report_sent_at_ms   INTEGER
+    report_sent_at_ms   INTEGER,
+    report_attempts     INTEGER NOT NULL DEFAULT 0
 );

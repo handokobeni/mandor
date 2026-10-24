@@ -1006,6 +1006,7 @@ pub struct FakeOvernight {
     pub laptop_only: Arc<Mutex<HashSet<String>>>,
     pub settings: Arc<Mutex<Option<mandor_usecase::overnight::OvernightSettings>>>,
     pub cycles: Arc<Mutex<HashMap<i64, mandor_usecase::overnight::CycleUsage>>>,
+    pub reports: Arc<Mutex<HashMap<i64, mandor_usecase::overnight::ReportState>>>,
 }
 
 impl FakeOvernight {
@@ -1118,6 +1119,25 @@ impl mandor_usecase::overnight::OvernightStore for FakeOvernight {
             .get(&start)
             .copied()
             .unwrap_or_default())
+    }
+    async fn report_state(
+        &self,
+        start: i64,
+    ) -> Result<mandor_usecase::overnight::ReportState, PortError> {
+        Ok(self
+            .reports
+            .lock()
+            .unwrap()
+            .get(&start)
+            .copied()
+            .unwrap_or_default())
+    }
+    async fn record_report(&self, start: i64, sent: bool, _now: i64) -> Result<(), PortError> {
+        let mut r = self.reports.lock().unwrap();
+        let e = r.entry(start).or_default();
+        e.attempts += 1;
+        e.sent |= sent;
+        Ok(())
     }
     async fn add_cycle_usage(
         &self,

@@ -4,7 +4,7 @@
 use mandor_usecase::PortError;
 use mandor_usecase::StartTarget;
 use mandor_usecase::overnight::{
-    CycleUsage, Dequeued, OvernightSettings, OvernightStore, QueueItem,
+    CycleUsage, Dequeued, OvernightSettings, OvernightStore, QueueItem, ReportState,
 };
 use serde::{Deserialize, Serialize};
 
@@ -274,6 +274,42 @@ impl OvernightStore for OvernightsStore {
             cache_read_tokens: to_u64(r.cache_read_tokens),
             cache_write_tokens: to_u64(r.cache_write_tokens),
         }))
+    }
+
+    async fn report_state(&self, cycle_start_ms: i64) -> Result<ReportState, PortError> {
+        let row = sqlx::query!(
+            "SELECT report_sent_at_ms, report_attempts FROM overnight_cycles WHERE cycle_start_ms = ?",
+            cycle_start_ms
+        )
+        .fetch_optional(&self.store.pool)
+        .await
+        .map_err(StoreError::internal)?;
+        Ok(row.map_or_else(ReportState::default, |r| ReportState {
+            sent: r.report_sent_at_ms.is_some(),
+            attempts: u32::try_from(r.report_attempts).unwrap_or(u32::MAX),
+        }))
+    }
+
+    async fn record_report(
+        &self,
+        cycle_start_ms: i64,
+        sent: bool,
+        now_ms: i64,
+    ) -> Result<(), PortError> {
+        let sent_at = sent.then_some(now_ms);
+        sqlx::query!(
+            "INSERT INTO overnight_cycles (cycle_start_ms, report_sent_at_ms, report_attempts)
+             VALUES (?, ?, 1)
+             ON CONFLICT (cycle_start_ms) DO UPDATE SET
+                 report_attempts = report_attempts + 1,
+                 report_sent_at_ms = COALESCE(report_sent_at_ms, excluded.report_sent_at_ms)",
+            cycle_start_ms,
+            sent_at
+        )
+        .execute(&self.store.pool)
+        .await
+        .map_err(StoreError::internal)?;
+        Ok(())
     }
 
     async fn add_cycle_usage(&self, cycle_start_ms: i64, u: &CycleUsage) -> Result<(), PortError> {

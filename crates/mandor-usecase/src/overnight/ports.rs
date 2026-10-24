@@ -58,6 +58,14 @@ impl CycleUsage {
     }
 }
 
+/// Status DM laporan satu siklus (R24).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct ReportState {
+    pub sent: bool,
+    /// Percobaan kirim yang sudah dilakukan.
+    pub attempts: u32,
+}
+
 /// Penyimpanan antrean, siklus, dan setelan lembur.
 pub trait OvernightStore: Send + Sync {
     /// Antrean aktif, urut posisi.
@@ -99,6 +107,18 @@ pub trait OvernightStore: Send + Sync {
         &self,
         cycle_start_ms: i64,
     ) -> impl Future<Output = Result<CycleUsage, PortError>> + Send;
+    /// Status DM laporan siklus.
+    fn report_state(
+        &self,
+        cycle_start_ms: i64,
+    ) -> impl Future<Output = Result<ReportState, PortError>> + Send;
+    /// Mencatat satu percobaan kirim DM laporan; `sent` bila berhasil.
+    fn record_report(
+        &self,
+        cycle_start_ms: i64,
+        sent: bool,
+        now_ms: i64,
+    ) -> impl Future<Output = Result<(), PortError>> + Send;
     /// Menambah pemakaian ke siklus.
     fn add_cycle_usage(
         &self,

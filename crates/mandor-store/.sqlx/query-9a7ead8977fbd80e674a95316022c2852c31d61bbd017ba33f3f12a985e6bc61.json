@@ -1,0 +1,38 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT report_sent_at_ms, report_attempts FROM overnight_cycles WHERE cycle_start_ms = ?",
+  "describe": {
+    "columns": [
+      {
+        "name": "report_sent_at_ms",
+        "ordinal": 0,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "overnight_cycles",
+            "name": "report_sent_at_ms"
+          }
+        }
+      },
+      {
+        "name": "report_attempts",
+        "ordinal": 1,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "overnight_cycles",
+            "name": "report_attempts"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      true,
+      false
+    ]
+  },
+  "hash": "9a7ead8977fbd80e674a95316022c2852c31d61bbd017ba33f3f12a985e6bc61"
+}

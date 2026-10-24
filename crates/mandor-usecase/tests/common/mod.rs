@@ -30,6 +30,10 @@ pub struct FakeLark {
     pub replies: Arc<Mutex<Vec<mandor_domain::Reply>>>,
     /// `true`: API komentar gagal (fallback Fix Notes).
     pub replies_fail: Arc<Mutex<bool>>,
+    /// DM yang dikirim ke developer sendiri (plan VM U14).
+    pub dms: Arc<Mutex<Vec<String>>>,
+    /// Jumlah kiriman DM berikutnya yang gagal.
+    pub dm_fail: Arc<Mutex<u32>>,
     pub names: Arc<Mutex<HashMap<String, String>>>,
     pub sprints: Arc<Mutex<HashMap<String, SprintItem>>>,
     /// Epic per ID record.
@@ -78,6 +82,15 @@ impl LarkTasks for FakeLark {
     async fn epics(&self, ids: &[String]) -> Result<Vec<EpicItem>, PortError> {
         let e = self.epics.lock().unwrap();
         Ok(ids.iter().filter_map(|i| e.get(i).cloned()).collect())
+    }
+    async fn message_me(&self, text: &str) -> Result<(), PortError> {
+        let mut fail = self.dm_fail.lock().unwrap();
+        if *fail > 0 {
+            *fail -= 1;
+            return Err(PortError::Transient("bot cannot send".to_owned()));
+        }
+        self.dms.lock().unwrap().push(text.to_owned());
+        Ok(())
     }
     async fn user_names(&self, ids: &[String]) -> Result<HashMap<String, String>, PortError> {
         self.name_calls.lock().unwrap().push(ids.to_vec());

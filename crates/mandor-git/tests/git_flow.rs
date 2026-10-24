@@ -594,17 +594,17 @@ async fn revert_commit_bersih_atau_konflik_dibatalkan() {
 }
 
 #[tokio::test]
-async fn git_daemon_vm_menolak_repo_dengan_konfigurasi_yang_bisa_mengeksekusi() {
+async fn git_daemon_vm_menolak_repo_dengan_konfigurasi_di_luar_allowlist() {
     for (key, value) in [
         ("core.sshCommand", "touch /tmp/x"),
         ("credential.helper", "!evil"),
         ("include.path", "../../evil.cfg"),
+        ("http.proxy", "http://evil:8080"),
+        ("remote.origin.uploadpack", "touch /tmp/x"),
     ] {
         let f = fixture();
         sh(&f.repo, &["config", key, value]);
-        let mut cfg = GitConfig::new(f.root.join("workspaces"));
-        cfg.distrust_repo_config = true;
-        let guarded = Git::new(cfg);
+        let guarded = Git::new(guarded_cfg(&f));
         let err = guarded.default_branch(&f.repo).await.unwrap_err();
         assert!(
             matches!(err, mandor_git::GitError::UnsafeConfig(ref k) if k == &key.to_ascii_lowercase()),
@@ -615,11 +615,47 @@ async fn git_daemon_vm_menolak_repo_dengan_konfigurasi_yang_bisa_mengeksekusi() 
     }
 }
 
+#[tokio::test]
+async fn git_daemon_vm_gagal_tertutup_bila_konfigurasi_tidak_terbaca() {
+    let f = fixture();
+    let config = f.repo.join(".git/config");
+    let mut raw = std::fs::read_to_string(&config).unwrap();
+    raw.push_str("\n[rusak\n");
+    std::fs::write(&config, raw).unwrap();
+    let guarded = Git::new(guarded_cfg(&f));
+    assert!(matches!(
+        guarded.default_branch(&f.repo).await.unwrap_err(),
+        mandor_git::GitError::UnreadableConfig(_)
+    ));
+}
+
+#[tokio::test]
+async fn git_daemon_vm_berjalan_pada_repo_biasa() {
+    let f = fixture();
+    let guarded = Git::new(guarded_cfg(&f));
+    assert!(guarded.default_branch(&f.repo).await.is_ok());
+    let wt = guarded
+        .create_worktree(&f.repo, "ws-vm", "mandor/pgs-77-vm", "main", None)
+        .await
+        .unwrap();
+    std::fs::write(wt.path.join("vm.txt"), "vm\n").unwrap();
+    assert!(guarded.commit_all(&wt.path, "vm").await.unwrap().is_some());
+}
+
+fn guarded_cfg(f: &Fixture) -> GitConfig {
+    let mut cfg = GitConfig::new(f.root.join("workspaces"));
+    cfg.distrust_repo_config = true;
+    cfg
+}
+
 #[test]
-fn kunci_konfigurasi_berbahaya() {
-    use mandor_git::unsafe_config_key;
+fn allowlist_kunci_konfigurasi_repo() {
+    use mandor_git::trusted_repo_config_key;
     for k in [
         "core.sshcommand",
+        "core.gitproxy",
+        "core.alternaterefscommand",
+        "core.worktree",
         "credential.https://github.com.helper",
         "url.git@evil:.insteadof",
         "includeif.gitdir:/x.path",
@@ -627,15 +663,30 @@ fn kunci_konfigurasi_berbahaya() {
         "diff.pdf.textconv",
         "merge.ours.driver",
         "gpg.ssh.program",
+        "http.proxy",
+        "http.sslverify",
+        "protocol.ext.allow",
+        "remote.origin.uploadpack",
+        "remote.origin.receivepack",
+        "remote.origin.vcs",
+        "remote.origin.proxy",
+        "branch.main.gh-merge-base.x",
     ] {
-        assert!(unsafe_config_key(k), "{k}");
+        assert!(!trusted_repo_config_key(k), "{k}");
     }
     for k in [
+        "core.repositoryformatversion",
+        "core.filemode",
+        "core.bare",
+        "core.autocrlf",
         "user.name",
         "remote.origin.url",
+        "remote.origin.fetch",
+        "remote.origin.gh-resolved",
         "branch.main.remote",
-        "core.autocrlf",
+        "branch.main.merge",
+        "extensions.worktreeconfig",
     ] {
-        assert!(!unsafe_config_key(k), "{k}");
+        assert!(trusted_repo_config_key(k), "{k}");
     }
 }

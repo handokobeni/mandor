@@ -86,32 +86,91 @@ pub enum GitError {
     #[error("file I/O failed: {0}")]
     Io(String),
     #[error(
-        "refusing to run git: the repo config sets {0}, which can run commands or redirect git"
+        "refusing to run git: the repo config sets {0}, which Mandor does not trust on the VM; remove it with `git config --unset`"
     )]
     UnsafeConfig(String),
+    #[error("refusing to run git: cannot read the repo config: {0}")]
+    UnreadableConfig(String),
 }
 
-/// Kunci konfigurasi repo yang bisa mengeksekusi perintah atau mengalihkan
-/// git (KTD-65 plan VM). `key` dalam huruf kecil.
+/// Kunci konfigurasi lokal/worktree yang dipercaya daemon VM (KTD-65 plan
+/// VM). Selain ini repo ditolak: konfigurasi repo bisa ditulis agent dan
+/// banyak kunci git yang mengeksekusi perintah atau mengalihkan jaringan.
+/// `key` dalam huruf kecil.
 #[must_use]
-pub fn unsafe_config_key(key: &str) -> bool {
-    const EXACT: &[&str] = &[
-        "core.sshcommand",
-        "core.pager",
-        "core.askpass",
-        "core.editor",
-        "core.hookspath",
-        "core.fsmonitor",
-        "diff.external",
-        "gpg.program",
-        "sequence.editor",
+pub fn trusted_repo_config_key(key: &str) -> bool {
+    const CORE: &[&str] = &[
+        "repositoryformatversion",
+        "filemode",
+        "bare",
+        "logallrefupdates",
+        "ignorecase",
+        "precomposeunicode",
+        "symlinks",
+        "autocrlf",
+        "eol",
+        "safecrlf",
+        "longpaths",
     ];
-    const PREFIX: &[&str] = &["credential.", "url.", "include.", "includeif.", "filter."];
-    const SUFFIX: &[&str] = &[".command", ".textconv", ".driver", ".program"];
-    EXACT.contains(&key)
-        || PREFIX.iter().any(|p| key.starts_with(p))
-        || ((key.starts_with("diff.") || key.starts_with("merge.") || key.starts_with("gpg."))
-            && SUFFIX.iter().any(|s| key.ends_with(s)))
+    const REMOTE: &[&str] = &["url", "pushurl", "fetch", "tagopt", "prune", "gh-resolved"];
+    const BRANCH: &[&str] = &[
+        "remote",
+        "merge",
+        "rebase",
+        "pushremote",
+        "description",
+        "gh-merge-base",
+    ];
+    let mut parts = key.splitn(2, '.');
+    let (Some(section), Some(rest)) = (parts.next(), parts.next()) else {
+        return false;
+    };
+    // `<section>.<subsection>.<name>`: nama setelah titik terakhir.
+    let name = rest.rsplit_once('.').map(|(_, n)| n);
+    match section {
+        "core" => CORE.contains(&rest),
+        "user" | "extensions" | "init" | "pull" | "fetch" | "gc" | "index" | "color" | "advice" => {
+            name.is_none()
+        }
+        "remote" => name.is_some_and(|n| REMOTE.contains(&n)),
+        "branch" => name.is_some_and(|n| BRANCH.contains(&n)),
+        _ => false,
+    }
+}
+
+/// Override konfigurasi untuk setiap proses git daemon VM, termasuk git yang
+/// dijalankan `gh`: menetralkan kunci yang mengeksekusi perintah walau
+/// konfigurasi repo diubah setelah diperiksa.
+const VM_OVERRIDES: &[(&str, &str)] = &[
+    ("core.sshCommand", "ssh -o BatchMode=yes"),
+    ("core.pager", "cat"),
+    ("core.askPass", ""),
+    ("core.editor", "true"),
+    ("core.fsmonitor", "false"),
+    ("core.gitProxy", ""),
+    ("core.alternateRefsCommand", ""),
+    ("diff.external", ""),
+    ("credential.helper", ""),
+    ("protocol.ext.allow", "never"),
+    ("http.proxy", ""),
+    ("http.sslVerify", "true"),
+    ("sequence.editor", "true"),
+    ("gpg.program", "gpg"),
+];
+
+/// Environment untuk [`VM_OVERRIDES`]. Lewat `GIT_CONFIG_PARAMETERS` (bentuk
+/// yang dipakai `git -c`), sehingga tidak bertabrakan dengan `-c` di argv
+/// maupun `GIT_CONFIG_COUNT` milik kredensial push.
+fn vm_override_env() -> [(&'static str, String); 2] {
+    let params = VM_OVERRIDES
+        .iter()
+        .map(|(k, v)| format!("'{k}={v}'"))
+        .collect::<Vec<_>>()
+        .join(" ");
+    [
+        ("GIT_CONFIG_NOSYSTEM", "1".to_owned()),
+        ("GIT_CONFIG_PARAMETERS", params),
+    ]
 }
 
 /// Adapter git.
@@ -127,7 +186,7 @@ impl Git {
     }
 
     /// Menolak repo di `dir` bila konfigurasi lokal atau worktree-nya memuat
-    /// kunci berbahaya. Direktori yang bukan repo tidak diperiksa.
+    /// kunci di luar allowlist, atau tidak bisa dibaca (gagal-tertutup).
     async fn check_repo_config(&self, dir: &Path) -> Result<(), GitError> {
         let cmd = Cmd::new(&self.cfg.git_bin)
             .cwd(dir)
@@ -137,14 +196,16 @@ impl Git {
             .timeout(LOCAL_TIMEOUT);
         let out = run(&cmd).await?;
         if !out.success() {
-            return Ok(());
+            return Err(GitError::UnreadableConfig(out.stderr.trim().to_owned()));
         }
         for line in out.stdout.lines() {
             let Some((scope, key)) = line.split_once('\t') else {
-                continue;
+                return Err(GitError::UnreadableConfig(format!(
+                    "unexpected line: {line}"
+                )));
             };
             let key = key.trim().to_ascii_lowercase();
-            if matches!(scope, "local" | "worktree") && unsafe_config_key(&key) {
+            if matches!(scope, "local" | "worktree") && !trusted_repo_config_key(&key) {
                 return Err(GitError::UnsafeConfig(key));
             }
         }
@@ -170,7 +231,11 @@ impl Git {
         if let Some(dir) = cmd.cwd_path() {
             self.check_repo_config(dir).await?;
         }
-        Ok(run(&cmd.clone().env("GIT_CONFIG_NOSYSTEM", "1")).await?)
+        let mut guarded = cmd.clone();
+        for (k, v) in vm_override_env() {
+            guarded = guarded.env(k, v);
+        }
+        Ok(run(&guarded).await?)
     }
 
     async fn ok(&self, op: &'static str, cmd: Cmd) -> Result<Output, GitError> {
@@ -183,5 +248,38 @@ impl Git {
                 stderr: out.stderr.trim().to_owned(),
             })
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #![allow(clippy::unwrap_used, clippy::expect_used)]
+    use super::*;
+
+    /// Override menang atas konfigurasi repo yang diubah sesudah diperiksa.
+    #[test]
+    fn override_vm_menang_atas_konfigurasi_repo() {
+        let dir = tempfile::tempdir().unwrap();
+        let git = |args: &[&str]| {
+            let mut c = std::process::Command::new("git");
+            c.current_dir(dir.path()).args(args);
+            for (k, v) in vm_override_env() {
+                c.env(k, v);
+            }
+            c.output().unwrap()
+        };
+        assert!(git(&["init", "-q"]).status.success());
+        assert!(
+            git(&["config", "core.sshCommand", "touch /tmp/pwned"])
+                .status
+                .success()
+        );
+        let out = git(&["config", "--get", "core.sshcommand"]);
+        assert_eq!(
+            String::from_utf8_lossy(&out.stdout).trim(),
+            "ssh -o BatchMode=yes"
+        );
+        let out = git(&["config", "--get-all", "credential.helper"]);
+        assert_eq!(String::from_utf8_lossy(&out.stdout).trim(), "");
     }
 }

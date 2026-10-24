@@ -68,6 +68,8 @@ struct RunExtra {
     hold_note: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     entered_waiting_fix_ms: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    draft_pending: Option<i64>,
 }
 
 /// Bentuk simpan [`RunWorkspace`].
@@ -231,6 +233,7 @@ fn extra_of(r: &RunRecord) -> Result<String, StoreError> {
         hold_reason: r.hold.as_ref().map(|h| h.reason.as_str().to_owned()),
         hold_note: r.hold.as_ref().and_then(|h| h.note.clone()),
         entered_waiting_fix_ms: r.entered_waiting_fix_ms,
+        draft_pending: r.draft_pending,
     })
     .map_err(StoreError::internal)
 }
@@ -329,6 +332,7 @@ fn to_record(row: Row) -> Result<RunRecord, StoreError> {
                 note: extra.hold_note,
             }),
         entered_waiting_fix_ms: extra.entered_waiting_fix_ms,
+        draft_pending: extra.draft_pending,
         created_at_ms: row.created_at_ms,
         updated_at_ms: row.updated_at_ms,
     })

@@ -244,19 +244,22 @@ impl GitPort for GitAdapter {
         branch: &str,
         title: &str,
         body: &str,
+        draft: bool,
     ) -> Result<String, PortError> {
         let token = self.token(repo).await?;
-        Ok(self
-            .git
-            .create_pr(
-                worktree,
-                &repo.default_branch,
-                branch,
-                title,
-                body,
-                token.as_ref(),
-            )
-            .await?)
+        let pr = crate::NewPr {
+            base: &repo.default_branch,
+            head: branch,
+            title,
+            body,
+            draft,
+        };
+        Ok(self.git.create_pr(worktree, &pr, token.as_ref()).await?)
+    }
+
+    async fn mark_pr_ready(&self, repo: &RepoInfo, url: &str) -> Result<(), PortError> {
+        let token = self.token(repo).await?;
+        Ok(self.git.pr_ready(&repo.path, url, token.as_ref()).await?)
     }
 }
 

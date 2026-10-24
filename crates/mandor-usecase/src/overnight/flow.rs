@@ -80,6 +80,18 @@ impl<D: Deps> RunService<D> {
     /// setelah selesai.
     pub(crate) fn vm_publish<'a>(self: &'a Arc<Self>, run_id: &'a str) -> Boxed<'a> {
         Box::pin(async move {
+            // Pemeriksaan ulang tepat sebelum push: berkas bisa berubah sejak
+            // akhir giliran, mis. selama review (R12).
+            if self.touches_sensitive(run_id).await? {
+                let mut run = self.load(run_id).await?;
+                return self
+                    .hold(
+                        &mut run,
+                        HoldReason::NeedsConfirmation,
+                        Some(SENSITIVE.to_owned()),
+                    )
+                    .await;
+            }
             let held = match self.publish_gated(run_id, &GateDecision::default()).await {
                 Ok(PublishOutcome::Published { .. } | PublishOutcome::ReviewStarted { .. }) => {
                     return Ok(());
@@ -105,6 +117,16 @@ impl<D: Deps> RunService<D> {
             let mut run = self.load(run_id).await?;
             self.hold(&mut run, held.0, Some(held.1)).await
         })
+    }
+
+    /// Perubahan run menyentuh CI, konfigurasi agent, atau hook git.
+    pub(crate) async fn touches_sensitive(&self, run_id: &str) -> Result<bool, RunError> {
+        let run = self.load(run_id).await?;
+        let work = self.member_changes(&run).await?;
+        Ok(touches_sensitive_path(
+            work.iter()
+                .flat_map(|(_, c)| c.files.iter().map(String::as_str)),
+        ))
     }
 
     /// Review Push & PR di VM selesai atau gagal: lanjut publish, atau tahan

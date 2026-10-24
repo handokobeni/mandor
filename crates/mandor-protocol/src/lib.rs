@@ -127,6 +127,9 @@ pub mod method {
     /// Keputusan AC dev untuk kartu VM yang tertahan `ac_gate` (R12a plan VM):
     /// push dan PR tanpa menjalankan agent. `PublishParams` → `PublishResult`.
     pub const OVERNIGHT_GATE_DECIDE: &str = "overnight.gate_decide";
+    /// PR draft VM siap di-review dan kartu ke Waiting Review (R23 plan VM).
+    /// `RunRef` → `{}`.
+    pub const OVERNIGHT_SEND_TO_REVIEW: &str = "overnight.send_to_review";
     /// Skill Claude yang bisa dipakai untuk planning (nama dan deskripsi).
     pub const AGENT_SKILLS: &str = "agent.skills";
     pub const REPOS_LIST: &str = "repos.list";

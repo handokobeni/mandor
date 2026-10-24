@@ -210,6 +210,7 @@ fn vm_waiting_fix(lark: &FakeLark, st: &Station, now: i64) {
     r.worktree = Some(wt.clone());
     r.session_id = Some("sess7".to_owned());
     r.session_started = true;
+    r.pr_url = Some("https://github.com/o/r/pull/7".to_owned());
     st.runs.insert(r);
     st.git.st().worktrees.insert(wt);
     *lark.replies.lock().unwrap() = vec![Reply {
@@ -431,7 +432,7 @@ async fn covers_ae6_cant_verify_menahan_ac_gate_tanpa_push_lalu_kartu_berikutnya
 
 #[tokio::test(flavor = "multi_thread")]
 async fn covers_ae12_konfirmasi_dev_pada_kartu_tertahan_langsung_push_tanpa_agent() {
-    let (_lark, _clock, st) = vm_started(true).await;
+    let (lark, _clock, st) = vm_started(true).await;
     changed(&st, "a", "src/form.rs");
     st.agent.last().done();
     eventually(|| run_of(&st, "a").state == RunState::Reviewing).await;
@@ -453,7 +454,10 @@ async fn covers_ae12_konfirmasi_dev_pada_kartu_tertahan_langsung_push_tanpa_agen
     );
     assert_eq!(st.git.st().pushes.len(), 1);
     assert_eq!(st.git.st().created_prs.len(), 1);
+    assert_eq!(st.git.st().drafts.len(), 1, "PR draft");
     assert_eq!(st.agent.count(), turns, "tanpa menjalankan agent");
+    st.svc.sync().drain_outbox(20).await.unwrap();
+    assert_eq!(lark.get("a").unwrap().status, TaskStatus::InProgress);
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -490,12 +494,79 @@ async fn perubahan_ci_menahan_needs_confirmation() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn tanpa_ac_kartu_vm_langsung_push_dan_pr() {
-    let (_lark, _clock, st) = vm_started(false).await;
+async fn covers_ae13_pr_draft_lalu_send_to_review() {
+    let (lark, _clock, st) = vm_started(false).await;
     changed(&st, "a", "src/form.rs");
     st.agent.last().done();
     eventually(|| !st.git.st().created_prs.is_empty()).await;
+    eventually(|| run_of(&st, "a").draft_pending.is_some()).await;
     assert_eq!(held(&st, "a"), None);
+    assert_eq!(st.git.st().drafts.len(), 1, "PR dibuat draft");
+    st.svc.sync().drain_outbox(20).await.unwrap();
+    let card = lark.get("a").unwrap();
+    assert_eq!(
+        card.status,
+        TaskStatus::InProgress,
+        "reviewer belum diberi tahu"
+    );
+    assert!(card.pr_url.is_some(), "link PR tetap ditulis");
+    let run = run_of(&st, "a");
+    assert_eq!(run.state, RunState::AwaitingDev);
+
+    // gh pr ready gagal: tidak ada transisi.
+    st.git.st().fail_ready = true;
+    assert!(st.svc.send_to_review(&run.id).await.is_err());
+    st.svc.sync().drain_outbox(20).await.unwrap();
+    assert_eq!(lark.get("a").unwrap().status, TaskStatus::InProgress);
+
+    st.git.st().fail_ready = false;
+    st.svc.send_to_review(&run.id).await.unwrap();
+    assert_eq!(st.git.st().ready.len(), 1);
+    st.svc.sync().drain_outbox(20).await.unwrap();
+    assert_eq!(lark.get("a").unwrap().status, TaskStatus::WaitingReview);
+    assert_eq!(run_of(&st, "a").draft_pending, None);
+    let err = st.svc.send_to_review(&run.id).await.unwrap_err();
+    assert!(
+        matches!(err, RunError::InvalidState(_)),
+        "tanpa PR draft: {err:?}"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn send_to_review_ditolak_untuk_kartu_yang_dipegang_daemon_lain() {
+    let (lark, _clock, st) = vm_started(false).await;
+    changed(&st, "a", "src/form.rs");
+    st.agent.last().done();
+    eventually(|| run_of(&st, "a").draft_pending.is_some()).await;
+    lark.edit("a", |t| {
+        t.claim = Some(Claim {
+            open_id: "ou_me".to_owned(),
+            ts_ms: wib(0, 20, 0),
+            nonce: "x~laptop".to_owned(),
+        });
+    });
+    st.svc.sync().poll(true, &[]).await.unwrap();
+    let run = run_of(&st, "a");
+    assert!(st.svc.send_to_review(&run.id).await.is_err());
+    assert!(st.git.st().ready.is_empty());
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn waiting_fix_pada_pr_yang_sudah_dikirim_kembali_ke_waiting_review_tanpa_konfirmasi() {
+    let (lark, _clock, st) = vm_with(&[], wib(1, 11, 0)).await;
+    vm_waiting_fix(&lark, &st, wib(1, 11, 0));
+    st.svc.sync().poll(true, &[]).await.unwrap();
+    assert_eq!(
+        st.svc.tick_waiting_fix(QUIET).await.unwrap().started,
+        ["rec7"]
+    );
+    st.svc.sync().drain_outbox(20).await.unwrap();
+    changed(&st, "rec7", "src/form.rs");
+    st.agent.last().done();
+    eventually(|| run_of(&st, "rec7").state == RunState::InReviewLoop).await;
+    st.svc.sync().drain_outbox(20).await.unwrap();
+    assert_eq!(lark.get("rec7").unwrap().status, TaskStatus::WaitingReview);
+    assert!(st.git.st().drafts.is_empty(), "PR lama tidak dibuat ulang");
 }
 
 #[tokio::test]
@@ -557,5 +628,23 @@ async fn waiting_fix_vm_dengan_ac_fail_ditahan_ac_gate_dan_tercatat_masuk_waitin
     st.agent.last().done();
     eventually(|| held(&st, "rec7").is_some()).await;
     assert_eq!(held(&st, "rec7"), Some(mandor_domain::HoldReason::AcGate));
+    assert!(st.git.st().pushes.is_empty());
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn berkas_ci_yang_berubah_saat_review_menahan_push_vm() {
+    let (_lark, _clock, st) = vm_started(true).await;
+    changed(&st, "a", "src/form.rs");
+    st.agent.last().done();
+    eventually(|| run_of(&st, "a").state == RunState::Reviewing).await;
+    report_verdict(&st, "ac1", mandor_domain::Verdict::Pass);
+    // Berkas CI ikut berubah selama review.
+    changed(&st, "a", ".github/workflows/ci.yml");
+    st.agent.last().done();
+    eventually(|| held(&st, "a").is_some()).await;
+    assert_eq!(
+        held(&st, "a"),
+        Some(mandor_domain::HoldReason::NeedsConfirmation)
+    );
     assert!(st.git.st().pushes.is_empty());
 }

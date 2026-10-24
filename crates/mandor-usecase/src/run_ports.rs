@@ -171,7 +171,14 @@ pub trait GitPort: Send + Sync {
         branch: &str,
         title: &str,
         body: &str,
+        draft: bool,
     ) -> impl Future<Output = Result<String, PortError>> + Send;
+    /// Menandai PR draft siap di-review (KTD-68 plan VM).
+    fn mark_pr_ready(
+        &self,
+        repo: &RepoInfo,
+        url: &str,
+    ) -> impl Future<Output = Result<(), PortError>> + Send;
     /// Tree id isi worktree saat ini (KTD-28), tanpa mengubah index.
     fn snapshot(&self, worktree: &Path) -> impl Future<Output = Result<String, PortError>> + Send;
     /// Berkas yang berbeda antara dua tree.
@@ -369,6 +376,8 @@ pub struct RunRecord {
     /// Waktu kartu pertama kali masuk Waiting Fix; metrik "lolos tanpa
     /// Waiting Fix" (R18 plan VM).
     pub entered_waiting_fix_ms: Option<i64>,
+    /// PR draft VM menunggu "Send to review" sejak waktu ini (KTD-68 plan VM).
+    pub draft_pending: Option<i64>,
     /// Diisi store saat membaca; diabaikan saat menyimpan.
     pub created_at_ms: i64,
     /// Diisi store saat membaca; diabaikan saat menyimpan.
@@ -416,6 +425,7 @@ impl RunRecord {
             reviewer_skill: None,
             hold: None,
             entered_waiting_fix_ms: None,
+            draft_pending: None,
             created_at_ms: 0,
             updated_at_ms: 0,
         }

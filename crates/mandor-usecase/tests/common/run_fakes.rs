@@ -42,6 +42,11 @@ pub struct GitState {
     /// URL PR yang sudah di-merge.
     pub merged_prs: Vec<String>,
     pub created_prs: Vec<(String, String)>,
+    /// PR yang dibuat sebagai draft (daemon VM).
+    pub drafts: Vec<String>,
+    /// PR yang ditandai siap (`gh pr ready`).
+    pub ready: Vec<String>,
+    pub fail_ready: bool,
     pub pr_bodies: Vec<String>,
     /// Badan PR saat ini per URL, seperti yang dikembalikan `gh pr view`.
     pub bodies: HashMap<String, String>,
@@ -204,6 +209,7 @@ impl GitPort for FakeGit {
         branch: &str,
         title: &str,
         body: &str,
+        draft: bool,
     ) -> Result<String, PortError> {
         let mut st = self.state.lock().unwrap();
         st.pr_bodies.push(body.to_owned());
@@ -216,9 +222,20 @@ impl GitPort for FakeGit {
             st.created_prs.len() + 1
         );
         st.created_prs.push((branch.to_owned(), title.to_owned()));
+        if draft {
+            st.drafts.push(url.clone());
+        }
         st.prs.insert(pr_key(r, branch), url.clone());
         st.bodies.insert(url.clone(), body.to_owned());
         Ok(url)
+    }
+    async fn mark_pr_ready(&self, _r: &RepoInfo, url: &str) -> Result<(), PortError> {
+        let mut st = self.state.lock().unwrap();
+        if st.fail_ready {
+            return Err(PortError::Transient("gh pr ready timed out".to_owned()));
+        }
+        st.ready.push(url.to_owned());
+        Ok(())
     }
     async fn snapshot(&self, wt: &Path) -> Result<String, PortError> {
         let st = self.state.lock().unwrap();

@@ -21,7 +21,7 @@ use mandor_proc::{Cmd, Output, ProcError, run};
 
 pub use diff::{ChangeStatus, ChangedFile};
 pub use discover::{DirEntry, DirListing, RepoCandidate, discover_repos, list_dirs};
-pub use gh::{ChecksState, PrInfo, PrState, summarize_checks};
+pub use gh::{ChecksState, NewPr, PrInfo, PrState, summarize_checks};
 pub use port::GitAdapter;
 pub use publish::touches_sensitive_path;
 pub use worktree::Worktree;

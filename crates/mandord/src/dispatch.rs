@@ -34,6 +34,7 @@ use crate::views::{
 mod app_run;
 mod design;
 mod group;
+mod overnight;
 mod review;
 mod workspaces;
 
@@ -44,7 +45,6 @@ const RUN_METHODS: &[&str] = &[
     method::RUNS_SEND_NOW,
     method::RUNS_STOP,
     method::RUNS_PUBLISH,
-    method::OVERNIGHT_GATE_DECIDE,
     method::RUNS_RESUME,
     method::RUNS_START_FIX,
     method::RUNS_TAKEOVER,
@@ -633,7 +633,11 @@ impl AppDispatch {
     /// Start dengan event `start.progress` per langkah untuk dialog Start.
     /// Push & PR dengan gerbang AC; keputusan dev dicatat atas nama akun Lark
     /// yang login (KTD-35).
-    async fn publish(&self, s: &LarkSession, p: PublishParams) -> Result<Value, RpcError> {
+    pub(super) async fn publish(
+        &self,
+        s: &LarkSession,
+        p: PublishParams,
+    ) -> Result<Value, RpcError> {
         let decision = mandor_domain::GateDecision {
             confirmed: p.confirmed.unwrap_or_default(),
             push_anyway_reason: p.push_anyway_reason.filter(|r| !r.trim().is_empty()),
@@ -759,6 +763,7 @@ impl AppDispatch {
             other if Self::is_app_method(other) => self.app_call(other, v).await,
             other if Self::is_review_method(other) => self.review_call(other, v).await,
             other if Self::is_group_method(other) => self.group_call(other, v).await,
+            other if Self::is_overnight_method(other) => self.overnight_call(other, v).await,
             other => self.run_action(other, v).await,
         }
     }
@@ -795,9 +800,7 @@ impl AppDispatch {
                 runs.stop(&p.run_id).await.map_err(run_error)?;
                 ok(&json!({}))
             }
-            method::RUNS_PUBLISH | method::OVERNIGHT_GATE_DECIDE => {
-                self.publish(&s, params(v)?).await
-            }
+            method::RUNS_PUBLISH => self.publish(&s, params(v)?).await,
             method::RUNS_RESUME => {
                 let p: SendParams = params(v)?;
                 let text = Some(p.text.as_str()).filter(|t| !t.trim().is_empty());

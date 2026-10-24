@@ -839,6 +839,16 @@ impl<D: Deps> RunService<D> {
         if let Some(note) = held {
             return self.hold_fix(run, HoldReason::AcGate, &note).await;
         }
+        // Berkas bisa berubah selama review; periksa ulang sebelum push otomatis.
+        if self.touches_sensitive(&run.id).await? {
+            return self
+                .hold_fix(
+                    run,
+                    HoldReason::NeedsConfirmation,
+                    "Changes touch CI, agent config, or git hooks; push needs developer confirmation",
+                )
+                .await;
+        }
         if !self.runs.cards(&run.id).await?.is_empty() && self.group_pr_merged(&run).await {
             return self.follow_up_fixing(run).await;
         }

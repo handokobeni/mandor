@@ -333,17 +333,17 @@ esac"#,
     cfg.gh_bin = gh;
     let git = Git::new(cfg);
     let token = secrecy::SecretString::from("ghs_ujiujiujiuji".to_owned());
-    let url = git
-        .create_pr(
-            &f.repo,
-            "main",
-            "mandor/pgs-6",
-            "feat: x",
-            "badan",
-            Some(&token),
-        )
-        .await
-        .unwrap();
+    let pr = mandor_git::NewPr {
+        base: "main",
+        head: "mandor/pgs-6",
+        title: "feat: x",
+        body: "badan",
+        draft: false,
+    };
+    let url = git.create_pr(&f.repo, &pr, Some(&token)).await.unwrap();
+    let draft = mandor_git::NewPr { draft: true, ..pr };
+    git.create_pr(&f.repo, &draft, Some(&token)).await.unwrap();
+    git.pr_ready(&f.repo, &url, Some(&token)).await.unwrap();
     assert_eq!(url, "https://github.com/o/r/pull/7");
     let pr = git
         .pr_for_branch(&f.repo, "mandor/pgs-6", Some(&token))
@@ -356,6 +356,14 @@ esac"#,
     let log = std::fs::read_to_string(&args_log).unwrap();
     assert!(
         log.contains("pr create --base main --head mandor/pgs-6"),
+        "{log}"
+    );
+    assert!(
+        log.contains("--body-file - --draft"),
+        "PR draft di VM: {log}"
+    );
+    assert!(
+        log.contains("pr ready https://github.com/o/r/pull/7"),
         "{log}"
     );
     assert!(log.contains("token=ghs_ujiujiujiuji"));

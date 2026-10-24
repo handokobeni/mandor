@@ -884,3 +884,45 @@ async fn covers_ae3_start_now_siang_hari_tetap_dengan_pagar_lembur() {
     st.svc.sync().drain_outbox(20).await.unwrap();
     assert_eq!(lark.get("a").unwrap().status, TaskStatus::InProgress);
 }
+
+/// R18 (U10): laporan siklus per kartu, `ac_gate` terpisah, pemakaian
+/// terhadap batas, dan kartu yang sampai Waiting Review tanpa Waiting Fix.
+#[tokio::test(flavor = "multi_thread")]
+async fn laporan_siklus_mengelompokkan_kartu_dan_menghitung_tanpa_waiting_fix() {
+    use mandor_usecase::overnight::CardOutcome;
+    let (_lark, _clock, st) = vm_started(true).await;
+    // Kartu a: Can't verify → ditahan ac_gate.
+    changed(&st, "a", "src/form.rs");
+    st.agent.last().done();
+    eventually(|| run_of(&st, "a").state == RunState::Reviewing).await;
+    report_verdict(&st, "ac1", mandor_domain::Verdict::CantVerify);
+    st.agent.last().done();
+    eventually(|| held(&st, "a").is_some()).await;
+    // Kartu b: PR draft lalu dikirim ke review tanpa Waiting Fix.
+    assert_eq!(
+        st.svc.overnight_tick().await.unwrap().started.as_deref(),
+        Some("b")
+    );
+    changed(&st, "b", "src/b.rs");
+    st.agent.last().done();
+    eventually(|| run_of(&st, "b").draft_pending.is_some()).await;
+    st.svc.send_to_review(&run_of(&st, "b").id).await.unwrap();
+
+    let r = st.svc.overnight_report().await.unwrap();
+    assert!(r.cycle_start_ms.is_some());
+    assert_eq!(r.limit, Some(1_000_000));
+    let outcome = |id: &str| {
+        r.cards
+            .iter()
+            .find(|c| c.record_id == id)
+            .map(|c| c.outcome.clone())
+    };
+    assert_eq!(
+        outcome("a"),
+        Some(CardOutcome::Held(mandor_domain::HoldReason::AcGate))
+    );
+    assert_eq!(outcome("b"), Some(CardOutcome::SentToReview));
+    let a = r.cards.iter().find(|c| c.record_id == "a").unwrap();
+    assert_eq!(a.ac_cant_verify, 1);
+    assert_eq!(r.reviewed_without_fix, 1);
+}

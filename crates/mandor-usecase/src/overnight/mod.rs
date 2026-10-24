@@ -7,6 +7,7 @@
 mod flow;
 mod handoff;
 mod ports;
+mod report;
 
 use std::sync::Arc;
 
@@ -14,6 +15,7 @@ use mandor_domain::gate::check_start;
 use mandor_domain::overnight::{CycleReport, Next, Slot, TickState, Window, decide, report_text};
 use mandor_domain::{DaemonRole, HoldReason, RunState, TaskStatus};
 pub use ports::{CycleUsage, Dequeued, OvernightSettings, OvernightStore, QueueItem, ReportState};
+pub use report::{CardOutcome, OvernightReport, ReportCard};
 
 use crate::ports::{Clock, Deps, LarkTasks, PortError, TaskCache};
 use crate::run::{RunError, RunService};

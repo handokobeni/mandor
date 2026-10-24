@@ -31,4 +31,8 @@ keep_awake_error?: string,
  * Daemon VM: login Lark, gh, dan Claude user agent beserta langkah
  * perbaikannya (KTD-66 plan VM). Daemon laptop tidak mengirimnya.
  */
-logins?: Array<LoginCheck>, };
+logins?: Array<LoginCheck>, 
+/**
+ * Id daemon di klaim (KTD-55), untuk serah-terima VM → laptop.
+ */
+daemon_id?: string, };

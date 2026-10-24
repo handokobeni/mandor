@@ -197,6 +197,7 @@ impl AppDispatch {
             keep_awake: Some(power.state.as_str().to_owned()),
             keep_awake_error: power.error,
             logins,
+            daemon_id: Some(self.app.cfg.daemon_id.clone()),
         })
     }
 

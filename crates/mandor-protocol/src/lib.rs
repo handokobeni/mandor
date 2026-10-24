@@ -133,6 +133,23 @@ pub mod method {
     /// Serah-terima kartu VM ke daemon laptop (R22, KTD-63 plan VM); dipanggil
     /// ke daemon VM. `HandoffParams` → `HandoffResult`.
     pub const RUNS_HANDOFF: &str = "runs.handoff";
+    /// Antrean VM dan kartu yang dikeluarkan siklus ini (R6 plan VM).
+    /// `null` → `OvernightQueueView`.
+    pub const OVERNIGHT_QUEUE_LIST: &str = "overnight.queue.list";
+    /// `QueueAddParams` → `{}`; kartu To Do atau tertahan (R6, R20).
+    pub const OVERNIGHT_QUEUE_ADD: &str = "overnight.queue.add";
+    /// `RecordRef` → `{}`.
+    pub const OVERNIGHT_QUEUE_REMOVE: &str = "overnight.queue.remove";
+    /// `QueueReorderParams` → `{}`.
+    pub const OVERNIGHT_QUEUE_REORDER: &str = "overnight.queue.reorder";
+    /// "Start now" (R7). `RecordRef` → `{}`.
+    pub const OVERNIGHT_QUEUE_START_NOW: &str = "overnight.queue.start_now";
+    /// `null` → `OvernightSettingsView | null`.
+    pub const OVERNIGHT_SETTINGS_GET: &str = "overnight.settings.get";
+    /// `OvernightSettingsView` → `{}` (R7, R10).
+    pub const OVERNIGHT_SETTINGS_SET: &str = "overnight.settings.set";
+    /// Laporan siklus (R18). `null` → `OvernightReportView`.
+    pub const OVERNIGHT_REPORT: &str = "overnight.report";
     /// Skill Claude yang bisa dipakai untuk planning (nama dan deskripsi).
     pub const AGENT_SKILLS: &str = "agent.skills";
     pub const REPOS_LIST: &str = "repos.list";
@@ -303,6 +320,26 @@ fn group_bindings() -> Result<Vec<(&'static str, String)>, String> {
         one("GroupCardRef.ts", GroupCardRef::export_to_string(&cfg))?,
         one("HandoffParams.ts", HandoffParams::export_to_string(&cfg))?,
         one("HandoffResult.ts", HandoffResult::export_to_string(&cfg))?,
+        one(
+            "OvernightQueueView.ts",
+            OvernightQueueView::export_to_string(&cfg),
+        )?,
+        one("QueueItemView.ts", QueueItemView::export_to_string(&cfg))?,
+        one("DequeuedView.ts", DequeuedView::export_to_string(&cfg))?,
+        one("QueueAddParams.ts", QueueAddParams::export_to_string(&cfg))?,
+        one(
+            "QueueReorderParams.ts",
+            QueueReorderParams::export_to_string(&cfg),
+        )?,
+        one(
+            "OvernightSettingsView.ts",
+            OvernightSettingsView::export_to_string(&cfg),
+        )?,
+        one(
+            "OvernightReportView.ts",
+            OvernightReportView::export_to_string(&cfg),
+        )?,
+        one("ReportCardView.ts", ReportCardView::export_to_string(&cfg))?,
         one(
             "GateCardDecisionParams.ts",
             GateCardDecisionParams::export_to_string(&cfg),

@@ -154,6 +154,10 @@ async fn pengaturan_app_repo_dan_state_app_per_run() {
     assert_eq!(app.test_mode, TestMode::NoApp);
     assert!(app.browser_tests);
     assert!(!app.auto_restart, "restart otomatis mati secara bawaan");
+    assert!(
+        !app.unattended_login,
+        "login tanpa pendamping mati secara bawaan"
+    );
 
     let wanted = AppSettings {
         test_mode: TestMode::Web,
@@ -164,6 +168,7 @@ async fn pengaturan_app_repo_dan_state_app_per_run() {
         env_keys: vec!["API_URL".to_owned()],
         browser_tests: false,
         auto_restart: true,
+        unattended_login: true,
     };
     s.set_repo_settings(
         "repo1",

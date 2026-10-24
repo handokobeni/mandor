@@ -99,6 +99,10 @@ pub struct AppSettings {
     /// Sebelum review berbrowser, Mandor menyalakan ulang app run ini dari
     /// kode terbaru tanpa konfirmasi perubahan (opt-in, bawaan mati).
     pub auto_restart: bool,
+    /// Setup command repo menyiapkan login uji sendiri, sehingga review
+    /// headless di VM boleh memakai browser tanpa konfirmasi login dev
+    /// (KTD-64 plan VM).
+    pub unattended_login: bool,
 }
 
 impl AppSettings {

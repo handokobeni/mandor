@@ -561,6 +561,10 @@ pub struct RepoAppView {
     /// (opt-in; kode agent berjalan tanpa konfirmasi perubahan).
     #[serde(default)]
     pub auto_restart: bool,
+    /// Setup command menyiapkan login uji sendiri; review headless di VM
+    /// memakai browser tanpa konfirmasi login (KTD-64 plan VM).
+    #[serde(default)]
+    pub unattended_login: bool,
 }
 
 /// Parameter `repos.add`.

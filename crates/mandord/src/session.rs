@@ -219,6 +219,7 @@ async fn build_agent(cfg: &Config, rpc_port: u16) -> anyhow::Result<ClaudeAgent>
             user: v.user.clone(),
             run_dir: v.run_dir(),
         }),
+        headless_browser: cfg.vm_agent.as_ref().map(|v| v.playwright_mcp.clone()),
         ledger_server: Some(LedgerServer {
             command: cfg.exe.clone(),
             port: rpc_port,

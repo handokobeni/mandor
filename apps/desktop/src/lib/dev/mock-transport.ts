@@ -353,7 +353,8 @@ const repos: unknown[] = setup
           app_url: null,
           env_keys: ['VITE_API_URL'],
           browser_tests: true,
-          auto_restart: false
+          auto_restart: false,
+          unattended_login: false
         }
       },
       {
@@ -373,7 +374,8 @@ const repos: unknown[] = setup
           app_url: null,
           env_keys: [],
           browser_tests: true,
-          auto_restart: false
+          auto_restart: false,
+          unattended_login: false
         }
       }
     ];
@@ -442,7 +444,8 @@ function handle(method: string, params: Record<string, unknown>): unknown {
           app_url: null,
           env_keys: [],
           browser_tests: true,
-          auto_restart: false
+          auto_restart: false,
+          unattended_login: false
         }
       });
       return repos.at(-1);

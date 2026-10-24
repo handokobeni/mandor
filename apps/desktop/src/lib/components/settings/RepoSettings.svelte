@@ -30,6 +30,7 @@
     app: RepoAppForm;
     browserTests: boolean;
     autoRestart: boolean;
+    unattendedLogin: boolean;
     gate: 'inherit' | 'block' | 'warn';
   }
   let edit = $state<Edit | null>(null);
@@ -54,6 +55,7 @@
         },
         browserTests: repo.app.browser_tests,
         autoRestart: repo.app.auto_restart,
+        unattendedLogin: repo.app.unattended_login,
         gate: repo.gate_mode === 'block' || repo.gate_mode === 'warn' ? repo.gate_mode : 'inherit'
       };
     }
@@ -89,7 +91,8 @@
           app_url: web ? a.appUrl.trim() || null : null,
           env_keys: web ? a.envKeys : [],
           browser_tests: edit.browserTests,
-          auto_restart: web && edit.autoRestart
+          auto_restart: web && edit.autoRestart,
+          unattended_login: web && edit.unattendedLogin
         }
       });
       await lark.refresh();
@@ -252,6 +255,17 @@
                 </span>
               </div>
               <Switch bind:checked={edit.autoRestart} aria-label="Restart the app before reviews" />
+            </div>
+            <div class="row-setting">
+              <div class="txt">
+                Setup command prepares a test login
+                <span>
+                  For overnight work on the VM. The setup command creates a test user and signs in by itself, so the
+                  headless browser review can run without you confirming the login. Without this, browser checks on the
+                  VM are marked Can't verify and the card is held for you.
+                </span>
+              </div>
+              <Switch bind:checked={edit.unattendedLogin} aria-label="Setup command prepares a test login" />
             </div>
           {/if}
           <div class="field">

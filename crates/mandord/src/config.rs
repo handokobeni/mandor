@@ -76,6 +76,26 @@ pub struct Config {
 pub struct VmAgent {
     pub user: String,
     pub group_dir: PathBuf,
+    /// Biner MCP Playwright untuk review headless (KTD-64 plan VM).
+    pub playwright_mcp: PathBuf,
+}
+
+/// Lokasi bawaan `mcp-server-playwright` dari `npm install -g @playwright/mcp`.
+const DEFAULT_PLAYWRIGHT_MCP: &str = "/usr/local/bin/mcp-server-playwright";
+
+/// Biner MCP Playwright dari `MANDOR_PLAYWRIGHT_MCP`; harus absolut karena
+/// agent berjalan dengan `PATH` dari allowlist.
+///
+/// # Errors
+/// Pesan untuk admin bila nilainya bukan path absolut.
+pub fn playwright_mcp_of(raw: Option<&str>) -> Result<PathBuf, String> {
+    match raw.map(str::trim).filter(|r| !r.is_empty()) {
+        None => Ok(PathBuf::from(DEFAULT_PLAYWRIGHT_MCP)),
+        Some(p) if p.starts_with('/') => Ok(PathBuf::from(p)),
+        Some(p) => Err(format!(
+            "MANDOR_PLAYWRIGHT_MCP must be an absolute path, got {p:?}"
+        )),
+    }
 }
 
 impl VmAgent {
@@ -105,6 +125,7 @@ pub fn vm_agent_of(
         (Some(u), Some(d)) if d.starts_with('/') => Ok(Some(VmAgent {
             user: u.to_owned(),
             group_dir: PathBuf::from(d),
+            playwright_mcp: PathBuf::from(DEFAULT_PLAYWRIGHT_MCP),
         })),
         _ => Err(
             "MANDOR_ROLE=vm needs MANDOR_AGENT_USER and an absolute MANDOR_GROUP_DIR (see docs/runbook/setup-vm.md)"
@@ -251,6 +272,14 @@ impl Config {
             std::env::var("MANDOR_AGENT_USER").ok().as_deref(),
             std::env::var("MANDOR_GROUP_DIR").ok().as_deref(),
         )
+        .map_err(anyhow::Error::msg)?
+        .map(|mut v| {
+            playwright_mcp_of(std::env::var("MANDOR_PLAYWRIGHT_MCP").ok().as_deref()).map(|p| {
+                v.playwright_mcp = p;
+                v
+            })
+        })
+        .transpose()
         .map_err(anyhow::Error::msg)?;
         // Di VM clone dan worktree ada di direktori grup developer.
         let workspaces_dir = vm_agent
@@ -417,6 +446,24 @@ mod tests {
             .unwrap();
         assert_eq!(v.user, "beni-agent");
         assert_eq!(v.run_dir(), std::path::Path::new("/srv/m/beni/runs"));
+        assert_eq!(
+            v.playwright_mcp,
+            std::path::Path::new("/usr/local/bin/mcp-server-playwright")
+        );
+    }
+
+    #[test]
+    fn biner_playwright_harus_absolut() {
+        use super::playwright_mcp_of;
+        assert_eq!(
+            playwright_mcp_of(Some("/opt/pw/bin/mcp-server-playwright")),
+            Ok("/opt/pw/bin/mcp-server-playwright".into())
+        );
+        assert_eq!(
+            playwright_mcp_of(None),
+            Ok("/usr/local/bin/mcp-server-playwright".into())
+        );
+        assert!(playwright_mcp_of(Some("mcp-server-playwright")).is_err());
     }
 
     #[test]

@@ -15,6 +15,31 @@ use crate::hook::{ToolCall, Verdict, classify_planning};
 /// Awalan tool ekstensi Claude in Chrome.
 pub const BROWSER_PREFIX: &str = "mcp__claude-in-chrome__";
 
+/// Awalan tool MCP Playwright reviewer headless di VM (KTD-64 plan VM).
+pub const PLAYWRIGHT_PREFIX: &str = "mcp__playwright__";
+
+/// Tool Playwright yang boleh dipakai reviewer. Navigasi diperiksa origin-nya;
+/// browser sendiri dibatasi `--allowed-origins`, jadi halaman yang terbuka
+/// selalu milik app. Tool yang menjalankan kode, menulis atau mengunggah
+/// berkas, membuka tab, atau tool baru ditolak.
+const PLAYWRIGHT_ALLOWED: &[&str] = &[
+    "browser_snapshot",
+    "browser_click",
+    "browser_type",
+    "browser_fill_form",
+    "browser_select_option",
+    "browser_press_key",
+    "browser_hover",
+    "browser_drag",
+    "browser_wait_for",
+    "browser_take_screenshot",
+    "browser_navigate_back",
+    "browser_console_messages",
+    "browser_handle_dialog",
+    "browser_resize",
+    "browser_close",
+];
+
 /// Sub-perintah git yang hanya membaca; selain ini ditolak di mode review.
 const GIT_READ_ONLY: &[&str] = &[
     "status",
@@ -226,6 +251,9 @@ fn deny(reason: &str) -> Verdict {
 /// Memutuskan tool call sesi reviewer.
 #[must_use]
 pub fn classify_review(call: &ToolCall, state: &ReviewState, allowed_mcp: &[String]) -> Verdict {
+    if let Some(tool) = call.tool_name.strip_prefix(PLAYWRIGHT_PREFIX) {
+        return playwright_verdict(tool, call, state);
+    }
     if let Some(kind) = kind(call) {
         return browser_verdict(call, kind, state);
     }
@@ -237,6 +265,15 @@ pub fn classify_review(call: &ToolCall, state: &ReviewState, allowed_mcp: &[Stri
             deny("the review is read-only; report findings through the ledger tools")
         }
         other => other,
+    }
+}
+
+fn playwright_verdict(tool: &str, call: &ToolCall, state: &ReviewState) -> Verdict {
+    match tool {
+        "browser_navigate" if allowed(state, call.url.as_deref()) => Verdict::Allow,
+        "browser_navigate" => deny("that address is outside the app allowed for this review"),
+        t if PLAYWRIGHT_ALLOWED.contains(&t) => Verdict::Allow,
+        t => deny(&format!("`{t}` is not available during review")),
     }
 }
 
@@ -1081,5 +1118,83 @@ mod tests {
             Some(1_828_590_158)
         );
         assert_eq!(created_tab("gagal"), None);
+    }
+
+    fn pw(tool: &str, url: Option<&str>) -> ToolCall {
+        ToolCall {
+            tool_name: format!("{PLAYWRIGHT_PREFIX}{tool}"),
+            url: url.map(str::to_owned),
+            ..ToolCall::default()
+        }
+    }
+
+    /// KTD-64 plan VM: reviewer headless di VM hanya membuka app dev run ini.
+    #[test]
+    fn playwright_hanya_navigasi_ke_app_dev() {
+        let s = state();
+        assert_eq!(
+            classify_review(
+                &pw("browser_navigate", Some("http://localhost:5173/jobs")),
+                &s,
+                &[]
+            ),
+            Verdict::Allow
+        );
+        for url in [
+            Some("https://evil.example/x"),
+            Some("http://localhost:5174/"),
+            Some("file:///etc/passwd"),
+            None,
+        ] {
+            assert!(
+                matches!(
+                    classify_review(&pw("browser_navigate", url), &s, &[]),
+                    Verdict::Deny(_)
+                ),
+                "{url:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn playwright_baca_dan_interaksi_boleh_tool_berbahaya_ditolak() {
+        let s = state();
+        for tool in [
+            "browser_snapshot",
+            "browser_click",
+            "browser_type",
+            "browser_fill_form",
+            "browser_select_option",
+            "browser_press_key",
+            "browser_hover",
+            "browser_wait_for",
+            "browser_take_screenshot",
+            "browser_navigate_back",
+            "browser_console_messages",
+            "browser_handle_dialog",
+            "browser_resize",
+            "browser_close",
+        ] {
+            assert_eq!(
+                classify_review(&pw(tool, None), &s, &[]),
+                Verdict::Allow,
+                "{tool}"
+            );
+        }
+        for tool in [
+            "browser_evaluate",
+            "browser_run_code",
+            "browser_file_upload",
+            "browser_install",
+            "browser_tabs",
+            "browser_pdf_save",
+            "browser_network_requests",
+            "tool_baru",
+        ] {
+            assert!(
+                matches!(classify_review(&pw(tool, None), &s, &[]), Verdict::Deny(_)),
+                "{tool}"
+            );
+        }
     }
 }

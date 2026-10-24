@@ -239,8 +239,9 @@ pub struct ReviewRequest {
     pub review_id: String,
     /// Origin app yang boleh dibuka browser reviewer.
     pub origins: Vec<String>,
-    /// `--chrome` hanya bila semua syarat kesiapan terpenuhi.
-    pub chrome: bool,
+    /// Browser hanya bila semua syarat kesiapan terpenuhi: Claude in Chrome
+    /// di laptop, Playwright headless di VM (KTD-64 plan VM).
+    pub browser: bool,
     pub model: Option<String>,
     /// Batas biaya `--max-budget-usd`, dalam sen.
     pub budget_cents: u32,

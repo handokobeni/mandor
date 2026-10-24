@@ -11,7 +11,7 @@ use common::run_fakes::eventually;
 use common::{FakeClock, FakeLark, Station, ready_task, station, vm_station};
 use mandor_domain::{Claim, Reply, RunState, TaskStatus};
 use mandor_usecase::overnight::OvernightSettings;
-use mandor_usecase::run_ports::{RunPhase, RunRecord, SessionRef};
+use mandor_usecase::run_ports::{AppRecords as _, RunPhase, RunRecord, SessionRef};
 use mandor_usecase::waiting_fix::DEFAULT_QUIET_SECS as QUIET;
 use mandor_usecase::{RunError, StartTarget};
 use pretty_assertions::assert_eq;
@@ -797,4 +797,66 @@ async fn dm_gagal_dicoba_lagi_dan_tidak_menahan_antrean() {
     assert_eq!(lark.dms.lock().unwrap().len(), 1);
     st.svc.overnight_tick().await.unwrap();
     assert_eq!(lark.dms.lock().unwrap().len(), 1, "tidak terkirim dua kali");
+}
+
+/// Kartu `a` di VM dengan repo Web yang app-nya menyala dari kode terbaru;
+/// `unattended` = setelan repo login tanpa pendamping (U7 plan VM).
+async fn vm_review_with_app(unattended: bool) -> Station {
+    let (_lark, _clock, st) = vm_started(true).await;
+    st.repos.repos.lock().unwrap()[0].app = mandor_domain::app_run::AppSettings {
+        test_mode: mandor_domain::app_run::TestMode::Web,
+        start_command: Some("bun run dev".to_owned()),
+        port: Some(5173),
+        browser_tests: true,
+        unattended_login: unattended,
+        ..Default::default()
+    };
+    let run = run_of(&st, "a");
+    st.git
+        .st()
+        .trees
+        .insert(run.worktree.clone().unwrap(), "tree-1".to_owned());
+    let app = mandor_usecase::run_ports::AppRecord {
+        run_id: run.id.clone(),
+        state: mandor_domain::app_run::AppRunState::Running,
+        members: vec![mandor_usecase::run_ports::AppMemberRecord {
+            repo_id: "repo1".to_owned(),
+            url: Some("http://localhost:5173".to_owned()),
+            pgid: Some(1),
+            state: mandor_domain::app_run::AppRunState::Running,
+        }],
+        snapshot: [("repo1".to_owned(), "tree-1".to_owned())].into(),
+        ..Default::default()
+    };
+    st.apps.save_app_record(&app).await.unwrap();
+    st.apps.set_app_owner(Some(&run.id)).await.unwrap();
+    changed(&st, "a", "src/form.rs");
+    st.agent.last().done();
+    eventually(|| run_of(&st, "a").state == RunState::Reviewing).await;
+    st
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn review_vm_memakai_browser_headless_dengan_login_tanpa_pendamping() {
+    let st = vm_review_with_app(true).await;
+    let review = st.agent.last().req.review.unwrap();
+    assert!(
+        review.browser,
+        "tanpa konfirmasi login dan tanpa ekstensi Chrome"
+    );
+    assert_eq!(review.origins, ["http://localhost:5173"]);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn review_vm_tanpa_login_tanpa_pendamping_tidak_memakai_browser() {
+    let st = vm_review_with_app(false).await;
+    let req = st.agent.last().req;
+    assert!(!req.review.unwrap().browser);
+    assert!(
+        req.message
+            .contains("No test login is prepared for unattended review"),
+        "{}",
+        req.message
+    );
+    // Baris browser lalu Can't verify dan kartu ditahan `ac_gate` (AE6).
 }

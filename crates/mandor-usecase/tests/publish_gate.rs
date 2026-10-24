@@ -204,7 +204,7 @@ async fn covers_ae4_tanpa_review_berlaku_review_dimulai_tanpa_push() {
     assert_eq!(st.runs.only().state, RunState::Reviewing);
     assert!(st.git.st().pushes.is_empty());
     let review = st.agent.last().req.review.unwrap();
-    assert!(!review.chrome);
+    assert!(!review.browser);
 }
 
 #[tokio::test(flavor = "multi_thread")]

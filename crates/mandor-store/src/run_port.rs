@@ -129,6 +129,8 @@ struct StoredApp {
     browser_tests: bool,
     #[serde(default)]
     auto_restart: bool,
+    #[serde(default)]
+    unattended_login: bool,
 }
 
 fn browser_tests_default() -> bool {
@@ -146,6 +148,7 @@ impl Default for StoredApp {
             env_keys: Vec::new(),
             browser_tests: true,
             auto_restart: false,
+            unattended_login: false,
         }
     }
 }
@@ -171,6 +174,7 @@ pub fn app_settings_of(settings: &serde_json::Value) -> AppSettings {
         env_keys: stored.env_keys,
         browser_tests: stored.browser_tests,
         auto_restart: stored.auto_restart,
+        unattended_login: stored.unattended_login,
     }
 }
 
@@ -186,6 +190,7 @@ pub fn app_settings_json(app: &AppSettings) -> serde_json::Value {
         env_keys: app.env_keys.clone(),
         browser_tests: app.browser_tests,
         auto_restart: app.auto_restart,
+        unattended_login: app.unattended_login,
     })
     .unwrap_or(serde_json::Value::Null)
 }

@@ -28,7 +28,7 @@
   import { overnight } from '#lib/stores/overnight.svelte.ts';
   import OvernightPage from '#lib/components/overnight/OvernightPage.svelte';
   import { supportsVmLink } from '#lib/vm.ts';
-  import { lark } from '#lib/stores/lark.svelte.ts';
+  import { lark, vmLark } from '#lib/stores/lark.svelte.ts';
   import { nav } from '#lib/stores/nav.svelte.ts';
   import { notifications } from '#lib/stores/notifications.svelte.ts';
   import { people } from '#lib/stores/people.svelte.ts';
@@ -97,7 +97,10 @@
       untrack(() => overnight.detach());
       return;
     }
-    return untrack(() => overnight.attach(client));
+    return untrack(() => {
+      const offs = [overnight.attach(client), vmLark.attach(client, () => undefined)];
+      return () => offs.forEach((off) => off());
+    });
   });
 
   // Store disambungkan ulang setiap kali koneksi siap (termasuk setelah reconnect).

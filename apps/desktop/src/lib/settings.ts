@@ -161,3 +161,19 @@ export function validateRepoApp(f: RepoAppForm): RepoAppErrors {
   if (bad) errors.envKeys = `${bad} is not a valid variable name.`;
   return errors;
 }
+
+/** Daemon yang diatur di Settings (laptop, atau daemon VM lewat link VM). */
+export type SettingsTarget = 'laptop' | 'vm';
+
+const VM_SECTIONS = ['lark', 'repos', 'workspaces'] as const;
+const LAPTOP_SECTIONS = ['lark', 'repos', 'workspaces', 'design-sources', 'general', 'background', 'vm', 'about'] as const;
+
+/** Bagian Settings yang tersedia untuk target; daemon VM hanya butuh Lark App, repo, dan workspace. */
+export function sectionsFor(target: SettingsTarget): string[] {
+  return target === 'vm' ? [...VM_SECTIONS] : [...LAPTOP_SECTIONS];
+}
+
+/** Bagian yang ditampilkan: bila tidak tersedia untuk target, kembali ke Lark. */
+export function sectionFor(target: SettingsTarget, section: string): string {
+  return sectionsFor(target).includes(section) ? section : 'lark';
+}

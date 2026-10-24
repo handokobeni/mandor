@@ -111,8 +111,11 @@ ssh -L 5150:127.0.0.1:5150 beni@vm          # dari laptop, lalu di VM:
 mandord login lark
 ```
 
-`mandord login lark` mencetak URL; buka di browser laptop. **(menunggu U12)**
-Pengaturan Lark App di daemon VM harus ada sebelum login.
+Sebelum login, isi Lark App daemon VM dari app laptop: **Settings → VM → Lark**
+(app ID, secret, Base, tabel, dan port callback di rentang port Anda), setelah
+link VM tersambung (langkah 7). Repo dan workspace VM juga didaftarkan dari
+**Settings → VM → Repos/Workspaces** (path di `/srv/mandor/<dev>/workspaces`).
+`mandord login lark` mencetak URL; buka di browser laptop.
 
 Status ketiga login terlihat di tab **Overnight** app (atau RPC `status`).
 

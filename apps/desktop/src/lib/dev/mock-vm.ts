@@ -100,7 +100,43 @@ function handle(method: string, p: Record<string, unknown>): unknown {
         ]
       };
     case 'repos.list':
-      return [{ id: 'pegasus-web', path: '/srv/mandor/beni/pegasus-web', gh_profile: null, default_branch: 'main' }];
+      return [
+        {
+          id: 'pegasus-web',
+          path: '/srv/mandor/beni/workspaces/pegasus-web',
+          default_branch: 'main',
+          gh_profile: null,
+          companions: [],
+          trusted_reviewers: [],
+          extra_allowed: ['Bash(pnpm test *)'],
+          gate_mode: null,
+          app: {
+            test_mode: 'web',
+            setup_command: 'pnpm install && pnpm seed:test-login',
+            start_command: 'pnpm dev --port 5150',
+            port: 5150,
+            app_url: null,
+            env_keys: [],
+            browser_tests: true,
+            auto_restart: false,
+            unattended_login: true
+          }
+        }
+      ];
+    case 'lark.settings.get':
+      return {
+        app_id: 'cli_a6f2c81d93b8d00e',
+        has_secret: true,
+        app_token: 'NkQ2bXr7YcPq1sZt9vLmHg4eAbc',
+        table_id: 'tbl8kX2pQm4vR7aW',
+        ac_table_id: 'tblD3nF6hJ9kL2pS',
+        redirect_port: 5199,
+        open_base: 'https://open.larksuite.com',
+        accounts_base: 'https://accounts.larksuite.com',
+        quiet_secs: 120
+      };
+    case 'notifications.take':
+      return [];
     case 'workspaces.list':
       return [];
     case 'overnight.queue.list':

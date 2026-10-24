@@ -8,15 +8,15 @@
   import { Button, buttonVariants } from '#lib/components/ui/button/index.ts';
   import type { WorkspaceView } from '#lib/protocol/WorkspaceView.ts';
   import type { Rpc } from '#lib/rpc.ts';
-  import { lark } from '#lib/stores/lark.svelte.ts';
+  import { lark, type LarkStore } from '#lib/stores/lark.svelte.ts';
   import AddWorkspaceDialog from './AddWorkspaceDialog.svelte';
   import CheckList from './CheckList.svelte';
   import { Switch } from '#lib/components/ui/switch/index.ts';
 
-  let { rpc }: { rpc: Rpc } = $props();
+  let { rpc, store = lark }: { rpc: Rpc; store?: LarkStore } = $props();
 
   let selectedId = $state<string | null>(null);
-  const ws = $derived(lark.workspaces.find((w) => w.id === selectedId) ?? lark.workspaces[0]);
+  const ws = $derived(store.workspaces.find((w) => w.id === selectedId) ?? store.workspaces[0]);
 
   // Salinan yang bisa diedit; diganti setiap workspace terpilih berubah.
   let edit = $state<{ repos: string[]; mcp: string[]; browserTests: boolean; gate: string } | null>(null);
@@ -59,7 +59,7 @@
   async function save(w: WorkspaceView): Promise<void> {
     if (!edit) return;
     // Urutan repo mengikuti daftar repo, agar repo utama run stabil.
-    const order = lark.repos.map((r) => r.id);
+    const order = store.repos.map((r) => r.id);
     const repoIds = order.filter((id) => edit?.repos.includes(id));
     try {
       await rpc.request('workspaces.update', {
@@ -69,7 +69,7 @@
         browser_tests: edit.browserTests,
         gate_mode: edit.gate
       });
-      await lark.refresh();
+      await store.refresh();
       editFor = null;
       toast.success('Workspace saved', { description: `${w.name} · used on the next start` });
     } catch (err) {
@@ -81,7 +81,7 @@
     removing = null;
     try {
       await rpc.request('workspaces.remove', { id: w.id });
-      await lark.refresh();
+      await store.refresh();
       selectedId = null;
       toast.success('Workspace removed', { description: w.name });
     } catch (err) {
@@ -95,12 +95,12 @@
     <h1>Workspaces</h1>
     <p class="lede">Groups of repos under one parent folder. Start a task in several repos at once, one PR per repo.</p>
   </div>
-  {#if lark.workspaces.length > 0}
+  {#if store.workspaces.length > 0}
     <Button variant="secondary" size="sm" onclick={() => (adding = true)}><Plus />Add workspace</Button>
   {/if}
 </section>
 
-{#if lark.workspaces.length === 0}
+{#if store.workspaces.length === 0}
   <section>
     <div class="settings-card">
       <EmptyState icon={Layers} title="No workspaces yet">
@@ -115,7 +115,7 @@
       <table class="table">
         <thead><tr><th>Workspace</th><th>Parent folder</th><th>Repos</th><th>MCP servers</th></tr></thead>
         <tbody>
-          {#each lark.workspaces as w (w.id)}
+          {#each store.workspaces as w (w.id)}
             <tr
               aria-selected={ws?.id === w.id}
               tabindex="0"
@@ -145,7 +145,7 @@
             <span class="text-sm font-medium">Repos</span>
             <p class="field-help">Repos you can check when starting a task in this workspace.</p>
             <CheckList
-              items={lark.repos.map((r) => ({ id: r.id, label: r.id, hint: r.path }))}
+              items={store.repos.map((r) => ({ id: r.id, label: r.id, hint: r.path }))}
               bind:selected={edit.repos}
               label="Workspace repos"
               empty="Add the repos in Settings › Repos first."
@@ -199,11 +199,11 @@
 {#if adding}
   <AddWorkspaceDialog
     {rpc}
-    repos={lark.repos}
+    repos={store.repos}
     oncancel={() => (adding = false)}
     onadded={async (w) => {
       adding = false;
-      await lark.refresh();
+      await store.refresh();
       selectedId = w.id;
       toast.success('Workspace added', { description: `${w.name} · ${w.repo_ids.length} repos` });
     }}

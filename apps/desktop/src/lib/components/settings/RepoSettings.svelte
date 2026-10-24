@@ -9,17 +9,17 @@
   import { Input } from '#lib/components/ui/input/index.ts';
   import type { RepoView } from '#lib/protocol/RepoView.ts';
   import type { Rpc } from '#lib/rpc.ts';
-  import { lark } from '#lib/stores/lark.svelte.ts';
+  import { lark, type LarkStore } from '#lib/stores/lark.svelte.ts';
   import AddRepoDialog from './AddRepoDialog.svelte';
   import Field from './Field.svelte';
   import ListEditor from './ListEditor.svelte';
   import { Switch } from '#lib/components/ui/switch/index.ts';
   import { type RepoAppForm, validateRepoApp } from '#lib/settings.ts';
 
-  let { rpc }: { rpc: Rpc } = $props();
+  let { rpc, store = lark }: { rpc: Rpc; store?: LarkStore } = $props();
 
   let selectedId = $state<string | null>(null);
-  const repo = $derived(lark.repos.find((r) => r.id === selectedId) ?? lark.repos[0]);
+  const repo = $derived(store.repos.find((r) => r.id === selectedId) ?? store.repos[0]);
 
   // Salinan yang bisa diedit; diganti setiap repo terpilih berubah.
   interface Edit {
@@ -95,7 +95,7 @@
           unattended_login: web && edit.unattendedLogin
         }
       });
-      await lark.refresh();
+      await store.refresh();
       toast.success('Repo saved', { description: `${r.id} · used on the next agent start` });
     } catch (err) {
       toast.error('Could not save the repo', { description: message(err) });
@@ -106,7 +106,7 @@
     removing = null;
     try {
       await rpc.request('repos.remove', { id: r.id });
-      await lark.refresh();
+      await store.refresh();
       selectedId = null;
       toast.success('Repo removed', { description: r.id });
     } catch (err) {
@@ -124,12 +124,12 @@
     <h1>Repos</h1>
     <p class="lede">Repos on the daemon machine that agents can work in.</p>
   </div>
-  {#if lark.repos.length > 0}
+  {#if store.repos.length > 0}
     <Button variant="secondary" size="sm" onclick={openAdd}><Plus />Add repo</Button>
   {/if}
 </section>
 
-{#if lark.repos.length === 0}
+{#if store.repos.length === 0}
   <section>
     <div class="settings-card">
       <EmptyState icon={FolderGit2} title="No repos yet">
@@ -144,7 +144,7 @@
       <table class="table">
         <thead><tr><th>Repo</th><th>Path</th><th>Default branch</th><th>gh profile</th></tr></thead>
         <tbody>
-          {#each lark.repos as r (r.id)}
+          {#each store.repos as r (r.id)}
             <tr
               aria-selected={repo?.id === r.id}
               tabindex="0"
@@ -295,7 +295,7 @@
     oncancel={() => (adding = false)}
     onadded={async (r) => {
       adding = false;
-      await lark.refresh();
+      await store.refresh();
       selectedId = r.id;
       toast.success('Repo added', { description: `${r.id} · default branch ${r.default_branch ?? 'unknown'}` });
     }}

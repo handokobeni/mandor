@@ -203,7 +203,9 @@ pub fn classify_vm(call: &ToolCall, run_dir: &str) -> Option<String> {
     if let Some(reason) = vm_text_violation(&lower, &run_dir) {
         return Some(reason);
     }
-    vm_command_violation(&words(&lower))
+    lower
+        .split([';', '&', '|', '\n'])
+        .find_map(|segment| vm_command_violation(&words(segment)))
 }
 
 /// Path yang ditolak di VM: berkas run daemon, berkas git per worktree, dan
@@ -255,7 +257,7 @@ fn vm_command_violation(ws: &[String]) -> Option<String> {
             return Some("mandor: changing git configuration is denied on the VM".to_owned());
         }
         if DB_CLIENTS.contains(&prog) {
-            if let Some(host) = remote_db_host(rest) {
+            if let Some(host) = remote_db_host(ws) {
                 return Some(format!(
                     "mandor: overnight work only uses local databases, not {host}"
                 ));
@@ -265,7 +267,8 @@ fn vm_command_violation(ws: &[String]) -> Option<String> {
     None
 }
 
-/// `git config` yang hanya membaca: ada opsi baca dan tidak ada opsi tulis.
+/// `git config` (argumen satu perintah sederhana) yang hanya membaca: ada
+/// opsi baca dan tidak ada opsi tulis; selain itu dianggap menulis.
 fn git_config_read_only(rest: &[String]) -> bool {
     const READ: &[&str] = &[
         "--get",
@@ -293,13 +296,23 @@ fn git_config_read_only(rest: &[String]) -> bool {
         && !rest.iter().any(|a| WRITE.contains(&a.as_str()))
 }
 
-/// Host database yang bukan lokal dari argumen klien (`-h`, `--host`, URL).
-fn remote_db_host(args: &[String]) -> Option<String> {
+/// Host database yang bukan loopback dari kata satu perintah sederhana:
+/// `-h X`, `-hX`, `--host[=]X`, `host=X` (conninfo), URL, dan assignment
+/// `PGHOST`/`MYSQL_HOST`/`REDISCLI_HOST`.
+fn remote_db_host(words: &[String]) -> Option<String> {
     let mut hosts = Vec::new();
-    for (i, a) in args.iter().enumerate() {
+    for (i, a) in words.iter().enumerate() {
         if a == "-h" || a == "--host" {
-            hosts.extend(args.get(i + 1).cloned());
-        } else if let Some(h) = a.strip_prefix("--host=") {
+            hosts.extend(words.get(i + 1).cloned());
+        } else if let Some(h) = a
+            .strip_prefix("--host=")
+            .or_else(|| a.strip_prefix("host="))
+            .or_else(|| a.strip_prefix("pghost="))
+            .or_else(|| a.strip_prefix("mysql_host="))
+            .or_else(|| a.strip_prefix("rediscli_host="))
+        {
+            hosts.push(h.to_owned());
+        } else if let Some(h) = a.strip_prefix("-h").filter(|h| !h.is_empty()) {
             hosts.push(h.to_owned());
         } else if let Some((_, after)) = a.split_once("://") {
             let authority = after.split('/').next().unwrap_or_default();
@@ -310,10 +323,10 @@ fn remote_db_host(args: &[String]) -> Option<String> {
     hosts.into_iter().find(|h| !local_host(h))
 }
 
-/// Host lokal: loopback atau nama layanan container tanpa titik.
+/// Hanya loopback yang lokal; nama layanan container ikut ditolak (agent
+/// memakai port yang dipetakan ke localhost).
 fn local_host(host: &str) -> bool {
     matches!(host, "localhost" | "127.0.0.1" | "::1" | "0.0.0.0" | "")
-        || !(host.contains('.') || host.contains(':'))
 }
 
 /// Path menyentuh berkas kredensial atau state mandor (aturan KTD-21).
@@ -772,6 +785,12 @@ mod tests {
             "mysql --host=db.example.com",
             "redis-cli -h cache.example.com",
             "git config core.sshCommand 'touch /tmp/x'",
+            "git config --get user.name; git config core.pager evil",
+            "git config --list && git config include.path x",
+            "psql -hdb.prod.internal",
+            "psql 'host=db.prod.internal dbname=x'",
+            "PGHOST=db.prod.internal psql",
+            "psql -h db",
             "git -C . config --add include.path ../x",
             "echo x >> .git/worktrees/pgs-1/config.worktree",
             "cat /srv/mandor/beni/runs/mcp/review-rv1.json",

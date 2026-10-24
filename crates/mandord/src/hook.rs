@@ -63,6 +63,19 @@ fn vm_run_dir(args: &[String]) -> Option<String> {
         .map(|w| w[1].clone())
 }
 
+/// Pagar VM dengan path tool yang dikanonisasi (`..`, symlink, path relatif
+/// terhadap cwd hook), dibandingkan dengan direktori run apa adanya maupun
+/// hasil kanonisasinya.
+fn vm_violation(call: &ToolCall, run_dir: &str) -> Option<String> {
+    let mut resolved = call.clone();
+    resolved.paths = call
+        .paths
+        .iter()
+        .flat_map(|p| [p.clone(), canonical(p)])
+        .collect();
+    classify_vm(&resolved, run_dir).or_else(|| classify_vm(&resolved, &canonical(run_dir)))
+}
+
 /// `--review <berkas>`: berkas state pagar sesi reviewer.
 fn review_state_path(args: &[String]) -> Option<PathBuf> {
     args.windows(2)
@@ -142,7 +155,7 @@ pub fn run(args: &[String]) -> u8 {
                 None => Verdict::Deny("mandor: --post needs --review".to_owned()),
             };
         }
-        if let Some(reason) = vm.as_deref().and_then(|dir| classify_vm(call, dir)) {
+        if let Some(reason) = vm.as_deref().and_then(|dir| vm_violation(call, dir)) {
             return Verdict::Deny(reason);
         }
         if !roots.is_empty() {

@@ -181,6 +181,7 @@ fn mode_review_memakai_state_dan_gagal_tertutup_tanpa_state() {
 
 /// U11 plan VM: `--vm <run dir>` menambah pagar lembur, termasuk untuk sesi
 /// reviewer, dan berkas run daemon tidak bisa dibaca agent.
+#[cfg(unix)]
 #[test]
 fn hook_vm_menolak_pesan_staging_dan_berkas_run() {
     let vm = ["--vm", "/srv/mandor/beni/runs"];
@@ -196,6 +197,18 @@ fn hook_vm_menolak_pesan_staging_dan_berkas_run() {
         assert!(err.contains("mandor:"), "{err}");
     }
     assert_eq!(hook_with(&bash("cargo test"), false, &vm).0, 0);
+    // Path lewat symlink ke direktori run tetap dikenali setelah kanonisasi.
+    let runs = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(runs.path().join("mcp")).unwrap();
+    std::fs::write(runs.path().join("mcp/x.json"), "{}").unwrap();
+    let other = tempfile::tempdir().unwrap();
+    std::os::unix::fs::symlink(runs.path(), other.path().join("l")).unwrap();
+    let sneaky = format!("{}/l/mcp/x.json", other.path().display());
+    let read = serde_json::json!({"hook_event_name": "PreToolUse", "tool_name": "Read",
+        "tool_input": {"file_path": sneaky}})
+    .to_string();
+    let dir = runs.path().display().to_string();
+    assert_eq!(hook_with(&read, false, &["--vm", &dir]).0, 2);
     // Tanpa --vm (laptop) aturan lembur tidak berlaku.
     assert_eq!(hook(&bash("curl https://staging.kelola.id/"), false).0, 0);
     // Sesi reviewer VM juga terkena pagar sebelum state review dibaca.

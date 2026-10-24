@@ -22,9 +22,7 @@ use tokio::signal::unix::{SignalKind, signal};
 const GRACE: Duration = Duration::from_secs(10);
 
 /// Variabel yang boleh diteruskan dari daemon atau dari environment sudo.
-const ALLOWED: &[&str] = &[
-    "PATH", "HOME", "USER", "LOGNAME", "LANG", "LC_ALL", "LC_CTYPE", "TERM", "TZ", "TMPDIR",
-];
+use mandor_agent::claude::command::AGENT_ENV_ALLOWED as ALLOWED;
 
 /// Mode `agent-exec`.
 #[derive(Debug, Clone, PartialEq, Eq)]

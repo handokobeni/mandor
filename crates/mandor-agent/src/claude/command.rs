@@ -55,7 +55,15 @@ pub struct AgentRunner {
 /// `sudo` absolut: environment eksplisit tanpa `PATH` warisan.
 const SUDO: &str = "/usr/bin/sudo";
 
-/// Argumen `sudo` sampai `--` sebelum program agent.
+/// Variabel yang boleh sampai ke agent di VM. Disaring di daemon sebelum
+/// argv `sudo` (argv terlihat di daftar proses) dan disaring lagi oleh
+/// `agent-exec` di sisi user agent.
+pub const AGENT_ENV_ALLOWED: &[&str] = &[
+    "PATH", "HOME", "USER", "LOGNAME", "LANG", "LC_ALL", "LC_CTYPE", "TERM", "TZ", "TMPDIR",
+];
+
+/// Argumen `sudo` sampai `--` sebelum program agent; hanya variabel
+/// [`AGENT_ENV_ALLOWED`] yang ikut.
 #[must_use]
 pub fn runner_args(r: &AgentRunner, env: &[(String, String)]) -> Vec<String> {
     let mut a = vec![
@@ -67,7 +75,10 @@ pub fn runner_args(r: &AgentRunner, env: &[(String, String)]) -> Vec<String> {
         "--run-dir".to_owned(),
         r.run_dir.display().to_string(),
     ];
-    for (k, v) in env {
+    for (k, v) in env
+        .iter()
+        .filter(|(k, _)| AGENT_ENV_ALLOWED.contains(&k.as_str()))
+    {
         a.push("--env".to_owned());
         a.push(format!("{k}={v}"));
     }
@@ -215,7 +226,11 @@ mod tests {
     #[test]
     fn peran_vm_membungkus_agent_dengan_sudo_dan_agent_exec() {
         let mut s = spec(Session::New("u-1".to_owned()));
-        s.env = vec![("PATH".to_owned(), "/usr/bin".to_owned())];
+        s.env = vec![
+            ("PATH".to_owned(), "/usr/bin".to_owned()),
+            ("GH_TOKEN".to_owned(), "ghs_rahasia".to_owned()),
+            ("SOME_VAR".to_owned(), "x".to_owned()),
+        ];
         s.runner = Some(AgentRunner {
             exe: "/home/beni/.local/bin/mandord".into(),
             user: "beni-agent".to_owned(),

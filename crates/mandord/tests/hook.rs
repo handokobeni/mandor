@@ -133,8 +133,10 @@ fn mode_review_memakai_state_dan_gagal_tertutup_tanpa_state() {
     let dir = tempfile::tempdir().unwrap();
     let state = dir.path().join("r1.json");
     let state_s = state.to_str().unwrap();
-    let pre = ["--review", state_s];
-    let post = ["--review", state_s, "--post"];
+    // Origin selalu dari argv yang ditulis daemon.
+    let origin = "http://localhost:5173";
+    let pre = ["--review", state_s, "--origin", origin];
+    let post = ["--review", state_s, "--origin", origin, "--post"];
     let nav_app = browser(
         "navigate",
         &serde_json::json!({"url": "http://localhost:5173/orders", "tabId": 7}),
@@ -175,4 +177,49 @@ fn mode_review_memakai_state_dan_gagal_tertutup_tanpa_state() {
         let mode = std::fs::metadata(&state).unwrap().permissions().mode();
         assert_eq!(mode & 0o777, 0o600, "state ditulis ulang 0600");
     }
+}
+
+/// U11 plan VM: `--vm <run dir>` menambah pagar lembur, termasuk untuk sesi
+/// reviewer, dan berkas run daemon tidak bisa dibaca agent.
+#[cfg(unix)]
+#[test]
+fn hook_vm_menolak_pesan_staging_dan_berkas_run() {
+    let vm = ["--vm", "/srv/mandor/beni/runs"];
+    for cmd in [
+        "sendmail -t < msg",
+        "curl https://staging.kelola.id/",
+        "cat /srv/mandor/beni/runs/mcp/x.json",
+        "git push origin main",
+        "gh pr merge 12",
+    ] {
+        let (code, err) = hook_with(&bash(cmd), false, &vm);
+        assert_eq!(code, 2, "{cmd}");
+        assert!(err.contains("mandor:"), "{err}");
+    }
+    assert_eq!(hook_with(&bash("cargo test"), false, &vm).0, 0);
+    // Path lewat symlink ke direktori run tetap dikenali setelah kanonisasi.
+    let runs = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(runs.path().join("mcp")).unwrap();
+    std::fs::write(runs.path().join("mcp/x.json"), "{}").unwrap();
+    let other = tempfile::tempdir().unwrap();
+    std::os::unix::fs::symlink(runs.path(), other.path().join("l")).unwrap();
+    let sneaky = format!("{}/l/mcp/x.json", other.path().display());
+    let read = serde_json::json!({"hook_event_name": "PreToolUse", "tool_name": "Read",
+        "tool_input": {"file_path": sneaky}})
+    .to_string();
+    let dir = runs.path().display().to_string();
+    assert_eq!(hook_with(&read, false, &["--vm", &dir]).0, 2);
+    // Tanpa --vm (laptop) aturan lembur tidak berlaku.
+    assert_eq!(hook(&bash("curl https://staging.kelola.id/"), false).0, 0);
+    // Sesi reviewer VM juga terkena pagar sebelum state review dibaca.
+    let dir = tempfile::tempdir().unwrap();
+    let state = dir.path().join("r.json");
+    std::fs::write(&state, r#"{"origins":[]}"#).unwrap();
+    let review = [
+        "--vm",
+        "/srv/mandor/beni/runs",
+        "--review",
+        state.to_str().unwrap(),
+    ];
+    assert_eq!(hook_with(&bash("sendmail -t"), false, &review).0, 2);
 }

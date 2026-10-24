@@ -1,6 +1,6 @@
 use std::path::{Path, PathBuf};
 
-use mandor_proc::{git_credential_env, run};
+use mandor_proc::git_credential_env;
 use secrecy::SecretString;
 
 use crate::{Git, GitError, NETWORK_TIMEOUT};
@@ -78,16 +78,19 @@ impl Git {
     /// sisa yang tidak bisa dihapus dicatat ke log.
     pub async fn remove_worktree(&self, repo: &Path, path: &Path, branch: Option<&str>) {
         let path_str = path.to_string_lossy().into_owned();
-        let removed = run(&self
-            .git(repo)
-            .args(["worktree", "remove", "--force", &path_str]))
-        .await;
+        let removed = self
+            .exec(
+                &self
+                    .git(repo)
+                    .args(["worktree", "remove", "--force", &path_str]),
+            )
+            .await;
         if !matches!(&removed, Ok(o) if o.success()) {
             let _ = tokio::fs::remove_dir_all(path).await;
-            let _ = run(&self.git(repo).args(["worktree", "prune"])).await;
+            let _ = self.exec(&self.git(repo).args(["worktree", "prune"])).await;
         }
         if let Some(b) = branch {
-            if let Ok(out) = run(&self.git(repo).args(["branch", "-D", b])).await {
+            if let Ok(out) = self.exec(&self.git(repo).args(["branch", "-D", b])).await {
                 if !out.success() && !out.stderr.contains("not found") {
                     tracing::warn!(branch = b, stderr = %out.stderr.trim(), "branch worktree tidak terhapus");
                 }
@@ -132,14 +135,15 @@ impl Git {
         }
         let path_str = path.to_string_lossy().into_owned();
         let remote = format!("origin/{branch}");
-        let local_exists = run(&self.git(repo).args([
-            "rev-parse",
-            "--verify",
-            "--quiet",
-            &format!("refs/heads/{branch}"),
-        ]))
-        .await?
-        .success();
+        let local_exists = self
+            .exec(&self.git(repo).args([
+                "rev-parse",
+                "--verify",
+                "--quiet",
+                &format!("refs/heads/{branch}"),
+            ]))
+            .await?
+            .success();
         let cmd = if local_exists {
             self.git(repo).args(["worktree", "add", &path_str, branch])
         } else {

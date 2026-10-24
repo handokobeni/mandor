@@ -1,7 +1,7 @@
 //! Pemetaan tipe domain/usecase ke DTO protokol.
 
 use mandor_domain::gate::check_start;
-use mandor_domain::{Task, TaskStatus};
+use mandor_domain::{ClaimIdentity, Holder, Task, TaskStatus};
 use mandor_protocol::{
     AcView, CardView, FlagView, GroupCardView, NoticeView, RunRepoView, RunView, SprintView,
     TaskDetailsView,
@@ -158,10 +158,30 @@ pub fn card_view(c: &CachedTask, run: Option<&RunRecord>, me: &str, now_ms: i64)
             detail: f.detail.clone(),
         }),
         run: run.map(|r| run_view(r, Some(t))),
+        holder: None,
         pr_url: t.pr_url.clone(),
         branch: t.branch.clone(),
         repo_id: t.repo_id.clone(),
         last_modified_ms: t.last_modified_ms,
+    }
+}
+
+/// Pemegang klaim kartu dari sudut daemon ini (KTD-56 plan VM). Kartu yang
+/// dipegang daemon lain milik dev yang sama hanya-baca: Start dan ambil alih
+/// nonaktif (R16).
+pub fn apply_holder(card: &mut CardView, task: &Task, me: &ClaimIdentity) {
+    let Some(holder) = task.holder(me) else {
+        return;
+    };
+    card.holder = Some(holder.as_str().to_owned());
+    if holder == Holder::OwnOtherDaemon {
+        let daemon = task
+            .claim
+            .as_ref()
+            .and_then(|c| c.daemon_id())
+            .unwrap_or("another daemon");
+        card.start_blocked = Some(format!("Held by your other Mandor daemon ({daemon})"));
+        card.can_takeover = false;
     }
 }
 
@@ -317,6 +337,39 @@ mod tests {
             Some("Task already has an active run"),
             "run tunggal tidak berubah"
         );
+    }
+
+    #[test]
+    fn kartu_yang_dipegang_daemon_vm_hanya_baca() {
+        use mandor_domain::Claim;
+        let laptop = ClaimIdentity::new("ou_me", "laptop", true);
+        let mut t = Task::new("rec1", TaskStatus::WaitingFix);
+        t.claim = Some(Claim {
+            open_id: "ou_me".to_owned(),
+            ts_ms: 0,
+            nonce: "r~vm".to_owned(),
+        });
+        let mut card = card_view(&cached(t.clone()), None, "ou_me", 0);
+        apply_holder(&mut card, &t, &laptop);
+        assert_eq!(card.holder.as_deref(), Some("own_other_daemon"));
+        assert_eq!(
+            card.start_blocked.as_deref(),
+            Some("Held by your other Mandor daemon (vm)")
+        );
+        assert!(!card.can_takeover);
+
+        t.claim = Some(Claim {
+            open_id: "ou_me".to_owned(),
+            ts_ms: 0,
+            nonce: "r~laptop".to_owned(),
+        });
+        let mut own = card_view(&cached(t.clone()), None, "ou_me", 0);
+        apply_holder(&mut own, &t, &laptop);
+        assert_eq!(own.holder.as_deref(), Some("self"));
+        t.claim = None;
+        let mut free = card_view(&cached(t.clone()), None, "ou_me", 0);
+        apply_holder(&mut free, &t, &laptop);
+        assert_eq!(free.holder, None);
     }
 
     #[test]

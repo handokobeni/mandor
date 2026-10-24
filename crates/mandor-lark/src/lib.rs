@@ -14,6 +14,7 @@ mod error;
 mod fields;
 mod fields_bootstrap;
 mod gateway;
+mod messages;
 mod oauth;
 mod rate_limit;
 mod token_store;

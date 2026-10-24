@@ -16,4 +16,9 @@ env_keys: Array<string>, browser_tests: boolean,
  * Restart app otomatis dari kode terbaru sebelum review berbrowser
  * (opt-in; kode agent berjalan tanpa konfirmasi perubahan).
  */
-auto_restart: boolean, };
+auto_restart: boolean, 
+/**
+ * Setup command menyiapkan login uji sendiri; review headless di VM
+ * memakai browser tanpa konfirmasi login (KTD-64 plan VM).
+ */
+unattended_login: boolean, };

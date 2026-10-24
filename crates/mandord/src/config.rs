@@ -1,5 +1,6 @@
 //! Konfigurasi daemon, dibaca sekali di `main` (satu-satunya pemakai `std::env::var`).
 
+use mandor_domain::DaemonRole;
 use std::path::{Path, PathBuf};
 
 use anyhow::Context;
@@ -18,6 +19,8 @@ pub struct Config {
     pub log_filter: String,
     /// Biner Claude Code (`MANDOR_CLAUDE_BIN`, default `claude`).
     pub claude_bin: PathBuf,
+    /// Biner GitHub CLI (`MANDOR_GH_BIN`, default `gh`).
+    pub gh_bin: PathBuf,
     /// Shell login untuk menangkap PATH pengguna (`SHELL`, default `/bin/bash`).
     pub shell: PathBuf,
     /// Perintah hook absolut: biner `mandord` ini ditambah ` hook`.
@@ -59,6 +62,167 @@ pub struct Config {
     /// `Err` bila nilainya tidak valid; daemon tetap start dan melaporkan
     /// `keep_awake: failing`.
     pub keep_awake_cmd: Option<Result<Vec<String>, String>>,
+    /// Peran daemon (`MANDOR_ROLE`: `laptop` default, `vm`; KTD-54 plan VM).
+    pub role: DaemonRole,
+    /// Id daemon di klaim (`MANDOR_DAEMON_ID`, default dari user, host, dan
+    /// peran; KTD-55).
+    pub daemon_id: String,
+    /// Peran VM: user Linux agent (`MANDOR_AGENT_USER`) dan direktori grup
+    /// developer untuk clone, worktree, dan berkas run (`MANDOR_GROUP_DIR`,
+    /// KTD-62).
+    pub vm_agent: Option<VmAgent>,
+}
+
+/// Agent di VM sebagai user Linux terpisah (KTD-62 plan VM).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct VmAgent {
+    pub user: String,
+    pub group_dir: PathBuf,
+    /// Biner MCP Playwright untuk review headless (KTD-64 plan VM).
+    pub playwright_mcp: PathBuf,
+    /// Rentang port milik developer ini di VM bersama (`MANDOR_PORT_RANGE`,
+    /// R5): port app repo dan port callback login Lark harus di dalamnya.
+    pub ports: PortRange,
+}
+
+/// Rentang port inklusif, mis. `5100-5199`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PortRange {
+    pub first: u16,
+    pub last: u16,
+}
+
+impl PortRange {
+    /// Mengurai `awal-akhir`.
+    ///
+    /// # Errors
+    /// Pesan bila bentuknya salah atau awal lebih besar dari akhir.
+    pub fn parse(raw: &str) -> Result<Self, String> {
+        let bad = || format!("MANDOR_PORT_RANGE must look like 5100-5199, got {raw:?}");
+        let (a, b) = raw.trim().split_once('-').ok_or_else(bad)?;
+        let first: u16 = a.trim().parse().map_err(|_| bad())?;
+        let last: u16 = b.trim().parse().map_err(|_| bad())?;
+        if first == 0 || first > last {
+            return Err(bad());
+        }
+        Ok(Self { first, last })
+    }
+
+    #[must_use]
+    pub fn contains(self, port: u16) -> bool {
+        (self.first..=self.last).contains(&port)
+    }
+}
+
+impl std::fmt::Display for PortRange {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}-{}", self.first, self.last)
+    }
+}
+
+/// Lokasi bawaan `mcp-server-playwright` dari `npm install -g @playwright/mcp`.
+const DEFAULT_PLAYWRIGHT_MCP: &str = "/usr/local/bin/mcp-server-playwright";
+
+/// Biner MCP Playwright dari `MANDOR_PLAYWRIGHT_MCP`; harus absolut karena
+/// agent berjalan dengan `PATH` dari allowlist.
+///
+/// # Errors
+/// Pesan untuk admin bila nilainya bukan path absolut.
+pub fn playwright_mcp_of(raw: Option<&str>) -> Result<PathBuf, String> {
+    match raw.map(str::trim).filter(|r| !r.is_empty()) {
+        None => Ok(PathBuf::from(DEFAULT_PLAYWRIGHT_MCP)),
+        Some(p) if p.starts_with('/') => Ok(PathBuf::from(p)),
+        Some(p) => Err(format!(
+            "MANDOR_PLAYWRIGHT_MCP must be an absolute path, got {p:?}"
+        )),
+    }
+}
+
+impl VmAgent {
+    /// Berkas run yang bisa dibaca user agent, di luar `~/.mandor`.
+    #[must_use]
+    pub fn run_dir(&self) -> PathBuf {
+        self.group_dir.join("runs")
+    }
+}
+
+/// Peran VM wajib punya user agent dan direktori grup; peran laptop
+/// mengabaikannya.
+///
+/// # Errors
+/// Pesan untuk admin bila peran VM tanpa salah satunya.
+pub fn vm_agent_of(
+    role: DaemonRole,
+    user: Option<&str>,
+    group_dir: Option<&str>,
+    ports: Option<&str>,
+) -> Result<Option<VmAgent>, String> {
+    if role != DaemonRole::Vm {
+        return Ok(None);
+    }
+    let user = user.map(str::trim).filter(|u| !u.is_empty());
+    let dir = group_dir.map(str::trim).filter(|d| !d.is_empty());
+    let ports = ports.map(str::trim).filter(|p| !p.is_empty());
+    match (user, dir, ports) {
+        (Some(u), Some(d), Some(p)) if d.starts_with('/') => Ok(Some(VmAgent {
+            user: u.to_owned(),
+            group_dir: PathBuf::from(d),
+            playwright_mcp: PathBuf::from(DEFAULT_PLAYWRIGHT_MCP),
+            ports: PortRange::parse(p)?,
+        })),
+        _ => Err(
+            "MANDOR_ROLE=vm needs MANDOR_AGENT_USER, an absolute MANDOR_GROUP_DIR, and MANDOR_PORT_RANGE (see docs/runbook/setup-vm.md)"
+                .to_owned(),
+        ),
+    }
+}
+
+/// Pengaturan agent VM dari environment (`MANDOR_AGENT_USER`,
+/// `MANDOR_GROUP_DIR`, `MANDOR_PORT_RANGE`, `MANDOR_PLAYWRIGHT_MCP`).
+fn vm_agent_from_env(role: DaemonRole) -> Result<Option<VmAgent>, String> {
+    let var = |k: &str| std::env::var(k).ok();
+    let Some(mut vm) = vm_agent_of(
+        role,
+        var("MANDOR_AGENT_USER").as_deref(),
+        var("MANDOR_GROUP_DIR").as_deref(),
+        var("MANDOR_PORT_RANGE").as_deref(),
+    )?
+    else {
+        return Ok(None);
+    };
+    vm.playwright_mcp = playwright_mcp_of(var("MANDOR_PLAYWRIGHT_MCP").as_deref())?;
+    Ok(Some(vm))
+}
+
+/// Peran dari `MANDOR_ROLE`; kosong berarti laptop.
+///
+/// # Errors
+/// Pesan untuk pengguna bila nilainya bukan `laptop` atau `vm`.
+pub fn parse_role(raw: Option<&str>) -> Result<DaemonRole, String> {
+    match raw.map(str::trim).filter(|r| !r.is_empty()) {
+        None => Ok(DaemonRole::Laptop),
+        Some(r) => DaemonRole::parse(r)
+            .ok_or_else(|| format!("MANDOR_ROLE must be laptop or vm, got {r:?}")),
+    }
+}
+
+/// Id daemon bawaan: `<user>@<host>` bila host diketahui, selain itu
+/// `<user>-<peran>`; nilai eksplisit menang.
+#[must_use]
+pub fn default_daemon_id(
+    explicit: Option<&str>,
+    user: Option<&str>,
+    host: Option<&str>,
+    role: DaemonRole,
+) -> String {
+    if let Some(id) = explicit.map(str::trim).filter(|i| !i.is_empty()) {
+        return id.to_owned();
+    }
+    let user = user.filter(|u| !u.is_empty()).unwrap_or("mandor");
+    match host.map(str::trim).filter(|h| !h.is_empty()) {
+        Some(h) => format!("{user}@{h}"),
+        None => format!("{user}-{}", role.as_str()),
+    }
 }
 
 /// Parse `MANDOR_KEEP_AWAKE_CMD`: array JSON argv tanpa shell, program berupa
@@ -129,6 +293,9 @@ impl Config {
         let claude_bin = std::env::var_os("MANDOR_CLAUDE_BIN")
             .filter(|v| !v.is_empty())
             .map_or_else(|| PathBuf::from("claude"), PathBuf::from);
+        let gh_bin = std::env::var_os("MANDOR_GH_BIN")
+            .filter(|v| !v.is_empty())
+            .map_or_else(|| PathBuf::from("gh"), PathBuf::from);
         let shell = std::env::var_os("SHELL")
             .filter(|v| !v.is_empty())
             .map_or_else(|| PathBuf::from("/bin/bash"), PathBuf::from);
@@ -161,6 +328,19 @@ impl Config {
         let systemctl = program("MANDOR_SYSTEMCTL", "systemctl");
         let loginctl = program("MANDOR_LOGINCTL", "loginctl");
         let user = std::env::var("USER").ok().filter(|u| !u.is_empty());
+        let role =
+            parse_role(std::env::var("MANDOR_ROLE").ok().as_deref()).map_err(anyhow::Error::msg)?;
+        let vm_agent = vm_agent_from_env(role).map_err(anyhow::Error::msg)?;
+        // Di VM clone dan worktree ada di direktori grup developer.
+        let workspaces_dir = vm_agent
+            .as_ref()
+            .map_or(workspaces_dir, |v| v.group_dir.join("workspaces"));
+        let daemon_id = default_daemon_id(
+            std::env::var("MANDOR_DAEMON_ID").ok().as_deref(),
+            user.as_deref(),
+            std::env::var("HOSTNAME").ok().as_deref(),
+            role,
+        );
         let keep_awake_cmd = std::env::var("MANDOR_KEEP_AWAKE_CMD")
             .ok()
             .filter(|v| !v.trim().is_empty())
@@ -171,6 +351,7 @@ impl Config {
             workspaces_dir,
             log_filter,
             claude_bin,
+            gh_bin,
             shell,
             hook_command,
             exe,
@@ -184,6 +365,9 @@ impl Config {
             loginctl,
             user,
             keep_awake_cmd,
+            role,
+            daemon_id,
+            vm_agent,
         })
     }
 
@@ -255,7 +439,7 @@ fn workspaces_dir_for(user_home: &Path, home: &Path, explicit_home: bool) -> Pat
 }
 
 /// Mengutip path untuk baris perintah hook bila mengandung spasi atau kutip.
-fn shell_quote(path: &str) -> String {
+pub fn shell_quote(path: &str) -> String {
     if path
         .chars()
         .all(|c| c.is_ascii_alphanumeric() || "/._-+:".contains(c))
@@ -296,7 +480,94 @@ mod tests {
         assert_eq!(ManagedBy::Detached.as_str(), "detached");
     }
 
-    use super::{ManagedBy, agent_may_read, parse_keep_awake_cmd, shell_quote, workspaces_dir_for};
+    use super::{
+        ManagedBy, agent_may_read, default_daemon_id, parse_keep_awake_cmd, parse_role,
+        shell_quote, workspaces_dir_for,
+    };
+    use mandor_domain::DaemonRole;
+
+    #[test]
+    fn peran_vm_wajib_user_agent_dan_direktori_grup() {
+        use super::vm_agent_of;
+        let r = Some("5100-5199");
+        assert_eq!(vm_agent_of(DaemonRole::Laptop, None, None, None), Ok(None));
+        assert!(vm_agent_of(DaemonRole::Vm, None, Some("/srv/m/beni"), r).is_err());
+        assert!(vm_agent_of(DaemonRole::Vm, Some("beni-agent"), Some("rel"), r).is_err());
+        assert!(
+            vm_agent_of(
+                DaemonRole::Vm,
+                Some("beni-agent"),
+                Some("/srv/m/beni"),
+                None
+            )
+            .is_err(),
+            "rentang port wajib"
+        );
+        let v = vm_agent_of(DaemonRole::Vm, Some("beni-agent"), Some("/srv/m/beni"), r)
+            .unwrap()
+            .unwrap();
+        assert!(v.ports.contains(5100) && v.ports.contains(5199));
+        assert!(!v.ports.contains(5200) && !v.ports.contains(53_682));
+        assert_eq!(v.user, "beni-agent");
+        assert_eq!(v.run_dir(), std::path::Path::new("/srv/m/beni/runs"));
+        assert_eq!(
+            v.playwright_mcp,
+            std::path::Path::new("/usr/local/bin/mcp-server-playwright")
+        );
+    }
+
+    #[test]
+    fn rentang_port_diurai_ketat() {
+        use super::PortRange;
+        assert_eq!(
+            PortRange::parse(" 5100 - 5199 "),
+            Ok(PortRange {
+                first: 5100,
+                last: 5199
+            })
+        );
+        for bad in ["5100", "5199-5100", "0-10", "a-b", "5100-70000"] {
+            assert!(PortRange::parse(bad).is_err(), "{bad}");
+        }
+    }
+
+    #[test]
+    fn biner_playwright_harus_absolut() {
+        use super::playwright_mcp_of;
+        assert_eq!(
+            playwright_mcp_of(Some("/opt/pw/bin/mcp-server-playwright")),
+            Ok("/opt/pw/bin/mcp-server-playwright".into())
+        );
+        assert_eq!(
+            playwright_mcp_of(None),
+            Ok("/usr/local/bin/mcp-server-playwright".into())
+        );
+        assert!(playwright_mcp_of(Some("mcp-server-playwright")).is_err());
+    }
+
+    #[test]
+    fn peran_dan_id_daemon_dari_environment() {
+        assert_eq!(parse_role(None), Ok(DaemonRole::Laptop));
+        assert_eq!(parse_role(Some(" ")), Ok(DaemonRole::Laptop));
+        assert_eq!(parse_role(Some("vm")), Ok(DaemonRole::Vm));
+        assert!(parse_role(Some("server")).is_err());
+        assert_eq!(
+            default_daemon_id(Some("vm-beni"), Some("beni"), Some("h"), DaemonRole::Vm),
+            "vm-beni"
+        );
+        assert_eq!(
+            default_daemon_id(None, Some("beni"), Some("lembur01"), DaemonRole::Vm),
+            "beni@lembur01"
+        );
+        assert_eq!(
+            default_daemon_id(None, Some("beni"), None, DaemonRole::Laptop),
+            "beni-laptop"
+        );
+        assert_eq!(
+            default_daemon_id(None, None, None, DaemonRole::Vm),
+            "mandor-vm"
+        );
+    }
     use std::path::Path;
 
     #[test]

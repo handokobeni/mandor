@@ -2,10 +2,18 @@
 
 import { workspace } from '#lib/stores/workspace.svelte.ts';
 
-export type SettingsSection = 'general' | 'lark' | 'repos' | 'workspaces' | 'design-sources' | 'background' | 'about';
+export type SettingsSection =
+  | 'general'
+  | 'lark'
+  | 'repos'
+  | 'workspaces'
+  | 'design-sources'
+  | 'background'
+  | 'vm'
+  | 'about';
 
 class Nav {
-  page = $state<'board' | 'settings'>('board');
+  page = $state<'board' | 'settings' | 'overnight'>('board');
   section = $state<SettingsSection>('lark');
   paletteOpen = $state(false);
 
@@ -17,6 +25,12 @@ class Nav {
   run(runId: string): void {
     this.page = 'board';
     workspace.open(runId);
+  }
+
+  /** Tab Overnight: antrean dan laporan daemon VM (U10 plan VM). */
+  overnight(): void {
+    this.page = 'overnight';
+    workspace.close();
   }
 
   settings(section: SettingsSection = this.section): void {

@@ -30,6 +30,10 @@ pub struct FakeLark {
     pub replies: Arc<Mutex<Vec<mandor_domain::Reply>>>,
     /// `true`: API komentar gagal (fallback Fix Notes).
     pub replies_fail: Arc<Mutex<bool>>,
+    /// DM yang dikirim ke developer sendiri (plan VM U14).
+    pub dms: Arc<Mutex<Vec<String>>>,
+    /// Jumlah kiriman DM berikutnya yang gagal.
+    pub dm_fail: Arc<Mutex<u32>>,
     pub names: Arc<Mutex<HashMap<String, String>>>,
     pub sprints: Arc<Mutex<HashMap<String, SprintItem>>>,
     /// Epic per ID record.
@@ -78,6 +82,15 @@ impl LarkTasks for FakeLark {
     async fn epics(&self, ids: &[String]) -> Result<Vec<EpicItem>, PortError> {
         let e = self.epics.lock().unwrap();
         Ok(ids.iter().filter_map(|i| e.get(i).cloned()).collect())
+    }
+    async fn message_me(&self, text: &str) -> Result<(), PortError> {
+        let mut fail = self.dm_fail.lock().unwrap();
+        if *fail > 0 {
+            *fail -= 1;
+            return Err(PortError::Transient("bot cannot send".to_owned()));
+        }
+        self.dms.lock().unwrap().push(text.to_owned());
+        Ok(())
     }
     async fn user_names(&self, ids: &[String]) -> Result<HashMap<String, String>, PortError> {
         self.name_calls.lock().unwrap().push(ids.to_vec());
@@ -391,6 +404,7 @@ impl Deps for FakeDeps {
     type Prompts = PlainMessage;
     type Reviews = run_fakes::FakeReviews;
     type Apps = run_fakes::FakeApps;
+    type Overnight = run_fakes::FakeOvernight;
 }
 
 pub mod run_fakes;
@@ -416,6 +430,16 @@ pub fn laptop(lark: &FakeLark, clock: &FakeClock, me: &str) -> Laptop {
     Laptop { svc, cache, outbox }
 }
 
+/// Daemon VM milik `me` (plan VM U1): klaim membawa id daemon `vm`.
+pub fn vm(lark: &FakeLark, clock: &FakeClock, me: &str) -> Laptop {
+    let Laptop { svc, cache, outbox } = laptop(lark, clock, me);
+    Laptop {
+        svc: svc.with_daemon("vm", mandor_domain::DaemonRole::Vm),
+        cache,
+        outbox,
+    }
+}
+
 /// Task siap dikerjakan, di-assign ke `who`.
 pub fn ready_task(id: &str, who: &[&str]) -> Task {
     let mut t = Task::new(id, TaskStatus::ToDo);
@@ -438,10 +462,20 @@ pub struct Station {
     pub repos: run_fakes::FakeRepos,
     pub reviews: run_fakes::FakeReviews,
     pub apps: run_fakes::FakeApps,
+    pub overnight: run_fakes::FakeOvernight,
 }
 
 pub fn station(lark: &FakeLark, clock: &FakeClock, me: &str) -> Station {
-    let Laptop { svc, cache, outbox } = laptop(lark, clock, me);
+    station_of(laptop(lark, clock, me))
+}
+
+/// Station daemon VM milik `me` (plan VM).
+pub fn vm_station(lark: &FakeLark, clock: &FakeClock, me: &str) -> Station {
+    station_of(vm(lark, clock, me))
+}
+
+fn station_of(l: Laptop) -> Station {
+    let Laptop { svc, cache, outbox } = l;
     let git = run_fakes::FakeGit::default();
     let agent = run_fakes::FakeAgent::default();
     let runs = run_fakes::FakeRuns::default();
@@ -449,6 +483,7 @@ pub fn station(lark: &FakeLark, clock: &FakeClock, me: &str) -> Station {
     let repos = run_fakes::FakeRepos::default();
     let reviews = run_fakes::FakeReviews::default();
     let apps = run_fakes::FakeApps::default();
+    let overnight = run_fakes::FakeOvernight::default();
     let ports = mandor_usecase::RunPorts::<FakeDeps> {
         git: git.clone(),
         agent: agent.clone(),
@@ -459,6 +494,7 @@ pub fn station(lark: &FakeLark, clock: &FakeClock, me: &str) -> Station {
         prompts: PlainMessage,
         reviews: reviews.clone(),
         apps: apps.clone(),
+        overnight: overnight.clone(),
     };
     let svc = Arc::new(mandor_usecase::RunService::new(Arc::new(svc), ports));
     Station {
@@ -472,6 +508,7 @@ pub fn station(lark: &FakeLark, clock: &FakeClock, me: &str) -> Station {
         repos,
         reviews,
         apps,
+        overnight,
     }
 }
 

@@ -76,6 +76,10 @@ pub trait LarkTasks: Send + Sync {
         ids: &[String],
     ) -> impl Future<Output = Result<Vec<EpicItem>, PortError>> + Send;
 
+    /// DM dari bot app ke developer yang login di daemon ini, dan hanya ke dia
+    /// (R13, R24 plan VM). Tidak ada parameter penerima.
+    fn message_me(&self, text: &str) -> impl Future<Output = Result<(), PortError>> + Send;
+
     /// Nama tampilan per `open_id`; ID yang tidak dikenal tidak ada di hasil.
     fn user_names(
         &self,
@@ -214,4 +218,6 @@ pub trait Deps: Send + Sync + 'static {
     /// desain, setelan).
     type Reviews: crate::run_ports::LedgerStore + crate::run_ports::ReviewHistory + 'static;
     type Apps: crate::run_ports::AppProcesses + crate::run_ports::AppRecords + 'static;
+    /// Antrean, siklus, dan setelan lembur VM (KTD-57 plan VM).
+    type Overnight: crate::overnight::OvernightStore + 'static;
 }

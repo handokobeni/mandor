@@ -23,7 +23,12 @@
   import type { Rpc } from '#lib/rpc.ts';
   import { board } from '#lib/stores/board.svelte.ts';
   import { connection } from '#lib/stores/connection.svelte.ts';
-  import { lark } from '#lib/stores/lark.svelte.ts';
+  import { vm } from '#lib/stores/vm.svelte.ts';
+  import { vmConnection } from '#lib/stores/connection.svelte.ts';
+  import { overnight } from '#lib/stores/overnight.svelte.ts';
+  import OvernightPage from '#lib/components/overnight/OvernightPage.svelte';
+  import { supportsVmLink } from '#lib/vm.ts';
+  import { lark, vmLark } from '#lib/stores/lark.svelte.ts';
   import { nav } from '#lib/stores/nav.svelte.ts';
   import { notifications } from '#lib/stores/notifications.svelte.ts';
   import { people } from '#lib/stores/people.svelte.ts';
@@ -65,14 +70,37 @@
     let stop = () => {};
     void (async () => {
       // `/?mock` di mode dev: data contoh tanpa daemon, untuk meninjau tampilan.
-      const transport =
-        import.meta.env.DEV && location.search.includes('mock')
-          ? new (await import('#lib/dev/mock-transport.ts')).MockTransport()
-          : new TauriTransport();
+      const mock = import.meta.env.DEV && location.search.includes('mock');
+      const transport = mock
+        ? new (await import('#lib/dev/mock-transport.ts')).MockTransport()
+        : new TauriTransport();
+      if (mock) vm.useMock('beni@overnight-vm', new (await import('#lib/dev/mock-vm.ts')).MockVmTransport());
       const client = connection.start(transport);
       stop = () => client.stop();
     })();
     return () => stop();
+  });
+
+  // Link VM dibuka setelah daemon laptop siap dan mendukung klaim per daemon
+  // (KTD-55 plan VM); tidak di mode contoh.
+  $effect(() => {
+    const s = connection.state;
+    if (s.kind === 'ready' && supportsVmLink(s.protocol) && !location.search.includes('mock')) {
+      untrack(() => void vm.load());
+    }
+  });
+
+  // Store Overnight mengikuti link VM: lepas saat terputus (badge antrean hilang).
+  $effect(() => {
+    const client = vmConnection.state.kind === 'ready' ? vmConnection.client : null;
+    if (!client) {
+      untrack(() => overnight.detach());
+      return;
+    }
+    return untrack(() => {
+      const offs = [overnight.attach(client), vmLark.attach(client, () => undefined)];
+      return () => offs.forEach((off) => off());
+    });
   });
 
   // Store disambungkan ulang setiap kali koneksi siap (termasuk setelah reconnect).
@@ -145,6 +173,8 @@
           <Onboarding rpc={client} start={onboardingAt} onfinish={finishOnboarding} />
         {:else if nav.page === 'settings'}
           <Settings rpc={client} />
+        {:else if nav.page === 'overnight'}
+          <OvernightPage laptop={client} laptopDaemonId={background.status?.daemon_id ?? null} />
         {:else if selectedRun}
           {#key selectedRun.id}
             <Workspace rpc={client} run={selectedRun} />

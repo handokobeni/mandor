@@ -126,3 +126,14 @@ describe('validasi app repo', () => {
     expect(validateRepoApp({ ...base, testMode: 'no_app', startCommand: '' })).toEqual({});
   });
 });
+
+describe('target pengaturan laptop atau VM', () => {
+  it('VM hanya punya Lark, Repos, dan Workspaces; bagian lain kembali ke Lark', async () => {
+    const { sectionsFor, sectionFor } = await import('#lib/settings.ts');
+    expect(sectionsFor('vm')).toEqual(['lark', 'repos', 'workspaces']);
+    expect(sectionsFor('laptop')).toContain('background');
+    expect(sectionFor('vm', 'repos')).toBe('repos');
+    expect(sectionFor('vm', 'background')).toBe('lark');
+    expect(sectionFor('laptop', 'background')).toBe('background');
+  });
+});

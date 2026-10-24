@@ -354,10 +354,16 @@ impl<D: Deps> RunService<D> {
     ) -> Result<String, RunError> {
         let heading = self.pr_heading(run).await?;
         let body = self.pr_body(run, m, &heading).await;
+        // Daemon VM membuat PR draft; reviewer baru diberi tahu lewat Send to
+        // review (KTD-68 plan VM).
+        let draft = self.is_vm();
         let url = self
             .git
-            .create_pr(&m.repo, &m.worktree, branch, &heading.title, &body)
+            .create_pr(&m.repo, &m.worktree, branch, &heading.title, &body, draft)
             .await?;
+        if draft {
+            run.draft_pending.get_or_insert(self.now());
+        }
         run.pr_body_hashes
             .insert(url.clone(), fnv1a_hex(&normalize_body(&body)));
         Ok(url)

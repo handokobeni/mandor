@@ -29,6 +29,9 @@ struct StoredState {
     origins: Vec<String>,
     #[serde(default)]
     tabs: BTreeMap<u64, StoredTab>,
+    /// Halaman Playwright reviewer VM.
+    #[serde(default)]
+    page: Option<StoredTab>,
 }
 
 fn to_domain(s: StoredState) -> ReviewState {
@@ -47,6 +50,10 @@ fn to_domain(s: StoredState) -> ReviewState {
                 )
             })
             .collect(),
+        page: s.page.map(|t| TabState {
+            url: t.url,
+            settled: t.settled,
+        }),
     }
 }
 
@@ -66,6 +73,10 @@ fn from_domain(s: &ReviewState) -> StoredState {
                 )
             })
             .collect(),
+        page: s.page.as_ref().map(|t| StoredTab {
+            url: t.url.clone(),
+            settled: t.settled,
+        }),
     }
 }
 
@@ -77,29 +88,59 @@ pub fn lock_path(path: &Path) -> PathBuf {
     path.with_file_name(name)
 }
 
-fn open_private(path: &Path, truncate: bool) -> std::io::Result<std::fs::File> {
+/// Menulis `body` ke `path` secara atomik: berkas sementara bernama acak
+/// dibuat baru (`O_EXCL`, tidak pernah mengikuti symlink yang sudah ada),
+/// modenya disetel lewat fd, lalu di-rename ke `path`. Aman di direktori yang
+/// juga bisa ditulis user agent (KTD-62 plan VM): symlink di `path` hanya
+/// tergantikan, targetnya tidak tersentuh.
+///
+/// # Errors
+/// Kegagalan I/O.
+#[cfg_attr(not(unix), allow(unused_variables))]
+pub fn write_atomic(path: &Path, body: &[u8], mode: u32) -> std::io::Result<()> {
+    let name = path.file_name().unwrap_or_default().to_string_lossy();
+    let tmp = path.with_file_name(format!(".{name}.{}.tmp", crate::prompt::new_nonce()));
     let mut opts = std::fs::OpenOptions::new();
-    opts.create(true).write(true).truncate(truncate);
+    opts.write(true).create_new(true);
     #[cfg(unix)]
     {
         use std::os::unix::fs::OpenOptionsExt;
         opts.mode(0o600);
     }
-    opts.open(path)
+    let mut f = opts.open(&tmp)?;
+    let written = (|| {
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            // Mode `open` dipotong umask; disetel lewat fd berkas baru ini.
+            f.set_permissions(std::fs::Permissions::from_mode(mode))?;
+        }
+        f.write_all(body)?;
+        f.sync_all()?;
+        std::fs::rename(&tmp, path)
+    })();
+    if written.is_err() {
+        let _ = std::fs::remove_file(&tmp);
+    }
+    written
 }
 
-/// Menulis state secara atomik (berkas sementara lalu rename).
+/// Menulis state secara atomik (berkas sementara lalu rename), 0600.
 ///
 /// # Errors
 /// Pesan bila berkas tidak bisa ditulis.
 pub fn save(path: &Path, state: &ReviewState) -> Result<(), String> {
+    save_with_mode(path, state, 0o600)
+}
+
+/// Seperti [`save`] dengan mode berkas tertentu; di VM 0660 agar hook yang
+/// berjalan sebagai user agent bisa memperbaruinya (KTD-62 plan VM).
+///
+/// # Errors
+/// Pesan bila berkas tidak bisa ditulis.
+pub fn save_with_mode(path: &Path, state: &ReviewState, mode: u32) -> Result<(), String> {
     let body = serde_json::to_vec(&from_domain(state)).map_err(|e| e.to_string())?;
-    let tmp = path.with_extension("tmp");
-    let mut f = open_private(&tmp, true).map_err(|e| format!("cannot write review state: {e}"))?;
-    f.write_all(&body)
-        .and_then(|()| f.sync_all())
-        .map_err(|e| format!("cannot write review state: {e}"))?;
-    std::fs::rename(&tmp, path).map_err(|e| format!("cannot write review state: {e}"))
+    write_atomic(path, &body, mode).map_err(|e| format!("cannot write review state: {e}"))
 }
 
 /// Membaca state.
@@ -138,5 +179,26 @@ mod tests {
         assert!(load(&path).is_err());
         remove(&path);
         assert!(!path.exists());
+    }
+
+    /// Symlink yang ditanam di direktori bersama tidak pernah diikuti.
+    #[cfg(unix)]
+    #[test]
+    fn symlink_di_jalur_state_diganti_tanpa_menyentuh_targetnya() {
+        let dir = tempfile::tempdir().unwrap();
+        let target = dir.path().join("rahasia");
+        std::fs::write(&target, "milik daemon").unwrap();
+        let path = dir.path().join("r1.json");
+        std::os::unix::fs::symlink(&target, &path).unwrap();
+        save_with_mode(&path, &ReviewState::default(), 0o660).unwrap();
+        assert_eq!(std::fs::read_to_string(&target).unwrap(), "milik daemon");
+        assert!(
+            !std::fs::symlink_metadata(&path)
+                .unwrap()
+                .file_type()
+                .is_symlink()
+        );
+        let leftovers = std::fs::read_dir(dir.path()).unwrap().count();
+        assert_eq!(leftovers, 2, "tanpa sisa berkas sementara");
     }
 }

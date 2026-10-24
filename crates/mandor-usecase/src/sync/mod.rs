@@ -7,6 +7,7 @@ mod poller;
 use std::collections::HashMap;
 use std::sync::{Mutex, PoisonError};
 
+use mandor_domain::{ClaimIdentity, DaemonRole};
 use mandor_domain::{ClaimRefused, GateRejection, Task, WriteRejected};
 
 use crate::ports::{AcItem, Clock, Deps, LarkTasks, PortError, SprintItem};
@@ -51,6 +52,10 @@ pub struct SyncService<D: Deps> {
     pub(crate) clock: D::Clock,
     pub(crate) ids: D::Ids,
     pub(crate) me: String,
+    /// Identitas daemon untuk klaim (KTD-55).
+    pub(crate) identity: ClaimIdentity,
+    /// Peran daemon (KTD-54).
+    pub(crate) role: DaemonRole,
     /// Nama orang per `open_id`; hanya di memori, terisi lagi setelah restart.
     names: Mutex<HashMap<String, String>>,
     /// Setelah Contact API gagal, jangan coba lagi sebelum waktu ini (ms epoch).
@@ -89,6 +94,8 @@ impl<D: Deps> SyncService<D> {
             outbox,
             clock,
             ids,
+            identity: ClaimIdentity::new(&me, "local", true),
+            role: DaemonRole::Laptop,
             me,
             names: Mutex::new(HashMap::new()),
             names_retry_at: Mutex::new(0),
@@ -194,6 +201,27 @@ impl<D: Deps> SyncService<D> {
     #[must_use]
     pub fn me(&self) -> &str {
         &self.me
+    }
+
+    /// Menetapkan id dan peran daemon ini (KTD-54). Daemon laptop menganggap
+    /// klaim lama tanpa id daemon miliknya; daemon VM tidak.
+    #[must_use]
+    pub fn with_daemon(mut self, daemon_id: &str, role: DaemonRole) -> Self {
+        self.identity = ClaimIdentity::new(&self.me, daemon_id, role == DaemonRole::Laptop);
+        self.role = role;
+        self
+    }
+
+    /// Identitas klaim daemon ini.
+    #[must_use]
+    pub fn identity(&self) -> &ClaimIdentity {
+        &self.identity
+    }
+
+    /// Peran daemon ini.
+    #[must_use]
+    pub fn role(&self) -> DaemonRole {
+        self.role
     }
 
     /// Semua kartu di cache beserta penandanya.

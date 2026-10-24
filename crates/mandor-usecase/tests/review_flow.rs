@@ -82,7 +82,7 @@ async fn review_semua_ac_tersimpan_dan_run_kembali_ke_dev() {
     let req = st.agent.last().req;
     let review = req.review.clone().unwrap();
     assert_eq!(review.review_id, rec.id);
-    assert!(!review.chrome, "repo tanpa app");
+    assert!(!review.browser, "repo tanpa app");
     assert_eq!(review.budget_cents, 200);
     assert!(matches!(
         req.session,
@@ -332,7 +332,7 @@ async fn covers_ae5_browser_hanya_bila_semua_syarat_kesiapan_terpenuhi() {
     st.apps.save_app_record(&app).await.unwrap();
     cycle(&st, &run).await;
     assert_eq!(reason(&st), "Claude in Chrome extension not connected");
-    assert!(!st.agent.last().req.review.unwrap().chrome);
+    assert!(!st.agent.last().req.review.unwrap().browser);
 
     *st.reviews.chrome.lock().unwrap() = true;
     st.svc
@@ -341,7 +341,7 @@ async fn covers_ae5_browser_hanya_bila_semua_syarat_kesiapan_terpenuhi() {
         .unwrap();
     let req = st.agent.last().req;
     let review = req.review.unwrap();
-    assert!(review.chrome);
+    assert!(review.browser);
     assert_eq!(review.origins, ["http://localhost:5173"]);
     assert!(req.message.contains("SKILL:qa:review"));
 
@@ -506,7 +506,7 @@ async fn restart_otomatis_menyalakan_ulang_app_dari_kode_terbaru_sebelum_review(
         "restart oleh Mandor tidak mereset login"
     );
     let review = st.agent.last().req.review.unwrap();
-    assert!(review.chrome, "browser dipakai setelah restart");
+    assert!(review.browser, "browser dipakai setelah restart");
     assert!(
         system_notes(&st)
             .iter()
@@ -574,7 +574,7 @@ async fn restart_otomatis_gagal_review_tetap_berjalan_tanpa_browser() {
         .await
         .unwrap();
     let review = st.agent.last().req.review.unwrap();
-    assert!(!review.chrome);
+    assert!(!review.browser);
     assert!(
         system_notes(&st)
             .iter()

@@ -49,8 +49,8 @@ describe('RpcClient', () => {
     const states: ConnectionState[] = [];
     const c = new RpcClient(t, { onState: (s) => states.push(s) });
     await c.connect();
-    expect(states.at(-1)).toEqual({ kind: 'ready', daemonVersion: '0.1.0' });
-    expect(t.sent[0]).toMatchObject({ method: 'hello', params: { token: 't', protocol: '1.0' } });
+    expect(states.at(-1)).toEqual({ kind: 'ready', daemonVersion: '0.1.0', protocol: '1.0' });
+    expect(t.sent[0]).toMatchObject({ method: 'hello', params: { token: 't', protocol: '1.1' } });
     await expect(c.request('echo', { a: 1 })).resolves.toEqual({ a: 1 });
   });
 

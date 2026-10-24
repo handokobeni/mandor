@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO overnight_cycles (cycle_start_ms, report_sent_at_ms, report_attempts)\n             VALUES (?, ?, 1)\n             ON CONFLICT (cycle_start_ms) DO UPDATE SET\n                 report_attempts = report_attempts + 1,\n                 report_sent_at_ms = COALESCE(report_sent_at_ms, excluded.report_sent_at_ms)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": []
+  },
+  "hash": "9d1040a592826cb4333fd64cf6a7bff7a185e53f8f505c3f4e417bca816c32c6"
+}

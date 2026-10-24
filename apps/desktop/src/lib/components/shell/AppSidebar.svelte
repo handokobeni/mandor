@@ -1,6 +1,9 @@
 <script lang="ts">
   import Settings2 from '@lucide/svelte/icons/settings-2';
   import SquareKanban from '@lucide/svelte/icons/square-kanban';
+  import MoonStar from '@lucide/svelte/icons/moon-star';
+  import { vmConnection } from '#lib/stores/connection.svelte.ts';
+  import { vm } from '#lib/stores/vm.svelte.ts';
   import { agentGroups } from '#lib/board.ts';
   import AgentRow from '#lib/components/mandor/AgentRow.svelte';
   import type { FlagView } from '#lib/protocol/FlagView.ts';
@@ -43,6 +46,18 @@
   <nav class="sidebar-nav" aria-label="Main">
     <button type="button" class="nav-item" aria-current={onBoard ? 'page' : undefined} title="Board" onclick={() => nav.board()}>
       <SquareKanban class="icon" aria-hidden="true" /><span class="label-text">Board</span>
+    </button>
+    <button
+      type="button"
+      class="nav-item"
+      aria-current={nav.page === 'overnight' ? 'page' : undefined}
+      title="Overnight"
+      onclick={() => nav.overnight()}
+    >
+      <MoonStar class="icon" aria-hidden="true" /><span class="label-text">Overnight</span>
+      {#if vm.host && vmConnection.state.kind !== 'ready'}
+        <span class="label-text muted" style="margin-left:auto;font-size:11px">VM offline</span>
+      {/if}
     </button>
     <button
       type="button"

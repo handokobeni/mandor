@@ -140,7 +140,7 @@ async fn versi_mayor_berbeda_ditolak_dengan_kedua_versi() {
     let err = resp.error.unwrap();
     assert_eq!(err.code, ErrorCode::VersionMismatch);
     assert!(
-        err.message.contains("2.0") && err.message.contains("1.0"),
+        err.message.contains("2.0") && err.message.contains("1.1"),
         "{}",
         err.message
     );
@@ -163,7 +163,7 @@ async fn hello_valid_lalu_method_dijalankan() {
     let mut ws = connect(d.addr).await;
     send(&mut ws, &hello("rahasia-uji", "1.0")).await;
     let ok: Response = serde_json::from_value(recv(&mut ws).await).unwrap();
-    assert_eq!(ok.result.unwrap()["protocol"], "1.0");
+    assert_eq!(ok.result.unwrap()["protocol"], "1.1");
     send(&mut ws, &Request::new(2, "echo", json!({"x": 1}))).await;
     let resp: Response = serde_json::from_value(recv(&mut ws).await).unwrap();
     assert_eq!(resp.id, 2);
@@ -381,4 +381,26 @@ async fn mcp_stdio_daemon_tidak_terjangkau_menjadi_error_tool_tanpa_hang() {
             .unwrap()
             .contains("unreachable")
     );
+}
+
+/// Notifikasi daemon di koneksi yang sama dilewati client RPC berurutan
+/// (mis. `mandord login lark` setelah sesi Lark mulai mengirim event).
+#[tokio::test]
+async fn client_rpc_melewati_notifikasi_di_antara_jawaban() {
+    let d = start().await;
+    let client =
+        mandor_api::DaemonClient::new(d.addr, SecretString::from("rahasia-uji".to_owned()), "uji");
+    assert_eq!(
+        client.request("status", Value::Null).await.unwrap(),
+        json!({"ok": true})
+    );
+    d.events
+        .send(Notification::new("sync.status", json!({"state": "ok"})))
+        .ok();
+    tokio::time::sleep(Duration::from_millis(50)).await;
+    assert_eq!(
+        client.request("echo", json!({"x": 1})).await.unwrap(),
+        json!({"x": 1})
+    );
+    d.shutdown.cancel();
 }

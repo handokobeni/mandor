@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "DELETE FROM overnight_queue WHERE record_id = ?",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": []
+  },
+  "hash": "769612eda3be89c9dbfd2077d7fbb59f365cf95cbfc317e5c2874c2cb7d9a042"
+}

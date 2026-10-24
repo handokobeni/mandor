@@ -1,6 +1,6 @@
 use std::path::Path;
 
-use mandor_proc::{git_credential_env, run};
+use mandor_proc::git_credential_env;
 use secrecy::SecretString;
 
 use crate::{Git, GitError, NETWORK_TIMEOUT};
@@ -20,7 +20,9 @@ impl Git {
     ) -> Result<Option<String>, GitError> {
         self.ok("add", self.git(worktree).args(["add", "-A"]))
             .await?;
-        let staged = run(&self.git(worktree).args(["diff", "--cached", "--quiet"])).await?;
+        let staged = self
+            .exec(&self.git(worktree).args(["diff", "--cached", "--quiet"]))
+            .await?;
         if staged.success() {
             return Ok(None);
         }
@@ -47,7 +49,9 @@ impl Git {
     /// # Errors
     /// [`GitError`] bila git gagal di luar konflik revert.
     pub async fn revert_commit(&self, worktree: &Path, sha: &str) -> Result<bool, GitError> {
-        let out = run(&self.git(worktree).args(["revert", "--no-edit", sha])).await?;
+        let out = self
+            .exec(&self.git(worktree).args(["revert", "--no-edit", sha]))
+            .await?;
         if out.success() {
             return Ok(true);
         }

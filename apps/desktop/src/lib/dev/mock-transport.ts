@@ -172,6 +172,7 @@ function card(r: RunView | null, extra: Partial<CardView>): CardView {
     can_takeover: false,
     flag: null,
     run: r,
+    holder: null,
     pr_url: r?.pr_url ?? null,
     branch: r?.branch ?? null,
     repo_id: r?.repo_id ?? null,
@@ -230,6 +231,14 @@ const CARDS: CardView[] = [
     card(GROUP, { record_id: g.record_id, key: g.key, title: g.title, start_blocked: GROUP_REASON })
   ),
   card(null, { record_id: 'recE', key: 'PGS-1340', title: 'Sort employees by join date', status: 'Delivered', column: 'done' }),
+  card(null, {
+    record_id: 'recV3',
+    key: 'PGS-1423',
+    title: 'Reminder email for pending approvals',
+    owner: 'ou_7f3a91',
+    mine: true,
+    holder: 'own_other_daemon'
+  }),
   card(null, {
     record_id: 'recT1',
     key: 'PGS-1468',
@@ -352,7 +361,8 @@ const repos: unknown[] = setup
           app_url: null,
           env_keys: ['VITE_API_URL'],
           browser_tests: true,
-          auto_restart: false
+          auto_restart: false,
+          unattended_login: false
         }
       },
       {
@@ -372,7 +382,8 @@ const repos: unknown[] = setup
           app_url: null,
           env_keys: [],
           browser_tests: true,
-          auto_restart: false
+          auto_restart: false,
+          unattended_login: false
         }
       }
     ];
@@ -397,7 +408,7 @@ function larkStatus(): unknown {
 function handle(method: string, params: Record<string, unknown>): unknown {
   switch (method) {
     case 'hello':
-      return { daemon_version: '0.1.0-mock', protocol: '1.0' };
+      return { daemon_version: '0.1.0-mock', protocol: '1.1' };
     case 'status':
       return {
         version: '0.1.0-mock',
@@ -441,7 +452,8 @@ function handle(method: string, params: Record<string, unknown>): unknown {
           app_url: null,
           env_keys: [],
           browser_tests: true,
-          auto_restart: false
+          auto_restart: false,
+          unattended_login: false
         }
       });
       return repos.at(-1);
@@ -762,7 +774,7 @@ export class MockTransport implements Transport {
   }
 
   async token(): Promise<{ token: string; protocol: string }> {
-    return { token: 'mock', protocol: '1.0' };
+    return { token: 'mock', protocol: '1.1' };
   }
 
   async open(onLine: (line: string) => void): Promise<void> {

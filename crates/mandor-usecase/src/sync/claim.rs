@@ -34,12 +34,12 @@ impl<D: Deps> SyncService<D> {
             check_start(&fresh.status, fresh.readiness.as_deref())?;
         }
         let now = self.clock.now_ms();
-        may_claim(fresh.claim.as_ref(), &self.me, now, takeover)?;
+        may_claim(fresh.claim.as_ref(), &self.identity, now, takeover)?;
 
         let mine = Claim {
             open_id: self.me.clone(),
             ts_ms: now,
-            nonce: self.ids.nonce(),
+            nonce: self.identity.nonce(&self.ids.nonce()),
         };
         self.lark
             .write(record_id, None, &[AppField::Claim(Some(mine.clone()))])
@@ -71,21 +71,55 @@ impl<D: Deps> SyncService<D> {
         if !fresh.assigned_to(&self.me) {
             return Ok(Heartbeat::Lost(ClaimLoss::Unassigned));
         }
-        let Some(current) = fresh.claim.filter(|c| c.open_id == self.me) else {
+        let Some(current) = fresh.claim.filter(|c| self.identity.holds(c)) else {
             return Ok(Heartbeat::Lost(ClaimLoss::TakenByOther));
         };
         let now = self.clock.now_ms();
         if !heartbeat_due(&current, now) {
             return Ok(Heartbeat::Fresh);
         }
+        // Klaim lama tanpa id daemon diadopsi dengan nonce baru (KTD-55).
+        let nonce = if current.daemon_id().is_some() {
+            current.nonce
+        } else {
+            self.identity.nonce(&self.ids.nonce())
+        };
         let renewed = Claim {
             ts_ms: now,
+            nonce,
             ..current
         };
         self.lark
             .write(record_id, None, &[AppField::Claim(Some(renewed))])
             .await?;
         Ok(Heartbeat::Renewed)
+    }
+
+    /// Serah-terima (KTD-63 plan VM): klaim yang dipegang daemon ini ditulis
+    /// ulang atas nama daemon `to_daemon` milik developer yang sama.
+    ///
+    /// # Errors
+    /// Kartu tidak dipegang daemon ini, atau kegagalan Lark.
+    pub async fn hand_over_claim(&self, record_id: &str, to_daemon: &str) -> Result<(), SyncError> {
+        let fresh = self
+            .fetch_one(record_id)
+            .await?
+            .ok_or(SyncError::NotFound)?;
+        if !fresh.held_here(&self.identity) {
+            return Err(SyncError::ClaimLost);
+        }
+        let target = mandor_domain::ClaimIdentity::new(&self.me, to_daemon, false);
+        let claim = Claim {
+            open_id: self.me.clone(),
+            ts_ms: self.clock.now_ms(),
+            nonce: target.nonce(&self.ids.nonce()),
+        };
+        let t = self
+            .lark
+            .write(record_id, None, &[AppField::Claim(Some(claim))])
+            .await?;
+        self.cache.upsert(&t).await?;
+        Ok(())
     }
 
     /// Melepas klaim bila masih milik kita (rollback Start, bersihkan orphan).
@@ -96,7 +130,7 @@ impl<D: Deps> SyncService<D> {
         let Some(fresh) = self.fetch_one(record_id).await? else {
             return Ok(());
         };
-        if fresh.claimed_by(&self.me) {
+        if fresh.held_here(&self.identity) {
             let t = self
                 .lark
                 .write(record_id, None, &[AppField::Claim(None)])

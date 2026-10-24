@@ -4,8 +4,6 @@
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use mandor_proc::run;
-
 use crate::{Git, GitError};
 
 /// Penomor berkas index sementara dalam proses ini.
@@ -69,13 +67,14 @@ impl Git {
 
     /// Path di dalam direktori git worktree (absolut).
     async fn git_path(&self, worktree: &Path, name: &str) -> Result<PathBuf, GitError> {
-        let out = run(&self.git(worktree).args([
-            "rev-parse",
-            "--path-format=absolute",
-            "--git-path",
-            name,
-        ]))
-        .await?;
+        let out = self
+            .exec(&self.git(worktree).args([
+                "rev-parse",
+                "--path-format=absolute",
+                "--git-path",
+                name,
+            ]))
+            .await?;
         if !out.success() {
             return Err(GitError::Command {
                 op: "rev-parse --git-path",

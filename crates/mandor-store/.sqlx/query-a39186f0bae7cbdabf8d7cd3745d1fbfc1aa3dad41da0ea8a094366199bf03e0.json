@@ -1,0 +1,74 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT record_id, target_json, note, start_now, added_at_ms\n             FROM overnight_queue ORDER BY position, added_at_ms",
+  "describe": {
+    "columns": [
+      {
+        "name": "record_id",
+        "ordinal": 0,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "overnight_queue",
+            "name": "record_id"
+          }
+        }
+      },
+      {
+        "name": "target_json",
+        "ordinal": 1,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "overnight_queue",
+            "name": "target_json"
+          }
+        }
+      },
+      {
+        "name": "note",
+        "ordinal": 2,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "overnight_queue",
+            "name": "note"
+          }
+        }
+      },
+      {
+        "name": "start_now",
+        "ordinal": 3,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "overnight_queue",
+            "name": "start_now"
+          }
+        }
+      },
+      {
+        "name": "added_at_ms",
+        "ordinal": 4,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "overnight_queue",
+            "name": "added_at_ms"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      false,
+      false,
+      true,
+      false,
+      false
+    ]
+  },
+  "hash": "a39186f0bae7cbdabf8d7cd3745d1fbfc1aa3dad41da0ea8a094366199bf03e0"
+}

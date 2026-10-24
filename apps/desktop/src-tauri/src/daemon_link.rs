@@ -1,8 +1,10 @@
 //! Jembatan ke daemon `mandord` lewat relay stdio (KTD-2).
 //!
 //! Webview tidak pernah membuka koneksi jaringan sendiri: sisi Rust menjalankan
-//! `mandord connect` (lokal) atau `wsl.exe -d <distro> -- mandord connect`
-//! (mode WSL), lalu meneruskan baris JSON lewat event Tauri.
+//! `mandord connect` (lokal), `wsl.exe -d <distro> -- mandord connect` (mode
+//! WSL), atau `ssh <vm> mandord connect` (daemon VM, KTD-67 plan VM), lalu
+//! meneruskan baris JSON lewat event Tauri bernama per link
+//! (`daemon://<kunci>/line`).
 
 use std::path::PathBuf;
 use std::process::Stdio;
@@ -17,9 +19,9 @@ use tokio::sync::Mutex;
 /// Batas waktu `mandord token` (cold boot WSL bisa lambat).
 const TOKEN_TIMEOUT: Duration = Duration::from_secs(20);
 
-/// Event yang dikirim ke webview.
-pub const EVENT_LINE: &str = "daemon://line";
-pub const EVENT_CLOSED: &str = "daemon://closed";
+/// `known_hosts` milik app untuk daemon VM; `~` diperluas ssh di sisi yang
+/// menjalankannya (Linux, atau distro WSL di Windows).
+pub const VM_KNOWN_HOSTS: &str = "~/.config/mandor/vm_known_hosts";
 
 /// Cara menjangkau daemon.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -31,9 +33,41 @@ pub enum LinkMode {
     LocalInstalled,
     /// Daemon di dalam distro WSL; `None` berarti distro default.
     Wsl { distro: Option<String> },
+    /// Daemon di VM lewat SSH (KTD-67 plan VM). Bentuk host divalidasi lewat
+    /// [`LinkMode::ssh`].
+    Ssh { host: String, via: SshVia },
+}
+
+/// Tempat `ssh` dijalankan.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SshVia {
+    Native,
+    /// Windows: ssh di dalam WSL agar kunci dan konfigurasinya sama dengan
+    /// workspace developer.
+    Wsl {
+        distro: Option<String>,
+    },
 }
 
 impl LinkMode {
+    /// Link SSH ke `host` (alias `ssh_config` atau `user@host`). Host yang bisa
+    /// dibaca ssh sebagai opsi, kosong, atau berisi spasi/kontrol ditolak.
+    ///
+    /// # Errors
+    /// [`LinkError::BadHost`] beserta alasannya.
+    pub fn ssh(host: &str, via: SshVia) -> Result<Self, LinkError> {
+        if host.is_empty()
+            || host.starts_with('-')
+            || host.chars().any(|c| c.is_whitespace() || c.is_control())
+        {
+            return Err(LinkError::BadHost(host.to_owned()));
+        }
+        Ok(Self::Ssh {
+            host: host.to_owned(),
+            via,
+        })
+    }
+
     /// Program dan argumen untuk menjalankan subcommand `mandord` (`token`
     /// atau `connect`). `keep_awake`: perintah penjaga keep-awake (JSON) yang
     /// diteruskan ke daemon yang dijalankan `connect`.
@@ -54,6 +88,20 @@ impl LinkMode {
                 let args = crate::provision::wsl_args(distro.as_deref(), &shell);
                 ("wsl.exe".to_owned(), args)
             }
+            Self::Ssh { host, via } => {
+                let remote = format!("\"$HOME/.local/bin/mandord\" {sub}");
+                let argv = ssh_argv(host, &remote);
+                match via {
+                    SshVia::Native => ("ssh".to_owned(), argv[1..].to_vec()),
+                    SshVia::Wsl { distro } => {
+                        let refs: Vec<&str> = argv.iter().map(String::as_str).collect();
+                        (
+                            "wsl.exe".to_owned(),
+                            crate::provision::wsl_args(distro.as_deref(), &refs),
+                        )
+                    }
+                }
+            }
         }
     }
 
@@ -61,7 +109,7 @@ impl LinkMode {
     #[must_use]
     pub fn keeper(&self) -> Option<(String, Vec<String>)> {
         match self {
-            Self::Local { .. } | Self::LocalInstalled => None,
+            Self::Local { .. } | Self::LocalInstalled | Self::Ssh { .. } => None,
             Self::Wsl { distro } => {
                 let mut args = Vec::new();
                 if let Some(d) = distro {
@@ -73,6 +121,25 @@ impl LinkMode {
             }
         }
     }
+}
+
+/// `ssh` beserta argumennya ke `host` dengan host key yang dipin di
+/// `known_hosts` milik app; perintah remote dijalankan shell login VM.
+#[must_use]
+pub fn ssh_argv(host: &str, remote: &str) -> Vec<String> {
+    let mut a = vec!["ssh".to_owned()];
+    for opt in [
+        "BatchMode=yes",
+        "StrictHostKeyChecking=yes",
+        &format!("UserKnownHostsFile={VM_KNOWN_HOSTS}"),
+        "ExitOnForwardFailure=yes",
+        "ServerAliveInterval=15",
+    ] {
+        a.push("-o".to_owned());
+        a.push(opt.to_owned());
+    }
+    a.extend(["--".to_owned(), host.to_owned(), remote.to_owned()]);
+    a
 }
 
 /// Skrip relay: biner terpasang di `~/.local/bin` dipakai dengan jalur
@@ -98,6 +165,8 @@ pub enum LinkError {
     NotConnected,
     #[error("failed to write to the daemon: {0}")]
     Write(String),
+    #[error("invalid VM host {0:?}: use an ssh_config alias or user@host")]
+    BadHost(String),
 }
 
 impl Serialize for LinkError {
@@ -109,6 +178,8 @@ impl Serialize for LinkError {
 /// State jembatan yang dikelola Tauri.
 #[derive(Debug)]
 pub struct DaemonLink {
+    /// Kunci link (`laptop`, `vm`) untuk nama event.
+    key: &'static str,
     mode: LinkMode,
     /// Perintah penjaga keep-awake dari provisioning (JSON argv).
     keep_awake: std::sync::Mutex<Option<String>>,
@@ -130,8 +201,9 @@ pub struct TokenInfo {
 
 impl DaemonLink {
     #[must_use]
-    pub fn new(mode: LinkMode) -> Self {
+    pub fn new(key: &'static str, mode: LinkMode) -> Self {
         Self {
+            key,
             mode,
             keep_awake: std::sync::Mutex::new(None),
             conn: Mutex::new(None),
@@ -145,6 +217,15 @@ impl DaemonLink {
         &self.mode
     }
 
+    /// Nama event baris dan tutup untuk link ini.
+    #[must_use]
+    pub fn events(&self) -> (String, String) {
+        (
+            format!("daemon://{}/line", self.key),
+            format!("daemon://{}/closed", self.key),
+        )
+    }
+
     /// Menyimpan perintah penjaga keep-awake untuk `connect` berikutnya.
     pub fn set_keep_awake(&self, json: Option<String>) {
         *self
@@ -153,7 +234,9 @@ impl DaemonLink {
             .unwrap_or_else(std::sync::PoisonError::into_inner) = json;
     }
 
-    fn spawn(&self, sub: &str) -> Result<Child, LinkError> {
+    /// `stderr`: tangkap stderr (perintah pendek seperti `token`); relay
+    /// `connect` yang berjalan lama membuangnya agar pipe tidak penuh.
+    fn spawn(&self, sub: &str, stderr: bool) -> Result<Child, LinkError> {
         let keep_awake = self
             .keep_awake
             .lock()
@@ -164,7 +247,11 @@ impl DaemonLink {
         cmd.args(&args)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
-            .stderr(Stdio::null())
+            .stderr(if stderr {
+                Stdio::piped()
+            } else {
+                Stdio::null()
+            })
             .kill_on_drop(true);
         hide_console(&mut cmd);
         cmd.spawn().map_err(|e| LinkError::Spawn {
@@ -178,15 +265,23 @@ impl DaemonLink {
     /// # Errors
     /// [`LinkError`] bila proses gagal atau melewati batas waktu.
     pub async fn token(&self) -> Result<TokenInfo, LinkError> {
-        let child = self.spawn("token")?;
+        let child = self.spawn("token", true)?;
         let out = tokio::time::timeout(TOKEN_TIMEOUT, child.wait_with_output())
             .await
             .map_err(|_| LinkError::TokenTimeout(TOKEN_TIMEOUT))?
             .map_err(|e| LinkError::BadToken(e.to_string()))?;
         let text = String::from_utf8_lossy(&out.stdout);
         let line = text.lines().last().unwrap_or_default();
-        let value: serde_json::Value =
-            serde_json::from_str(line).map_err(|e| LinkError::BadToken(e.to_string()))?;
+        // Kegagalan ssh (mis. host key VM berubah) terlihat di stderr.
+        let value: serde_json::Value = serde_json::from_str(line).map_err(|e| {
+            let err = String::from_utf8_lossy(&out.stderr);
+            LinkError::BadToken(
+                err.lines()
+                    .rev()
+                    .find(|l| !l.trim().is_empty())
+                    .map_or_else(|| e.to_string(), |l| l.trim().to_owned()),
+            )
+        })?;
         let field = |k: &str| value.get(k).and_then(|v| v.as_str()).map(str::to_owned);
         match (field("token"), field("protocol")) {
             (Some(token), Some(protocol)) => Ok(TokenInfo { token, protocol }),
@@ -201,20 +296,21 @@ impl DaemonLink {
     /// # Errors
     /// [`LinkError::Spawn`] bila relay tidak bisa dijalankan.
     pub async fn open(&self, app: AppHandle) -> Result<(), LinkError> {
-        let mut child = self.spawn("connect")?;
+        let mut child = self.spawn("connect", false)?;
         let stdout = child.stdout.take().ok_or(LinkError::NotConnected)?;
         let stdin = child.stdin.take().ok_or(LinkError::NotConnected)?;
         if let Some(mut old) = self.conn.lock().await.replace(Connection { child, stdin }) {
             let _ = old.child.kill().await;
         }
+        let (line_event, closed_event) = self.events();
         tauri::async_runtime::spawn(async move {
             let mut lines = BufReader::new(stdout).lines();
             while let Ok(Some(line)) = lines.next_line().await {
-                if app.emit(EVENT_LINE, line).is_err() {
+                if app.emit(&line_event, line).is_err() {
                     break;
                 }
             }
-            let _ = app.emit(EVENT_CLOSED, ());
+            let _ = app.emit(&closed_event, ());
         });
         Ok(())
     }
@@ -385,5 +481,100 @@ mod tests {
             String::from_utf8_lossy(&out.stdout).trim(),
             format!("token|{json}")
         );
+    }
+
+    /// KTD-67 plan VM: argv ssh tanpa shell lokal, host key dipin di
+    /// `known_hosts` milik app, biner daemon VM dengan jalur absolut.
+    #[test]
+    fn perintah_ssh_memakai_pin_host_key_dan_jalur_absolut() {
+        let mode = LinkMode::ssh("beni@vm-lembur", SshVia::Native).unwrap();
+        let (program, args) = mode.command("connect", Some("[]"));
+        assert_eq!(program, "ssh");
+        for opt in [
+            "BatchMode=yes",
+            "StrictHostKeyChecking=yes",
+            "UserKnownHostsFile=~/.config/mandor/vm_known_hosts",
+            "ExitOnForwardFailure=yes",
+            "ServerAliveInterval=15",
+        ] {
+            let at = args
+                .iter()
+                .position(|a| a == opt)
+                .unwrap_or_else(|| panic!("{opt}: {args:?}"));
+            assert_eq!(args[at - 1], "-o");
+        }
+        let n = args.len();
+        assert_eq!(
+            &args[n - 3..],
+            [
+                "--",
+                "beni@vm-lembur",
+                "\"$HOME/.local/bin/mandord\" connect"
+            ]
+        );
+        assert_eq!(mode.keeper(), None, "tanpa penjaga WSL untuk VM");
+        let (_, token) = mode.command("token", None);
+        assert!(token.last().unwrap().ends_with(" token"));
+    }
+
+    #[test]
+    fn perintah_ssh_di_windows_lewat_wsl() {
+        let mode = LinkMode::ssh(
+            "vm-lembur",
+            SshVia::Wsl {
+                distro: Some("Ubuntu".to_owned()),
+            },
+        )
+        .unwrap();
+        let (program, args) = mode.command("connect", None);
+        assert_eq!(program, "wsl.exe");
+        assert_eq!(&args[..4], ["-d", "Ubuntu", "-e", "ssh"]);
+        assert_eq!(args.last().unwrap(), "\"$HOME/.local/bin/mandord\" connect");
+    }
+
+    #[test]
+    fn host_ssh_yang_bisa_menjadi_opsi_ditolak() {
+        for bad in ["", "-oProxyCommand=sh", "vm lembur", "vm\nx", " -x"] {
+            assert!(LinkMode::ssh(bad, SshVia::Native).is_err(), "{bad:?}");
+        }
+        assert!(LinkMode::ssh("beni@10.0.0.5", SshVia::Native).is_ok());
+    }
+
+    #[test]
+    fn event_dinamai_per_link() {
+        let laptop = DaemonLink::new(
+            "laptop",
+            LinkMode::Local {
+                bin: "mandord".into(),
+            },
+        );
+        let vm = DaemonLink::new("vm", LinkMode::ssh("vm", SshVia::Native).unwrap());
+        assert_eq!(
+            laptop.events(),
+            (
+                "daemon://laptop/line".to_owned(),
+                "daemon://laptop/closed".to_owned()
+            )
+        );
+        assert_eq!(vm.events().0, "daemon://vm/line");
+    }
+
+    /// Host key VM berubah: ssh gagal dengan pesan di stderr, dan pesan itu
+    /// yang sampai ke app (link laptop adalah objek terpisah, tidak tersentuh).
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn token_gagal_membawa_pesan_stderr() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let fake = dir.path().join("ssh-gagal");
+        std::fs::write(
+            &fake,
+            "#!/bin/sh\necho '@@@ WARNING: REMOTE HOST IDENTIFICATION HAS CHANGED! @@@' >&2\necho 'Host key verification failed.' >&2\nexit 255\n",
+        )
+        .unwrap();
+        std::fs::set_permissions(&fake, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let vm = DaemonLink::new("vm", LinkMode::Local { bin: fake });
+        let err = vm.token().await.unwrap_err().to_string();
+        assert!(err.contains("Host key verification failed"), "{err}");
     }
 }

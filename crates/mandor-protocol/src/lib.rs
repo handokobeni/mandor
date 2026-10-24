@@ -124,6 +124,32 @@ pub mod method {
     /// Revert atau tetap untuk kartu yang berubah di Lark.
     /// `GateCardDecisionParams` → `GateCardDecisionResult`.
     pub const RUNS_GATE_CARD_DECISION: &str = "runs.gate_card_decision";
+    /// Keputusan AC dev untuk kartu VM yang tertahan `ac_gate` (R12a plan VM):
+    /// push dan PR tanpa menjalankan agent. `PublishParams` → `PublishResult`.
+    pub const OVERNIGHT_GATE_DECIDE: &str = "overnight.gate_decide";
+    /// PR draft VM siap di-review dan kartu ke Waiting Review (R23 plan VM).
+    /// `RunRef` → `{}`.
+    pub const OVERNIGHT_SEND_TO_REVIEW: &str = "overnight.send_to_review";
+    /// Serah-terima kartu VM ke daemon laptop (R22, KTD-63 plan VM); dipanggil
+    /// ke daemon VM. `HandoffParams` → `HandoffResult`.
+    pub const RUNS_HANDOFF: &str = "runs.handoff";
+    /// Antrean VM dan kartu yang dikeluarkan siklus ini (R6 plan VM).
+    /// `null` → `OvernightQueueView`.
+    pub const OVERNIGHT_QUEUE_LIST: &str = "overnight.queue.list";
+    /// `QueueAddParams` → `{}`; kartu To Do atau tertahan (R6, R20).
+    pub const OVERNIGHT_QUEUE_ADD: &str = "overnight.queue.add";
+    /// `RecordRef` → `{}`.
+    pub const OVERNIGHT_QUEUE_REMOVE: &str = "overnight.queue.remove";
+    /// `QueueReorderParams` → `{}`.
+    pub const OVERNIGHT_QUEUE_REORDER: &str = "overnight.queue.reorder";
+    /// "Start now" (R7). `RecordRef` → `{}`.
+    pub const OVERNIGHT_QUEUE_START_NOW: &str = "overnight.queue.start_now";
+    /// `null` → `OvernightSettingsView | null`.
+    pub const OVERNIGHT_SETTINGS_GET: &str = "overnight.settings.get";
+    /// `OvernightSettingsView` → `{}` (R7, R10).
+    pub const OVERNIGHT_SETTINGS_SET: &str = "overnight.settings.set";
+    /// Laporan siklus (R18). `null` → `OvernightReportView`.
+    pub const OVERNIGHT_REPORT: &str = "overnight.report";
     /// Skill Claude yang bisa dipakai untuk planning (nama dan deskripsi).
     pub const AGENT_SKILLS: &str = "agent.skills";
     pub const REPOS_LIST: &str = "repos.list";
@@ -188,6 +214,7 @@ pub fn ts_bindings() -> Result<Vec<(&'static str, String)>, String> {
         one("LarkStatus.ts", LarkStatus::export_to_string(&cfg))?,
         one("StatusResult.ts", StatusResult::export_to_string(&cfg))?,
         one("DrainResult.ts", DrainResult::export_to_string(&cfg))?,
+        one("LoginCheck.ts", LoginCheck::export_to_string(&cfg))?,
         one("DrainResult.ts", DrainResult::export_to_string(&cfg))?,
         one(
             "LarkSettingsView.ts",
@@ -291,6 +318,28 @@ fn group_bindings() -> Result<Vec<(&'static str, String)>, String> {
             StartGroupParams::export_to_string(&cfg),
         )?,
         one("GroupCardRef.ts", GroupCardRef::export_to_string(&cfg))?,
+        one("HandoffParams.ts", HandoffParams::export_to_string(&cfg))?,
+        one("HandoffResult.ts", HandoffResult::export_to_string(&cfg))?,
+        one(
+            "OvernightQueueView.ts",
+            OvernightQueueView::export_to_string(&cfg),
+        )?,
+        one("QueueItemView.ts", QueueItemView::export_to_string(&cfg))?,
+        one("DequeuedView.ts", DequeuedView::export_to_string(&cfg))?,
+        one("QueueAddParams.ts", QueueAddParams::export_to_string(&cfg))?,
+        one(
+            "QueueReorderParams.ts",
+            QueueReorderParams::export_to_string(&cfg),
+        )?,
+        one(
+            "OvernightSettingsView.ts",
+            OvernightSettingsView::export_to_string(&cfg),
+        )?,
+        one(
+            "OvernightReportView.ts",
+            OvernightReportView::export_to_string(&cfg),
+        )?,
+        one("ReportCardView.ts", ReportCardView::export_to_string(&cfg))?,
         one(
             "GateCardDecisionParams.ts",
             GateCardDecisionParams::export_to_string(&cfg),

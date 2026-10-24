@@ -7,9 +7,14 @@
 //!   client yang tidak bisa membaca `daemon.json` langsung (mode WSL).
 //! - `mcp`: server MCP ledger (stdio) untuk satu giliran agent.
 //! - `hook`: hook `PreToolUse` Claude Code untuk agent; fail-closed (exit 2).
+//! - `agent-exec`: pengawas agent sebagai user Linux terpisah di VM (plan VM U6).
+//! - `login lark`: login Lark dari terminal (SSH) ke daemon yang berjalan
+//!   (plan VM U8).
 //! - `install [--check] [--keep-awake-cmd <json>]` dan `uninstall [--force]`:
 //!   memasang atau melepas daemon sebagai service systemd user.
 
+#[cfg(unix)]
+mod agent_exec;
 mod app;
 mod apps;
 mod config;
@@ -19,6 +24,8 @@ mod dispatch;
 mod hook;
 #[cfg(target_os = "linux")]
 mod install;
+mod login;
+mod logins;
 mod mcp;
 mod power;
 mod prereq;
@@ -54,6 +61,14 @@ fn main() -> ExitCode {
 }
 
 async fn run(args: Vec<String>) -> ExitCode {
+    // Pengawas agent berjalan sebagai user agent tanpa konfigurasi daemon.
+    #[cfg(unix)]
+    if args.first().map(String::as_str) == Some("agent-exec") {
+        return match agent_exec::run(&args[1..]).await {
+            Ok(code) => ExitCode::from(u8::try_from(code).unwrap_or(1)),
+            Err(err) => fail(&err),
+        };
+    }
     let cfg = match Config::from_env() {
         Ok(cfg) => cfg,
         Err(err) => return fail(&err),
@@ -63,6 +78,7 @@ async fn run(args: Vec<String>) -> ExitCode {
         Some("connect") => connect::run(&cfg).await,
         Some("token") => connect::print_token(&cfg).await,
         Some("mcp") => mcp::run(&cfg).await,
+        Some("login") => login::run(&cfg, &args[1..]).await,
         Some("--version") => print_version().await,
         // Pemasangan sebagai service systemd hanya untuk daemon Linux (WSL,
         // tahap 2); macOS memakai launchd di tahap 3.
@@ -71,7 +87,7 @@ async fn run(args: Vec<String>) -> ExitCode {
         #[cfg(target_os = "linux")]
         Some("uninstall") => return exit(install::run_uninstall(&cfg, &args[1..]).await),
         Some(other) => Err(anyhow::anyhow!(
-            "unknown subcommand: {other} (use serve, connect, token, mcp, install, uninstall, or hook)"
+            "unknown subcommand: {other} (use serve, connect, token, mcp, login, install, uninstall, or hook)"
         )),
     };
     match result {

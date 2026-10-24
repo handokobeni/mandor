@@ -36,6 +36,54 @@ pub struct SessionSpec {
     pub plan_mode: bool,
     /// Sesi reviewer: hook `PostToolUse`, browser, dan batas biaya.
     pub review: Option<ReviewFlags>,
+    /// Daemon VM: agent dijalankan sebagai user Linux terpisah lewat
+    /// `sudo -n -u <user> mandord agent-exec` (KTD-62 plan VM).
+    pub runner: Option<AgentRunner>,
+}
+
+/// Cara menjalankan agent sebagai user agent di VM.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AgentRunner {
+    /// Biner `mandord` yang bisa dieksekusi user agent.
+    pub exe: PathBuf,
+    /// User Linux agent, mis. `beni-agent`.
+    pub user: String,
+    /// Direktori berkas run yang bisa dibaca user agent.
+    pub run_dir: PathBuf,
+}
+
+/// `sudo` absolut: environment eksplisit tanpa `PATH` warisan.
+const SUDO: &str = "/usr/bin/sudo";
+
+/// Variabel yang boleh sampai ke agent di VM. Disaring di daemon sebelum
+/// argv `sudo` (argv terlihat di daftar proses) dan disaring lagi oleh
+/// `agent-exec` di sisi user agent.
+pub const AGENT_ENV_ALLOWED: &[&str] = &[
+    "PATH", "HOME", "USER", "LOGNAME", "LANG", "LC_ALL", "LC_CTYPE", "TERM", "TZ", "TMPDIR",
+];
+
+/// Argumen `sudo` sampai `--` sebelum program agent; hanya variabel
+/// [`AGENT_ENV_ALLOWED`] yang ikut.
+#[must_use]
+pub fn runner_args(r: &AgentRunner, env: &[(String, String)]) -> Vec<String> {
+    let mut a = vec![
+        "-n".to_owned(),
+        "-u".to_owned(),
+        r.user.clone(),
+        r.exe.display().to_string(),
+        "agent-exec".to_owned(),
+        "--run-dir".to_owned(),
+        r.run_dir.display().to_string(),
+    ];
+    for (k, v) in env
+        .iter()
+        .filter(|(k, _)| AGENT_ENV_ALLOWED.contains(&k.as_str()))
+    {
+        a.push("--env".to_owned());
+        a.push(format!("{k}={v}"));
+    }
+    a.push("--".to_owned());
+    a
 }
 
 /// Argumen tambahan sesi reviewer (KTD-29–KTD-31).
@@ -127,10 +175,29 @@ pub fn args(spec: &SessionSpec) -> Vec<String> {
 /// [`Cmd`] siap dijalankan dengan environment eksplisit.
 #[must_use]
 pub fn build(spec: &SessionSpec) -> Cmd {
-    Cmd::new(&spec.claude_bin)
+    claude_cmd(&spec.claude_bin, spec.runner.as_ref(), &spec.env)
         .args(args(spec))
         .cwd(&spec.worktree)
-        .env_policy(EnvPolicy::Explicit(spec.env.clone()))
+}
+
+/// `claude` dengan environment eksplisit; di VM dibungkus
+/// `sudo -n -u <user agent> mandord agent-exec` sehingga berjalan sebagai user
+/// agent dengan login Claude miliknya (KTD-62 plan VM). Argumen `claude`
+/// ditambahkan pemanggil.
+#[must_use]
+pub fn claude_cmd(
+    claude_bin: &std::path::Path,
+    runner: Option<&AgentRunner>,
+    env: &[(String, String)],
+) -> Cmd {
+    match runner {
+        None => Cmd::new(claude_bin).env_policy(EnvPolicy::Explicit(env.to_vec())),
+        // `agent-exec` menyaring environment lagi di sisi user agent.
+        Some(r) => Cmd::new(SUDO)
+            .args(runner_args(r, env))
+            .arg(claude_bin)
+            .env_policy(EnvPolicy::Explicit(Vec::new())),
+    }
 }
 
 #[cfg(test)]
@@ -152,7 +219,47 @@ mod tests {
             mcp_config: None,
             plan_mode: false,
             review: None,
+            runner: None,
         }
+    }
+
+    #[test]
+    fn peran_vm_membungkus_agent_dengan_sudo_dan_agent_exec() {
+        let mut s = spec(Session::New("u-1".to_owned()));
+        s.env = vec![
+            ("PATH".to_owned(), "/usr/bin".to_owned()),
+            ("GH_TOKEN".to_owned(), "ghs_rahasia".to_owned()),
+            ("SOME_VAR".to_owned(), "x".to_owned()),
+        ];
+        s.runner = Some(AgentRunner {
+            exe: "/home/beni/.local/bin/mandord".into(),
+            user: "beni-agent".to_owned(),
+            run_dir: "/srv/mandor/beni/runs".into(),
+        });
+        let cmd = build(&s);
+        assert_eq!(cmd.program_name(), "/usr/bin/sudo");
+        let a = runner_args(s.runner.as_ref().unwrap(), &s.env);
+        assert_eq!(
+            a,
+            [
+                "-n",
+                "-u",
+                "beni-agent",
+                "/home/beni/.local/bin/mandord",
+                "agent-exec",
+                "--run-dir",
+                "/srv/mandor/beni/runs",
+                "--env",
+                "PATH=/usr/bin",
+                "--"
+            ]
+        );
+        s.runner = None;
+        assert_eq!(
+            build(&s).program_name(),
+            "claude",
+            "peran laptop tidak berubah"
+        );
     }
 
     #[test]

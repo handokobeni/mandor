@@ -80,7 +80,7 @@
   import CircleCheck from '@lucide/svelte/icons/circle-check';
   import Play from '@lucide/svelte/icons/play';
   import OctagonX from '@lucide/svelte/icons/octagon-x';
-  import { cardKey, changedCards, groupAction } from '#lib/group.ts';
+  import { cardKey, changedCards, groupAction, headerCard } from '#lib/group.ts';
 
   let { rpc, run }: { rpc: Rpc; run: RunView } = $props();
 
@@ -199,6 +199,8 @@
   });
 
   const key = $derived(run.key ?? run.record_id);
+  // Run grup: header menampilkan kartu yang sedang dikerjakan.
+  const header = $derived(headerCard(run));
   const card = $derived(board.card(run.record_id));
   const working = $derived(isWorking(run.state));
   const flag = $derived(card?.flag ?? null);
@@ -455,7 +457,7 @@
   <Button variant="ghost" size="icon-sm" aria-label="Back to board" title="Back to board" onclick={() => nav.board()}>
     <ArrowLeft />
   </Button>
-  <div class="ws-title"><span class="key">{key}</span><h1 title={run.title}>{run.title}</h1></div>
+  <div class="ws-title"><span class="key">{header.key}</span><h1 title={header.title}>{header.title}</h1></div>
   <div class="meta">
     {#if card}
       <Badge variant="outline" title="Task Status in Lark"><SquareKanban />Lark: {card.status}</Badge>

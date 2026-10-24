@@ -72,6 +72,21 @@ export function stateLabel(state: string): string {
   return STATE_LABELS[state] ?? state;
 }
 
+/**
+ * Kunci dan judul di header workspace: kartu grup yang sedang dikerjakan, atau
+ * kartu utama run bila tidak ada kartu aktif (run tunggal, atau semua selesai).
+ */
+export function headerCard(run: {
+  key: string | null;
+  title: string;
+  record_id: string;
+  cards: GroupCardView[];
+}): { key: string; title: string } {
+  const active = run.cards.find((c) => c.state === 'active');
+  if (active) return { key: cardKey(active), title: active.title };
+  return { key: run.key ?? run.record_id, title: run.title };
+}
+
 /** Kartu selesai yang berubah di Lark dan belum diputuskan dev. */
 export function changedCards(cards: GroupCardView[]): GroupCardView[] {
   return cards.filter((c) => c.state === 'done' && c.changed_in_lark && !c.kept_reason);

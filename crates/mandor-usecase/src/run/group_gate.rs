@@ -228,6 +228,27 @@ impl<D: Deps> RunService<D> {
             .collect())
     }
 
+    /// Awalan commit perbaikan run grup: kunci kartu yang komentarnya dikirim
+    /// pada siklus Waiting Fix ini (KTD-G3). `None` untuk run tunggal atau bila
+    /// tidak ada kartu yang sedang diperbaiki.
+    pub(super) async fn fix_commit_prefix(&self, run: &RunRecord) -> Option<String> {
+        let cards = match self.runs.cards(&run.id).await {
+            Ok(c) => c,
+            Err(e) => {
+                tracing::warn!(run_id = %run.id, error = %e, "kartu grup tidak terbaca; commit tanpa awalan kunci");
+                return None;
+            }
+        };
+        let mut keys = Vec::new();
+        for c in cards
+            .iter()
+            .filter(|c| c.is_open() && !c.fix_replies.is_empty())
+        {
+            keys.push(self.key_or_id(&c.record_id).await);
+        }
+        (!keys.is_empty()).then(|| keys.join(", "))
+    }
+
     /// Judul dan bahan deskripsi PR grup (KTD-G7, R16).
     pub(super) async fn group_heading(
         &self,

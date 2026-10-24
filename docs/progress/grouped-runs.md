@@ -27,11 +27,11 @@ Plan: `docs/plans/2026-10-23-004-feat-grouped-card-runs-plan.md`. Branch `feat/g
 
 Temuan untuk tindak lanjut (tidak menahan DoD):
 
-- Next card dapat ditekan saat agent masih menunggu jawaban; kartu menjadi Done tanpa commit. Perlu peringatan atau konfirmasi bila kartu aktif belum punya perubahan (perubahan perilaku produk, tanyakan dulu).
-- Judul workspace run grup menampilkan kartu utama, bukan kartu yang sedang aktif.
-- Kartu yang di-keep setelah dikembalikan ke To Do tidak mendapat `mandor_pr`: sinkron Rilis 1 melepas klaimnya saat kembali ke To Do, dan outbox menolak menulis ke kartu tanpa klaim. Link dan alasan tetap ada di deskripsi PR.
-- Commit perbaikan Waiting Fix grup tidak diawali kunci kartu (`docs: bold group run steps in README`).
-- Satu klik Next card dari UI tidak sampai ke daemon (tidak ada error); panggilan RPC langsung berhasil. Belum bisa direproduksi.
+- Next card dapat ditekan saat agent masih menunggu jawaban; kartu menjadi Done tanpa commit. Pemilik memutuskan (2026-10-24) perilaku ini dibiarkan sesuai plan; runbook mengingatkan untuk menjawab dulu.
+- Judul workspace run grup menampilkan kartu utama, bukan kartu aktif. **Diperbaiki**: header memakai kartu yang sedang dikerjakan (`headerCard` di `group.ts`).
+- Kartu yang di-keep setelah dikembalikan ke To Do tidak mendapat `mandor_pr`: sinkron Rilis 1 melepas klaimnya, dan outbox menolak menulis ke kartu tanpa klaim. Disengaja; dicatat di runbook.
+- Commit perbaikan Waiting Fix grup tidak diawali kunci kartu. **Diperbaiki**: commit di run grup diawali kunci kartu yang diperbaiki pada siklus itu (`PGS-1402: …`, `PGS-1402, PGS-1403: …`).
+- Satu klik Next card dari UI tampak tidak sampai ke daemon. Setelah ditelusuri di riwayat chat run, klik itu sudah tercatat sebelumnya ("Next card: PGS-1514"); tidak terbukti sebagai bug.
 
 ### Penyimpangan dari plan
 

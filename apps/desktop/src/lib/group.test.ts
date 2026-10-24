@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   changedCards,
   groupAction,
+  headerCard,
   initialOrder,
   moveCard,
   progress,
@@ -106,6 +107,16 @@ describe('pemilihan kartu', () => {
     order = toggleCard(order, '1401');
     expect(order).toEqual(['1403', '1402', '1401']);
     expect(moveCard(order, '1403', -1)).toEqual(order);
+  });
+});
+
+describe('judul workspace grup', () => {
+  it('kartu aktif, atau kartu utama bila tidak ada yang aktif', () => {
+    const run = { key: 'PGS-1', title: 'Utama', record_id: '1' };
+    const cards = [card('1', 'done'), card('2', 'active'), card('3', 'pending')];
+    expect(headerCard({ ...run, cards })).toEqual({ key: 'PGS-2', title: 'Judul 2' });
+    expect(headerCard({ ...run, cards: [card('1', 'done'), card('2', 'done')] })).toEqual({ key: 'PGS-1', title: 'Utama' });
+    expect(headerCard({ ...run, key: null, cards: [] })).toEqual({ key: '1', title: 'Utama' });
   });
 });
 

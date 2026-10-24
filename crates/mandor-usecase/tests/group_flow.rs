@@ -981,6 +981,11 @@ async fn covers_ae5_perbaikan_satu_kartu_di_branch_grup_dan_review_semua_kartu()
     );
     eventually(|| group_run(&st, &run_id).state == RunState::InReviewLoop).await;
     assert_eq!(st.git.st().pushes.last().unwrap(), GROUP_BRANCH);
+    let (_, message) = st.git.st().commits.last().cloned().unwrap();
+    assert!(
+        message.starts_with("PGS-1402: "),
+        "commit perbaikan diawali kunci kartu yang diperbaiki: {message}"
+    );
     st.svc.sync().drain_outbox(20).await.unwrap();
     for id in ["c1", "c2", "c3"] {
         assert_eq!(
@@ -1016,6 +1021,8 @@ async fn dua_kartu_waiting_fix_satu_run_perbaikan() {
 
     fix_reviewed(&st, [Verdict::Pass; 3]).await;
     eventually(|| group_run(&st, &run_id).state == RunState::InReviewLoop).await;
+    let (_, message) = st.git.st().commits.last().cloned().unwrap();
+    assert!(message.starts_with("PGS-1402, PGS-1403: "), "{message}");
     st.svc.sync().drain_outbox(20).await.unwrap();
     for id in ["c2", "c3"] {
         assert_eq!(

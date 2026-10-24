@@ -271,11 +271,13 @@ impl<D: Deps> RunService<D> {
             .clone()
             .ok_or(RunError::InvalidState("no branch"))?;
         let multi = run.workspace.is_some();
+        let prefix = self.fix_commit_prefix(run).await;
         let mut urls = Vec::new();
         let mut progressed = false;
         for (index, (m, changes)) in work.iter().enumerate() {
             if !changes.is_empty() {
-                self.commit_and_push(&run.id, m, changes, &branch).await?;
+                self.commit_and_push(&run.id, m, changes, &branch, prefix.as_deref())
+                    .await?;
                 progressed = true;
             }
             let existing = match &m.pr_url {
@@ -312,10 +314,15 @@ impl<D: Deps> RunService<D> {
         m: &Member,
         changes: &WorkChanges,
         branch: &str,
+        prefix: Option<&str>,
     ) -> Result<(), RunError> {
         if changes.dirty {
             let diff: String = changes.diff.chars().take(COMMIT_DIFF_MAX).collect();
-            let message = self.agent.commit_message(&m.worktree, &diff).await?;
+            let summary = self.agent.commit_message(&m.worktree, &diff).await?;
+            let message = match prefix {
+                Some(p) => format!("{p}: {summary}"),
+                None => summary,
+            };
             self.git.commit_all(&m.worktree, &message).await?;
             self.runs
                 .append(

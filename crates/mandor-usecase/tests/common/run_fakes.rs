@@ -47,6 +47,7 @@ pub struct GitState {
     /// PR yang ditandai siap (`gh pr ready`).
     pub ready: Vec<String>,
     pub fail_ready: bool,
+    pub fail_push: bool,
     pub pr_bodies: Vec<String>,
     /// Badan PR saat ini per URL, seperti yang dikembalikan `gh pr view`.
     pub bodies: HashMap<String, String>,
@@ -174,6 +175,9 @@ impl GitPort for FakeGit {
     }
     async fn push(&self, _r: &RepoInfo, wt: &Path, branch: &str) -> Result<(), PortError> {
         let mut st = self.state.lock().unwrap();
+        if st.fail_push {
+            return Err(PortError::Transient("git push rejected".to_owned()));
+        }
         st.pushes.push(branch.to_owned());
         st.pushed_wts.push(wt.to_path_buf());
         if let Some(c) = st.changes.get_mut(wt) {

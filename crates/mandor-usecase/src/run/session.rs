@@ -381,7 +381,7 @@ impl<D: Deps> RunService<D> {
 
     /// Menaikkan generasi lebih dulu (event giliran lama jadi basi), lalu
     /// menghentikan prosesnya. Mengembalikan `true` bila ada giliran yang dihentikan.
-    async fn interrupt(&self, run_id: &str) -> Result<bool, RunError> {
+    pub(crate) async fn interrupt(&self, run_id: &str) -> Result<bool, RunError> {
         let mut run = self.load(run_id).await?;
         if !run.state.is_busy() {
             return Ok(false);

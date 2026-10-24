@@ -1050,3 +1050,17 @@ pub struct LedgerToolSetVerdict {
     #[serde(default)]
     pub evidence: Option<String>,
 }
+
+/// Parameter `runs.handoff`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+pub struct HandoffParams {
+    pub record_id: String,
+    /// Id daemon laptop penerima klaim (dari `status` daemon laptop).
+    pub to_daemon_id: String,
+}
+
+/// Hasil `runs.handoff`: branch kartu untuk dipulihkan laptop.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+pub struct HandoffResult {
+    pub branch: String,
+}

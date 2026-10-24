@@ -1,6 +1,6 @@
 //! Method lembur VM (plan VM): keputusan gerbang AC dan Send to review.
 
-use mandor_protocol::{ErrorCode, RpcError, RunRef, method};
+use mandor_protocol::{ErrorCode, HandoffParams, HandoffResult, RpcError, RunRef, method};
 use serde_json::{Value, json};
 
 use super::{AppDispatch, ok, params, run_error};
@@ -10,6 +10,7 @@ impl AppDispatch {
         [
             method::OVERNIGHT_GATE_DECIDE,
             method::OVERNIGHT_SEND_TO_REVIEW,
+            method::RUNS_HANDOFF,
         ]
         .contains(&name)
     }
@@ -24,6 +25,16 @@ impl AppDispatch {
                 s.runs.send_to_review(&p.run_id).await.map_err(run_error)?;
                 s.poke.notify_one();
                 ok(&json!({}))
+            }
+            method::RUNS_HANDOFF => {
+                let p: HandoffParams = params(v)?;
+                let branch = s
+                    .runs
+                    .handoff(&p.record_id, &p.to_daemon_id)
+                    .await
+                    .map_err(run_error)?;
+                s.poke.notify_one();
+                ok(&HandoffResult { branch })
             }
             other => Err(RpcError::new(
                 ErrorCode::MethodNotFound,

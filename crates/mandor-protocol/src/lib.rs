@@ -130,6 +130,9 @@ pub mod method {
     /// PR draft VM siap di-review dan kartu ke Waiting Review (R23 plan VM).
     /// `RunRef` → `{}`.
     pub const OVERNIGHT_SEND_TO_REVIEW: &str = "overnight.send_to_review";
+    /// Serah-terima kartu VM ke daemon laptop (R22, KTD-63 plan VM); dipanggil
+    /// ke daemon VM. `HandoffParams` → `HandoffResult`.
+    pub const RUNS_HANDOFF: &str = "runs.handoff";
     /// Skill Claude yang bisa dipakai untuk planning (nama dan deskripsi).
     pub const AGENT_SKILLS: &str = "agent.skills";
     pub const REPOS_LIST: &str = "repos.list";
@@ -297,6 +300,8 @@ fn group_bindings() -> Result<Vec<(&'static str, String)>, String> {
             StartGroupParams::export_to_string(&cfg),
         )?,
         one("GroupCardRef.ts", GroupCardRef::export_to_string(&cfg))?,
+        one("HandoffParams.ts", HandoffParams::export_to_string(&cfg))?,
+        one("HandoffResult.ts", HandoffResult::export_to_string(&cfg))?,
         one(
             "GateCardDecisionParams.ts",
             GateCardDecisionParams::export_to_string(&cfg),

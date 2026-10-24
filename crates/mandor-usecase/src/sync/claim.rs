@@ -95,6 +95,33 @@ impl<D: Deps> SyncService<D> {
         Ok(Heartbeat::Renewed)
     }
 
+    /// Serah-terima (KTD-63 plan VM): klaim yang dipegang daemon ini ditulis
+    /// ulang atas nama daemon `to_daemon` milik developer yang sama.
+    ///
+    /// # Errors
+    /// Kartu tidak dipegang daemon ini, atau kegagalan Lark.
+    pub async fn hand_over_claim(&self, record_id: &str, to_daemon: &str) -> Result<(), SyncError> {
+        let fresh = self
+            .fetch_one(record_id)
+            .await?
+            .ok_or(SyncError::NotFound)?;
+        if !fresh.held_here(&self.identity) {
+            return Err(SyncError::ClaimLost);
+        }
+        let target = mandor_domain::ClaimIdentity::new(&self.me, to_daemon, false);
+        let claim = Claim {
+            open_id: self.me.clone(),
+            ts_ms: self.clock.now_ms(),
+            nonce: target.nonce(&self.ids.nonce()),
+        };
+        let t = self
+            .lark
+            .write(record_id, None, &[AppField::Claim(Some(claim))])
+            .await?;
+        self.cache.upsert(&t).await?;
+        Ok(())
+    }
+
     /// Melepas klaim bila masih milik kita (rollback Start, bersihkan orphan).
     ///
     /// # Errors

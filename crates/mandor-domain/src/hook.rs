@@ -321,9 +321,16 @@ fn remote_db_host(words: &[String]) -> Option<String> {
         } else if let Some(h) = a.strip_prefix("-h").filter(|h| !h.is_empty()) {
             hosts.push(h.to_owned());
         } else if let Some((_, after)) = a.split_once("://") {
-            let authority = after.split(['/', '?']).next().unwrap_or_default();
-            let host = authority.rsplit('@').next().unwrap_or_default();
-            hosts.push(host.split(':').next().unwrap_or_default().to_owned());
+            // Seperti libpq: userinfo dipotong di `@` terakhir sebelum `/`
+            // pertama, lalu host dipotong di `?`; multi-host dipisah koma.
+            let pre = after.split('/').next().unwrap_or_default();
+            let hostpart = pre.rsplit('@').next().unwrap_or_default();
+            let hostlist = hostpart.split('?').next().unwrap_or_default();
+            hosts.extend(
+                hostlist
+                    .split(',')
+                    .map(|h| h.split(':').next().unwrap_or_default().to_owned()),
+            );
             // `?host=` atau `?hostaddr=` di query URL juga host tujuan.
             if let Some((_, query)) = after.split_once('?') {
                 hosts.extend(query.split('&').filter_map(|kv| {
@@ -808,6 +815,8 @@ mod tests {
             "PGHOST=10.0.0.9; psql",
             "psql 'hostaddr=10.0.0.9 dbname=x'",
             "psql 'postgres:///x?host=db.prod.internal'",
+            "psql 'postgres://u?x@db.prod.internal/kelola'",
+            "psql 'postgres://localhost,db.prod.internal/kelola'",
             "git config \\\ncore.pager evil",
             "git -C . config --add include.path ../x",
             "echo x >> .git/worktrees/pgs-1/config.worktree",

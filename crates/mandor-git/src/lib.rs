@@ -31,6 +31,11 @@ pub use worktree::Worktree;
 const NO_HOOKS: &str = "core.hooksPath=/dev/null";
 #[cfg(windows)]
 const NO_HOOKS: &str = "core.hooksPath=NUL";
+const NO_HOOKS_KEY: &str = "core.hooksPath";
+#[cfg(not(windows))]
+const NO_HOOKS_VALUE: &str = "/dev/null";
+#[cfg(windows)]
+const NO_HOOKS_VALUE: &str = "NUL";
 
 /// Batas waktu operasi git lokal.
 const LOCAL_TIMEOUT: Duration = Duration::from_secs(60);
@@ -129,9 +134,10 @@ pub fn trusted_repo_config_key(key: &str) -> bool {
     let name = rest.rsplit_once('.').map(|(_, n)| n);
     match section {
         "core" => CORE.contains(&rest),
-        "user" | "extensions" | "init" | "pull" | "fetch" | "gc" | "index" | "color" | "advice" => {
-            name.is_none()
-        }
+        "user" | "color" | "advice" => name.is_none(),
+        "extensions" => matches!(rest, "worktreeconfig" | "objectformat"),
+        "fetch" => rest == "prune",
+        "pull" => rest == "rebase",
         "remote" => name.is_some_and(|n| REMOTE.contains(&n)),
         "branch" => name.is_some_and(|n| BRANCH.contains(&n)),
         _ => false,
@@ -142,6 +148,7 @@ pub fn trusted_repo_config_key(key: &str) -> bool {
 /// dijalankan `gh`: menetralkan kunci yang mengeksekusi perintah walau
 /// konfigurasi repo diubah setelah diperiksa.
 const VM_OVERRIDES: &[(&str, &str)] = &[
+    (NO_HOOKS_KEY, NO_HOOKS_VALUE),
     ("core.sshCommand", "ssh -o BatchMode=yes"),
     ("core.pager", "cat"),
     ("core.askPass", ""),
@@ -156,6 +163,10 @@ const VM_OVERRIDES: &[(&str, &str)] = &[
     ("http.sslVerify", "true"),
     ("sequence.editor", "true"),
     ("gpg.program", "gpg"),
+    ("commit.gpgSign", "false"),
+    ("tag.gpgSign", "false"),
+    ("fetch.recurseSubmodules", "false"),
+    ("submodule.recurse", "false"),
 ];
 
 /// Environment untuk [`VM_OVERRIDES`]. Lewat `GIT_CONFIG_PARAMETERS` (bentuk

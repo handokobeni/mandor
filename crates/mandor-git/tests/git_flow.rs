@@ -671,6 +671,10 @@ fn allowlist_kunci_konfigurasi_repo() {
         "remote.origin.vcs",
         "remote.origin.proxy",
         "branch.main.gh-merge-base.x",
+        "fetch.recursesubmodules",
+        "init.templatedir",
+        "extensions.partialclone",
+        "submodule.x.update",
     ] {
         assert!(!trusted_repo_config_key(k), "{k}");
     }

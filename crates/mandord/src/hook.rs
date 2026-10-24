@@ -7,6 +7,10 @@
 //! ditulis daemon di `--settings` agent dan tidak bisa diubah agent. Akar
 //! sumber desain datang dari `--design <path>` (boleh berulang).
 //!
+//! Daemon VM menambah `--vm <run dir>`: pagar lembur (tanpa pesan, staging,
+//! database jarak jauh, atau perubahan konfigurasi git) dan berkas run daemon
+//! ditolak untuk semua sesi (U11 plan VM).
+//!
 //! Sesi reviewer memakai `--review <berkas state>` (KTD-31): `PreToolUse`
 //! memutuskan dengan state pagar, dan `--post` (`PostToolUse`) mencatat tab
 //! serta alamatnya. State hilang, rusak, atau terkunci menolak.
@@ -15,7 +19,8 @@ use std::path::{Path, PathBuf};
 
 use mandor_agent::claude::guardrails::run_hook;
 use mandor_domain::hook::{
-    DesignRoot, ToolCall, Verdict, check_design_path, classify_planning, classify_with_mcp,
+    DesignRoot, ToolCall, Verdict, check_design_path, classify_planning, classify_vm,
+    classify_with_mcp,
 };
 use mandor_domain::hook_review::{classify_review, mark_before, record_post};
 
@@ -48,6 +53,14 @@ fn review_origins(args: &[String]) -> Vec<String> {
         .filter(|w| w[0] == "--origin")
         .filter_map(|w| mandor_domain::hook_review::origin_of(&w[1]))
         .collect()
+}
+
+/// `--vm <run dir>`: daemon VM, pagar lembur berlaku dan berkas run daemon
+/// ditolak (U11 plan VM).
+fn vm_run_dir(args: &[String]) -> Option<String> {
+    args.windows(2)
+        .find(|w| w[0] == "--vm")
+        .map(|w| w[1].clone())
 }
 
 /// `--review <berkas>`: berkas state pagar sesi reviewer.
@@ -118,6 +131,7 @@ pub fn run(args: &[String]) -> u8 {
     let roots = design_roots(args);
     let review = review_state_path(args);
     let origins = review_origins(args);
+    let vm = vm_run_dir(args);
     let post = args.iter().any(|a| a == "--post");
     let stdin = std::io::stdin();
     let mut stderr = std::io::stderr();
@@ -127,6 +141,9 @@ pub fn run(args: &[String]) -> u8 {
                 Some(path) => review_post(path, &origins, call),
                 None => Verdict::Deny("mandor: --post needs --review".to_owned()),
             };
+        }
+        if let Some(reason) = vm.as_deref().and_then(|dir| classify_vm(call, dir)) {
+            return Verdict::Deny(reason);
         }
         if !roots.is_empty() {
             let denied = call

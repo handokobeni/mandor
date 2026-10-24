@@ -111,4 +111,18 @@ mod tests {
             Err(GateRejection::NotToDo(_))
         ));
     }
+
+    /// R13 plan VM: tidak ada transisi app yang melewati Waiting Review,
+    /// untuk daemon laptop maupun VM (allowlist tidak bergantung peran).
+    #[test]
+    fn tidak_ada_transisi_melewati_waiting_review() {
+        for from in ALL {
+            for to in ["In Review", "Waiting Deploy", "Delivered"] {
+                assert!(
+                    !transition_allowed(&TaskStatus::parse(from), &TaskStatus::parse(to)),
+                    "{from} -> {to}"
+                );
+            }
+        }
+    }
 }

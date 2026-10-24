@@ -178,3 +178,35 @@ fn mode_review_memakai_state_dan_gagal_tertutup_tanpa_state() {
         assert_eq!(mode & 0o777, 0o600, "state ditulis ulang 0600");
     }
 }
+
+/// U11 plan VM: `--vm <run dir>` menambah pagar lembur, termasuk untuk sesi
+/// reviewer, dan berkas run daemon tidak bisa dibaca agent.
+#[test]
+fn hook_vm_menolak_pesan_staging_dan_berkas_run() {
+    let vm = ["--vm", "/srv/mandor/beni/runs"];
+    for cmd in [
+        "sendmail -t < msg",
+        "curl https://staging.kelola.id/",
+        "cat /srv/mandor/beni/runs/mcp/x.json",
+        "git push origin main",
+        "gh pr merge 12",
+    ] {
+        let (code, err) = hook_with(&bash(cmd), false, &vm);
+        assert_eq!(code, 2, "{cmd}");
+        assert!(err.contains("mandor:"), "{err}");
+    }
+    assert_eq!(hook_with(&bash("cargo test"), false, &vm).0, 0);
+    // Tanpa --vm (laptop) aturan lembur tidak berlaku.
+    assert_eq!(hook(&bash("curl https://staging.kelola.id/"), false).0, 0);
+    // Sesi reviewer VM juga terkena pagar sebelum state review dibaca.
+    let dir = tempfile::tempdir().unwrap();
+    let state = dir.path().join("r.json");
+    std::fs::write(&state, r#"{"origins":[]}"#).unwrap();
+    let review = [
+        "--vm",
+        "/srv/mandor/beni/runs",
+        "--review",
+        state.to_str().unwrap(),
+    ];
+    assert_eq!(hook_with(&bash("sendmail -t"), false, &review).0, 2);
+}

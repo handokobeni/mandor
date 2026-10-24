@@ -860,3 +860,27 @@ async fn review_vm_tanpa_login_tanpa_pendamping_tidak_memakai_browser() {
     );
     // Baris browser lalu Can't verify dan kartu ditahan `ac_gate` (AE6).
 }
+
+/// Covers AE3 (U11): Start now siang hari memakai pagar lembur yang sama:
+/// push hanya ke branch kartu, PR draft, dan status Lark tidak bergerak.
+#[tokio::test(flavor = "multi_thread")]
+async fn covers_ae3_start_now_siang_hari_tetap_dengan_pagar_lembur() {
+    let (lark, _clock, st) = vm_with(&["a"], wib(1, 14, 0)).await;
+    queue(&st, &["a"]).await;
+    st.svc.queue_start_now("a").await.unwrap();
+    assert_eq!(
+        st.svc.overnight_tick().await.unwrap().started.as_deref(),
+        Some("a")
+    );
+    changed(&st, "a", "src/form.rs");
+    st.agent.last().done();
+    eventually(|| run_of(&st, "a").draft_pending.is_some()).await;
+    let branch = run_of(&st, "a").branch.unwrap();
+    {
+        let git = st.git.st();
+        assert_eq!(git.pushes, [branch], "push hanya ke branch kartu");
+        assert_eq!(git.drafts.len(), 1, "PR draft, bukan PR siap");
+    }
+    st.svc.sync().drain_outbox(20).await.unwrap();
+    assert_eq!(lark.get("a").unwrap().status, TaskStatus::InProgress);
+}

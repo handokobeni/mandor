@@ -439,7 +439,7 @@ fn workspaces_dir_for(user_home: &Path, home: &Path, explicit_home: bool) -> Pat
 }
 
 /// Mengutip path untuk baris perintah hook bila mengandung spasi atau kutip.
-fn shell_quote(path: &str) -> String {
+pub fn shell_quote(path: &str) -> String {
     if path
         .chars()
         .all(|c| c.is_ascii_alphanumeric() || "/._-+:".contains(c))

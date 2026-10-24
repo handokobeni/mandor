@@ -209,7 +209,7 @@ async fn build_agent(cfg: &Config, rpc_port: u16) -> anyhow::Result<ClaudeAgent>
         .map_or_else(|| cfg.home.join("agent"), config::VmAgent::run_dir);
     Ok(ClaudeAgent::new(ClaudeConfig {
         claude_bin: cfg.claude_bin.clone(),
-        hook_command: cfg.hook_command.clone(),
+        hook_command: agent_hook_command(&cfg.hook_command, cfg.vm_agent.as_ref()),
         env: agent_env(&login_env, &agent_home),
         model: None,
         commit_model: "haiku".to_owned(),
@@ -226,6 +226,19 @@ async fn build_agent(cfg: &Config, rpc_port: u16) -> anyhow::Result<ClaudeAgent>
             port: rpc_port,
         }),
     }))
+}
+
+/// Perintah hook semua sesi agent; di VM ditambah `--vm <run dir>` sehingga
+/// pagar lembur berlaku untuk setiap run, termasuk Start now dan Waiting Fix
+/// (U11 plan VM).
+fn agent_hook_command(base: &str, vm: Option<&config::VmAgent>) -> String {
+    match vm {
+        Some(v) => format!(
+            "{base} --vm {}",
+            config::shell_quote(&v.run_dir().display().to_string())
+        ),
+        None => base.to_owned(),
+    }
 }
 
 /// Environment login shell pengguna; fallback ke environment minimal dari config.
@@ -394,5 +407,29 @@ async fn drain(s: &LarkSession) {
         Ok(_) => {}
         Err(SyncError::Port(PortError::Reauth)) => s.reauth.store(true, Ordering::Relaxed),
         Err(e) => tracing::warn!(error = %e, "outbox gagal"),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn hook_agent_vm_membawa_pagar_lembur() {
+        let vm = config::vm_agent_of(
+            mandor_domain::DaemonRole::Vm,
+            Some("beni-agent"),
+            Some("/srv/m/beni"),
+            Some("5100-5199"),
+        )
+        .unwrap();
+        assert_eq!(
+            agent_hook_command("/opt/mandord hook", vm.as_ref()),
+            "/opt/mandord hook --vm /srv/m/beni/runs"
+        );
+        assert_eq!(
+            agent_hook_command("/opt/mandord hook", None),
+            "/opt/mandord hook"
+        );
     }
 }

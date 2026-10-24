@@ -285,6 +285,9 @@ pub struct CardView {
     pub can_takeover: bool,
     pub flag: Option<FlagView>,
     pub run: Option<RunView>,
+    /// Pemegang klaim dilihat dari daemon ini: `self`, `own_other_daemon`
+    /// (mis. daemon VM, badge "On VM"), atau `other_person`; `None` tanpa klaim.
+    pub holder: Option<String>,
     pub pr_url: Option<String>,
     pub branch: Option<String>,
     pub repo_id: Option<String>,

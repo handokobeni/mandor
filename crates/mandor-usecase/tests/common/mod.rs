@@ -416,6 +416,16 @@ pub fn laptop(lark: &FakeLark, clock: &FakeClock, me: &str) -> Laptop {
     Laptop { svc, cache, outbox }
 }
 
+/// Daemon VM milik `me` (plan VM U1): klaim membawa id daemon `vm`.
+pub fn vm(lark: &FakeLark, clock: &FakeClock, me: &str) -> Laptop {
+    let Laptop { svc, cache, outbox } = laptop(lark, clock, me);
+    Laptop {
+        svc: svc.with_daemon("vm", mandor_domain::DaemonRole::Vm),
+        cache,
+        outbox,
+    }
+}
+
 /// Task siap dikerjakan, di-assign ke `who`.
 pub fn ready_task(id: &str, who: &[&str]) -> Task {
     let mut t = Task::new(id, TaskStatus::ToDo);
@@ -441,7 +451,16 @@ pub struct Station {
 }
 
 pub fn station(lark: &FakeLark, clock: &FakeClock, me: &str) -> Station {
-    let Laptop { svc, cache, outbox } = laptop(lark, clock, me);
+    station_of(laptop(lark, clock, me))
+}
+
+/// Station daemon VM milik `me` (plan VM).
+pub fn vm_station(lark: &FakeLark, clock: &FakeClock, me: &str) -> Station {
+    station_of(vm(lark, clock, me))
+}
+
+fn station_of(l: Laptop) -> Station {
+    let Laptop { svc, cache, outbox } = l;
     let git = run_fakes::FakeGit::default();
     let agent = run_fakes::FakeAgent::default();
     let runs = run_fakes::FakeRuns::default();

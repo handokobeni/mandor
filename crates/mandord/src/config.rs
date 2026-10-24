@@ -1,5 +1,6 @@
 //! Konfigurasi daemon, dibaca sekali di `main` (satu-satunya pemakai `std::env::var`).
 
+use mandor_domain::DaemonRole;
 use std::path::{Path, PathBuf};
 
 use anyhow::Context;
@@ -59,6 +60,42 @@ pub struct Config {
     /// `Err` bila nilainya tidak valid; daemon tetap start dan melaporkan
     /// `keep_awake: failing`.
     pub keep_awake_cmd: Option<Result<Vec<String>, String>>,
+    /// Peran daemon (`MANDOR_ROLE`: `laptop` default, `vm`; KTD-54 plan VM).
+    pub role: DaemonRole,
+    /// Id daemon di klaim (`MANDOR_DAEMON_ID`, default dari user, host, dan
+    /// peran; KTD-55).
+    pub daemon_id: String,
+}
+
+/// Peran dari `MANDOR_ROLE`; kosong berarti laptop.
+///
+/// # Errors
+/// Pesan untuk pengguna bila nilainya bukan `laptop` atau `vm`.
+pub fn parse_role(raw: Option<&str>) -> Result<DaemonRole, String> {
+    match raw.map(str::trim).filter(|r| !r.is_empty()) {
+        None => Ok(DaemonRole::Laptop),
+        Some(r) => DaemonRole::parse(r)
+            .ok_or_else(|| format!("MANDOR_ROLE must be laptop or vm, got {r:?}")),
+    }
+}
+
+/// Id daemon bawaan: `<user>@<host>` bila host diketahui, selain itu
+/// `<user>-<peran>`; nilai eksplisit menang.
+#[must_use]
+pub fn default_daemon_id(
+    explicit: Option<&str>,
+    user: Option<&str>,
+    host: Option<&str>,
+    role: DaemonRole,
+) -> String {
+    if let Some(id) = explicit.map(str::trim).filter(|i| !i.is_empty()) {
+        return id.to_owned();
+    }
+    let user = user.filter(|u| !u.is_empty()).unwrap_or("mandor");
+    match host.map(str::trim).filter(|h| !h.is_empty()) {
+        Some(h) => format!("{user}@{h}"),
+        None => format!("{user}-{}", role.as_str()),
+    }
 }
 
 /// Parse `MANDOR_KEEP_AWAKE_CMD`: array JSON argv tanpa shell, program berupa
@@ -161,6 +198,14 @@ impl Config {
         let systemctl = program("MANDOR_SYSTEMCTL", "systemctl");
         let loginctl = program("MANDOR_LOGINCTL", "loginctl");
         let user = std::env::var("USER").ok().filter(|u| !u.is_empty());
+        let role =
+            parse_role(std::env::var("MANDOR_ROLE").ok().as_deref()).map_err(anyhow::Error::msg)?;
+        let daemon_id = default_daemon_id(
+            std::env::var("MANDOR_DAEMON_ID").ok().as_deref(),
+            user.as_deref(),
+            std::env::var("HOSTNAME").ok().as_deref(),
+            role,
+        );
         let keep_awake_cmd = std::env::var("MANDOR_KEEP_AWAKE_CMD")
             .ok()
             .filter(|v| !v.trim().is_empty())
@@ -184,6 +229,8 @@ impl Config {
             loginctl,
             user,
             keep_awake_cmd,
+            role,
+            daemon_id,
         })
     }
 
@@ -296,7 +343,35 @@ mod tests {
         assert_eq!(ManagedBy::Detached.as_str(), "detached");
     }
 
-    use super::{ManagedBy, agent_may_read, parse_keep_awake_cmd, shell_quote, workspaces_dir_for};
+    use super::{
+        ManagedBy, agent_may_read, default_daemon_id, parse_keep_awake_cmd, parse_role,
+        shell_quote, workspaces_dir_for,
+    };
+    use mandor_domain::DaemonRole;
+
+    #[test]
+    fn peran_dan_id_daemon_dari_environment() {
+        assert_eq!(parse_role(None), Ok(DaemonRole::Laptop));
+        assert_eq!(parse_role(Some(" ")), Ok(DaemonRole::Laptop));
+        assert_eq!(parse_role(Some("vm")), Ok(DaemonRole::Vm));
+        assert!(parse_role(Some("server")).is_err());
+        assert_eq!(
+            default_daemon_id(Some("vm-beni"), Some("beni"), Some("h"), DaemonRole::Vm),
+            "vm-beni"
+        );
+        assert_eq!(
+            default_daemon_id(None, Some("beni"), Some("lembur01"), DaemonRole::Vm),
+            "beni@lembur01"
+        );
+        assert_eq!(
+            default_daemon_id(None, Some("beni"), None, DaemonRole::Laptop),
+            "beni-laptop"
+        );
+        assert_eq!(
+            default_daemon_id(None, None, None, DaemonRole::Vm),
+            "mandor-vm"
+        );
+    }
     use std::path::Path;
 
     #[test]

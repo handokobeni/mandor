@@ -62,7 +62,7 @@ impl<D: Deps> SyncService<D> {
                 .as_ref()
                 .is_some_and(|p| p.task.status != TaskStatus::ToDo)
                 && task.status == TaskStatus::ToDo;
-            if task.claimed_by(&self.me) {
+            if task.held_here(&self.identity) {
                 let mut fields = Vec::new();
                 if reverted_to_todo {
                     fields.push(AppField::Claim(None));

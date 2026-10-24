@@ -172,6 +172,7 @@ function card(r: RunView | null, extra: Partial<CardView>): CardView {
     can_takeover: false,
     flag: null,
     run: r,
+    holder: null,
     pr_url: r?.pr_url ?? null,
     branch: r?.branch ?? null,
     repo_id: r?.repo_id ?? null,

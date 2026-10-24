@@ -27,7 +27,8 @@ use crate::app::App;
 use crate::prod::{emit, now_ms};
 use crate::session::LarkSession;
 use crate::views::{
-    apply_group, card_view, notice_view, run_view, sprint_view, task_details_view, team_card_view,
+    apply_group, apply_holder, card_view, notice_view, run_view, sprint_view, task_details_view,
+    team_card_view,
 };
 
 mod app_run;
@@ -231,6 +232,7 @@ impl AppDispatch {
             .map(|c| {
                 let run = runs.get(&c.task.record_id);
                 let mut card = card_view(c, run, &s.me, now);
+                apply_holder(&mut card, &c.task, s.sync.identity());
                 if let (Some(view), Some(r)) = (card.run.as_mut(), run) {
                     view.ac = summaries.get(&r.id).cloned();
                 }

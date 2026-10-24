@@ -3,7 +3,7 @@
 
 mod common;
 
-use common::{FakeClock, FakeLark, OutState, laptop, ready_task};
+use common::{FakeClock, FakeLark, OutState, laptop, ready_task, vm};
 use mandor_domain::claim::{HEARTBEAT_MS, STALE_MS};
 use mandor_domain::{
     AppField, Claim, ClaimLoss, ClaimRefused, FlagKind, GateRejection, TaskStatus, WriteOp,
@@ -562,5 +562,119 @@ async fn papan_tim_berisi_kartu_aktif_rekan_dan_done_14_hari_terakhir() {
             .await
             .unwrap()
             .is_empty()
+    );
+}
+
+// --- Klaim per daemon (plan VM U1, KTD-55, KTD-56) ---
+
+#[tokio::test]
+async fn klaim_vm_tidak_ditimpa_laptop_developer_yang_sama() {
+    let (lark, clock) = setup();
+    lark.put(now_task("rec1", &["ou_a"], &clock));
+    let on_vm = vm(&lark, &clock, "ou_a");
+    let mine = on_vm.svc.claim("rec1", false).await.unwrap();
+    assert_eq!(mine.daemon_id(), Some("vm"));
+
+    let a = laptop(&lark, &clock, "ou_a");
+    let err = a.svc.claim("rec1", false).await.unwrap_err();
+    assert!(
+        matches!(err, SyncError::Claim(ClaimRefused::OwnOtherDaemon(ref d)) if d == "vm"),
+        "{err:?}"
+    );
+    assert_eq!(lark.get("rec1").unwrap().claim, Some(mine.clone()));
+
+    // Heartbeat laptop tidak memperbarui klaim VM.
+    clock.advance(HEARTBEAT_MS);
+    assert_eq!(
+        a.svc.heartbeat("rec1").await.unwrap(),
+        Heartbeat::Lost(ClaimLoss::TakenByOther)
+    );
+    assert_eq!(lark.get("rec1").unwrap().claim, Some(mine.clone()));
+    // VM memperbaruinya.
+    assert_eq!(
+        on_vm.svc.heartbeat("rec1").await.unwrap(),
+        Heartbeat::Renewed
+    );
+    // Laptop tidak melepas klaim VM.
+    a.svc.release_claim("rec1").await.unwrap();
+    assert!(lark.get("rec1").unwrap().claim.is_some());
+}
+
+#[tokio::test]
+async fn outbox_laptop_untuk_kartu_vm_dibatalkan_bukan_pemilik() {
+    let (lark, clock) = setup();
+    lark.put(now_task("rec1", &["ou_a"], &clock));
+    let on_vm = vm(&lark, &clock, "ou_a");
+    on_vm.svc.claim("rec1", false).await.unwrap();
+    let a = laptop(&lark, &clock, "ou_a");
+    a.svc.request_write("rec1", &start_op()).await.unwrap();
+    a.svc.drain_outbox(10).await.unwrap();
+    assert_eq!(lark.get("rec1").unwrap().status, TaskStatus::ToDo);
+    assert!(
+        a.outbox
+            .states()
+            .iter()
+            .any(|(_, s)| matches!(s, OutState::Cancelled(r) if r.contains("no longer yours"))),
+        "{:?}",
+        a.outbox.states()
+    );
+}
+
+#[tokio::test]
+async fn poller_laptop_tidak_menghapus_klaim_vm_saat_kembali_ke_to_do() {
+    let (lark, clock) = setup();
+    let mut t = now_task("rec1", &["ou_a"], &clock);
+    t.status = TaskStatus::InProgress;
+    t.kanban_mirror = Some("in_progress".to_owned());
+    lark.put(t);
+    let on_vm = vm(&lark, &clock, "ou_a");
+    let a = laptop(&lark, &clock, "ou_a");
+    lark.edit("rec1", |t| {
+        t.claim = Some(Claim {
+            open_id: "ou_a".to_owned(),
+            ts_ms: 10 * DAY,
+            nonce: "r~vm".to_owned(),
+        });
+    });
+    a.svc.poll(true, &[]).await.unwrap();
+    on_vm.svc.poll(true, &[]).await.unwrap();
+    lark.edit("rec1", |t| t.status = TaskStatus::ToDo);
+    a.svc.poll(false, &[]).await.unwrap();
+    assert!(a.outbox.ops().is_empty(), "laptop tidak menyentuh kartu VM");
+    on_vm.svc.poll(false, &[]).await.unwrap();
+    assert!(
+        on_vm
+            .outbox
+            .ops()
+            .iter()
+            .any(|op| matches!(op, WriteOp::Fields(f) if f.contains(&AppField::Claim(None)))),
+        "VM yang melepas klaimnya"
+    );
+}
+
+#[tokio::test]
+async fn laptop_mengadopsi_klaim_lama_miliknya_saat_heartbeat() {
+    let (lark, clock) = setup();
+    let mut t = now_task("rec1", &["ou_a"], &clock);
+    t.claim = Some(claim_of("ou_a", 10 * DAY, "lama"));
+    lark.put(t);
+    let a = laptop(&lark, &clock, "ou_a");
+    clock.advance(HEARTBEAT_MS);
+    assert_eq!(a.svc.heartbeat("rec1").await.unwrap(), Heartbeat::Renewed);
+    let c = lark.get("rec1").unwrap().claim.unwrap();
+    assert_eq!(c.daemon_id(), Some(a.svc.identity().daemon_id.as_str()));
+    // VM tidak menganggap klaim lama miliknya.
+    let mut t2 = now_task("rec2", &["ou_a"], &clock);
+    t2.claim = Some(claim_of(
+        "ou_a",
+        mandor_usecase::Clock::now_ms(&clock),
+        "lama",
+    ));
+    lark.put(t2);
+    let on_vm = vm(&lark, &clock, "ou_a");
+    clock.advance(HEARTBEAT_MS);
+    assert_eq!(
+        on_vm.svc.heartbeat("rec2").await.unwrap(),
+        Heartbeat::Lost(ClaimLoss::TakenByOther)
     );
 }

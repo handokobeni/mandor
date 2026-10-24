@@ -185,7 +185,9 @@ impl<D: Deps> RunService<D> {
             .map(|c| c.task)
             .filter(|t| {
                 looped.contains(&t.record_id)
-                    || (t.status == TaskStatus::WaitingFix && t.claimed_by(me) && t.assigned_to(me))
+                    || (t.status == TaskStatus::WaitingFix
+                        && t.held_here(self.sync.identity())
+                        && t.assigned_to(me))
             })
             .collect())
     }

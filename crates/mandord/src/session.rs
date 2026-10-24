@@ -120,14 +120,17 @@ pub async fn start(
     let agent = build_agent(env.cfg, env.rpc_port).await?;
     let git = Git::new(GitConfig::new(env.cfg.workspaces_dir()));
 
-    let sync = Arc::new(SyncService::<Prod>::new(
-        gateway,
-        BroadcastTasks::new(tasks.clone(), env.events.clone()),
-        tasks,
-        SystemClock,
-        UuidIds,
-        me.clone(),
-    ));
+    let sync = Arc::new(
+        SyncService::<Prod>::new(
+            gateway,
+            BroadcastTasks::new(tasks.clone(), env.events.clone()),
+            tasks,
+            SystemClock,
+            UuidIds,
+            me.clone(),
+        )
+        .with_daemon(&env.cfg.daemon_id, env.cfg.role),
+    );
     let runs = Arc::new(
         RunService::new(
             Arc::clone(&sync),

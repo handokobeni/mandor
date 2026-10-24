@@ -21,4 +21,9 @@ assignees: Array<string>,
 /**
  * Kartu rekan di papan Team: hanya baca, tidak bisa di-Start dari sini.
  */
-team: boolean, owner: string | null, owner_active: boolean, mine: boolean, can_takeover: boolean, flag: FlagView | null, run: RunView | null, pr_url: string | null, branch: string | null, repo_id: string | null, last_modified_ms: number, };
+team: boolean, owner: string | null, owner_active: boolean, mine: boolean, can_takeover: boolean, flag: FlagView | null, run: RunView | null, 
+/**
+ * Pemegang klaim dilihat dari daemon ini: `self`, `own_other_daemon`
+ * (mis. daemon VM, badge "On VM"), atau `other_person`; `None` tanpa klaim.
+ */
+holder: string | null, pr_url: string | null, branch: string | null, repo_id: string | null, last_modified_ms: number, };

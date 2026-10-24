@@ -315,6 +315,9 @@ impl<D: Deps> RunService<D> {
             }
             return Ok(if entered { Step::Entered } else { Step::Idle });
         }
+        if self.defer_for_vm(&mut run).await? {
+            return Ok(if entered { Step::Entered } else { Step::Idle });
+        }
         self.start_fix_turn(run, vec![(task, batch)], &repo, None)
             .await?;
         Ok(Step::Started)
@@ -605,6 +608,22 @@ impl<D: Deps> RunService<D> {
             }
         }
         Ok(())
+    }
+
+    /// Daemon VM: perbaikan siap menunggu giliran bila VM sedang mengerjakan
+    /// kartu lain (R8, R21). Run ditandai `WfQuiet` dengan jeda yang sudah lewat
+    /// agar penjadwal tidak memulai kartu antrean lebih dulu.
+    pub(super) async fn defer_for_vm(&self, run: &mut RunRecord) -> Result<bool, RunError> {
+        if self.sync.role() != mandor_domain::DaemonRole::Vm || !self.vm_busy().await? {
+            return Ok(false);
+        }
+        let now = self.sync.clock.now_ms();
+        if run.state != RunState::WfQuiet || run.quiet_until_ms.is_none_or(|u| u > now) {
+            run.state = RunState::WfQuiet;
+            run.quiet_until_ms = Some(now);
+            self.runs.save(run, run.generation, self.now()).await?;
+        }
+        Ok(true)
     }
 
     pub(crate) async fn ac_texts(&self, task: &Task) -> Result<Vec<String>, RunError> {

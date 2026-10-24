@@ -214,4 +214,6 @@ pub trait Deps: Send + Sync + 'static {
     /// desain, setelan).
     type Reviews: crate::run_ports::LedgerStore + crate::run_ports::ReviewHistory + 'static;
     type Apps: crate::run_ports::AppProcesses + crate::run_ports::AppRecords + 'static;
+    /// Antrean, siklus, dan setelan lembur VM (KTD-57 plan VM).
+    type Overnight: crate::overnight::OvernightStore + 'static;
 }

@@ -974,3 +974,139 @@ impl mandor_usecase::run_ports::ReviewHistory for FakeReviews {
         *self.chrome.lock().unwrap()
     }
 }
+
+/// Antrean, siklus, dan setelan lembur di memori (plan VM U2).
+#[derive(Clone, Default)]
+pub struct FakeOvernight {
+    pub queue: Arc<Mutex<Vec<mandor_usecase::overnight::QueueItem>>>,
+    pub dequeued: Arc<Mutex<Vec<mandor_usecase::overnight::Dequeued>>>,
+    pub laptop_only: Arc<Mutex<HashSet<String>>>,
+    pub settings: Arc<Mutex<Option<mandor_usecase::overnight::OvernightSettings>>>,
+    pub cycles: Arc<Mutex<HashMap<i64, mandor_usecase::overnight::CycleUsage>>>,
+}
+
+impl FakeOvernight {
+    pub fn ids(&self) -> Vec<String> {
+        self.queue
+            .lock()
+            .unwrap()
+            .iter()
+            .map(|i| i.record_id.clone())
+            .collect()
+    }
+}
+
+impl mandor_usecase::overnight::OvernightStore for FakeOvernight {
+    async fn queue(&self) -> Result<Vec<mandor_usecase::overnight::QueueItem>, PortError> {
+        Ok(self.queue.lock().unwrap().clone())
+    }
+    async fn enqueue(&self, item: &mandor_usecase::overnight::QueueItem) -> Result<(), PortError> {
+        let mut q = self.queue.lock().unwrap();
+        if q.iter().any(|i| i.record_id == item.record_id) {
+            return Err(PortError::Conflict);
+        }
+        q.push(item.clone());
+        Ok(())
+    }
+    async fn dequeue(
+        &self,
+        record_id: &str,
+        reason: Option<&str>,
+        now_ms: i64,
+    ) -> Result<(), PortError> {
+        self.queue
+            .lock()
+            .unwrap()
+            .retain(|i| i.record_id != record_id);
+        if let Some(r) = reason {
+            self.dequeued
+                .lock()
+                .unwrap()
+                .push(mandor_usecase::overnight::Dequeued {
+                    record_id: record_id.to_owned(),
+                    reason: r.to_owned(),
+                    at_ms: now_ms,
+                });
+        }
+        Ok(())
+    }
+    async fn reorder(&self, record_ids: &[String]) -> Result<(), PortError> {
+        let mut q = self.queue.lock().unwrap();
+        q.sort_by_key(|i| {
+            record_ids
+                .iter()
+                .position(|r| *r == i.record_id)
+                .unwrap_or(usize::MAX)
+        });
+        Ok(())
+    }
+    async fn set_start_now(&self, record_id: &str) -> Result<(), PortError> {
+        let mut q = self.queue.lock().unwrap();
+        let item = q
+            .iter_mut()
+            .find(|i| i.record_id == record_id)
+            .ok_or_else(|| PortError::Rejected("the card is not queued".to_owned()))?;
+        item.start_now = true;
+        Ok(())
+    }
+    async fn dequeued_since(
+        &self,
+        since_ms: i64,
+    ) -> Result<Vec<mandor_usecase::overnight::Dequeued>, PortError> {
+        Ok(self
+            .dequeued
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|d| d.at_ms >= since_ms)
+            .cloned()
+            .collect())
+    }
+    async fn laptop_only(&self, record_id: &str) -> Result<bool, PortError> {
+        Ok(self.laptop_only.lock().unwrap().contains(record_id))
+    }
+    async fn set_laptop_only(&self, record_id: &str, _now_ms: i64) -> Result<(), PortError> {
+        self.laptop_only
+            .lock()
+            .unwrap()
+            .insert(record_id.to_owned());
+        Ok(())
+    }
+    async fn settings(
+        &self,
+    ) -> Result<Option<mandor_usecase::overnight::OvernightSettings>, PortError> {
+        Ok(self.settings.lock().unwrap().clone())
+    }
+    async fn set_settings(
+        &self,
+        s: &mandor_usecase::overnight::OvernightSettings,
+    ) -> Result<(), PortError> {
+        *self.settings.lock().unwrap() = Some(s.clone());
+        Ok(())
+    }
+    async fn cycle_usage(
+        &self,
+        start: i64,
+    ) -> Result<mandor_usecase::overnight::CycleUsage, PortError> {
+        Ok(self
+            .cycles
+            .lock()
+            .unwrap()
+            .get(&start)
+            .copied()
+            .unwrap_or_default())
+    }
+    async fn add_cycle_usage(
+        &self,
+        start: i64,
+        u: &mandor_usecase::overnight::CycleUsage,
+    ) -> Result<(), PortError> {
+        let mut c = self.cycles.lock().unwrap();
+        let e = c.entry(start).or_default();
+        e.input_tokens += u.input_tokens;
+        e.output_tokens += u.output_tokens;
+        e.cache_read_tokens += u.cache_read_tokens;
+        e.cache_write_tokens += u.cache_write_tokens;
+        Ok(())
+    }
+}

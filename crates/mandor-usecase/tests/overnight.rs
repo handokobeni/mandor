@@ -1,0 +1,347 @@
+//! Penjadwal lembur di daemon VM (U2 plan VM): antrean, jam lembur, Start now,
+//! dan giliran Waiting Fix, satu kartu sekaligus.
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+
+mod common;
+
+use std::path::PathBuf;
+use std::sync::atomic::Ordering;
+
+use common::run_fakes::eventually;
+use common::{FakeClock, FakeLark, Station, ready_task, station, vm_station};
+use mandor_domain::{Claim, Reply, RunState, TaskStatus};
+use mandor_usecase::overnight::OvernightSettings;
+use mandor_usecase::run_ports::{RunPhase, RunRecord, SessionRef};
+use mandor_usecase::waiting_fix::DEFAULT_QUIET_SECS as QUIET;
+use mandor_usecase::{RunError, StartTarget};
+use pretty_assertions::assert_eq;
+
+const MIN: i64 = 60_000;
+/// 2026-10-23T00:00:00Z.
+const DAY0: i64 = 1_792_713_600_000;
+
+/// ms epoch hari `day` pukul `h:m` WIB (+07:00).
+fn wib(day: i64, h: i64, m: i64) -> i64 {
+    DAY0 + day * 24 * 60 * MIN + ((h * 60 + m) - 7 * 60) * MIN
+}
+
+fn at(lark: &FakeLark, clock: &FakeClock, ms: i64) {
+    clock.set(ms);
+    lark.clock.store(ms, Ordering::SeqCst);
+}
+
+fn settings(limit: Option<u64>) -> OvernightSettings {
+    OvernightSettings {
+        start: "19:00".to_owned(),
+        end: "06:00".to_owned(),
+        offset: "+07:00".to_owned(),
+        token_limit: limit,
+    }
+}
+
+/// Daemon VM dengan kartu To Do `ids`, jam lembur 19:00–06:00, batas diisi.
+async fn vm_with(ids: &[&str], now: i64) -> (FakeLark, FakeClock, Station) {
+    let lark = FakeLark::default();
+    let clock = FakeClock::default();
+    at(&lark, &clock, now);
+    for id in ids {
+        let mut t = ready_task(id, &["ou_me"]);
+        t.last_modified_ms = now;
+        lark.put(t);
+    }
+    let st = vm_station(&lark, &clock, "ou_me");
+    st.svc
+        .set_overnight_settings(&settings(Some(1_000_000)))
+        .await
+        .unwrap();
+    st.svc.sync().poll(true, &[]).await.unwrap();
+    (lark, clock, st)
+}
+
+fn repo1() -> StartTarget {
+    StartTarget::Repo("repo1".to_owned())
+}
+
+async fn queue(st: &Station, ids: &[&str]) {
+    for id in ids {
+        st.svc.queue_add(id, &repo1(), None).await.unwrap();
+    }
+}
+
+fn running(st: &Station) -> Vec<String> {
+    st.runs
+        .all()
+        .into_iter()
+        .filter(|r| r.state.is_working())
+        .map(|r| r.record_id)
+        .collect()
+}
+
+#[tokio::test]
+async fn batas_siklus_belum_diisi_tidak_memulai_apapun() {
+    let (_lark, _clock, st) = vm_with(&["a"], wib(0, 20, 0)).await;
+    queue(&st, &["a"]).await;
+    st.svc
+        .set_overnight_settings(&settings(None))
+        .await
+        .unwrap();
+    st.svc.queue_start_now("a").await.unwrap();
+    let tick = st.svc.overnight_tick().await.unwrap();
+    assert_eq!(tick.started, None, "Start now juga butuh batas");
+    assert!(st.runs.all().is_empty());
+}
+
+#[tokio::test]
+async fn covers_ae1_satu_kartu_sekaligus_berurutan() {
+    let (_lark, _clock, st) = vm_with(&["a", "b", "c"], wib(0, 19, 0)).await;
+    queue(&st, &["a", "b", "c"]).await;
+    assert_eq!(
+        st.svc.overnight_tick().await.unwrap().started.as_deref(),
+        Some("a")
+    );
+    let run = st.runs.only();
+    assert_eq!(
+        run.phase,
+        RunPhase::Implement,
+        "VM tidak menunggu persetujuan plan"
+    );
+    assert_eq!(run.repo_id, "repo1", "target dari antrean");
+    assert_eq!(st.overnight.ids(), ["b", "c"]);
+    assert_eq!(
+        st.svc.overnight_tick().await.unwrap().started,
+        None,
+        "masih berjalan"
+    );
+
+    st.agent.last().done();
+    eventually(|| running(&st).is_empty()).await;
+    assert_eq!(
+        st.svc.overnight_tick().await.unwrap().started.as_deref(),
+        Some("b")
+    );
+    assert_eq!(running(&st), ["b"]);
+}
+
+#[tokio::test]
+async fn covers_ae2_kartu_berjalan_diselesaikan_setelah_jam_lembur_berakhir() {
+    let (lark, clock, st) = vm_with(&["a", "b"], wib(1, 5, 40)).await;
+    queue(&st, &["a", "b"]).await;
+    assert_eq!(
+        st.svc.overnight_tick().await.unwrap().started.as_deref(),
+        Some("a")
+    );
+    at(&lark, &clock, wib(1, 6, 0));
+    assert_eq!(running(&st), ["a"], "kartu yang berjalan tidak dihentikan");
+    st.agent.last().done();
+    eventually(|| running(&st).is_empty()).await;
+    assert_eq!(st.svc.overnight_tick().await.unwrap().started, None);
+    assert_eq!(st.overnight.ids(), ["b"]);
+}
+
+#[tokio::test]
+async fn covers_ae3_start_now_siang_hari_bila_vm_kosong() {
+    let (_lark, _clock, st) = vm_with(&["a", "b"], wib(1, 14, 0)).await;
+    queue(&st, &["a", "b"]).await;
+    assert_eq!(
+        st.svc.overnight_tick().await.unwrap().started,
+        None,
+        "di luar jam lembur"
+    );
+    st.svc.queue_start_now("b").await.unwrap();
+    assert_eq!(
+        st.svc.overnight_tick().await.unwrap().started.as_deref(),
+        Some("b")
+    );
+    assert_eq!(st.overnight.ids(), ["a"]);
+}
+
+#[tokio::test]
+async fn covers_ae4_kartu_yang_sudah_in_progress_dikeluarkan_dengan_alasan() {
+    let (lark, clock, st) = vm_with(&["a", "b"], wib(0, 18, 0)).await;
+    queue(&st, &["a", "b"]).await;
+    lark.edit("a", |t| {
+        t.status = TaskStatus::InProgress;
+        t.claim = Some(Claim {
+            open_id: "ou_lain".to_owned(),
+            ts_ms: wib(0, 18, 0),
+            nonce: "x".to_owned(),
+        });
+    });
+    at(&lark, &clock, wib(0, 19, 0));
+    let tick = st.svc.overnight_tick().await.unwrap();
+    assert_eq!(tick.dequeued.len(), 1);
+    assert_eq!(tick.dequeued[0].0, "a");
+    assert!(
+        tick.dequeued[0].1.contains("In Progress"),
+        "{:?}",
+        tick.dequeued
+    );
+    assert_eq!(
+        tick.started.as_deref(),
+        Some("b"),
+        "kartu berikutnya dicoba"
+    );
+    let logged = st.overnight.dequeued.lock().unwrap().clone();
+    assert_eq!(logged[0].record_id, "a", "dicatat untuk laporan pagi");
+}
+
+const BRANCH: &str = "mandor/pgs-7-tab-data";
+
+/// Kartu `rec7` milik VM di Waiting Fix dengan run lama dan komentar tepercaya
+/// yang jeda tenangnya sudah lewat.
+fn vm_waiting_fix(lark: &FakeLark, st: &Station, now: i64) {
+    let mut t = ready_task("rec7", &["ou_me"]);
+    t.status = TaskStatus::WaitingFix;
+    t.branch = Some(BRANCH.to_owned());
+    t.repo_id = Some("repo1".to_owned());
+    t.pr_url = Some("https://github.com/o/r/pull/7".to_owned());
+    t.claim = Some(Claim {
+        open_id: "ou_me".to_owned(),
+        ts_ms: now,
+        nonce: "n~vm".to_owned(),
+    });
+    t.comment_cursor = Some(format!("{}:", now / 1000 - 3600));
+    t.last_modified_ms = now;
+    lark.put(t);
+    let wt = PathBuf::from(format!("/wt/{BRANCH}"));
+    let mut r = RunRecord::new("run7".to_owned(), "repo1".to_owned(), "rec7".to_owned());
+    r.state = RunState::InReviewLoop;
+    r.branch = Some(BRANCH.to_owned());
+    r.worktree = Some(wt.clone());
+    r.session_id = Some("sess7".to_owned());
+    r.session_started = true;
+    st.runs.insert(r);
+    st.git.st().worktrees.insert(wt);
+    *lark.replies.lock().unwrap() = vec![Reply {
+        record_id: "rec7".to_owned(),
+        comment_id: "c".to_owned(),
+        reply_id: "r1".to_owned(),
+        author: "ou_qa".to_owned(),
+        create_time: now / 1000 - 600,
+        text: "Tombol simpan error".to_owned(),
+    }];
+}
+
+#[tokio::test]
+async fn covers_ae9_waiting_fix_mulai_langsung_saat_vm_kosong() {
+    let (lark, _clock, st) = vm_with(&[], wib(1, 11, 0)).await;
+    vm_waiting_fix(&lark, &st, wib(1, 11, 0));
+    st.svc.sync().poll(true, &[]).await.unwrap();
+    let report = st.svc.tick_waiting_fix(QUIET).await.unwrap();
+    assert_eq!(report.started, ["rec7"], "tanpa menunggu jam lembur");
+}
+
+#[tokio::test]
+async fn covers_ae10_waiting_fix_menunggu_lalu_mendahului_antrean() {
+    let (lark, _clock, st) = vm_with(&["a", "b"], wib(1, 11, 0)).await;
+    queue(&st, &["a", "b"]).await;
+    st.svc.queue_start_now("a").await.unwrap();
+    assert_eq!(
+        st.svc.overnight_tick().await.unwrap().started.as_deref(),
+        Some("a")
+    );
+    st.svc.queue_start_now("b").await.unwrap();
+
+    vm_waiting_fix(&lark, &st, wib(1, 11, 0));
+    st.svc.sync().poll(true, &[]).await.unwrap();
+    let report = st.svc.tick_waiting_fix(QUIET).await.unwrap();
+    assert!(report.started.is_empty(), "VM sibuk: perbaikan menunggu");
+    let fix = st.runs.all().into_iter().find(|r| r.id == "run7").unwrap();
+    assert_eq!(fix.state, RunState::WfQuiet);
+
+    // Kartu "a" selesai: perbaikan mendapat giliran sebelum kartu antrean.
+    let a_turn = st.agent.last();
+    a_turn.done();
+    eventually(|| running(&st).is_empty()).await;
+    assert_eq!(st.svc.overnight_tick().await.unwrap().started, None);
+    assert_eq!(st.overnight.ids(), ["b"]);
+    let report = st.svc.tick_waiting_fix(QUIET).await.unwrap();
+    assert_eq!(report.started, ["rec7"]);
+}
+
+#[tokio::test]
+async fn kartu_tertahan_yang_diantre_ulang_dilanjutkan_di_sesi_yang_sama() {
+    let (lark, _clock, st) = vm_with(&[], wib(0, 20, 0)).await;
+    let mut t = ready_task("held", &["ou_me"]);
+    t.status = TaskStatus::InProgress;
+    lark.put(t);
+    st.svc.sync().poll(true, &[]).await.unwrap();
+    let wt = PathBuf::from("/wt/mandor/held");
+    let mut r = RunRecord::new("run-h".to_owned(), "repo1".to_owned(), "held".to_owned());
+    r.state = RunState::Held;
+    r.phase = RunPhase::Implement;
+    r.branch = Some("mandor/held".to_owned());
+    r.worktree = Some(wt.clone());
+    r.session_id = Some("sess-h".to_owned());
+    r.session_started = true;
+    st.runs.insert(r);
+    st.git.st().worktrees.insert(wt);
+
+    st.svc
+        .queue_add("held", &repo1(), Some("Pakai warna primer"))
+        .await
+        .unwrap();
+    assert_eq!(
+        st.svc.overnight_tick().await.unwrap().started.as_deref(),
+        Some("held")
+    );
+    let req = st.agent.last().req;
+    assert_eq!(req.session, SessionRef::Resume("sess-h".to_owned()));
+    assert!(req.message.contains("Pakai warna primer"));
+    assert_eq!(st.runs.all().len(), 1, "run yang sama, bukan run baru");
+}
+
+#[tokio::test]
+async fn antrean_hanya_to_do_atau_tertahan_dan_bukan_kartu_laptop() {
+    let (lark, _clock, st) = vm_with(&["a", "b", "c"], wib(0, 10, 0)).await;
+    lark.edit("c", |t| t.status = TaskStatus::InProgress);
+    st.svc.sync().poll(true, &[]).await.unwrap();
+    queue(&st, &["a", "b"]).await;
+    let err = st.svc.queue_add("c", &repo1(), None).await.unwrap_err();
+    assert!(matches!(err, RunError::Sync(_)), "bukan To Do: {err:?}");
+    let err = st.svc.queue_add("a", &repo1(), None).await.unwrap_err();
+    assert!(
+        matches!(err, RunError::InvalidState(_)),
+        "sudah diantre: {err:?}"
+    );
+    st.overnight
+        .laptop_only
+        .lock()
+        .unwrap()
+        .insert("b".to_owned());
+    st.svc.queue_remove("b").await.unwrap();
+    let err = st.svc.queue_add("b", &repo1(), None).await.unwrap_err();
+    assert!(
+        matches!(err, RunError::InvalidState(_)),
+        "hanya laptop: {err:?}"
+    );
+
+    lark.edit("c", |t| t.status = TaskStatus::ToDo);
+    st.svc.sync().poll(true, &[]).await.unwrap();
+    st.svc.queue_add("c", &repo1(), None).await.unwrap();
+    st.svc
+        .queue_reorder(&["c".to_owned(), "a".to_owned()])
+        .await
+        .unwrap();
+    assert_eq!(st.overnight.ids(), ["c", "a"]);
+}
+
+#[tokio::test]
+async fn daemon_laptop_tidak_menjalankan_penjadwal_atau_antrean() {
+    let lark = FakeLark::default();
+    let clock = FakeClock::default();
+    at(&lark, &clock, wib(0, 20, 0));
+    lark.put(ready_task("a", &["ou_me"]));
+    let st = station(&lark, &clock, "ou_me");
+    st.svc.sync().poll(true, &[]).await.unwrap();
+    assert!(st.svc.queue_add("a", &repo1(), None).await.is_err());
+    assert_eq!(st.svc.overnight_tick().await.unwrap().started, None);
+}
+
+#[tokio::test]
+async fn setelan_jam_lembur_divalidasi() {
+    let (_lark, _clock, st) = vm_with(&[], wib(0, 10, 0)).await;
+    let mut bad = settings(Some(1));
+    bad.offset = "7".to_owned();
+    assert!(st.svc.set_overnight_settings(&bad).await.is_err());
+}

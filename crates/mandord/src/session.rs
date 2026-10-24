@@ -33,6 +33,8 @@ const PR_EVERY: Duration = Duration::from_secs(60);
 /// Papan Team (kartu seluruh tim) lebih jarang dari kartu milik pengguna.
 const TEAM_EVERY: Duration = Duration::from_secs(60);
 const HEARTBEAT_EVERY: Duration = Duration::from_secs(5 * 60);
+/// Penjadwal lembur daemon VM (U2 plan VM).
+const OVERNIGHT_EVERY: Duration = Duration::from_secs(30);
 const OUTBOX_BATCH: u32 = 20;
 const LOGIN_ENV_TIMEOUT: Duration = Duration::from_secs(10);
 
@@ -151,6 +153,7 @@ pub async fn start(
                     mandor_store::AppStateStore::new(env.store.clone()),
                     env.events.clone(),
                 ),
+                overnight: mandor_store::OvernightsStore::new(env.store.clone()),
             },
         )
         .with_drain_gate(Arc::clone(env.drain)),
@@ -252,6 +255,7 @@ struct Schedule {
     prs: Due,
     heartbeat: Due,
     team: Due,
+    overnight: Due,
 }
 
 impl Schedule {
@@ -263,6 +267,7 @@ impl Schedule {
             prs: Due::new(PR_EVERY),
             heartbeat: Due::new(HEARTBEAT_EVERY),
             team: Due::new(TEAM_EVERY),
+            overnight: Due::new(OVERNIGHT_EVERY),
         }
     }
 
@@ -299,7 +304,18 @@ impl Schedule {
         if self.heartbeat.take(now) {
             warn_err(s.runs.heartbeat_all().await, "heartbeat klaim gagal");
         }
+        if s.sync.role() == mandor_domain::DaemonRole::Vm && (poked || self.overnight.take(now)) {
+            overnight_once(s).await;
+        }
         drain(s).await;
+    }
+}
+
+/// Satu tick penjadwal lembur daemon VM (U2 plan VM).
+async fn overnight_once(s: &LarkSession) {
+    let tick = warn_err(s.runs.overnight_tick().await, "penjadwal lembur gagal");
+    if let Some(t) = tick.filter(|t| t.started.is_some() || !t.dequeued.is_empty()) {
+        tracing::info!(started = ?t.started, dequeued = ?t.dequeued, "penjadwal lembur");
     }
 }
 

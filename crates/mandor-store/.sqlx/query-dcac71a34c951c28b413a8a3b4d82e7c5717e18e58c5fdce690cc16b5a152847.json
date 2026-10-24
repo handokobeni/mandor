@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "UPDATE overnight_queue SET start_now = 1 WHERE record_id = ?",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": []
+  },
+  "hash": "dcac71a34c951c28b413a8a3b4d82e7c5717e18e58c5fdce690cc16b5a152847"
+}

@@ -1,0 +1,50 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT record_id, reason, at_ms FROM overnight_dequeued\n             WHERE at_ms >= ? ORDER BY at_ms, id",
+  "describe": {
+    "columns": [
+      {
+        "name": "record_id",
+        "ordinal": 0,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "overnight_dequeued",
+            "name": "record_id"
+          }
+        }
+      },
+      {
+        "name": "reason",
+        "ordinal": 1,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "overnight_dequeued",
+            "name": "reason"
+          }
+        }
+      },
+      {
+        "name": "at_ms",
+        "ordinal": 2,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "overnight_dequeued",
+            "name": "at_ms"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "f8d82a027a6e524ca10e0c63b5c4b7e42c15a83c2139eb925d0b0618fd8c1fd0"
+}

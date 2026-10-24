@@ -126,6 +126,9 @@ impl<D: Deps> RunService<D> {
             }
             return Ok(step);
         }
+        if self.defer_for_vm(&mut run).await? {
+            return Ok(step);
+        }
         let started = ready.iter().map(|(t, _)| t.record_id.clone()).collect();
         self.start_fix_turn(run, ready, &repo, None).await?;
         Ok(GroupStep {

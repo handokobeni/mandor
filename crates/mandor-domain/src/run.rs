@@ -18,6 +18,10 @@ pub enum RunState {
     Orphaned,
     /// Record dihapus atau tidak lagi di-assign: agent dihentikan, dev menutup run.
     Stopped,
+    /// Kartu lembur VM tertahan dengan alasan (KTD-60 plan VM): menunggu
+    /// jawaban atau keputusan dev, lalu diantre ulang. Bukan parkir dan tidak
+    /// sibuk.
+    Held,
 }
 
 impl RunState {
@@ -36,6 +40,7 @@ impl RunState {
             Self::Failed => "failed",
             Self::Orphaned => "orphaned",
             Self::Stopped => "stopped",
+            Self::Held => "held",
         }
     }
 
@@ -54,6 +59,7 @@ impl RunState {
             "failed" => Self::Failed,
             "orphaned" => Self::Orphaned,
             "stopped" => Self::Stopped,
+            "held" => Self::Held,
             _ => return None,
         })
     }
@@ -239,6 +245,7 @@ mod tests {
             RunState::Failed,
             RunState::Orphaned,
             RunState::Stopped,
+            RunState::Held,
         ] {
             assert!(!s.is_working(), "{s:?}");
         }
@@ -265,9 +272,11 @@ mod tests {
             RunState::Failed,
             RunState::Orphaned,
             RunState::Stopped,
+            RunState::Held,
         ] {
             assert_eq!(RunState::parse(s.as_str()), Some(s));
         }
+        assert!(!RunState::Held.is_parked() && !RunState::Held.is_busy());
         assert_eq!(RunState::parse("x"), None);
         assert!(RunState::WfQuiet.in_fix_loop());
         assert!(!RunState::Running.in_fix_loop());

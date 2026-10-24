@@ -391,6 +391,7 @@ impl Deps for FakeDeps {
     type Prompts = PlainMessage;
     type Reviews = run_fakes::FakeReviews;
     type Apps = run_fakes::FakeApps;
+    type Overnight = run_fakes::FakeOvernight;
 }
 
 pub mod run_fakes;
@@ -448,6 +449,7 @@ pub struct Station {
     pub repos: run_fakes::FakeRepos,
     pub reviews: run_fakes::FakeReviews,
     pub apps: run_fakes::FakeApps,
+    pub overnight: run_fakes::FakeOvernight,
 }
 
 pub fn station(lark: &FakeLark, clock: &FakeClock, me: &str) -> Station {
@@ -468,6 +470,7 @@ fn station_of(l: Laptop) -> Station {
     let repos = run_fakes::FakeRepos::default();
     let reviews = run_fakes::FakeReviews::default();
     let apps = run_fakes::FakeApps::default();
+    let overnight = run_fakes::FakeOvernight::default();
     let ports = mandor_usecase::RunPorts::<FakeDeps> {
         git: git.clone(),
         agent: agent.clone(),
@@ -478,6 +481,7 @@ fn station_of(l: Laptop) -> Station {
         prompts: PlainMessage,
         reviews: reviews.clone(),
         apps: apps.clone(),
+        overnight: overnight.clone(),
     };
     let svc = Arc::new(mandor_usecase::RunService::new(Arc::new(svc), ports));
     Station {
@@ -491,6 +495,7 @@ fn station_of(l: Laptop) -> Station {
         repos,
         reviews,
         apps,
+        overnight,
     }
 }
 

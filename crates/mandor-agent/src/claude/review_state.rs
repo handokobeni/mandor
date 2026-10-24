@@ -29,6 +29,9 @@ struct StoredState {
     origins: Vec<String>,
     #[serde(default)]
     tabs: BTreeMap<u64, StoredTab>,
+    /// Halaman Playwright reviewer VM.
+    #[serde(default)]
+    page: Option<StoredTab>,
 }
 
 fn to_domain(s: StoredState) -> ReviewState {
@@ -47,6 +50,10 @@ fn to_domain(s: StoredState) -> ReviewState {
                 )
             })
             .collect(),
+        page: s.page.map(|t| TabState {
+            url: t.url,
+            settled: t.settled,
+        }),
     }
 }
 
@@ -66,6 +73,10 @@ fn from_domain(s: &ReviewState) -> StoredState {
                 )
             })
             .collect(),
+        page: s.page.as_ref().map(|t| StoredTab {
+            url: t.url.clone(),
+            settled: t.settled,
+        }),
     }
 }
 
@@ -77,25 +88,42 @@ pub fn lock_path(path: &Path) -> PathBuf {
     path.with_file_name(name)
 }
 
-fn open_private(path: &Path, truncate: bool) -> std::io::Result<std::fs::File> {
+#[cfg_attr(not(unix), allow(unused_variables))]
+fn open_with_mode(path: &Path, mode: u32) -> std::io::Result<std::fs::File> {
     let mut opts = std::fs::OpenOptions::new();
-    opts.create(true).write(true).truncate(truncate);
+    opts.create(true).write(true).truncate(true);
     #[cfg(unix)]
     {
-        use std::os::unix::fs::OpenOptionsExt;
-        opts.mode(0o600);
+        use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
+        opts.mode(mode);
+        let f = opts.open(path)?;
+        // Mode `open` dipotong umask; disetel ulang agar grup benar-benar
+        // mendapat akses yang diminta.
+        f.set_permissions(std::fs::Permissions::from_mode(mode))?;
+        Ok(f)
     }
+    #[cfg(not(unix))]
     opts.open(path)
 }
 
-/// Menulis state secara atomik (berkas sementara lalu rename).
+/// Menulis state secara atomik (berkas sementara lalu rename), 0600.
 ///
 /// # Errors
 /// Pesan bila berkas tidak bisa ditulis.
 pub fn save(path: &Path, state: &ReviewState) -> Result<(), String> {
+    save_with_mode(path, state, 0o600)
+}
+
+/// Seperti [`save`] dengan mode berkas tertentu; di VM 0660 agar hook yang
+/// berjalan sebagai user agent bisa memperbaruinya (KTD-62 plan VM).
+///
+/// # Errors
+/// Pesan bila berkas tidak bisa ditulis.
+pub fn save_with_mode(path: &Path, state: &ReviewState, mode: u32) -> Result<(), String> {
     let body = serde_json::to_vec(&from_domain(state)).map_err(|e| e.to_string())?;
     let tmp = path.with_extension("tmp");
-    let mut f = open_private(&tmp, true).map_err(|e| format!("cannot write review state: {e}"))?;
+    let mut f =
+        open_with_mode(&tmp, mode).map_err(|e| format!("cannot write review state: {e}"))?;
     f.write_all(&body)
         .and_then(|()| f.sync_all())
         .map_err(|e| format!("cannot write review state: {e}"))?;

@@ -164,17 +164,27 @@ pub fn args(spec: &SessionSpec) -> Vec<String> {
 /// [`Cmd`] siap dijalankan dengan environment eksplisit.
 #[must_use]
 pub fn build(spec: &SessionSpec) -> Cmd {
-    match &spec.runner {
-        None => Cmd::new(&spec.claude_bin)
-            .args(args(spec))
-            .cwd(&spec.worktree)
-            .env_policy(EnvPolicy::Explicit(spec.env.clone())),
+    claude_cmd(&spec.claude_bin, spec.runner.as_ref(), &spec.env)
+        .args(args(spec))
+        .cwd(&spec.worktree)
+}
+
+/// `claude` dengan environment eksplisit; di VM dibungkus
+/// `sudo -n -u <user agent> mandord agent-exec` sehingga berjalan sebagai user
+/// agent dengan login Claude miliknya (KTD-62 plan VM). Argumen `claude`
+/// ditambahkan pemanggil.
+#[must_use]
+pub fn claude_cmd(
+    claude_bin: &std::path::Path,
+    runner: Option<&AgentRunner>,
+    env: &[(String, String)],
+) -> Cmd {
+    match runner {
+        None => Cmd::new(claude_bin).env_policy(EnvPolicy::Explicit(env.to_vec())),
         // `agent-exec` menyaring environment lagi di sisi user agent.
         Some(r) => Cmd::new(SUDO)
-            .args(runner_args(r, &spec.env))
-            .arg(&spec.claude_bin)
-            .args(args(spec))
-            .cwd(&spec.worktree)
+            .args(runner_args(r, env))
+            .arg(claude_bin)
             .env_policy(EnvPolicy::Explicit(Vec::new())),
     }
 }

@@ -126,16 +126,25 @@ impl Cmd {
         self
     }
 
-    /// Nama program untuk pesan error dan log.
     /// Direktori kerja perintah, bila diatur.
     #[must_use]
     pub fn cwd_path(&self) -> Option<&Path> {
         self.cwd.as_deref()
     }
 
+    /// Nama program untuk pesan error dan log.
     #[must_use]
     pub fn program_name(&self) -> String {
         self.program.to_string_lossy().into_owned()
+    }
+
+    /// Argumen perintah sebagai teks, untuk log dan test.
+    #[must_use]
+    pub fn arg_list(&self) -> Vec<String> {
+        self.args
+            .iter()
+            .map(|a| a.to_string_lossy().into_owned())
+            .collect()
     }
 
     pub(crate) fn build(&self) -> CommandWrap {

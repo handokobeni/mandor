@@ -457,7 +457,7 @@ impl ClaudeAgent {
         }
         let config = serde_json::to_string_pretty(&serde_json::json!({ "mcpServers": picked }))
             .map_err(|e| PortError::Storage(e.to_string()))?;
-        tokio::fs::create_dir_all(&self.cfg.mcp_dir)
+        self.prepare_dir(&self.cfg.mcp_dir, 0o2750)
             .await
             .map_err(io)?;
         let name: String = match &req.review {
@@ -466,7 +466,7 @@ impl ClaudeAgent {
         };
         let path = self.cfg.mcp_dir.join(format!("{name}.json"));
         tokio::fs::write(&path, config).await.map_err(io)?;
-        restrict(&path).await.map_err(io)?;
+        restrict(&path, self.file_mode(0o640)).await.map_err(io)?;
         Ok(Some(path))
     }
 
@@ -566,7 +566,7 @@ impl ClaudeAgent {
 
     /// `claude -p` tanpa tool, tanpa MCP, env agent tanpa token, dan hook yang sama.
     fn toolless_cmd(&self, worktree: &Path, prompt: String, timeout: Duration) -> Cmd {
-        Cmd::new(&self.cfg.claude_bin)
+        self.claude()
             .args([
                 "-p",
                 "--model",
@@ -587,9 +587,25 @@ impl ClaudeAgent {
                 &settings_json(&self.cfg.hook_command),
             ])
             .cwd(worktree)
-            .env_policy(EnvPolicy::Explicit(self.cfg.env.clone()))
             .stdin_bytes(prompt.into_bytes())
             .timeout(timeout)
+    }
+
+    /// `claude` sebagai user agent di VM, atau user daemon di laptop.
+    fn claude(&self) -> Cmd {
+        crate::claude::command::claude_cmd(
+            &self.cfg.claude_bin,
+            self.cfg.runner.as_ref(),
+            &self.cfg.env,
+        )
+    }
+
+    /// Perintah cek login Claude (`claude auth status --json`).
+    #[must_use]
+    pub fn login_check_cmd(&self) -> Cmd {
+        self.claude()
+            .args(["auth", "status", "--json"])
+            .timeout(LOGIN_CHECK_TIMEOUT)
     }
 }
 
@@ -719,11 +735,7 @@ impl AgentPort for ClaudeAgent {
     }
 
     async fn logged_in(&self) -> bool {
-        let cmd = Cmd::new(&self.cfg.claude_bin)
-            .args(["auth", "status", "--json"])
-            .env_policy(EnvPolicy::Explicit(self.cfg.env.clone()))
-            .timeout(LOGIN_CHECK_TIMEOUT);
-        match run(&cmd).await {
+        match run(&self.login_check_cmd()).await {
             Ok(out) => logged_in_from(&out.stdout),
             Err(e) => {
                 tracing::warn!(error = %e, "status login Claude tidak terbaca");
@@ -854,14 +866,14 @@ fn wt_key(path: &Path) -> String {
 }
 
 #[cfg(unix)]
-async fn restrict(path: &Path) -> std::io::Result<()> {
+async fn restrict(path: &Path, mode: u32) -> std::io::Result<()> {
     use std::os::unix::fs::PermissionsExt;
-    tokio::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600)).await
+    tokio::fs::set_permissions(path, std::fs::Permissions::from_mode(mode)).await
 }
 
 #[cfg(not(unix))]
 #[allow(clippy::unused_async, reason = "tanda tangan sama dengan versi Unix")]
-async fn restrict(_path: &Path) -> std::io::Result<()> {
+async fn restrict(_path: &Path, _mode: u32) -> std::io::Result<()> {
     Ok(())
 }
 
@@ -949,7 +961,32 @@ fn logged_in_from(stdout: &str) -> bool {
 }
 
 impl ClaudeAgent {
-    /// Menulis state pagar awal review (0600): origin app, tanpa tab.
+    /// Daemon VM: berkas run dipakai bersama user agent lewat grup
+    /// developer (KTD-62 plan VM).
+    fn shared_with_agent(&self) -> bool {
+        self.cfg.runner.is_some()
+    }
+
+    /// `vm_mode` di VM, 0600 di laptop.
+    fn file_mode(&self, vm_mode: u32) -> u32 {
+        if self.shared_with_agent() {
+            vm_mode
+        } else {
+            0o600
+        }
+    }
+
+    /// Membuat direktori berkas run; di VM modenya disetel (setgid agar
+    /// berkas baru ikut grup developer), di laptop mengikuti umask.
+    async fn prepare_dir(&self, dir: &Path, vm_mode: u32) -> std::io::Result<()> {
+        tokio::fs::create_dir_all(dir).await?;
+        if self.shared_with_agent() {
+            restrict(dir, vm_mode).await?;
+        }
+        Ok(())
+    }
+
+    /// Menulis state pagar awal review (0600, 0660 di VM): origin app, tanpa tab.
     async fn write_review_state(&self, review: &ReviewRequest) -> Result<(), PortError> {
         let path = self.review_state_path(&review.review_id);
         let dir = self.cfg.review_dir.clone();
@@ -957,10 +994,12 @@ impl ClaudeAgent {
             origins: review.origins.clone(),
             ..Default::default()
         };
-        let write = tokio::task::spawn_blocking(move || {
-            std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
-            review_state::save(&path, &state)
-        });
+        self.prepare_dir(&dir, 0o2770)
+            .await
+            .map_err(|e| PortError::Storage(e.to_string()))?;
+        let mode = self.file_mode(0o660);
+        let write =
+            tokio::task::spawn_blocking(move || review_state::save_with_mode(&path, &state, mode));
         match tokio::time::timeout(FILE_TIMEOUT, write).await {
             Ok(Ok(Ok(()))) => Ok(()),
             Ok(Ok(Err(e))) => Err(PortError::Storage(e)),
@@ -1227,6 +1266,78 @@ mod tests {
         assert!(spec.allowed.contains(&"Bash(git diff*)".to_owned()));
         let argv = format!("{:?}", spec.allowed);
         assert!(!argv.contains("tok-rahasia"));
+    }
+
+    /// Di VM login Claude ada di user agent: cek login dan pembuat pesan
+    /// commit/PR berjalan lewat `sudo agent-exec`, bukan sebagai user daemon.
+    #[test]
+    fn perintah_claude_tanpa_tool_di_vm_berjalan_sebagai_user_agent() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut cfg = test_agent(dir.path().join("mcp")).cfg;
+        cfg.runner = Some(crate::claude::command::AgentRunner {
+            exe: "/opt/mandord".into(),
+            user: "beni-agent".to_owned(),
+            run_dir: "/srv/m/beni/runs".into(),
+        });
+        let agent = ClaudeAgent::new(cfg);
+        for cmd in [
+            agent.login_check_cmd(),
+            agent.commit_message_cmd(Path::new("/w"), "+x"),
+        ] {
+            assert_eq!(cmd.program_name(), "/usr/bin/sudo");
+            let args = cmd.arg_list();
+            let dash = args.iter().position(|a| a == "--").unwrap();
+            assert_eq!(&args[..4], ["-n", "-u", "beni-agent", "/opt/mandord"]);
+            assert_eq!(args[dash + 1], "claude");
+        }
+        let laptop = test_agent(dir.path().join("mcp"));
+        assert_eq!(laptop.login_check_cmd().program_name(), "claude");
+    }
+
+    /// Di VM `claude` dan hook berjalan sebagai user agent: konfigurasi MCP
+    /// bisa dibaca grup, state review bisa ditulis grup, dan direktorinya
+    /// setgid agar berkas baru ikut grup developer (KTD-62 plan VM).
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn berkas_run_di_vm_bisa_diakses_grup_developer() {
+        use mandor_usecase::review::{CapabilityRole, CapabilityToken, LedgerAccess};
+        use std::os::unix::fs::PermissionsExt;
+        let mode = |p: &Path| std::fs::metadata(p).unwrap().permissions().mode() & 0o7777;
+        let dir = tempfile::tempdir().unwrap();
+        let mut cfg = test_agent(dir.path().join("mcp")).cfg;
+        cfg.runner = Some(crate::claude::command::AgentRunner {
+            exe: "/opt/mandord".into(),
+            user: "beni-agent".to_owned(),
+            run_dir: dir.path().to_path_buf(),
+        });
+        let agent = ClaudeAgent::new(cfg);
+        let mut req = workspace_req(dir.path().to_path_buf());
+        req.ledger = Some(LedgerAccess {
+            role: CapabilityRole::Verdict,
+            token: CapabilityToken::for_test("tok-v"),
+        });
+        let review = ReviewRequest {
+            review_id: "rv1".to_owned(),
+            origins: vec!["http://localhost:5173".to_owned()],
+            browser: false,
+            model: None,
+            budget_cents: 100,
+            timeout: Duration::from_secs(900),
+        };
+        req.review = Some(review.clone());
+        let path = agent.prepare_workspace(&req).await.unwrap().unwrap();
+        assert_eq!(mode(&path), 0o640);
+        assert_eq!(mode(&dir.path().join("mcp")), 0o2750);
+        agent.write_review_state(&review).await.unwrap();
+        assert_eq!(mode(&agent.review_state_path("rv1")), 0o660);
+        assert_eq!(mode(&dir.path().join("mcp/review")), 0o2770);
+
+        // Laptop tetap privat.
+        let laptop = test_agent(dir.path().join("laptop"));
+        let path = laptop.prepare_workspace(&req).await.unwrap().unwrap();
+        assert_eq!(mode(&path), 0o600);
+        laptop.write_review_state(&review).await.unwrap();
+        assert_eq!(mode(&laptop.review_state_path("rv1")), 0o600);
     }
 
     /// KTD-64 plan VM: reviewer daemon VM memakai MCP Playwright headless

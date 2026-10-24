@@ -22,6 +22,7 @@ fn kind(e: &AgentEvent) -> &'static str {
         AgentEvent::PermissionDenied { .. } => "permission_denied",
         AgentEvent::RateLimit { .. } => "rate_limit",
         AgentEvent::Usage(_) => "usage",
+        AgentEvent::MessageUsage { .. } => "message_usage",
         AgentEvent::Done { .. } => "done",
         AgentEvent::Failed { .. } => "failed",
     }
@@ -29,7 +30,12 @@ fn kind(e: &AgentEvent) -> &'static str {
 
 #[test]
 fn run_lengkap_menghasilkan_event_berurutan_dengan_session_id() {
-    let events: Vec<AgentEvent> = fixture().lines().flat_map(parse_line).collect();
+    // Pemakaian per pesan diuji terpisah.
+    let events: Vec<AgentEvent> = fixture()
+        .lines()
+        .flat_map(parse_line)
+        .filter(|e| !matches!(e, AgentEvent::MessageUsage { .. }))
+        .collect();
     let kinds: Vec<_> = events.iter().map(kind).collect();
     assert_eq!(
         kinds,
@@ -106,7 +112,11 @@ fn baris_rusak_di_tengah_dilewati_dan_stream_berlanjut() {
     lines.insert(3, "{\"type\": \"assistant\", rusak");
     lines.insert(5, "bukan json sama sekali");
     lines.insert(6, "");
-    let events: Vec<AgentEvent> = lines.into_iter().flat_map(parse_line).collect();
+    let events: Vec<AgentEvent> = lines
+        .into_iter()
+        .flat_map(parse_line)
+        .filter(|e| !matches!(e, AgentEvent::MessageUsage { .. }))
+        .collect();
     assert!(matches!(
         events.first(),
         Some(AgentEvent::SessionStarted { .. })
@@ -160,4 +170,28 @@ fn hasil_batas_biaya_dikenali_dengan_biaya_dan_usage() {
         })
         .unwrap();
     assert!(usage.output_tokens > 0, "{usage:?}");
+}
+
+#[test]
+fn pemakaian_per_pesan_dihitung_sekali_per_id_dan_tanpa_subagent() {
+    let mut tracker = mandor_domain::UsageTracker::default();
+    let mut input = 0;
+    let mut lines: Vec<String> = fixture().lines().map(str::to_owned).collect();
+    // Pesan subagent tidak dihitung.
+    lines.push(
+        r#"{"type":"assistant","parent_tool_use_id":"toolu_x","message":{"id":"msg_sub","usage":{"input_tokens":999,"output_tokens":999}}}"#
+            .to_owned(),
+    );
+    let mut ids = Vec::new();
+    for e in lines.iter().flat_map(|l| parse_line(l)) {
+        if let AgentEvent::MessageUsage { message_id, usage } = e {
+            input += tracker.observe(&message_id, &usage).input_tokens;
+            ids.push(message_id);
+        }
+    }
+    assert!(!ids.iter().any(|i| i == "msg_sub"));
+    assert_eq!(
+        input, 4,
+        "dua pesan, masing-masing 2 token input, walau 6 baris"
+    );
 }

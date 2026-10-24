@@ -648,3 +648,86 @@ async fn berkas_ci_yang_berubah_saat_review_menahan_push_vm() {
     );
     assert!(st.git.st().pushes.is_empty());
 }
+
+// --- Pemakaian per siklus dan batas (U3 plan VM) ---
+
+fn usage_event(id: &str, input: u64, output: u64) -> mandor_domain::AgentEvent {
+    mandor_domain::AgentEvent::MessageUsage {
+        message_id: id.to_owned(),
+        usage: mandor_domain::Usage {
+            input_tokens: input,
+            output_tokens: output,
+            ..mandor_domain::Usage::default()
+        },
+    }
+}
+
+#[tokio::test]
+async fn covers_ae5_batas_tercapai_menahan_kartu_dan_menunggu_siklus_berikutnya() {
+    let (lark, clock, st) = vm_with(&["a", "b", "c"], wib(0, 19, 0)).await;
+    st.svc
+        .set_overnight_settings(&settings(Some(1_000)))
+        .await
+        .unwrap();
+    queue(&st, &["a", "b", "c"]).await;
+    assert_eq!(
+        st.svc.overnight_tick().await.unwrap().started.as_deref(),
+        Some("a")
+    );
+    let a = st.agent.last();
+    a.emit(usage_event("m1", 300, 100));
+    a.emit(usage_event("m1", 300, 100));
+    a.finish("Pertanyaan?");
+    eventually(|| run_of(&st, "a").state == RunState::Held).await;
+
+    at(&lark, &clock, wib(0, 23, 0));
+    assert_eq!(
+        st.svc.overnight_tick().await.unwrap().started.as_deref(),
+        Some("b")
+    );
+    let b = st.agent.last();
+    b.emit(usage_event("m2", 500, 200));
+    eventually(|| held(&st, "b").is_some()).await;
+    assert_eq!(held(&st, "b"), Some(mandor_domain::HoldReason::UsageLimit));
+    assert!(b.is_stopped(), "agent dihentikan di tengah giliran");
+
+    assert_eq!(st.svc.overnight_tick().await.unwrap().started, None);
+    at(&lark, &clock, wib(1, 1, 0));
+    assert_eq!(
+        st.svc.overnight_tick().await.unwrap().started,
+        None,
+        "setelah tengah malam masih siklus yang sama"
+    );
+    at(&lark, &clock, wib(1, 19, 0));
+    assert_eq!(
+        st.svc.overnight_tick().await.unwrap().started.as_deref(),
+        Some("c"),
+        "siklus baru: penghitung kembali nol"
+    );
+}
+
+#[tokio::test]
+async fn kuota_langganan_ditolak_menahan_usage_limit_tanpa_coba_lagi() {
+    let (_lark, _clock, st) = vm_with(&["a", "b"], wib(0, 20, 0)).await;
+    queue(&st, &["a", "b"]).await;
+    st.svc.overnight_tick().await.unwrap();
+    let turns = st.agent.count();
+    st.agent.last().emit(mandor_domain::AgentEvent::RateLimit {
+        status: "rejected".to_owned(),
+        utilization: Some(1.0),
+    });
+    eventually(|| held(&st, "a").is_some()).await;
+    assert_eq!(held(&st, "a"), Some(mandor_domain::HoldReason::UsageLimit));
+    assert_eq!(st.agent.count(), turns, "tanpa coba lagi");
+}
+
+#[tokio::test]
+async fn login_claude_tidak_valid_tidak_memulai_kartu() {
+    let (_lark, _clock, st) = vm_with(&["a"], wib(0, 20, 0)).await;
+    queue(&st, &["a"]).await;
+    *st.agent.logged_out.lock().unwrap() = true;
+    let tick = st.svc.overnight_tick().await.unwrap();
+    assert_eq!(tick.started, None);
+    assert!(tick.blocked.unwrap().contains("not logged in"));
+    assert_eq!(st.overnight.ids(), ["a"], "kartu tetap di antrean");
+}

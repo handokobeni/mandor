@@ -7,10 +7,13 @@ use std::pin::Pin;
 use std::sync::Arc;
 
 use mandor_domain::run::touches_sensitive_path;
-use mandor_domain::{DaemonRole, GateDecision, HoldReason, RunState};
+use mandor_domain::{
+    AgentEvent, DaemonRole, GateDecision, HoldReason, RunState, Usage, UsageTracker,
+};
 
+use super::{CycleUsage, OvernightStore};
 use crate::notify::notice;
-use crate::ports::Deps;
+use crate::ports::{Clock, Deps};
 use crate::run::{PublishOutcome, RunError, RunService};
 use crate::run_ports::{Hold, NoticeKind, Notifier, RunRecord, RunStore};
 
@@ -117,6 +120,73 @@ impl<D: Deps> RunService<D> {
             let mut run = self.load(run_id).await?;
             self.hold(&mut run, held.0, Some(held.1)).await
         })
+    }
+
+    /// Menghitung pemakaian event ke siklus berjalan. `true` bila batas siklus
+    /// tercapai atau kuota langganan menolak (R10); kegagalan menyimpan hanya
+    /// dicatat.
+    pub(crate) async fn vm_count_usage(
+        &self,
+        event: &AgentEvent,
+        tracker: &mut UsageTracker,
+    ) -> bool {
+        match event {
+            AgentEvent::RateLimit { status, .. } => status == "rejected",
+            AgentEvent::MessageUsage { message_id, usage } => {
+                let delta = tracker.observe(message_id, usage);
+                match self.add_usage(&delta).await {
+                    Ok(hit) => hit,
+                    Err(e) => {
+                        tracing::warn!(error = %e, "pemakaian siklus tidak tersimpan");
+                        false
+                    }
+                }
+            }
+            _ => false,
+        }
+    }
+
+    /// Menambah pemakaian ke siklus; `true` bila sudah mencapai batas.
+    async fn add_usage(&self, delta: &Usage) -> Result<bool, RunError> {
+        let Some(settings) = self.overnight.settings().await? else {
+            return Ok(false);
+        };
+        let Some(window) = super::window_of(&settings) else {
+            return Ok(false);
+        };
+        let start = window.cycle_start(self.sync.clock.now_ms());
+        let usage = CycleUsage {
+            input_tokens: delta.input_tokens,
+            output_tokens: delta.output_tokens,
+            cache_read_tokens: delta.cache_read_input_tokens,
+            cache_write_tokens: delta.cache_creation_input_tokens,
+        };
+        self.overnight.add_cycle_usage(start, &usage).await?;
+        let used = self.overnight.cycle_usage(start).await?.counted();
+        Ok(settings.token_limit.is_some_and(|l| used >= l))
+    }
+
+    /// Run dihentikan karena batas: `Held usage_limit` (R10). Review yang sedang
+    /// berjalan ikut berhenti.
+    pub(crate) async fn hold_for_limit(
+        &self,
+        run_id: &str,
+        generation: i64,
+    ) -> Result<(), RunError> {
+        self.clear_stopper(run_id, generation);
+        self.revoke_capabilities(run_id);
+        let mut run = self.load(run_id).await?;
+        if run.generation != generation {
+            return Ok(());
+        }
+        run.pid = None;
+        run.review_id = None;
+        self.hold(
+            &mut run,
+            HoldReason::UsageLimit,
+            Some("Usage limit reached for this overnight cycle".to_owned()),
+        )
+        .await
     }
 
     /// Perubahan run menyentuh CI, konfigurasi agent, atau hook git.

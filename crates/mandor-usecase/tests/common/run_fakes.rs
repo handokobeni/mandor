@@ -398,6 +398,8 @@ pub struct FakeAgent {
     pub fail_pr_description: Arc<Mutex<bool>>,
     /// Review yang berkasnya dibersihkan (`end_review`).
     pub ended_reviews: Arc<Mutex<Vec<String>>>,
+    /// Login Claude tidak valid (plan VM U3).
+    pub logged_out: Arc<Mutex<bool>>,
 }
 
 /// Salinan [`PrContext`] yang diterima fake agent.
@@ -461,6 +463,10 @@ impl AgentPort for FakeAgent {
     async fn reap(&self, pid: u32) {
         self.reaped.lock().unwrap().push(pid);
     }
+    async fn logged_in(&self) -> bool {
+        !*self.logged_out.lock().unwrap()
+    }
+
     async fn end_review(&self, review_id: &str) {
         self.ended_reviews
             .lock()

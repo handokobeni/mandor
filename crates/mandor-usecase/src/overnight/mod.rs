@@ -16,7 +16,7 @@ pub use ports::{CycleUsage, Dequeued, OvernightSettings, OvernightStore, QueueIt
 
 use crate::ports::{Clock, Deps, PortError};
 use crate::run::{RunError, RunService};
-use crate::run_ports::{RunRecord, RunStore};
+use crate::run_ports::{AgentPort, RunRecord, RunStore};
 use crate::{Planning, StartTarget};
 
 /// Pesan lanjutan untuk kartu tertahan yang diantre ulang tanpa catatan.
@@ -29,6 +29,8 @@ pub struct OvernightTick {
     pub started: Option<String>,
     /// Kartu yang dikeluarkan karena tidak lagi memenuhi syarat, beserta alasan.
     pub dequeued: Vec<(String, String)>,
+    /// Alasan tidak ada kartu yang dimulai walau giliran ada, mis. login Claude.
+    pub blocked: Option<String>,
 }
 
 impl<D: Deps> RunService<D> {
@@ -72,6 +74,11 @@ impl<D: Deps> RunService<D> {
             let Some(item) = queue.iter().find(|i| i.record_id == id).cloned() else {
                 return Ok(out);
             };
+            // Login Claude diperiksa tepat sebelum memulai (KTD-59).
+            if !self.agent.logged_in().await {
+                out.blocked = Some("Claude Code is not logged in on the VM".to_owned());
+                return Ok(out);
+            }
             match self.start_queued(&item, now).await? {
                 Ok(()) => {
                     out.started = Some(item.record_id);
@@ -289,7 +296,7 @@ impl<D: Deps> RunService<D> {
     }
 }
 
-fn window_of(s: &OvernightSettings) -> Option<Window> {
+pub(crate) fn window_of(s: &OvernightSettings) -> Option<Window> {
     Window::parse(&s.start, &s.end, &s.offset).ok()
 }
 

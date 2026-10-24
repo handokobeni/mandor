@@ -295,6 +295,9 @@ pub trait AgentPort: Send + Sync {
     fn reap(&self, pid: u32) -> impl Future<Output = ()> + Send;
     /// Membersihkan berkas milik sesi reviewer (state pagar browser).
     fn end_review(&self, review_id: &str) -> impl Future<Output = ()> + Send;
+    /// Login Claude Code yang dipakai agent masih valid (KTD-59 plan VM).
+    /// Kegagalan memeriksa berarti tidak valid.
+    fn logged_in(&self) -> impl Future<Output = bool> + Send;
 }
 
 /// Bahan deskripsi PR. Semua teks berasal dari Lark atau diff dan diperlakukan

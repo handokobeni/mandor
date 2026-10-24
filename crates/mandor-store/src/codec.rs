@@ -222,6 +222,12 @@ pub(crate) fn chat_to_json(
                            "denials": denials, "cost_usd": cost_usd, "limit": limit})
                 }
                 E::Failed { message } => json!({"type": "failed", "message": message}),
+                E::MessageUsage { message_id, usage } => json!({
+                    "type": "message_usage",
+                    "message_id": message_id,
+                    "input_tokens": usage.input_tokens,
+                    "output_tokens": usage.output_tokens
+                }),
             },
         ),
     }

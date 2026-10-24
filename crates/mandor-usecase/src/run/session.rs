@@ -96,23 +96,44 @@ impl<D: Deps> RunService<D> {
     ) {
         let mut end = TurnEnd::Error("agent stopped without a result".to_owned());
         let mut stats = ReviewEnd::default();
+        let mut tracker = mandor_domain::UsageTracker::default();
+        let mut limited = false;
         while let Some(event) = handle.next_event().await {
             observe(&event, &mut end, &mut stats);
-            // Sesi reviewer tidak masuk chat pelaksana; progresnya lewat buku AC.
-            match self.current_state(&run_id, generation).await {
-                Some(current) if current != RunState::Reviewing => {}
-                _ => continue,
+            // Batas siklus VM dihitung per pesan agar bisa berhenti di tengah
+            // giliran (KTD-59 plan VM).
+            if self.is_vm() && !limited && self.vm_count_usage(&event, &mut tracker).await {
+                limited = true;
+                handle.stopper().stop().await;
             }
-            if let Err(e) = self
-                .runs
-                .append(&run_id, &ChatItem::Agent(event), self.now())
-                .await
-            {
-                tracing::warn!(run_id, error = %e, "gagal menyimpan event agent");
-            }
+            self.record_event(&run_id, generation, event).await;
         }
-        if let Err(e) = self.finish_turn(&run_id, generation, end, stats).await {
+        let finished = if limited {
+            self.hold_for_limit(&run_id, generation).await
+        } else {
+            self.finish_turn(&run_id, generation, end, stats).await
+        };
+        if let Err(e) = finished {
             tracing::warn!(run_id, error = %e, "gagal menyelesaikan giliran agent");
+        }
+    }
+
+    /// Menyimpan event agent ke chat run. Pemakaian per pesan dan sesi reviewer
+    /// tidak masuk chat pelaksana; progres review lewat buku AC.
+    async fn record_event(&self, run_id: &str, generation: i64, event: AgentEvent) {
+        if matches!(event, AgentEvent::MessageUsage { .. }) {
+            return;
+        }
+        match self.current_state(run_id, generation).await {
+            Some(current) if current != RunState::Reviewing => {}
+            _ => return,
+        }
+        if let Err(e) = self
+            .runs
+            .append(run_id, &ChatItem::Agent(event), self.now())
+            .await
+        {
+            tracing::warn!(run_id, error = %e, "gagal menyimpan event agent");
         }
     }
 

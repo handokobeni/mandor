@@ -620,6 +620,20 @@ impl AgentPort for ClaudeAgent {
         })
     }
 
+    async fn logged_in(&self) -> bool {
+        let cmd = Cmd::new(&self.cfg.claude_bin)
+            .args(["auth", "status", "--json"])
+            .env_policy(EnvPolicy::Explicit(self.cfg.env.clone()))
+            .timeout(LOGIN_CHECK_TIMEOUT);
+        match run(&cmd).await {
+            Ok(out) => logged_in_from(&out.stdout),
+            Err(e) => {
+                tracing::warn!(error = %e, "status login Claude tidak terbaca");
+                false
+            }
+        }
+    }
+
     async fn end_review(&self, review_id: &str) {
         let state = self.review_state_path(review_id);
         let mcp = self
@@ -809,6 +823,16 @@ pub fn chrome_check_result(stdout: &str, stderr: &str) -> ChromeCheck {
 const REVIEW_WRITE_TOOLS: &[&str] = &["Edit", "Write", "MultiEdit", "NotebookEdit"];
 /// Batas waktu menulis atau menghapus berkas state review.
 const FILE_TIMEOUT: Duration = Duration::from_secs(5);
+/// Batas `claude auth status`.
+const LOGIN_CHECK_TIMEOUT: Duration = Duration::from_secs(20);
+
+/// `loggedIn` dari `claude auth status --json`; keluaran lain = tidak login.
+fn logged_in_from(stdout: &str) -> bool {
+    serde_json::from_str::<serde_json::Value>(stdout)
+        .ok()
+        .and_then(|v| v.get("loggedIn").and_then(serde_json::Value::as_bool))
+        .unwrap_or(false)
+}
 
 impl ClaudeAgent {
     /// Menulis state pagar awal review (0600): origin app, tanpa tab.
@@ -836,6 +860,16 @@ impl ClaudeAgent {
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn status_login_claude_dari_json() {
+        assert!(super::logged_in_from(
+            r#"{"loggedIn":true,"authMethod":"claude.ai"}"#
+        ));
+        assert!(!super::logged_in_from(r#"{"loggedIn":false}"#));
+        assert!(!super::logged_in_from("Not logged in"));
+    }
+
     use super::*;
 
     #[test]

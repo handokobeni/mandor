@@ -23,7 +23,7 @@ pub mod task;
 pub mod trust;
 
 pub use ac_ledger::{AcRow, Design, FetchedAc, RowStatus, Verdict};
-pub use agent::{AgentEvent, Usage};
+pub use agent::{AgentEvent, Usage, UsageTracker};
 pub use claim::{Claim, ClaimIdentity, ClaimRefused, Holder};
 pub use cursor::{Cursor, Reply};
 pub use gate::GateRejection;

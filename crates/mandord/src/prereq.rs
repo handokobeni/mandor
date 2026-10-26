@@ -31,13 +31,20 @@ async fn probe(name: &str, cmd: Cmd) -> PrereqView {
     }
 }
 
-/// Semua prasyarat, berurutan. Dijalankan bersamaan agar cepat.
-pub async fn check_all(claude_bin: &Path) -> Vec<PrereqView> {
+/// Semua prasyarat, berurutan. Dijalankan bersamaan agar cepat. `path`
+/// adalah PATH login shell pengguna: service systemd hanya membawa PATH
+/// sistem, sedangkan agent dijalankan dengan PATH login shell (mis. `claude`
+/// di `~/.local/bin`).
+pub async fn check_all(claude_bin: &Path, path: Option<&str>) -> Vec<PrereqView> {
+    let cmd = |program: &Path| match path {
+        Some(p) => Cmd::new(program).env("PATH", p),
+        None => Cmd::new(program),
+    };
     let (git, gh, gh_auth, claude) = tokio::join!(
-        probe("git", Cmd::new("git").arg("--version")),
-        probe("gh", Cmd::new("gh").arg("--version")),
-        probe("gh login", Cmd::new("gh").args(["auth", "status"])),
-        probe("claude", Cmd::new(claude_bin).arg("--version")),
+        probe("git", cmd(Path::new("git")).arg("--version")),
+        probe("gh", cmd(Path::new("gh")).arg("--version")),
+        probe("gh login", cmd(Path::new("gh")).args(["auth", "status"])),
+        probe("claude", cmd(claude_bin).arg("--version")),
     );
     vec![git, gh, gh_auth, claude]
 }
@@ -67,5 +74,24 @@ mod tests {
             "{}",
             hilang.detail
         );
+    }
+
+    /// Service systemd punya PATH sistem saja; `claude` di `~/.local/bin`
+    /// ditemukan lewat PATH login shell, sama seperti agent.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn claude_dicari_lewat_path_login_shell() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let fake = dir.path().join("claude-uji-mandor");
+        std::fs::write(&fake, "#!/bin/sh\necho '2.1.310 (Claude Code)'\n").unwrap();
+        std::fs::set_permissions(&fake, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let path = format!("{}:/usr/bin:/bin", dir.path().display());
+        let checks = check_all(Path::new("claude-uji-mandor"), Some(&path)).await;
+        let claude = checks.iter().find(|c| c.name == "claude").unwrap();
+        assert!(claude.ok, "{}", claude.detail);
+        assert_eq!(claude.detail, "2.1.310 (Claude Code)");
+        let tanpa = check_all(Path::new("claude-uji-mandor"), None).await;
+        assert!(!tanpa.iter().find(|c| c.name == "claude").unwrap().ok);
     }
 }

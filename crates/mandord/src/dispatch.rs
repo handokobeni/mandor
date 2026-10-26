@@ -751,7 +751,14 @@ impl AppDispatch {
             method::NOTIFICATIONS_TAKE => self.notifications().await,
             method::NOTIFICATIONS_LIST => self.notifications_list().await,
             method::NOTIFICATIONS_READ => self.notifications_read(params(v)?).await,
-            method::SYSTEM_CHECK => ok(&crate::prereq::check_all(&self.app.cfg.claude_bin).await),
+            method::SYSTEM_CHECK => {
+                let env = crate::session::login_env(&self.app.cfg).await;
+                ok(&crate::prereq::check_all(
+                    &self.app.cfg.claude_bin,
+                    env.get("PATH").map(String::as_str),
+                )
+                .await)
+            }
             method::REPOS_DISCOVER => self.repos_discover().await,
             method::FS_LIST_DIRS => self.list_dirs(params(v)?).await,
             method::AGENT_SKILLS => {

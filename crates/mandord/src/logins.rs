@@ -16,7 +16,18 @@ const RUNBOOK: &str = "docs/runbook/setup-vm.md";
 
 /// Status ketiga login, diperiksa bersamaan.
 pub async fn check(cfg: &Config, vm: &VmAgent, lark: &LarkStatus) -> Vec<LoginCheck> {
+    // PATH login shell, seperti agent: service systemd hanya membawa PATH sistem.
+    let login = crate::session::login_env(cfg).await;
+    let path = login.get("PATH").cloned().unwrap_or_default();
+    let mut env: Vec<(String, String)> = cfg
+        .base_env
+        .iter()
+        .filter(|(k, _)| k != "PATH")
+        .cloned()
+        .collect();
+    env.push(("PATH".to_owned(), path.clone()));
     let gh = Cmd::new(&cfg.gh_bin)
+        .env("PATH", path)
         .args(["auth", "status", "--hostname", "github.com"])
         .scrub_tokens()
         .timeout(CHECK_TIMEOUT);
@@ -25,7 +36,7 @@ pub async fn check(cfg: &Config, vm: &VmAgent, lark: &LarkStatus) -> Vec<LoginCh
         user: vm.user.clone(),
         run_dir: vm.run_dir(),
     };
-    let claude = claude_cmd(&cfg.claude_bin, Some(&runner), &cfg.base_env)
+    let claude = claude_cmd(&cfg.claude_bin, Some(&runner), &env)
         .args(["auth", "status", "--json"])
         .timeout(CHECK_TIMEOUT);
     let (gh, claude) = tokio::join!(run(&gh), run(&claude));

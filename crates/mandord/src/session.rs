@@ -242,7 +242,7 @@ fn agent_hook_command(base: &str, vm: Option<&config::VmAgent>) -> String {
 }
 
 /// Environment login shell pengguna; fallback ke environment minimal dari config.
-async fn login_env(cfg: &Config) -> BTreeMap<String, String> {
+pub(crate) async fn login_env(cfg: &Config) -> BTreeMap<String, String> {
     match mandor_proc::capture_login_env(&cfg.shell, LOGIN_ENV_TIMEOUT).await {
         Ok(env) => env,
         Err(e) => {

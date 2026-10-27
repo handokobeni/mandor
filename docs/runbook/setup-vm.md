@@ -73,8 +73,11 @@ harus keluar tanpa meminta password.
 
 - Beri setiap developer rentang port sendiri, mis. `handoko_ben` 5100–5199. Port app
   repo dan port callback login Lark harus di dalamnya; daemon menolak yang di luar.
-- Daftarkan redirect URL `http://127.0.0.1:<port callback>/callback` developer
-  itu di konsol app Lark (Security Settings → Redirect URLs).
+  Contoh di runbook ini: callback Lark `handoko_ben` = 5199.
+- Tambahkan redirect URL `http://127.0.0.1:5199/callback` di konsol app Lark
+  (Security Settings → Redirect URLs). `http://127.0.0.1:53682/callback` milik
+  daemon laptop tetap dipertahankan. Host tetap `127.0.0.1` karena callback
+  dibuka browser laptop dan diteruskan ke VM lewat `ssh -L`.
 - App Lark perlu kapabilitas bot dan izin kirim pesan ke user
   (`im:message:send_as_bot`) untuk DM laporan pagi.
 
@@ -102,31 +105,60 @@ systemctl --user restart mandord
 systemctl --user status mandord
 ```
 
-## 6. Developer: login dari terminal SSH
+## 6. Developer: akses SSH dari laptop
 
-```bash
-gh auth login                               # sebagai handoko_ben: push dan PR oleh daemon
-sudo -iu handoko_ben-agent claude                  # login Claude Code di user agent (perlu izin admin)
-ssh -L 5150:127.0.0.1:5150 handoko_ben@instance-lembur          # dari laptop, lalu di VM:
-mandord login lark
+App dan login Lark memakai `ssh` sungguhan dari laptop (WSL); SSH-in-browser
+Google Cloud tidak bisa meneruskan port. `instance-lembur` adalah nama
+instance GCP, bukan nama host yang bisa dijangkau, jadi buat alias `lembur`
+di `~/.ssh/config` WSL laptop dengan salah satu cara:
+
+```sshconfig
+# A. VM punya IP eksternal dan kunci SSH Anda sudah didaftarkan
+#    (OS Login: `gcloud compute os-login ssh-keys add --key-file ~/.ssh/id_ed25519.pub`,
+#    atau admin menambahkannya di metadata instance).
+Host lembur
+    HostName <IP eksternal instance-lembur>
+    User handoko_ben
+    IdentityFile ~/.ssh/id_ed25519
+
+# B. Tanpa IP eksternal: lewat IAP dengan gcloud (zona sesuai instance).
+Host lembur
+    User handoko_ben
+    IdentityFile ~/.ssh/google_compute_engine
+    ProxyCommand gcloud compute start-iap-tunnel instance-lembur 22 --listen-on-stdin --zone <zona>
 ```
 
-Sebelum login, isi Lark App daemon VM dari app laptop: **Settings → VM → Lark**
-(app ID, secret, Base, tabel, dan port callback di rentang port Anda), setelah
-link VM tersambung (langkah 7). Repo dan workspace VM juga didaftarkan dari
-**Settings → VM → Repos/Workspaces** (path di `/srv/mandor/<dev>/workspaces`).
-`mandord login lark` mencetak URL; buka di browser laptop.
+Cek: `ssh lembur hostname` harus mencetak `instance-lembur` tanpa meminta
+password. Pada cara B, **Check host key** di app tidak bisa membaca kunci
+lewat IAP; pin host key manual dari admin.
+
+## 7. Developer: sambungkan app, isi Lark dan repo VM
+
+1. Di app laptop: **Settings → Overnight VM**, isi `lembur`, cocokkan
+   fingerprint host key dengan yang diberikan admin, lalu **Trust and
+   connect**. Daemon laptop harus versi yang mendukung klaim per daemon
+   (protokol 1.1).
+2. **Settings → VM → Lark**: app ID, secret, Base, tabel, dan **Callback port
+   5199** (di rentang port Anda dan terdaftar di app Lark, bagian 4).
+3. **Settings → VM → Repos/Workspaces**: daftarkan repo dengan path di
+   `/srv/mandor/handoko_ben/workspaces`; port app repo juga di rentang
+   5100–5199.
+
+## 8. Developer: login
+
+```bash
+# Di VM (SSH-in-browser atau ssh lembur):
+gh auth login                                  # sebagai handoko_ben: push dan PR oleh daemon
+sudo -iu handoko_ben-agent claude              # login Claude Code di user agent (perlu izin admin)
+
+# Di laptop (WSL): teruskan port callback, lalu di sesi itu jalankan login Lark.
+ssh -L 5199:127.0.0.1:5199 lembur
+mandord login lark                             # buka URL yang dicetak di browser laptop
+```
 
 Status ketiga login terlihat di tab **Overnight** app (atau RPC `status`).
 
-## 7. Developer: sambungkan app
-
-Di app laptop: **Settings → Overnight VM**, isi alias SSH atau `handoko_ben@instance-lembur`,
-cocokkan fingerprint host key dengan yang diberikan admin, lalu **Trust and
-connect**. Daemon laptop harus versi yang mendukung klaim per daemon
-(protokol 1.1).
-
-## 8. VM dimatikan atau restart
+## 9. VM dimatikan atau restart
 
 `mandord` dan service user agent start sendiri saat boot (linger). Antrean,
 setelan, pemakaian siklus, dan worktree tetap ada. Kartu yang sedang
@@ -136,7 +168,7 @@ tekan **Queue again** pada kartu itu untuk melanjutkannya di VM pada branch
 dan sesi yang sama, atau **Take over to laptop**. Bila VM mati lebih dari 30
 menit, klaim kartunya menjadi basi dan kartu bisa diambil alih dari laptop.
 
-## 9. Saat developer keluar
+## 10. Saat developer keluar
 
 ```bash
 sudo -iu handoko_ben systemctl --user disable --now mandord

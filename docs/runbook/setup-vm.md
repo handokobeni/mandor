@@ -129,8 +129,15 @@ Host lembur
 ```
 
 Cek: `ssh lembur hostname` harus mencetak `instance-lembur` tanpa meminta
-password. Pada cara B, **Check host key** di app tidak bisa membaca kunci
-lewat IAP; pin host key manual dari admin.
+password. Pakai satu blok `Host lembur` saja; dua blok dengan nama sama
+digabung ssh (mis. `HostName` dari cara A ikut dipakai bersama `ProxyCommand`
+cara B). **Check host key** di app membaca kunci lewat `ssh` dengan config ini,
+jadi berjalan juga lewat IAP.
+
+Akun yang dipakai `gcloud compute ssh` bisa berbeda dengan akun
+SSH-in-browser (mis. `handokobeni` vs `handoko_ben`). Daftarkan public key
+laptop (`~/.ssh/google_compute_engine.pub`) di `~/.ssh/authorized_keys` milik
+user developer (`handoko_ben`) dari SSH-in-browser, lalu cek `ssh lembur whoami`.
 
 ## 7. Developer: sambungkan app, isi Lark dan repo VM
 

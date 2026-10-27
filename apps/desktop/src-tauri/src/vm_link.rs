@@ -26,6 +26,10 @@ pub enum VmError {
     Command(&'static str, String),
     #[error("no host key found for {0}; check the host name and that the VM is reachable")]
     NoKeys(String),
+    #[error(
+        "can't reach {host} over SSH ({reason}); check the alias in ~/.ssh/config and that `ssh {host}` works from this machine"
+    )]
+    Unreachable { host: String, reason: String },
     #[error("check the host key of {0} first")]
     NotScanned(String),
     #[error("saving the VM setting failed: {0}")]
@@ -107,20 +111,23 @@ impl Links {
     /// [`VmError`] bila host tidak valid, tidak terjangkau, atau tanpa kunci.
     pub async fn scan(&self, host: &str) -> Result<HostScan, VmError> {
         LinkMode::ssh(host, self.via.clone())?;
-        let resolved = self.run("ssh -G", &["ssh", "-G", "--", host], None).await?;
-        let (hostname, port) = resolve(&resolved);
-        if hostname.starts_with('-') || hostname.is_empty() {
-            return Err(VmError::NoKeys(host.to_owned()));
-        }
-        let port = port.to_string();
-        let keys = self
+        let keys = match self
             .run(
-                "ssh-keyscan",
-                &["ssh-keyscan", "-T", "10", "-p", &port, "--", &hostname],
+                "read host key",
+                &["sh", "-c", SCAN_SCRIPT, "sh", host],
                 None,
             )
-            .await?;
-        let keys = key_lines(&keys);
+            .await
+        {
+            Ok(out) => key_lines(&out),
+            Err(VmError::Command(_, reason)) => {
+                return Err(VmError::Unreachable {
+                    host: host.to_owned(),
+                    reason,
+                });
+            }
+            Err(e) => return Err(e),
+        };
         if keys.is_empty() {
             return Err(VmError::NoKeys(host.to_owned()));
         }
@@ -244,19 +251,21 @@ impl Links {
     }
 }
 
-/// `hostname` dan `port` dari keluaran `ssh -G`.
-fn resolve(out: &str) -> (String, u16) {
-    let mut hostname = String::new();
-    let mut port = 22;
-    for line in out.lines() {
-        match line.split_once(' ') {
-            Some(("hostname", v)) => v.trim().clone_into(&mut hostname),
-            Some(("port", v)) => port = v.trim().parse().unwrap_or(22),
-            _ => {}
-        }
-    }
-    (hostname, port)
-}
+/// Membaca host key VM lewat `ssh` sendiri, sehingga `~/.ssh/config`
+/// pengguna (alias, `ProxyCommand` seperti IAP Google Cloud, port) ikut
+/// berlaku; `ssh-keyscan` hanya bisa menyambung langsung. Kunci baru dicatat
+/// ke `known_hosts` sementara (`accept-new`) tanpa login
+/// (`PreferredAuthentications=none`), lalu dicetak untuk dikonfirmasi
+/// developer. `$1` adalah host, diteruskan sebagai argumen, bukan teks skrip.
+/// Gagal: baris stderr terakhir `ssh` sebagai alasan.
+pub(crate) const SCAN_SCRIPT: &str = r#"f=$(mktemp) || exit 1
+ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile="$f" \
+  -o GlobalKnownHostsFile=/dev/null -o PreferredAuthentications=none -o ConnectTimeout=20 \
+  -- "$1" true >/dev/null 2>"$f.err"
+if [ -s "$f" ]; then cat "$f"; rm -f "$f" "$f.err"; exit 0; fi
+grep -v '^ *$' "$f.err" | tail -n 1 >&2
+rm -f "$f" "$f.err"
+exit 1"#;
 
 /// Baris kunci dari keluaran `ssh-keyscan` (komentar dibuang).
 fn key_lines(out: &str) -> String {
@@ -297,13 +306,6 @@ async fn write_host(dir: &Path, host: &str) -> Result<(), VmError> {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn ssh_g_memberi_hostname_dan_port() {
-        let out = "user beni\nhostname 10.0.0.5\nport 2222\nidentityfile ~/.ssh/id\n";
-        assert_eq!(resolve(out), ("10.0.0.5".to_owned(), 2222));
-        assert_eq!(resolve("hostname vm\n"), ("vm".to_owned(), 22));
-    }
 
     #[test]
     fn baris_kunci_tanpa_komentar() {
@@ -355,5 +357,65 @@ mod tests {
             links.scan("-oProxyCommand=x").await,
             Err(VmError::Link(LinkError::BadHost(_)))
         ));
+    }
+
+    /// `ssh` palsu: menulis host key ke berkas `UserKnownHostsFile` yang
+    /// diberikan (seperti `StrictHostKeyChecking=accept-new`), lalu gagal
+    /// login seperti `PreferredAuthentications=none`.
+    #[cfg(unix)]
+    fn fake_ssh(dir: &Path, body: &str) {
+        use std::os::unix::fs::PermissionsExt;
+        let f = dir.join("ssh");
+        std::fs::write(&f, format!("#!/bin/sh\n{body}\n")).unwrap();
+        std::fs::set_permissions(&f, std::fs::Permissions::from_mode(0o755)).unwrap();
+    }
+
+    #[cfg(unix)]
+    fn run_scan(dir: &Path, host: &str) -> std::process::Output {
+        let path = format!("{}:/usr/bin:/bin", dir.display());
+        std::process::Command::new("sh")
+            .args(["-c", SCAN_SCRIPT, "sh", host])
+            .env("PATH", path)
+            .output()
+            .unwrap()
+    }
+
+    /// Host key dibaca lewat `ssh` dengan `~/.ssh/config` pengguna (mis.
+    /// `ProxyCommand` IAP), bukan `ssh-keyscan` yang hanya bisa langsung.
+    #[cfg(unix)]
+    #[test]
+    fn scan_memakai_ssh_dan_alias_apa_adanya() {
+        let dir = tempfile::tempdir().unwrap();
+        fake_ssh(
+            dir.path(),
+            r#"for a in "$@"; do case "$a" in UserKnownHostsFile=*) kh="${a#UserKnownHostsFile=}";; esac; done
+last=""; for a in "$@"; do last2="$last"; last="$a"; done
+echo "$last2 ssh-ed25519 AAAAuji" > "$kh"; echo "$*" > "$kh.args"
+echo "handoko_ben@lembur: Permission denied (publickey)." >&2; exit 255"#,
+        );
+        let out = run_scan(dir.path(), "lembur");
+        assert!(
+            out.status.success(),
+            "{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        assert_eq!(
+            key_lines(&String::from_utf8_lossy(&out.stdout)),
+            "lembur ssh-ed25519 AAAAuji\n"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn scan_host_tak_terjangkau_memberi_alasan_ssh() {
+        let dir = tempfile::tempdir().unwrap();
+        fake_ssh(
+            dir.path(),
+            "echo 'ssh: connect to host 34.101.156.130 port 22: Connection timed out' >&2; exit 255",
+        );
+        let out = run_scan(dir.path(), "handoko_ben@34.101.156.130");
+        assert!(!out.status.success());
+        let err = String::from_utf8_lossy(&out.stderr);
+        assert!(err.contains("Connection timed out"), "{err}");
     }
 }

@@ -77,7 +77,8 @@ impl AppDispatch {
                 for item in &items {
                     let task = cached_task(s, &item.record_id).await?;
                     let held = report.cards.iter().any(|c| {
-                        c.record_id == item.record_id && matches!(c.outcome, CardOutcome::Held(_))
+                        c.record_id == item.record_id
+                            && matches!(c.outcome, CardOutcome::Held(_) | CardOutcome::Failed)
                     });
                     view.items.push(queue_item_view(item, task.as_ref(), held));
                 }

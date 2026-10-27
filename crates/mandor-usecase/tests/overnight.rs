@@ -926,3 +926,35 @@ async fn laporan_siklus_mengelompokkan_kartu_dan_menghitung_tanpa_waiting_fix() 
     assert_eq!(a.ac_cant_verify, 1);
     assert_eq!(r.reviewed_without_fix, 1);
 }
+
+/// VM mati di tengah kartu: setelah daemon start, run menjadi Failed yang bisa
+/// dilanjutkan, dan kartu bisa diantre ulang ke VM di sesi yang sama.
+#[tokio::test(flavor = "multi_thread")]
+async fn kartu_terputus_karena_vm_restart_bisa_diantre_ulang_dan_dilanjutkan() {
+    let (_lark, _clock, st) = vm_started(false).await;
+    let session = run_of(&st, "a").session_id.clone();
+    // Daemon VM restart saat agent kartu a masih berjalan.
+    st.svc.reconcile().await.unwrap();
+    assert_eq!(run_of(&st, "a").state, RunState::Failed);
+    let r = st.svc.overnight_report().await.unwrap();
+    assert!(
+        r.cards
+            .iter()
+            .any(|c| c.record_id == "a"
+                && c.outcome == mandor_usecase::overnight::CardOutcome::Failed)
+    );
+
+    st.svc.queue_add("a", &repo1(), None).await.unwrap();
+    st.svc.queue_start_now("a").await.unwrap();
+    assert_eq!(
+        st.svc.overnight_tick().await.unwrap().started.as_deref(),
+        Some("a")
+    );
+    let req = st.agent.last().req;
+    assert_eq!(req.session, SessionRef::Resume(session.unwrap()));
+    assert_eq!(
+        st.runs.all().iter().filter(|r| r.record_id == "a").count(),
+        1,
+        "run yang sama, bukan run baru"
+    );
+}

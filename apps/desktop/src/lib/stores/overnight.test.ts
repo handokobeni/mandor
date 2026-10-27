@@ -156,3 +156,15 @@ describe('aksi kartu VM', () => {
     expect(runId).toBe('run-laptop');
   });
 });
+
+describe('kartu VM yang terputus', () => {
+  it('Queue again mengantre ulang kartu Failed di repo run-nya', async () => {
+    const [store, vm] = await attached();
+    await store.answer({ ...held, outcome: 'failed', hold_reason: null, hold_note: null }, '');
+    expect(vm.calls.find(([m]) => m === 'overnight.queue.add')?.[1]).toEqual({
+      record_id: 'h',
+      repo_id: 'repo1',
+      note: ''
+    });
+  });
+});

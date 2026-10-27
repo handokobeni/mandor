@@ -135,6 +135,14 @@
                   Answer and queue
                 </Button>
               </div>
+            {:else if c.outcome === 'failed'}
+              <!-- Mis. VM atau daemon restart di tengah kartu: lanjut di sesi yang sama. -->
+              <div class="answer">
+                <Textarea rows={2} placeholder="Optional note for the agent when it continues" bind:value={answers[c.run_id]} />
+                <Button size="sm" disabled={busy === c.run_id} onclick={() => act(c, () => overnight.answer(c, answers[c.run_id] ?? ''), `${key(c)} is back in the queue`)}>
+                  Queue again
+                </Button>
+              </div>
             {/if}
 
             {#if gate[c.run_id]}

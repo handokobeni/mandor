@@ -226,10 +226,11 @@ impl<D: Deps> RunService<D> {
             .await
             .map_err(|e| e.to_string())?;
         if let Some(run) = existing {
-            if run.state != RunState::Held {
+            if !resumable(run.state) {
                 return Err("the card already has a run".to_owned());
             }
-            // Kartu tertahan: lanjut di branch, worktree, dan sesi yang sama.
+            // Kartu tertahan atau terputus: lanjut di branch, worktree, dan
+            // sesi yang sama.
             let text = item.note.as_deref().unwrap_or(CONTINUE);
             return self
                 .send_message(&run.id, text)
@@ -284,7 +285,8 @@ impl<D: Deps> RunService<D> {
         Ok(self.overnight.queue().await?)
     }
 
-    /// Mengantrekan kartu To Do atau kartu tertahan (R6, R20).
+    /// Mengantrekan kartu To Do, kartu tertahan (R6, R20), atau kartu yang
+    /// gagal karena terputus.
     ///
     /// # Errors
     /// Bukan daemon VM, kartu "hanya laptop", sudah diantre, punya run lain,
@@ -306,7 +308,7 @@ impl<D: Deps> RunService<D> {
             ));
         }
         match self.runs.active_for(record_id).await? {
-            Some(run) if run.state != RunState::Held => {
+            Some(run) if !resumable(run.state) => {
                 return Err(RunError::InvalidState("the card already has a run"));
             }
             Some(_) => {}
@@ -378,6 +380,12 @@ impl<D: Deps> RunService<D> {
             .map_err(|e| RunError::Port(PortError::Rejected(e.to_string())))?;
         Ok(self.overnight.set_settings(s).await?)
     }
+}
+
+/// Run kartu yang boleh diantre ulang dan dilanjutkan di sesi yang sama:
+/// tertahan, atau gagal (mis. terputus karena VM atau daemon restart).
+fn resumable(state: RunState) -> bool {
+    matches!(state, RunState::Held | RunState::Failed)
 }
 
 pub(crate) fn window_of(s: &OvernightSettings) -> Option<Window> {

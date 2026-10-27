@@ -126,7 +126,17 @@ cocokkan fingerprint host key dengan yang diberikan admin, lalu **Trust and
 connect**. Daemon laptop harus versi yang mendukung klaim per daemon
 (protokol 1.1).
 
-## 8. Saat developer keluar
+## 8. VM dimatikan atau restart
+
+`mandord` dan service user agent start sendiri saat boot (linger). Antrean,
+setelan, pemakaian siklus, dan worktree tetap ada. Kartu yang sedang
+dikerjakan saat VM mati menjadi **Failed** ("the daemon restarted while this
+run was active"); antrean berikutnya tetap berjalan. Di tab **Overnight**,
+tekan **Queue again** pada kartu itu untuk melanjutkannya di VM pada branch
+dan sesi yang sama, atau **Take over to laptop**. Bila VM mati lebih dari 30
+menit, klaim kartunya menjadi basi dan kartu bisa diambil alih dari laptop.
+
+## 9. Saat developer keluar
 
 ```bash
 sudo -iu beni systemctl --user disable --now mandord

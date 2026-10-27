@@ -8,31 +8,31 @@ Linux miliknya, dengan agent Claude Code sebagai user Linux terpisah
 (`<dev>-agent`). Laptop tetap menjalankan daemon laptop; app tersambung ke
 keduanya, ke VM lewat SSH.
 
-Contoh di bawah memakai developer `beni`, user agent `beni-agent`, grup
-`beni-mandor`, dan direktori grup `/srv/mandor/beni`.
+Contoh di bawah memakai VM `instance-lembur` dan developer `handoko_ben`, user agent `handoko_ben-agent`, grup
+`handoko_ben-mandor`, dan direktori grup `/srv/mandor/handoko_ben`.
 
 ## 1. Admin: user, grup, dan direktori (per developer)
 
 ```bash
-sudo useradd -m -s /bin/bash beni              # bila belum ada
-sudo useradd -m -s /bin/bash beni-agent
-sudo groupadd beni-mandor
-sudo usermod -aG beni-mandor beni
-sudo usermod -aG beni-mandor beni-agent
+# handoko_ben sudah ada di instance-lembur; untuk developer lain: sudo useradd -m -s /bin/bash <dev>
+sudo useradd -m -s /bin/bash handoko_ben-agent
+sudo groupadd handoko_ben-mandor
+sudo usermod -aG handoko_ben-mandor handoko_ben
+sudo usermod -aG handoko_ben-mandor handoko_ben-agent
 
 # Clone, worktree, dan berkas run: daemon dan agent menulis, user lain tidak.
-sudo install -d -o beni -g beni-mandor -m 2770 /srv/mandor/beni
-sudo install -d -o beni -g beni-mandor -m 2770 /srv/mandor/beni/workspaces
-sudo install -d -o beni -g beni-mandor -m 2770 /srv/mandor/beni/runs
+sudo install -d -o handoko_ben -g handoko_ben-mandor -m 2770 /srv/mandor/handoko_ben
+sudo install -d -o handoko_ben -g handoko_ben-mandor -m 2770 /srv/mandor/handoko_ben/workspaces
+sudo install -d -o handoko_ben -g handoko_ben-mandor -m 2770 /srv/mandor/handoko_ben/runs
 
 # Biner mandord di ~/.local/bin bisa dieksekusi user agent; ~/.mandor tetap 0700.
-sudo chmod 0711 /home/beni
-sudo -u beni mkdir -p /home/beni/.local/bin
-sudo chmod 0755 /home/beni/.local /home/beni/.local/bin
+sudo chmod 0711 /home/handoko_ben
+sudo -u handoko_ben mkdir -p /home/handoko_ben/.local/bin
+sudo chmod 0755 /home/handoko_ben/.local /home/handoko_ben/.local/bin
 
 # Service kedua user tetap hidup tanpa sesi login.
-sudo loginctl enable-linger beni
-sudo loginctl enable-linger beni-agent
+sudo loginctl enable-linger handoko_ben
+sudo loginctl enable-linger handoko_ben-agent
 ```
 
 ## 2. Admin: sudoers persis
@@ -42,14 +42,14 @@ ke user daemon bila aturan ini salah (run gagal dengan pesan yang menunjuk
 runbook ini).
 
 ```bash
-sudo visudo -f /etc/sudoers.d/mandor-beni
+sudo visudo -f /etc/sudoers.d/mandor-handoko_ben
 ```
 
 ```
-beni ALL=(beni-agent) NOPASSWD: /home/beni/.local/bin/mandord agent-exec *
+handoko_ben ALL=(handoko_ben-agent) NOPASSWD: /home/handoko_ben/.local/bin/mandord agent-exec *
 ```
 
-Cek dari user `beni`: `sudo -n -u beni-agent /home/beni/.local/bin/mandord agent-exec --reap 1 x`
+Cek dari user `handoko_ben`: `sudo -n -u handoko_ben-agent /home/handoko_ben/.local/bin/mandord agent-exec --reap 1 x`
 harus keluar tanpa meminta password.
 
 ## 3. Admin: alat untuk agent
@@ -59,7 +59,7 @@ harus keluar tanpa meminta password.
 - Review headless (KTD-64):
   ```bash
   sudo npm install -g @playwright/mcp@<versi yang dipin>
-  sudo -iu beni-agent npx playwright install chromium
+  sudo -iu handoko_ben-agent npx playwright install chromium
   ```
   Biner default `/usr/local/bin/mcp-server-playwright`; lain tempat: `MANDOR_PLAYWRIGHT_MCP`.
 - Docker rootless untuk user agent bila repo memakai container:
@@ -71,7 +71,7 @@ harus keluar tanpa meminta password.
 
 ## 4. Admin: rentang port dan Lark
 
-- Beri setiap developer rentang port sendiri, mis. `beni` 5100–5199. Port app
+- Beri setiap developer rentang port sendiri, mis. `handoko_ben` 5100–5199. Port app
   repo dan port callback login Lark harus di dalamnya; daemon menolak yang di luar.
 - Daftarkan redirect URL `http://127.0.0.1:<port callback>/callback` developer
   itu di konsol app Lark (Security Settings → Redirect URLs).
@@ -93,8 +93,8 @@ mkdir -p ~/.config/systemd/user/mandord.service.d
 cat > ~/.config/systemd/user/mandord.service.d/vm.conf <<'EOF'
 [Service]
 Environment=MANDOR_ROLE=vm
-Environment=MANDOR_AGENT_USER=beni-agent
-Environment=MANDOR_GROUP_DIR=/srv/mandor/beni
+Environment=MANDOR_AGENT_USER=handoko_ben-agent
+Environment=MANDOR_GROUP_DIR=/srv/mandor/handoko_ben
 Environment=MANDOR_PORT_RANGE=5100-5199
 EOF
 systemctl --user daemon-reload
@@ -105,9 +105,9 @@ systemctl --user status mandord
 ## 6. Developer: login dari terminal SSH
 
 ```bash
-gh auth login                               # sebagai beni: push dan PR oleh daemon
-sudo -iu beni-agent claude                  # login Claude Code di user agent (perlu izin admin)
-ssh -L 5150:127.0.0.1:5150 beni@vm          # dari laptop, lalu di VM:
+gh auth login                               # sebagai handoko_ben: push dan PR oleh daemon
+sudo -iu handoko_ben-agent claude                  # login Claude Code di user agent (perlu izin admin)
+ssh -L 5150:127.0.0.1:5150 handoko_ben@instance-lembur          # dari laptop, lalu di VM:
 mandord login lark
 ```
 
@@ -121,7 +121,7 @@ Status ketiga login terlihat di tab **Overnight** app (atau RPC `status`).
 
 ## 7. Developer: sambungkan app
 
-Di app laptop: **Settings → Overnight VM**, isi alias SSH atau `beni@vm`,
+Di app laptop: **Settings → Overnight VM**, isi alias SSH atau `handoko_ben@instance-lembur`,
 cocokkan fingerprint host key dengan yang diberikan admin, lalu **Trust and
 connect**. Daemon laptop harus versi yang mendukung klaim per daemon
 (protokol 1.1).
@@ -139,12 +139,12 @@ menit, klaim kartunya menjadi basi dan kartu bisa diambil alih dari laptop.
 ## 9. Saat developer keluar
 
 ```bash
-sudo -iu beni systemctl --user disable --now mandord
-sudo loginctl disable-linger beni; sudo loginctl disable-linger beni-agent
-sudo rm /etc/sudoers.d/mandor-beni
-sudo -iu beni gh auth logout
-sudo -iu beni-agent claude /logout          # atau hapus kredensial Claude user agent
-sudo userdel -r beni-agent; sudo rm -rf /srv/mandor/beni
+sudo -iu handoko_ben systemctl --user disable --now mandord
+sudo loginctl disable-linger handoko_ben; sudo loginctl disable-linger handoko_ben-agent
+sudo rm /etc/sudoers.d/mandor-handoko_ben
+sudo -iu handoko_ben gh auth logout
+sudo -iu handoko_ben-agent claude /logout          # atau hapus kredensial Claude user agent
+sudo userdel -r handoko_ben-agent; sudo rm -rf /srv/mandor/handoko_ben
 ```
 
 Cabut juga token Lark di konsol Lark bila perlu.

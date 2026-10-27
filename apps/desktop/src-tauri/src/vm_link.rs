@@ -254,17 +254,21 @@ impl Links {
 /// Membaca host key VM lewat `ssh` sendiri, sehingga `~/.ssh/config`
 /// pengguna (alias, `ProxyCommand` seperti IAP Google Cloud, port) ikut
 /// berlaku; `ssh-keyscan` hanya bisa menyambung langsung. Kunci baru dicatat
-/// ke `known_hosts` sementara (`accept-new`) tanpa login
-/// (`PreferredAuthentications=none`), lalu dicetak untuk dikonfirmasi
+/// ke `known_hosts` sementara di direktori privat (`accept-new`) tanpa login
+/// dan tanpa efek samping sesi (agent, X11, port forward, perintah lokal),
+/// lalu dicetak untuk dikonfirmasi
 /// developer. `$1` adalah host, diteruskan sebagai argumen, bukan teks skrip.
 /// Gagal: baris stderr terakhir `ssh` sebagai alasan.
-pub(crate) const SCAN_SCRIPT: &str = r#"f=$(mktemp) || exit 1
-ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile="$f" \
-  -o GlobalKnownHostsFile=/dev/null -o PreferredAuthentications=none -o ConnectTimeout=20 \
-  -- "$1" true >/dev/null 2>"$f.err"
-if [ -s "$f" ]; then cat "$f"; rm -f "$f" "$f.err"; exit 0; fi
-grep -v '^ *$' "$f.err" | tail -n 1 >&2
-rm -f "$f" "$f.err"
+pub(crate) const SCAN_SCRIPT: &str = r#"d=$(mktemp -d) || exit 1
+trap 'rm -rf "$d"' EXIT
+ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile="$d/kh" \
+  -o GlobalKnownHostsFile=/dev/null -o ConnectTimeout=20 \
+  -o PreferredAuthentications=none -o PubkeyAuthentication=no -o PasswordAuthentication=no \
+  -o KbdInteractiveAuthentication=no -o ForwardAgent=no -o ForwardX11=no -o ClearAllForwardings=yes \
+  -o PermitLocalCommand=no -o RequestTTY=no -o ControlMaster=no -o ControlPath=none \
+  -T -- "$1" true >/dev/null 2>"$d/err"
+if [ -s "$d/kh" ]; then cat "$d/kh"; exit 0; fi
+grep -v '^ *$' "$d/err" | tail -n 1 >&2
 exit 1"#;
 
 /// Baris kunci dari keluaran `ssh-keyscan` (komentar dibuang).

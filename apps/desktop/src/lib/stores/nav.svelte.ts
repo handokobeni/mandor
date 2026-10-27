@@ -15,6 +15,8 @@ export type SettingsSection =
 class Nav {
   page = $state<'board' | 'settings' | 'overnight'>('board');
   section = $state<SettingsSection>('lark');
+  /** Daemon yang diatur di Settings: laptop, atau daemon VM lewat link VM. */
+  target = $state<'laptop' | 'vm'>('laptop');
   paletteOpen = $state(false);
 
   board(): void {
@@ -33,8 +35,9 @@ class Nav {
     workspace.close();
   }
 
-  settings(section: SettingsSection = this.section): void {
+  settings(section: SettingsSection = this.section, target: 'laptop' | 'vm' = this.target): void {
     this.section = section;
+    this.target = target;
     this.page = 'settings';
   }
 }

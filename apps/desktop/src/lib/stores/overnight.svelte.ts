@@ -32,6 +32,12 @@ export class OvernightStore {
   repos = $state<RepoView[]>([]);
   workspaces = $state<WorkspaceView[]>([]);
   error = $state<string | null>(null);
+  /** Status daemon VM sudah terbaca sekali. */
+  statusLoaded = $state(false);
+  /** Daemon VM sudah login Lark; antrean, setelan, dan laporan butuh ini. */
+  larkReady = $state(false);
+  /** Daemon berperan VM (melaporkan status login VM); `false` = masih peran laptop. */
+  vmRole = $state(false);
   private rpc: Rpc | null = null;
 
   /**
@@ -60,6 +66,7 @@ export class OvernightStore {
 
   detach(): void {
     this.rpc = null;
+    this.statusLoaded = false;
     this.queue = null;
     this.report = null;
   }
@@ -67,22 +74,41 @@ export class OvernightStore {
   async refresh(): Promise<void> {
     const rpc = this.rpc;
     if (!rpc) return;
+    // Status dan repo selalu bisa dibaca; data lembur butuh sesi Lark di VM.
     try {
-      const [queue, settings, report, status, repos, workspaces] = await Promise.all([
-        rpc.request<OvernightQueueView>('overnight.queue.list'),
-        rpc.request<OvernightSettingsView | null>('overnight.settings.get'),
-        rpc.request<OvernightReportView>('overnight.report'),
+      const [status, repos, workspaces] = await Promise.all([
         rpc.request<StatusResult>('status'),
         rpc.request<RepoView[]>('repos.list'),
         rpc.request<WorkspaceView[]>('workspaces.list')
       ]);
       if (this.rpc !== rpc) return;
+      this.statusLoaded = true;
+      this.vmRole = status.logins !== undefined && status.logins !== null;
+      this.logins = status.logins ?? [];
+      this.larkReady = status.lark.logged_in && !status.lark.reauth_required;
+      this.repos = repos;
+      this.workspaces = workspaces;
+    } catch (err) {
+      this.error = message(err);
+      return;
+    }
+    if (!this.larkReady) {
+      this.queue = null;
+      this.settings = null;
+      this.report = null;
+      this.error = null;
+      return;
+    }
+    try {
+      const [queue, settings, report] = await Promise.all([
+        rpc.request<OvernightQueueView>('overnight.queue.list'),
+        rpc.request<OvernightSettingsView | null>('overnight.settings.get'),
+        rpc.request<OvernightReportView>('overnight.report')
+      ]);
+      if (this.rpc !== rpc) return;
       this.queue = queue;
       this.settings = settings;
       this.report = report;
-      this.logins = status.logins ?? [];
-      this.repos = repos;
-      this.workspaces = workspaces;
       this.error = null;
     } catch (err) {
       this.error = message(err);

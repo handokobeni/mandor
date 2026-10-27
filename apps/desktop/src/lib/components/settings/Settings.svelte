@@ -36,7 +36,8 @@
   ];
 
   // Daemon yang diatur: laptop, atau daemon VM saat link VM tersambung.
-  let target = $state<SettingsTarget>('laptop');
+  // Pilihan disimpan di nav agar halaman lain bisa membuka setelan VM.
+  let target = $derived<SettingsTarget>(nav.target);
   const vmRpc = $derived(vmConnection.state.kind === 'ready' ? vmConnection.client : null);
   const active = $derived<SettingsTarget>(target === 'vm' && vmRpc ? 'vm' : 'laptop');
   const visible = $derived(SECTIONS.filter((s) => sectionsFor(active).includes(s.id)));
@@ -47,8 +48,8 @@
   <nav class="settings-nav" aria-label="Settings">
     {#if vmRpc}
       <div class="target" role="radiogroup" aria-label="Daemon to configure">
-        <label class="radio-card"><input type="radio" name="s-target" value="laptop" bind:group={target} />Laptop</label>
-        <label class="radio-card"><input type="radio" name="s-target" value="vm" bind:group={target} />VM</label>
+        <label class="radio-card"><input type="radio" name="s-target" value="laptop" checked={target === 'laptop'} onchange={() => (nav.target = 'laptop')} />Laptop</label>
+        <label class="radio-card"><input type="radio" name="s-target" value="vm" checked={target === 'vm'} onchange={() => (nav.target = 'vm')} />VM</label>
       </div>
     {/if}
     {#each visible as s (s.id)}

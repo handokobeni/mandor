@@ -37,7 +37,10 @@ class FakeVm implements Rpc {
       case 'overnight.report':
         return { cycle_start_ms: null, used: 0, limit: null, cache_read_tokens: 0, cards: [], dequeued: [], reviewed_without_fix: 0 } as T;
       case 'status':
-        return { logins: [{ service: 'gh', state: 'expired', fix: 'Run gh auth login' }] } as T;
+        return {
+          lark: { configured: true, logged_in: true, open_id: 'ou_me', name: null, reauth_required: false },
+          logins: [{ service: 'gh', state: 'expired', fix: 'Run gh auth login' }]
+        } as T;
       case 'repos.list':
       case 'workspaces.list':
         return [] as T;
@@ -166,5 +169,43 @@ describe('kartu VM yang terputus', () => {
       repo_id: 'repo1',
       note: ''
     });
+  });
+});
+
+/** Daemon VM yang belum siap: belum login Lark, atau masih berperan laptop. */
+class NotReadyVm implements Rpc {
+  constructor(private readonly vmRole: boolean) {}
+  async request<T>(method: string): Promise<T> {
+    if (method.startsWith('overnight.')) throw new Error('log in to Lark first');
+    if (method === 'status') {
+      return {
+        lark: { configured: false, logged_in: false, open_id: null, name: null, reauth_required: false },
+        ...(this.vmRole ? { logins: [{ service: 'lark', state: 'missing', fix: 'Run mandord login lark' }] } : {})
+      } as T;
+    }
+    return [] as T;
+  }
+  on(): () => void {
+    return () => undefined;
+  }
+}
+
+describe('VM yang belum siap', () => {
+  it('status dan login tetap terbaca walau data lembur butuh login Lark', async () => {
+    const store = new OvernightStore();
+    store.attach(new NotReadyVm(true));
+    await store.refresh();
+    expect(store.larkReady).toBe(false);
+    expect(store.vmRole).toBe(true);
+    expect(store.logins[0].service).toBe('lark');
+    expect(store.error).toBeNull();
+    expect(store.report).toBeNull();
+  });
+
+  it('daemon tanpa status login VM berarti masih berperan laptop', async () => {
+    const store = new OvernightStore();
+    store.attach(new NotReadyVm(false));
+    await store.refresh();
+    expect(store.vmRole).toBe(false);
   });
 });

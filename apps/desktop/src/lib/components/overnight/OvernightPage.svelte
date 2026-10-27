@@ -84,32 +84,58 @@
         </div>
       </div>
     </section>
+  {:else if !overnight.statusLoaded}
+    <section><p class="field-help">Loading…</p></section>
   {:else}
     {#if overnight.error}
       <section>
-        <div class="settings-card"><div class="content"><span class="chip" data-tone="failed">Error</span> {overnight.error}</div></div>
+        <div class="settings-card"><div class="content"><span class="chip" data-tone="failed" style="justify-self:start">Error</span> {overnight.error}</div></div>
       </section>
     {/if}
 
-    <section>
-      <h2>Logins on the VM</h2>
-      <div class="settings-card">
-        <div class="content">
-          {#each logins as l (l.label)}
-            <div class="row-setting">
-              <div class="txt">
-                {l.label}
-                {#if l.fix}<span>{l.fix}</span>{/if}
-              </div>
-              <span class="chip" data-tone={l.tone}>
-                {l.state === 'ok' ? 'Logged in' : l.state === 'expired' ? 'Expired' : 'Not logged in'}
-              </span>
-            </div>
-          {/each}
+    {#if !overnight.vmRole}
+      <section>
+        <div class="settings-card">
+          <div class="content">
+            <p class="line"><span class="chip" data-tone="warning">Laptop mode</span> The daemon on the VM is not running as a VM daemon yet, so it can't run overnight work.</p>
+            <p class="field-help">
+              Add the <code>vm.conf</code> drop-in from the VM runbook (section 5), then on the VM run
+              <code>systemctl --user daemon-reload &amp;&amp; systemctl --user restart mandord</code>.
+            </p>
+          </div>
         </div>
-      </div>
-    </section>
+      </section>
+    {:else}
+      <section>
+        <h2>Logins on the VM</h2>
+        <div class="settings-card">
+          <div class="content">
+            {#each logins as l (l.label)}
+              <div class="row-setting">
+                <div class="txt">
+                  {l.label}
+                  {#if l.fix}<span>{l.fix}</span>{/if}
+                </div>
+                <span class="chip" data-tone={l.tone}>
+                  {l.state === 'ok' ? 'Logged in' : l.state === 'expired' ? 'Expired' : 'Not logged in'}
+                </span>
+              </div>
+            {/each}
+          </div>
+        </div>
+      </section>
+    {/if}
 
+    {#if !overnight.larkReady}
+      <section>
+        <div class="settings-card">
+          <div class="content">
+            <p class="line"><span class="chip" data-tone="warning">Not logged in to Lark</span> The queue, hours, and report appear after the VM daemon logs in to Lark.</p>
+            <div><Button size="sm" onclick={() => nav.settings('lark', 'vm')}>Set up Lark on the VM</Button></div>
+          </div>
+        </div>
+      </section>
+    {:else}
     <section>
       <h2>Hours and limit</h2>
       <div class="settings-card">
@@ -142,6 +168,7 @@
 
     <QueueSection />
     <ReportSection {laptop} {laptopDaemonId} />
+    {/if}
   {/if}
 </div>
 
@@ -156,6 +183,13 @@
   }
   section {
     margin-bottom: 20px;
+  }
+  .line {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+    margin: 0;
   }
   .grid {
     display: grid;

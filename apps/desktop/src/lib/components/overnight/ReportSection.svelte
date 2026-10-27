@@ -78,7 +78,7 @@
 <section>
   <h2>This cycle</h2>
   {#if !report}
-    <p class="field-help">Loading…</p>
+    <p class="field-help">{overnight.error ? "Couldn't load the report: " + overnight.error : 'Loading…'}</p>
   {:else}
     <div class="settings-card">
       <div class="content summary">

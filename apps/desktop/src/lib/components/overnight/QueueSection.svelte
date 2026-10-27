@@ -136,7 +136,8 @@
     height: 32px;
     border: 1px solid var(--input);
     border-radius: 8px;
-    background: transparent;
+    background: var(--card);
+    color: var(--foreground);
     padding: 0 8px;
     max-width: 320px;
   }

@@ -151,10 +151,22 @@ lewat IAP; pin host key manual dari admin.
 gh auth login                                  # sebagai handoko_ben: push dan PR oleh daemon
 sudo -iu handoko_ben-agent claude              # login Claude Code di user agent (perlu izin admin)
 
-# Di laptop (WSL): teruskan port callback, lalu di sesi itu jalankan login Lark.
-ssh -L 5199:127.0.0.1:5199 lembur
-mandord login lark                             # buka URL yang dicetak di browser laptop
 ```
+
+Login Lark daemon VM (perintah pertama di laptop, kedua di VM):
+
+```bash
+# 1. Di laptop (WSL): masuk ke VM sambil meneruskan port callback 5199.
+ssh -L 5199:127.0.0.1:5199 lembur
+
+# 2. Di prompt VM yang terbuka dari perintah di atas:
+mandord login lark          # atau ~/.local/bin/mandord login lark
+```
+
+3. Buka URL yang dicetak di **browser laptop** dan login. Callback ke
+   `127.0.0.1:5199` diteruskan ke VM; terminal VM menampilkan "Logged in to
+   Lark". Jangan jalankan `mandord login lark` di laptop: itu login daemon
+   laptop, bukan daemon VM.
 
 Status ketiga login terlihat di tab **Overnight** app (atau RPC `status`).
 

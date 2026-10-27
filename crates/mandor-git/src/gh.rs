@@ -75,13 +75,37 @@ impl Git {
     /// # Errors
     /// [`GitError::Command`] bila profil tidak login.
     pub async fn gh_token(&self, profile: &str) -> Result<SecretString, GitError> {
-        let out = self
-            .ok(
-                "gh auth token",
-                self.gh(Path::new("."), None)
-                    .args(["auth", "token", "--user", profile]),
-            )
-            .await?;
+        self.auth_token(&["auth", "token", "--user", profile], None)
+            .await
+    }
+
+    /// Token akun `gh` yang aktif (`gh auth token`), untuk daemon VM yang
+    /// repo-nya tidak memilih profil.
+    ///
+    /// # Errors
+    /// [`GitError::Command`] bila `gh` belum login; pesannya menyebut caranya.
+    pub async fn gh_active_token(&self) -> Result<SecretString, GitError> {
+        self.auth_token(
+            &["auth", "token"],
+            Some("no GitHub account is logged in for the daemon; run `gh auth login` as the daemon's user on the VM, or set a gh profile for the repo"),
+        )
+        .await
+    }
+
+    /// `gh auth token` langsung, bukan lewat penjaga konfigurasi repo: perintah
+    /// ini tidak menjalankan git di dalam repo mana pun.
+    async fn auth_token(
+        &self,
+        args: &[&str],
+        hint: Option<&str>,
+    ) -> Result<SecretString, GitError> {
+        let out = mandor_proc::run(&self.gh(Path::new("."), None).args(args)).await?;
+        if !out.success() {
+            return Err(GitError::Command {
+                op: "gh auth token",
+                stderr: hint.map_or_else(|| out.stderr.trim().to_owned(), str::to_owned),
+            });
+        }
         Ok(SecretString::from(out.stdout.trim().to_owned()))
     }
 

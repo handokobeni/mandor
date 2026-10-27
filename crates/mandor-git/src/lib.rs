@@ -223,6 +223,13 @@ impl Git {
         Ok(())
     }
 
+    /// Daemon VM: konfigurasi repo tidak dipercaya dan credential helper git
+    /// dinonaktifkan (KTD-65).
+    #[must_use]
+    pub fn distrusts_repo_config(&self) -> bool {
+        self.cfg.distrust_repo_config
+    }
+
     /// `git` dengan hook repo dinonaktifkan, di direktori `dir`.
     fn git(&self, dir: &Path) -> Cmd {
         Cmd::new(&self.cfg.git_bin)

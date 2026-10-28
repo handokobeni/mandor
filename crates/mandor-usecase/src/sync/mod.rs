@@ -197,6 +197,43 @@ impl<D: Deps> SyncService<D> {
             .collect()
     }
 
+    /// Orang yang muncul di kartu sendiri dan papan Team (assignee, reporter,
+    /// pengubah terakhir) beserta namanya, urut nama. Orang tanpa nama dari
+    /// Contact API tidak ikut. Dipakai pemilih reviewer di Settings.
+    ///
+    /// # Errors
+    /// Error penyimpanan cache kartu.
+    pub async fn known_people(&self) -> Result<Vec<(String, String)>, SyncError> {
+        let mut tasks: Vec<mandor_domain::Task> =
+            self.board().await?.into_iter().map(|c| c.task).collect();
+        tasks.extend(
+            self.team
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .iter()
+                .cloned(),
+        );
+        let mut ids: Vec<String> = tasks
+            .iter()
+            .flat_map(|t| {
+                t.assignees
+                    .iter()
+                    .chain(t.reporter.as_ref())
+                    .chain(t.last_modified_by.as_ref())
+                    .cloned()
+            })
+            .collect();
+        ids.sort();
+        ids.dedup();
+        let mut people: Vec<(String, String)> = self.user_names(&ids).await.into_iter().collect();
+        people.sort_by(|a, b| {
+            a.1.to_lowercase()
+                .cmp(&b.1.to_lowercase())
+                .then(a.0.cmp(&b.0))
+        });
+        Ok(people)
+    }
+
     /// `open_id` pengguna.
     #[must_use]
     pub fn me(&self) -> &str {

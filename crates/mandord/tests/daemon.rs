@@ -257,6 +257,7 @@ fn rpc_pengaturan_login_dan_repo_tanpa_sesi_lark() {
                 &json!({"ids": (0..501).collect::<Vec<_>>()}),
             ),
             rpc(16, "people.names", &json!({"open_ids": ["ou_a"]})),
+            rpc(17, "people.known", &Value::Null),
         ],
     );
     assert_eq!(replies[1]["result"]["lark"]["configured"], false);
@@ -293,6 +294,7 @@ fn rpc_pengaturan_login_dan_repo_tanpa_sesi_lark() {
     assert_eq!(replies[14]["error"]["code"], "rejected");
     // Nama orang butuh sesi Lark.
     assert_eq!(replies[15]["error"]["code"], "unauthorized");
+    assert_eq!(replies[16]["error"]["code"], "unauthorized");
 
     let secret_file = std::fs::read_to_string(home.path().join("lark.json")).unwrap();
     assert!(secret_file.contains("rahasia-app"));

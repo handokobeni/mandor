@@ -88,6 +88,8 @@ pub mod method {
     pub const CARD_COMMENTS: &str = "card.comments";
     pub const CARD_DETAILS: &str = "card.details";
     pub const PEOPLE_NAMES: &str = "people.names";
+    /// Orang yang muncul di kartu sendiri dan papan Team, untuk pemilih reviewer.
+    pub const PEOPLE_KNOWN: &str = "people.known";
     pub const RUNS_LIST: &str = "runs.list";
     pub const RUNS_MESSAGES: &str = "runs.messages";
     pub const RUNS_START: &str = "runs.start";

@@ -678,3 +678,43 @@ async fn laptop_mengadopsi_klaim_lama_miliknya_saat_heartbeat() {
         Heartbeat::Lost(ClaimLoss::TakenByOther)
     );
 }
+
+/// Calon reviewer untuk pemilih di Settings: orang yang muncul di kartu
+/// sendiri dan papan Team, dengan nama dari Contact API, urut nama.
+#[tokio::test]
+async fn orang_yang_dikenal_dari_kartu_sendiri_dan_tim_dengan_nama() {
+    let (lark, clock) = setup();
+    for (id, name) in [
+        ("ou_me", "Beni"),
+        ("ou_qa", "Ayu"),
+        ("ou_pm", "Citra"),
+        ("ou_dev2", "Dimas"),
+    ] {
+        lark.names
+            .lock()
+            .unwrap()
+            .insert(id.to_owned(), name.to_owned());
+    }
+    let mut mine = now_task("r1", &["ou_me"], &clock);
+    mine.reporter = Some("ou_pm".to_owned());
+    mine.last_modified_by = Some("ou_qa".to_owned());
+    lark.put(mine);
+    let mut other = now_task("r2", &["ou_dev2"], &clock);
+    other.reporter = Some("ou_tanpa_nama".to_owned());
+    lark.put(other);
+    let a = laptop(&lark, &clock, "ou_me");
+    a.svc.poll(true, &[]).await.unwrap();
+    a.svc.poll_team().await.unwrap();
+
+    let got = a.svc.known_people().await.unwrap();
+    assert_eq!(
+        got,
+        [
+            ("ou_qa".to_owned(), "Ayu".to_owned()),
+            ("ou_me".to_owned(), "Beni".to_owned()),
+            ("ou_pm".to_owned(), "Citra".to_owned()),
+            ("ou_dev2".to_owned(), "Dimas".to_owned()),
+        ],
+        "tanpa nama tidak ikut; urut nama"
+    );
+}

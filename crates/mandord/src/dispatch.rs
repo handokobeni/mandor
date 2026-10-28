@@ -429,6 +429,19 @@ impl AppDispatch {
         ok(&out)
     }
 
+    async fn known_people(&self) -> Result<Value, RpcError> {
+        let s = self.session().await?;
+        let out: Vec<PersonView> = s
+            .sync
+            .known_people()
+            .await
+            .map_err(sync_error)?
+            .into_iter()
+            .map(|(open_id, name)| PersonView { open_id, name })
+            .collect();
+        ok(&out)
+    }
+
     async fn details(&self, r: RecordRef) -> Result<Value, RpcError> {
         let s = self.session().await?;
         let d = s
@@ -996,6 +1009,7 @@ impl Dispatch for AppDispatch {
             method::CARD_COMMENTS => self.comments(params(v)?).await,
             method::CARD_DETAILS => self.details(params(v)?).await,
             method::PEOPLE_NAMES => self.people(params(v)?).await,
+            method::PEOPLE_KNOWN => self.known_people().await,
             method::RUNS_LIST => self.runs_list().await,
             method::RUNS_MESSAGES => self.messages(params(v)?).await,
             method::RUNS_CHANGES => self.changes(params(v)?).await,

@@ -13,6 +13,7 @@
   import AddRepoDialog from './AddRepoDialog.svelte';
   import Field from './Field.svelte';
   import ListEditor from './ListEditor.svelte';
+  import ReviewerPicker from './ReviewerPicker.svelte';
   import { Switch } from '#lib/components/ui/switch/index.ts';
   import { type RepoAppForm, validateRepoApp } from '#lib/settings.ts';
 
@@ -184,10 +185,10 @@
           <div class="field">
             <span class="text-sm font-medium">Trusted reviewers and QA</span>
             <p class="field-help">
-              Lark open_ids whose record comments are forwarded to the agent automatically. Assignees and the reporter are
-              always trusted.
+              People whose record comments are forwarded to the agent automatically. Assignees and the reporter are always
+              trusted.
             </p>
-            <ListEditor list="reviewers" label="trusted reviewers" placeholder="ou_51aa6c" bind:items={edit.reviewers} />
+            <ReviewerPicker {rpc} bind:items={edit.reviewers} />
           </div>
           <div class="field">
             <span class="text-sm font-medium">Extra agent allowlist</span>

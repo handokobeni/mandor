@@ -177,3 +177,23 @@ export function sectionsFor(target: SettingsTarget): string[] {
 export function sectionFor(target: SettingsTarget, section: string): string {
   return sectionsFor(target).includes(section) ? section : 'lark';
 }
+
+/** Orang yang dikenal daemon (`people.known`): `open_id` dan nama. */
+export interface KnownPerson {
+  open_id: string;
+  name: string;
+}
+
+/** Calon reviewer: belum dipilih, cocok dengan nama atau `open_id` (tanpa beda huruf besar), urut nama. */
+export function reviewerCandidates(known: KnownPerson[], selected: string[], query: string): KnownPerson[] {
+  const q = query.trim().toLowerCase();
+  return known
+    .filter((p) => !selected.includes(p.open_id))
+    .filter((p) => !q || p.name.toLowerCase().includes(q) || p.open_id.toLowerCase().includes(q))
+    .sort((a, b) => a.name.localeCompare(b.name));
+}
+
+/** Nama reviewer untuk ditampilkan; `open_id` bila namanya belum dikenal. */
+export function reviewerLabel(known: KnownPerson[], openId: string): string {
+  return known.find((p) => p.open_id === openId)?.name ?? openId;
+}

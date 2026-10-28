@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { validateLark, validateListItem, validateRepoApp } from '#lib/settings.ts';
+import { reviewerCandidates, reviewerLabel, validateLark, validateListItem, validateRepoApp } from '#lib/settings.ts';
 
 const ok = {
   appId: 'cli_a6f2c81d93b8d00e',
@@ -135,5 +135,25 @@ describe('target pengaturan laptop atau VM', () => {
     expect(sectionFor('vm', 'repos')).toBe('repos');
     expect(sectionFor('vm', 'background')).toBe('lark');
     expect(sectionFor('laptop', 'background')).toBe('background');
+  });
+});
+
+describe('pemilih reviewer', () => {
+  const known = [
+    { open_id: 'ou_qa1234', name: 'Ayu Lestari' },
+    { open_id: 'ou_me1234', name: 'Beni Handoko' },
+    { open_id: 'ou_pm1234', name: 'Citra' }
+  ];
+
+  it('mencari menurut nama atau open_id dan menyembunyikan yang sudah dipilih', () => {
+    expect(reviewerCandidates(known, ['ou_me1234'], '').map((p) => p.name)).toEqual(['Ayu Lestari', 'Citra']);
+    expect(reviewerCandidates(known, [], 'ayu').map((p) => p.open_id)).toEqual(['ou_qa1234']);
+    expect(reviewerCandidates(known, [], 'OU_PM').map((p) => p.name)).toEqual(['Citra']);
+    expect(reviewerCandidates(known, [], 'tidak ada')).toEqual([]);
+  });
+
+  it('nama tampilan reviewer, open_id bila belum dikenal', () => {
+    expect(reviewerLabel(known, 'ou_qa1234')).toBe('Ayu Lestari');
+    expect(reviewerLabel(known, 'ou_baru999')).toBe('ou_baru999');
   });
 });

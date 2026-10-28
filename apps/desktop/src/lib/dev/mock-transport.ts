@@ -561,6 +561,13 @@ function handle(method: string, params: Record<string, unknown>): unknown {
       };
       return (params.open_ids as string[]).filter((id) => known[id]).map((id) => ({ open_id: id, name: known[id] }));
     }
+    case 'people.known':
+      return [
+        { open_id: 'ou_7f3a91', name: 'Beni Handoko' },
+        { open_id: 'ou_9e07b2', name: 'Dimas Aditya' },
+        { open_id: 'ou_2c81d4', name: 'Rizky Pratama' },
+        { open_id: 'ou_51aa6c', name: 'Sari Wulandari' }
+      ];
     case 'runs.discard_file':
       return {};
     case 'repos.discover':

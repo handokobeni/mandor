@@ -251,7 +251,8 @@
                   When this run's app runs older code, Mandor restarts it from the latest code before a browser review,
                   including automatic reviews after Waiting Fix. The agent's code then runs with the selected .env keys
                   without you checking the changes first. Use only with local or dev credentials. Needs a login you
-                  confirmed once; another run's app is never stopped.
+                  confirmed once. On the laptop, another run's app is never stopped. On the VM, Mandor also starts an
+                  app that is not running and stops the previous card's app, since overnight cards run one at a time.
                 </span>
               </div>
               <Switch bind:checked={edit.autoRestart} aria-label="Restart the app before reviews" />

@@ -149,7 +149,10 @@ user developer (`handoko_ben`) dari SSH-in-browser, lalu cek `ssh lembur whoami`
    5199** (di rentang port Anda dan terdaftar di app Lark, bagian 4).
 3. **Settings → VM → Repos/Workspaces**: daftarkan repo dengan path di
    `/srv/mandor/handoko_ben/workspaces`; port app repo juga di rentang
-   5100–5199.
+   5100–5199. Untuk review headless, aktifkan **Restart the app before
+   reviews** dan **Setup command prepares a test login**: daemon VM
+   menyalakan app run sendiri sebelum review dan menghentikan app kartu
+   sebelumnya (kartu lembur dikerjakan satu per satu).
 
 ## 8. Developer: login
 

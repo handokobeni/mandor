@@ -269,6 +269,11 @@ impl<D: Deps> RunService<D> {
             .iter()
             .filter_map(|m| Some((m.repo_id.clone(), snapshot.get(&m.repo_id)?.clone())))
             .collect();
+        // Di laptop syarat restart sudah menjamin tidak ada app run lain; di
+        // VM app kartu sebelumnya dihentikan di sini.
+        self.stop_other_app(run_id)
+            .await
+            .map_err(|e| e.to_string())?;
         self.apps.stop(run_id).await;
         // App yang belum menyala belum punya pemilik (VM, R11).
         self.apps

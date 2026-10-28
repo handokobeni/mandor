@@ -584,10 +584,9 @@ async fn restart_otomatis_gagal_review_tetap_berjalan_tanpa_browser() {
     );
 }
 
-/// Di VM tidak ada dev yang menekan Run app: review headless menyalakan app
-/// run ini sendiri bila belum menyala (R11), selama restart otomatis aktif.
-#[tokio::test(flavor = "multi_thread")]
-async fn vm_menyalakan_app_yang_belum_menyala_sebelum_review_headless() {
+/// Run VM yang agent-nya baru selesai dengan perubahan kode; review dimulai
+/// otomatis lewat gerbang push. `before` dijalankan sebelum giliran berakhir.
+async fn vm_review(before: impl AsyncFnOnce(&Station)) -> (FakeLark, FakeClock, Station, String) {
     let (lark, clock) = setup();
     let st = vm_station(&lark, &clock, "ou_me");
     st.repos.repos.lock().unwrap()[0].app = AppSettings {
@@ -610,10 +609,18 @@ async fn vm_menyalakan_app_yang_belum_menyala_sebelum_review_headless() {
             diff: "+bmi".to_owned(),
         },
     );
-    // Akhir giliran agent di VM langsung memulai review lewat gerbang push.
+    before(&st).await;
     st.agent.last().done();
     eventually(|| st.agent.last().req.review.is_some()).await;
     let run = st.runs.only().id;
+    (lark, clock, st, run)
+}
+
+/// Di VM tidak ada dev yang menekan Run app: review headless menyalakan app
+/// run ini sendiri bila belum menyala (R11), selama restart otomatis aktif.
+#[tokio::test(flavor = "multi_thread")]
+async fn vm_menyalakan_app_yang_belum_menyala_sebelum_review_headless() {
+    let (_lark, _clock, st, run) = vm_review(async |_| {}).await;
     let calls = st.apps.calls();
     assert!(calls.contains(&"spawn:repo1".to_owned()), "{calls:?}");
     assert_eq!(
@@ -628,6 +635,36 @@ async fn vm_menyalakan_app_yang_belum_menyala_sebelum_review_headless() {
         "{:?}",
         system_notes(&st)
     );
+}
+
+/// Kartu lembur dikerjakan satu per satu: app kartu sebelumnya dihentikan
+/// agar kartu berikutnya bisa di-review dengan browser.
+#[tokio::test(flavor = "multi_thread")]
+async fn vm_menghentikan_app_kartu_sebelumnya_sebelum_review_headless() {
+    let (_lark, _clock, st, run) = vm_review(async |st| {
+        st.apps
+            .save_app_record(&AppRecord {
+                run_id: "run-lain".to_owned(),
+                state: AppRunState::Running,
+                ..AppRecord::default()
+            })
+            .await
+            .unwrap();
+        st.apps.set_app_owner(Some("run-lain")).await.unwrap();
+    })
+    .await;
+    let calls = st.apps.calls();
+    assert!(calls.contains(&"stop:run-lain".to_owned()), "{calls:?}");
+    assert!(calls.contains(&"spawn:repo1".to_owned()), "{calls:?}");
+    assert_eq!(
+        st.apps.app_owner().await.unwrap().as_deref(),
+        Some(run.as_str())
+    );
+    assert_eq!(
+        st.apps.record("run-lain").unwrap().state,
+        AppRunState::StoppedByOtherRun
+    );
+    assert!(st.agent.last().req.review.unwrap().browser);
 }
 
 #[tokio::test(flavor = "multi_thread")]

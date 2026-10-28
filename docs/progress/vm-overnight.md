@@ -113,4 +113,5 @@ Review headless berbrowser penuh terbukti di **PGS-1522**: app dinyalakan otomat
 - R19 masih ditunda (Take over lalu review di laptop).
 - Reviewer bisa menilai AC tampilan "pass" hanya dari kode (PGS-1519, PGS-1528 AC-5 "Unduh" tidak diklik); AC yang butuh browser seharusnya Can't verify bila tidak dibuktikan di browser.
 - PGS-1528 (informasi brand sengaja tidak diberikan): agent tidak bertanya, tetapi membuat nilai sementara yang ditandai `PLACEHOLDER`; gerbang menahan kartu `ac_gate` karena AC-1 dan AC-3 Can't verify.
+- Kartu lembur di VM dimulai tanpa tahap plan (`Planning::Skip`, KTD-57); pengamannya di gerbang akhir. Opsi yang diusulkan, diputuskan pemilik produk setelah testing selesai: (1) plan disetujui siang di laptop lalu dieksekusi VM malam hari, atau (2) VM membuat plan sendiri tanpa persetujuan sebelum implementasi.
 - Sisa AE di atas perlu uji jam lembur sungguhan dan developer kedua.

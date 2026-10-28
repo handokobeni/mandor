@@ -64,7 +64,7 @@ VM `instance-lembur` (GCP `asia-southeast2-b`, Ubuntu 26.10, 2 vCPU, 3,8 GB), sa
 | AE1 antrean berurutan pada jam lembur | belum diuji | Semua kartu dijalankan lewat Start now; penjadwal jam lembur sungguhan belum diamati. |
 | AE2 kartu berjalan melewati akhir jam | belum diuji | |
 | AE3 Start now siang hari | lulus | PGS-1519, 1520, 1521, 1522: dikerjakan di VM, push hanya branch kartu, PR draft, Lark tetap In Progress. |
-| AE4 kartu antrean sudah dipindah orang lain | belum diuji | |
+| AE4 kartu antrean sudah dipindah orang lain | lulus | PGS-1527 diubah ke In Progress di Lark lalu Start now: tidak ada run, kartu dikeluarkan dari antrean dengan alasan "the card moved to In Progress in Lark". |
 | AE5 batas pemakaian tercapai | sebagian | Batas tidak pernah tercapai karena cache tidak dihitung (lihat temuan 6); setelah perbaikan, test unit/integrasi saja. |
 | AE6 Can't verify menahan `ac_gate` tanpa push | lulus | PGS-1518 dan PGS-1520: 6 Can't verify, kartu ditahan, tidak ada push. |
 | AE7 isolasi dua developer | belum diuji | Baru satu developer di VM. |

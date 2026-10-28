@@ -585,12 +585,18 @@ impl ReviewReadiness {
     /// App run ini perlu dinyalakan ulang otomatis sebelum review: restart
     /// aktif di semua repo Web (`auto_restart`), app run ini menyala dari kode lama, tidak ada app run lain yang
     /// menyala, login pernah dikonfirmasi, dan ekstensi tersambung, sehingga
-    /// restart membuat review bisa memakai browser.
+    /// restart membuat review bisa memakai browser. Di VM tidak ada dev yang
+    /// menyalakan app, jadi app yang belum menyala juga dinyalakan (R11).
     #[must_use]
     pub fn restarts_app(&self, auto_restart: bool) -> bool {
+        let stale = match self.app {
+            AppReadiness::OlderCode => true,
+            AppReadiness::NotRunning => matches!(self.driver, BrowserDriver::Headless { .. }),
+            AppReadiness::Current => false,
+        };
         self.needs_dialog()
             && auto_restart
-            && self.app == AppReadiness::OlderCode
+            && stale
             && self.other_owner.is_none()
             && self.login_ready()
             && self.driver_ready()

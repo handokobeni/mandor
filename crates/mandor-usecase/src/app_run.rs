@@ -243,8 +243,15 @@ impl<D: Deps> RunService<D> {
         run_id: &str,
         snapshot: &BTreeMap<String, String>,
     ) -> String {
+        let was_running = self
+            .app_status(run_id)
+            .await
+            .is_ok_and(|a| a.state == AppRunState::Running);
         match self.restart_app(run_id, snapshot).await {
-            Ok(()) => "Restarted the app with the latest code before the review.".to_owned(),
+            Ok(()) if was_running => {
+                "Restarted the app with the latest code before the review.".to_owned()
+            }
+            Ok(()) => "Started the app with the latest code before the review.".to_owned(),
             Err(why) => format!(
                 "Could not restart the app ({why}); the review continues without the browser."
             ),
@@ -263,6 +270,11 @@ impl<D: Deps> RunService<D> {
             .filter_map(|m| Some((m.repo_id.clone(), snapshot.get(&m.repo_id)?.clone())))
             .collect();
         self.apps.stop(run_id).await;
+        // App yang belum menyala belum punya pemilik (VM, R11).
+        self.apps
+            .set_app_owner(Some(run_id))
+            .await
+            .map_err(|e| e.to_string())?;
         let rec = starting_record(run_id, &members, wanted, prev, true);
         self.apps
             .save_app_record(&rec)

@@ -8,7 +8,7 @@ use std::path::PathBuf;
 use std::sync::atomic::Ordering;
 
 use common::run_fakes::eventually;
-use common::{FakeClock, FakeLark, Station, ready_task, station};
+use common::{FakeClock, FakeLark, Station, ready_task, station, vm_station};
 use mandor_domain::app_run::{AppRunState, AppSettings, TestMode};
 use mandor_domain::{RunState, Verdict};
 use mandor_usecase::run_ports::{
@@ -582,4 +582,74 @@ async fn restart_otomatis_gagal_review_tetap_berjalan_tanpa_browser() {
         "{:?}",
         system_notes(&st)
     );
+}
+
+/// Di VM tidak ada dev yang menekan Run app: review headless menyalakan app
+/// run ini sendiri bila belum menyala (R11), selama restart otomatis aktif.
+#[tokio::test(flavor = "multi_thread")]
+async fn vm_menyalakan_app_yang_belum_menyala_sebelum_review_headless() {
+    let (lark, clock) = setup();
+    let st = vm_station(&lark, &clock, "ou_me");
+    st.repos.repos.lock().unwrap()[0].app = AppSettings {
+        test_mode: TestMode::Web,
+        start_command: Some("python3 -m http.server 5150".to_owned()),
+        port: Some(5150),
+        browser_tests: true,
+        auto_restart: true,
+        unattended_login: true,
+        ..AppSettings::default()
+    };
+    st.svc.start("rec1", "repo1", None).await.unwrap();
+    let wt: PathBuf = st.runs.only().worktree.unwrap();
+    st.git.set_changes(
+        &wt,
+        mandor_usecase::run_ports::WorkChanges {
+            dirty: true,
+            unpushed: 0,
+            files: vec!["web/bmi.html".to_owned()],
+            diff: "+bmi".to_owned(),
+        },
+    );
+    // Akhir giliran agent di VM langsung memulai review lewat gerbang push.
+    st.agent.last().done();
+    eventually(|| st.agent.last().req.review.is_some()).await;
+    let run = st.runs.only().id;
+    let calls = st.apps.calls();
+    assert!(calls.contains(&"spawn:repo1".to_owned()), "{calls:?}");
+    assert_eq!(
+        st.apps.app_owner().await.unwrap().as_deref(),
+        Some(run.as_str())
+    );
+    assert!(st.agent.last().req.review.unwrap().browser);
+    assert!(
+        system_notes(&st)
+            .iter()
+            .any(|n| n.contains("Started the app")),
+        "{:?}",
+        system_notes(&st)
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn laptop_tidak_menyalakan_app_yang_belum_menyala() {
+    let (lark, clock) = setup();
+    let st = station(&lark, &clock, "ou_me");
+    st.repos.repos.lock().unwrap()[0].app = AppSettings {
+        test_mode: TestMode::Web,
+        start_command: Some("bun run dev".to_owned()),
+        port: Some(5173),
+        browser_tests: true,
+        auto_restart: true,
+        ..AppSettings::default()
+    };
+    *st.reviews.chrome.lock().unwrap() = true;
+    st.svc.start("rec1", "repo1", None).await.unwrap();
+    st.agent.last().done();
+    eventually(|| st.runs.only().state == RunState::AwaitingDev).await;
+    let run = st.runs.only().id;
+    st.svc
+        .start_review(&run, ReviewTrigger::Manual, None)
+        .await
+        .unwrap();
+    assert!(!st.apps.calls().iter().any(|c| c.starts_with("spawn:")));
 }

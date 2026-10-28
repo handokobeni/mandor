@@ -3,7 +3,17 @@ import type { CardView } from '#lib/protocol/CardView.ts';
 import type { LoginCheck } from '#lib/protocol/LoginCheck.ts';
 import type { OvernightReportView } from '#lib/protocol/OvernightReportView.ts';
 import type { ReportCardView } from '#lib/protocol/ReportCardView.ts';
-import { canActivate, canQueue, loginNotices, reportGroups, usageText, vmBadge } from './overnight';
+import {
+  canActivate,
+  canQueue,
+  formatTokens,
+  loginNotices,
+  offsetOptions,
+  reportGroups,
+  timeOptions,
+  usageText,
+  vmBadge
+} from './overnight';
 
 function card(over: Partial<CardView> = {}): CardView {
   return {
@@ -131,5 +141,30 @@ describe('laporan pagi', () => {
   it('pemakaian terhadap batas', () => {
     expect(usageText(report)).toBe('250,000 of 1,000,000 tokens (25%)');
     expect(usageText({ ...report, limit: null })).toBe('250,000 tokens · no limit set');
+  });
+});
+
+describe('pilihan jam dan offset lembur', () => {
+  it('jam tiap 30 menit dan nilai tersimpan di luar langkah tetap ada', () => {
+    const opts = timeOptions('19:00');
+    expect(opts[0]).toBe('00:00');
+    expect(opts[1]).toBe('00:30');
+    expect(opts).toHaveLength(48);
+    expect(timeOptions('19:15')).toContain('19:15');
+    expect(timeOptions('19:15')).toHaveLength(49);
+  });
+
+  it('offset UTC −12:00 sampai +14:00 dengan label zona umum Indonesia', () => {
+    const opts = offsetOptions('+07:00');
+    expect(opts[0].value).toBe('-12:00');
+    expect(opts.at(-1)?.value).toBe('+14:00');
+    expect(opts.find((o) => o.value === '+07:00')?.label).toBe('UTC+07:00 · WIB');
+    expect(opts.find((o) => o.value === '+08:00')?.label).toBe('UTC+08:00 · WITA');
+    expect(opts.find((o) => o.value === '+09:00')?.label).toBe('UTC+09:00 · WIT');
+    expect(offsetOptions('+05:45').map((o) => o.value)).toContain('+05:45');
+  });
+
+  it('batas token dibaca dengan pemisah ribuan', () => {
+    expect(formatTokens(10_000_000)).toBe('10,000,000');
   });
 });

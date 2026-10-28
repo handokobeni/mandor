@@ -2,7 +2,8 @@
   import { toast } from 'svelte-sonner';
   import { Button } from '#lib/components/ui/button/index.ts';
   import { Input } from '#lib/components/ui/input/index.ts';
-  import { canActivate, loginNotices } from '#lib/overnight.ts';
+  import * as Select from '#lib/components/ui/select/index.ts';
+  import { canActivate, formatTokens, loginNotices, offsetOptions, timeOptions } from '#lib/overnight.ts';
   import type { OvernightSettingsView } from '#lib/protocol/OvernightSettingsView.ts';
   import type { Rpc } from '#lib/rpc.ts';
   import { vmConnection } from '#lib/stores/connection.svelte.ts';
@@ -31,6 +32,15 @@
         limitText = s.token_limit === null ? '' : String(s.token_limit);
       }
     }
+  });
+
+  const starts = $derived(timeOptions(form.start));
+  const ends = $derived(timeOptions(form.end));
+  const offsets = $derived(offsetOptions(form.offset));
+  const offsetLabel = $derived(offsets.find((o) => o.value === form.offset)?.label ?? form.offset);
+  const limitPreview = $derived.by(() => {
+    const n = Number(limitText.trim().replaceAll(',', ''));
+    return limitText.trim() !== '' && Number.isInteger(n) && n >= 0 ? `${formatTokens(n)} tokens` : null;
   });
 
   async function saveSettings(): Promise<void> {
@@ -147,16 +157,39 @@
             </p>
           {/if}
           <div class="grid">
-            <label class="field"><span class="text-sm font-medium">Starts</span><Input type="time" bind:value={form.start} /></label>
-            <label class="field"><span class="text-sm font-medium">Ends</span><Input type="time" bind:value={form.end} /></label>
-            <label class="field">
-              <span class="text-sm font-medium">UTC offset</span><Input class="mono" placeholder="+07:00" bind:value={form.offset} />
-            </label>
+            <div class="field">
+              <span class="text-sm font-medium">Starts</span>
+              <Select.Root type="single" bind:value={form.start}>
+                <Select.Trigger class="mono w-full" aria-label="Starts">{form.start}</Select.Trigger>
+                <Select.Content class="max-h-64">
+                  {#each starts as t (t)}<Select.Item value={t} label={t} />{/each}
+                </Select.Content>
+              </Select.Root>
+            </div>
+            <div class="field">
+              <span class="text-sm font-medium">Ends</span>
+              <Select.Root type="single" bind:value={form.end}>
+                <Select.Trigger class="mono w-full" aria-label="Ends">{form.end}</Select.Trigger>
+                <Select.Content class="max-h-64">
+                  {#each ends as t (t)}<Select.Item value={t} label={t} />{/each}
+                </Select.Content>
+              </Select.Root>
+            </div>
+            <div class="field">
+              <span class="text-sm font-medium">UTC offset</span>
+              <Select.Root type="single" bind:value={form.offset}>
+                <Select.Trigger class="mono w-full" aria-label="UTC offset">{offsetLabel}</Select.Trigger>
+                <Select.Content class="max-h-64">
+                  {#each offsets as o (o.value)}<Select.Item value={o.value} label={o.label} />{/each}
+                </Select.Content>
+              </Select.Root>
+            </div>
             <label class="field">
               <span class="text-sm font-medium">Usage limit (tokens)</span>
               <Input class="mono" inputmode="numeric" placeholder="e.g. 2000000" bind:value={limitText} />
             </label>
           </div>
+          {#if limitPreview}<p class="field-help mono" style="margin-top:-4px">Limit: {limitPreview}</p>{/if}
           <p class="field-help">
             A cycle runs from one start time to the next. Start now and Waiting Fix runs during the day count toward the
             same limit. The limit counts input, output and cache-write tokens, plus 10% of cache-read tokens, for the

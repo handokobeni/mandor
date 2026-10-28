@@ -97,7 +97,40 @@ export function holdLabel(reason: string | null): string {
 
 /** Pemakaian siklus terhadap batasnya. */
 export function usageText(r: Pick<OvernightReportView, 'used' | 'limit'>): string {
-  const n = (v: number) => v.toLocaleString('en-US');
+  const n = formatTokens;
   if (!r.limit) return `${n(r.used)} tokens · no limit set`;
   return `${n(r.used)} of ${n(r.limit)} tokens (${Math.round((r.used / r.limit) * 100)}%)`;
+}
+
+/** Jam mulai/selesai lembur tiap 30 menit; nilai tersimpan di luar langkah ikut ditampilkan. */
+export function timeOptions(current: string): string[] {
+  const out: string[] = [];
+  for (let m = 0; m < 24 * 60; m += 30) {
+    out.push(`${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`);
+  }
+  if (current && !out.includes(current)) {
+    out.push(current);
+    out.sort();
+  }
+  return out;
+}
+
+const ZONE_NAMES: Record<string, string> = { '+07:00': 'WIB', '+08:00': 'WITA', '+09:00': 'WIT' };
+
+/** Offset UTC per jam dari −12:00 sampai +14:00; offset tersimpan lain (mis. +05:45) ikut. */
+export function offsetOptions(current: string): { value: string; label: string }[] {
+  const values: string[] = [];
+  for (let h = -12; h <= 14; h++) {
+    values.push(`${h < 0 ? '-' : '+'}${String(Math.abs(h)).padStart(2, '0')}:00`);
+  }
+  if (current && !values.includes(current)) values.push(current);
+  const minutes = (v: string): number => (v.startsWith('-') ? -1 : 1) * (Number(v.slice(1, 3)) * 60 + Number(v.slice(4, 6)));
+  return values
+    .sort((a, b) => minutes(a) - minutes(b))
+    .map((value) => ({ value, label: ZONE_NAMES[value] ? `UTC${value} · ${ZONE_NAMES[value]}` : `UTC${value}` }));
+}
+
+/** Jumlah token dengan pemisah ribuan. */
+export function formatTokens(n: number): string {
+  return n.toLocaleString('en-US');
 }

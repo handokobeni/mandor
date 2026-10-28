@@ -77,6 +77,8 @@ VM `instance-lembur` (GCP `asia-southeast2-b`, Ubuntu 26.10, 2 vCPU, 3,8 GB), sa
 | AE14 DM laporan pagi | belum diuji | |
 | AE15 badge Queued for VM | lulus | PGS-1524 di antrean: board laptop menampilkan "Queued for VM" menggantikan Start. |
 
+Skenario tambahan (R12, perubahan sensitif): **PGS-1529** (workflow GitHub Actions) lulus. Agent menambah `.github/workflows/test.yml`; VM menahan kartu `needs_confirmation` tanpa commit dan tanpa push.
+
 Review headless berbrowser penuh terbukti di **PGS-1522**: app dinyalakan otomatis, satu review dengan browser, 6 AC pass dengan bukti isi form, klik, dan baca halaman, lalu PR draft #9 tanpa campur tangan.
 
 ### Asumsi

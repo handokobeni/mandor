@@ -153,7 +153,7 @@
               <span class="text-sm font-medium">UTC offset</span><Input class="mono" placeholder="+07:00" bind:value={form.offset} />
             </label>
             <label class="field">
-              <span class="text-sm font-medium">Usage limit per cycle (tokens)</span>
+              <span class="text-sm font-medium">Usage limit (tokens)</span>
               <Input class="mono" inputmode="numeric" placeholder="e.g. 2000000" bind:value={limitText} />
             </label>
           </div>
@@ -194,6 +194,7 @@
   .grid {
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+    align-items: end;
     gap: 12px;
     margin-bottom: 8px;
   }

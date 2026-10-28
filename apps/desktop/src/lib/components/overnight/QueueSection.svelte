@@ -5,6 +5,7 @@
   import Play from '@lucide/svelte/icons/play';
   import X from '@lucide/svelte/icons/x';
   import { Button } from '#lib/components/ui/button/index.ts';
+  import * as Select from '#lib/components/ui/select/index.ts';
   import { canQueue } from '#lib/overnight.ts';
   import { board } from '#lib/stores/board.svelte.ts';
   import { overnight, type QueueTarget } from '#lib/stores/overnight.svelte.ts';
@@ -42,6 +43,16 @@
     pick = '';
   }
 
+  const pickLabel = $derived.by(() => {
+    const c = candidates.find((x) => x.record_id === pick);
+    return c ? `${c.key ?? c.record_id} · ${c.title}` : 'Choose a To Do card…';
+  });
+  const targetText = $derived.by(() => {
+    if (target.startsWith('repo:')) return target.slice(5);
+    const ws = overnight.workspaces.find((w) => `ws:${w.id}` === target);
+    return ws ? `Workspace ${ws.name}` : 'Repo on the VM…';
+  });
+
   function targetLabel(repo: string | null, ws: string | null): string {
     return ws ? `workspace ${ws}` : (repo ?? '');
   }
@@ -73,21 +84,29 @@
         </ol>
       {/if}
       <div class="add">
-        <select class="native-select" aria-label="Card to queue" bind:value={pick}>
-          <option value="">Choose a To Do card…</option>
-          {#each candidates as c (c.record_id)}
-            <option value={c.record_id}>{c.key ?? c.record_id} · {c.title}</option>
-          {/each}
-        </select>
-        <select class="native-select" aria-label="Repo on the VM" bind:value={target}>
-          <option value="">Repo on the VM…</option>
-          {#each overnight.repos as r (r.id)}
-            <option value={`repo:${r.id}`}>{r.id}</option>
-          {/each}
-          {#each overnight.workspaces as w (w.id)}
-            <option value={`ws:${w.id}`}>Workspace {w.name}</option>
-          {/each}
-        </select>
+        <Select.Root type="single" bind:value={pick}>
+          <Select.Trigger class="w-80 max-w-full" aria-label="Card to queue">
+            <span class="min-w-0 truncate" class:placeholder={!pick}>{pickLabel}</span>
+          </Select.Trigger>
+          <Select.Content>
+            {#each candidates as c (c.record_id)}
+              <Select.Item value={c.record_id} label={`${c.key ?? c.record_id} · ${c.title}`} />
+            {/each}
+          </Select.Content>
+        </Select.Root>
+        <Select.Root type="single" bind:value={target}>
+          <Select.Trigger class="w-44" aria-label="Repo on the VM">
+            <span class="min-w-0 truncate" class:placeholder={!target}>{targetText}</span>
+          </Select.Trigger>
+          <Select.Content>
+            {#each overnight.repos as r (r.id)}
+              <Select.Item value={`repo:${r.id}`} label={r.id} />
+            {/each}
+            {#each overnight.workspaces as w (w.id)}
+              <Select.Item value={`ws:${w.id}`} label={`Workspace ${w.name}`} />
+            {/each}
+          </Select.Content>
+        </Select.Root>
         <Button size="sm" disabled={!pick || !target} onclick={add}>Add to queue</Button>
       </div>
       {#if overnight.queue && overnight.queue.dequeued.length > 0}
@@ -129,17 +148,12 @@
   }
   .add {
     display: flex;
+    flex-wrap: wrap;
     gap: 8px;
     align-items: center;
   }
-  .native-select {
-    height: 32px;
-    border: 1px solid var(--input);
-    border-radius: 8px;
-    background: var(--card);
-    color: var(--foreground);
-    padding: 0 8px;
-    max-width: 320px;
+  .placeholder {
+    color: var(--muted-foreground);
   }
   .dequeued li {
     font-size: 13px;

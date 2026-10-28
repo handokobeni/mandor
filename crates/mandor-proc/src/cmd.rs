@@ -8,6 +8,8 @@ use std::time::Duration;
 use process_wrap::tokio::{ChildWrapper, CommandWrap, KillOnDrop};
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWriteExt};
 
+use secrecy::SecretString;
+
 use crate::redact::redact;
 
 /// Timeout default untuk proses pendek (git, gh).
@@ -245,6 +247,46 @@ pub enum ProcError {
 /// [`ProcError::Spawn`] bila program tidak bisa dijalankan, [`ProcError::Timeout`]
 /// bila melewati batas waktu, [`ProcError::Io`] bila pipe gagal.
 pub async fn run(cmd: &Cmd) -> Result<Output, ProcError> {
+    let (code, out, err) = run_raw(cmd).await?;
+    Ok(Output {
+        code,
+        stdout: redact(&String::from_utf8_lossy(&out)).into_owned(),
+        stderr: redact(&String::from_utf8_lossy(&err)).into_owned(),
+    })
+}
+
+/// Hasil [`run_secret`]: stdout adalah rahasia, stderr tetap diredaksi.
+#[derive(Debug)]
+pub struct SecretOutput {
+    /// Kode keluar; `None` bila proses dihentikan sinyal.
+    pub code: Option<i32>,
+    pub stdout: SecretString,
+    pub stderr: String,
+}
+
+impl SecretOutput {
+    /// `true` bila kode keluar 0.
+    #[must_use]
+    pub fn success(&self) -> bool {
+        self.code == Some(0)
+    }
+}
+
+/// Seperti [`run`], tetapi stdout tidak diredaksi dan dikembalikan sebagai
+/// rahasia, untuk perintah yang memang mencetak token (mis. `gh auth token`).
+///
+/// # Errors
+/// Sama dengan [`run`].
+pub async fn run_secret(cmd: &Cmd) -> Result<SecretOutput, ProcError> {
+    let (code, out, err) = run_raw(cmd).await?;
+    Ok(SecretOutput {
+        code,
+        stdout: SecretString::from(String::from_utf8_lossy(&out).into_owned()),
+        stderr: redact(&String::from_utf8_lossy(&err)).into_owned(),
+    })
+}
+
+async fn run_raw(cmd: &Cmd) -> Result<(Option<i32>, Vec<u8>, Vec<u8>), ProcError> {
     let program = cmd.program_name();
     let mut child = cmd.build().spawn().map_err(|source| ProcError::Spawn {
         program: program.clone(),
@@ -272,11 +314,7 @@ pub async fn run(cmd: &Cmd) -> Result<Output, ProcError> {
     .await;
 
     match outcome {
-        Ok(Ok((out, err, status))) => Ok(Output {
-            code: status.code(),
-            stdout: redact(&String::from_utf8_lossy(&out)).into_owned(),
-            stderr: redact(&String::from_utf8_lossy(&err)).into_owned(),
-        }),
+        Ok(Ok((out, err, status))) => Ok((status.code(), out, err)),
         Ok(Err(source)) => Err(ProcError::Io { program, source }),
         Err(_elapsed) => {
             kill_group(child.as_mut()).await;

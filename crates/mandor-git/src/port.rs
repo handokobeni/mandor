@@ -313,7 +313,7 @@ mod tests {
         let gh = dir.join("gh");
         std::fs::write(
             &gh,
-            "#!/bin/sh\nif [ \"$3\" = --user ]; then echo \"tok-$4\"; else echo tok-aktif; fi\n",
+            "#!/bin/sh\nif [ \"$3\" = --user ]; then echo \"ghp_$4000000000000000000000000000\"; else echo gho_aktif0000000000000000000000000000; fi\n",
         )
         .unwrap();
         std::fs::set_permissions(&gh, std::fs::Permissions::from_mode(0o755)).unwrap();
@@ -332,9 +332,13 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let vm = adapter(dir.path(), true);
         let t = vm.token(&repo(None)).await.unwrap().unwrap();
-        assert_eq!(t.expose_secret(), "tok-aktif");
+        // Token berbentuk asli tidak boleh ikut diredaksi seperti output perintah lain.
+        assert_eq!(t.expose_secret(), "gho_aktif0000000000000000000000000000");
         let t = vm.token(&repo(Some("handoko78"))).await.unwrap().unwrap();
-        assert_eq!(t.expose_secret(), "tok-handoko78");
+        assert_eq!(
+            t.expose_secret(),
+            "ghp_handoko78000000000000000000000000000"
+        );
         let laptop = adapter(dir.path(), false);
         assert!(laptop.token(&repo(None)).await.unwrap().is_none());
     }

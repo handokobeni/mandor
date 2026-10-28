@@ -117,3 +117,15 @@ async fn variabel_eksplisit_tetap_ada_walau_scrub() {
     let out = run(&cmd).await.unwrap();
     assert_eq!(out.stdout.trim(), "gh=milik-daemon");
 }
+
+#[tokio::test]
+async fn stdout_rahasia_tidak_diredaksi_tetapi_stderr_tetap() {
+    use secrecy::ExposeSecret;
+    let token = "ghp_abcdefghijklmnopqrstuvwxyz0123456789";
+    let out = mandor_proc::run_secret(&sh(&format!("echo {token}; echo {token} 1>&2")))
+        .await
+        .unwrap();
+    assert!(out.success());
+    assert_eq!(out.stdout.expose_secret().trim(), token);
+    assert!(!out.stderr.contains(token));
+}

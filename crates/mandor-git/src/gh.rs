@@ -99,14 +99,17 @@ impl Git {
         args: &[&str],
         hint: Option<&str>,
     ) -> Result<SecretString, GitError> {
-        let out = mandor_proc::run(&self.gh(Path::new("."), None).args(args)).await?;
+        // Stdout `run` biasa diredaksi, yang akan merusak token itu sendiri.
+        let out = mandor_proc::run_secret(&self.gh(Path::new("."), None).args(args)).await?;
         if !out.success() {
             return Err(GitError::Command {
                 op: "gh auth token",
                 stderr: hint.map_or_else(|| out.stderr.trim().to_owned(), str::to_owned),
             });
         }
-        Ok(SecretString::from(out.stdout.trim().to_owned()))
+        Ok(SecretString::from(
+            out.stdout.expose_secret().trim().to_owned(),
+        ))
     }
 
     /// Membuat PR dari `head` ke `base`; mengembalikan URL PR. PR draft di

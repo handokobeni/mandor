@@ -56,8 +56,14 @@ impl<D: Deps> RunService<D> {
         let skill = skill.as_deref();
         let allowed = match trigger {
             ReviewTrigger::AutomaticFix => run.state == RunState::WfRunning,
-            ReviewTrigger::Manual | ReviewTrigger::PushAndPr => {
+            ReviewTrigger::Manual => {
                 run.state == RunState::AwaitingDev && run.phase == RunPhase::Implement
+            }
+            // Di VM kartu `ac_gate` yang AC-nya belum di-review (review putus)
+            // di-review lagi lewat keputusan dev di gerbang.
+            ReviewTrigger::PushAndPr => {
+                run.phase == RunPhase::Implement
+                    && (run.state == RunState::AwaitingDev || self.held_at_ac_gate(&run))
             }
         };
         if !allowed {
@@ -126,6 +132,7 @@ impl<D: Deps> RunService<D> {
         run.review_snapshot = snapshot;
         run.review_id = Some(record.id.clone());
         run.state = RunState::Reviewing;
+        run.hold = None;
         let summary = match skill {
             Some(s) => format!("Review started with {s}."),
             None => "Review started.".to_owned(),
@@ -173,6 +180,16 @@ impl<D: Deps> RunService<D> {
         let run = self.load(run_id).await?;
         let snapshot = self.code_snapshot(&run).await?;
         self.readiness(&run, &snapshot).await
+    }
+
+    /// Kartu VM yang tertahan di gerbang AC.
+    fn held_at_ac_gate(&self, run: &RunRecord) -> bool {
+        self.is_vm()
+            && run.state == RunState::Held
+            && run
+                .hold
+                .as_ref()
+                .is_some_and(|h| h.reason == mandor_domain::HoldReason::AcGate)
     }
 
     async fn readiness(

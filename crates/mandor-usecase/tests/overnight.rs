@@ -1021,3 +1021,43 @@ async fn batas_siklus_ikut_menghitung_token_cache() {
         1_100
     );
 }
+
+/// Review yang putus (mis. daemon dihentikan) meninggalkan AC belum
+/// di-review. Keputusan dev pada kartu `ac_gate` itu memulai review headless
+/// baru, lalu gerbang memproses hasilnya seperti biasa.
+#[tokio::test(flavor = "multi_thread")]
+async fn keputusan_dev_setelah_review_putus_memulai_review_baru_di_vm() {
+    let (_lark, _clock, st) = vm_started(true).await;
+    changed(&st, "a", "src/form.rs");
+    st.agent.last().done();
+    eventually(|| run_of(&st, "a").state == RunState::Reviewing).await;
+    st.agent
+        .last()
+        .crash("agent stopped without a result (exit 143)");
+    eventually(|| held(&st, "a").is_some()).await;
+    assert_eq!(held(&st, "a"), Some(mandor_domain::HoldReason::AcGate));
+
+    let run_id = run_of(&st, "a").id;
+    let decision = mandor_domain::GateDecision {
+        confirmed: Vec::new(),
+        push_anyway_reason: None,
+        decided_by: Some("Beni".to_owned()),
+    };
+    let out = st.svc.publish_gated(&run_id, &decision).await.unwrap();
+    assert!(
+        matches!(
+            out,
+            mandor_usecase::run::PublishOutcome::ReviewStarted { .. }
+        ),
+        "{out:?}"
+    );
+    assert_eq!(run_of(&st, "a").state, RunState::Reviewing);
+    assert!(
+        run_of(&st, "a").hold.is_none(),
+        "tahanan dilepas saat review mulai"
+    );
+    report_verdict(&st, "ac1", mandor_domain::Verdict::Pass);
+    st.agent.last().done();
+    eventually(|| !st.git.st().pushes.is_empty()).await;
+    assert_eq!(st.git.st().drafts.len(), 1, "PR draft");
+}

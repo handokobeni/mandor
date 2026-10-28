@@ -52,3 +52,61 @@ Syarat rollout ke tim (bukan blocker implementasi): konfirmasi tertulis Anthropi
 - Review keamanan: argv `sudo` agent VM hanya membawa variabel allowlist (`AGENT_ENV_ALLOWED`, dipakai bersama `agent-exec`).
 - VM atau daemon restart di tengah kartu: run menjadi Failed (rekonsiliasi Rilis 1) dan kini bisa diantre ulang (`queue_add` menerima run Held atau Failed) lalu dilanjutkan di branch, worktree, dan sesi yang sama; tab Overnight menampilkan **Queue again** untuk kartu Failed. Runbook bagian 8.
 - Uji langsung (2026-10-27): kartu VM ditolak saat `git fetch` ("could not read Username") karena repo tanpa gh profile bergantung pada credential helper git, yang sengaja dinonaktifkan di VM (KTD-65). Kini di peran VM repo tanpa gh profile memakai token akun `gh` yang aktif (`gh auth token`), disuntikkan hanya ke fetch/push daemon; tanpa login `gh` pesannya menunjuk `gh auth login`. `gh auth token` dijalankan di luar penjaga konfigurasi repo karena tidak menjalankan git di repo.
+
+## U12: uji langsung (2026-10-27 s.d. 2026-10-28)
+
+VM `instance-lembur` (GCP `asia-southeast2-b`, Ubuntu 26.10, 2 vCPU, 3,8 GB), satu developer (`handoko_ben`, agent `handoko_ben-agent`, port 5100–5199, callback Lark 5199), akses lewat IAP (`ssh lembur`). Base Lark salinan dan repo `handokobeni/mandor-smoke`. Kartu uji PGS-1518 sampai PGS-1523 (6 AC masing-masing); kartu dijalankan dengan Start now di luar jam lembur.
+
+### Hasil per AE
+
+| AE | Status | Bukti / catatan |
+|---|---|---|
+| AE1 antrean berurutan pada jam lembur | belum diuji | Semua kartu dijalankan lewat Start now; penjadwal jam lembur sungguhan belum diamati. |
+| AE2 kartu berjalan melewati akhir jam | belum diuji | |
+| AE3 Start now siang hari | lulus | PGS-1519, 1520, 1521, 1522: dikerjakan di VM, push hanya branch kartu, PR draft, Lark tetap In Progress. |
+| AE4 kartu antrean sudah dipindah orang lain | belum diuji | |
+| AE5 batas pemakaian tercapai | sebagian | Batas tidak pernah tercapai karena cache tidak dihitung (lihat temuan 6); setelah perbaikan, test unit/integrasi saja. |
+| AE6 Can't verify menahan `ac_gate` tanpa push | lulus | PGS-1518 dan PGS-1520: 6 Can't verify, kartu ditahan, tidak ada push. |
+| AE7 isolasi dua developer | belum diuji | Baru satu developer di VM. |
+| AE8 laptop melihat kartu milik VM | sebagian | Badge **On VM** di board laptop terlihat; hanya-baca belum dicoba eksplisit. |
+| AE9 Waiting Fix siang saat VM kosong | belum diuji | PGS-1518 masuk Waiting Fix setelah PR #5 di-merge; tidak diamati sampai selesai. |
+| AE10 Waiting Fix mendahului antrean | belum diuji | |
+| AE11 Take over to laptop | belum diuji | |
+| AE12 konfirmasi Can't verify lalu push tanpa agent | lulus | PGS-1518 (PR #5) dan PGS-1521 (PR #8) setelah Decide AC. |
+| AE13 PR draft lalu Send to review | lulus | PGS-1518, 1519, 1521: PR keluar dari draft, Lark ke Waiting Review. |
+| AE14 DM laporan pagi | belum diuji | |
+| AE15 badge Queued for VM | belum diuji | |
+
+Review headless berbrowser penuh terbukti di **PGS-1522**: app dinyalakan otomatis, satu review dengan browser, 6 AC pass dengan bukti isi form, klik, dan baca halaman, lalu PR draft #9 tanpa campur tangan.
+
+### Asumsi
+
+| Asumsi | Status |
+|---|---|
+| A1 sudoers `agent-exec`, linger kedua user | terbukti; container rootless belum dipakai (repo uji statis) |
+| A2 Claude Code lewat `sudo -n` sebagai user agent | terbukti (sesi kerja, review, cek login); SIGTERM ke agent saat daemon berhenti menghasilkan exit 143 yang tertangani |
+| A3 Playwright MCP headless dalam batas sumber daya | terbukti untuk satu run; memori VM tersisa sekitar 2,7 GB saat review berjalan |
+| A4 nonce klaim panjang di Lark | terbukti |
+| A5 SSH berbasis kunci dan `ssh -L` | terbukti lewat IAP (`ProxyCommand gcloud compute start-iap-tunnel`) |
+
+### Temuan dan perbaikan
+
+1. **Check host key gagal lewat IAP**: `ssh-keyscan` tidak memakai `ProxyCommand`. Scan kini lewat `ssh` dengan config pengguna di direktori sementara privat (`617670e`, `032697d`).
+2. **System check: `claude` tidak ditemukan** di PATH service systemd. Cek login dan system check memakai PATH login shell (`2a15be1`).
+3. **`git fetch` ditolak** untuk repo tanpa gh profile (credential helper dinonaktifkan KTD-65): pakai akun `gh` aktif (`3c44073`). Lalu **token gh tersensor**: `mandor_proc::run` meredaksi stdout, sehingga `gh auth token` menjadi `ghp_[REDACTED]`. Ditambah `run_secret` (`3505b0e`).
+4. **App tidak dinyalakan sebelum review headless**: restart otomatis hanya untuk app yang sudah menyala. Di VM app yang belum menyala dinyalakan (`ef16175`), dan app kartu sebelumnya dihentikan karena kartu lembur berurutan (`8fef0b8`, disetujui pemilik produk).
+5. **Deskripsi PR gagal ("external diff died")**: override `diff.external=` kosong membuat git menjalankan program "". Override dibuang, semua `git diff` daemon memakai `--no-ext-diff` (`9d06eaa`).
+6. **Loop review tanpa batas (34 review pada PGS-1521)**: Playwright MCP menulis snapshot ke `.playwright-mcp/` di worktree, sehingga setiap review basi dan gerbang memulai review baru. Output Playwright kini di `<run dir>/playwright/<review>`, dan review basi di VM menahan kartu `ac_gate` alih-alih review ulang (`1c0b5c3`).
+7. **Batas pemakaian tidak menghentikan loop**: batas hanya menghitung input + output, padahal hampir semua input Claude Code masuk cache (34 review tercatat sekitar 4 ribu token). Batas kini menghitung cache tulis penuh dan 10% cache baca; KTD-59 direvisi (`864e29d`, disetujui pemilik produk).
+8. **Kartu `ac_gate` dengan review putus tidak bisa diputuskan**: "action not available (held)". Di VM keputusan dev kini memulai review headless baru (`bac8534`).
+9. **Hook review menolak klik setelah `browser_fill_form`**: Playwright MCP 0.0.83 tidak menyertakan `Page URL` di respons `fill_form`, dan hook menganggap alamat tidak diketahui. Isi form yang berhasil tanpa baris URL kini mempertahankan alamat (halaman tetap belum stabil sampai `wait_for` dengan URL baru); tool lain tetap gagal-tertutup (`129b642`, dipersempit setelah review keamanan di `6f23409`).
+10. UI tab Overnight dan Settings VM: halaman tidak lagi Loading terus saat VM belum login Lark (`81d7466`); pemilih antrean terbaca, bisa dicari, dan tidak melebar (`717e81e`, `24ccfb2`, `050b4f1`, `c056799`); judul laporan satu baris (`f9cec35`); jam lembur dan offset UTC dipilih dari daftar (`a1baae7`).
+
+### Catatan terbuka
+
+- Mengubah jam lembur menghitung ulang awal siklus, sehingga penghitung pemakaian ikut mulai dari nol.
+- Laporan menampilkan "AC 0 pass" untuk kartu yang AC-nya dikonfirmasi manual (Decide AC); keputusan dev belum dihitung.
+- Repo statis tanpa login harus menyalakan **Setup command prepares a test login** agar review headless memakai browser; usul ganti label ditunda pemilik produk.
+- Desain prototype hanya dipakai run laptop; antrean VM belum bisa memilih sumber desain.
+- R19 masih ditunda (Take over lalu review di laptop).
+- Sisa AE di atas perlu uji jam lembur sungguhan dan developer kedua.

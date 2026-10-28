@@ -75,7 +75,7 @@ VM `instance-lembur` (GCP `asia-southeast2-b`, Ubuntu 26.10, 2 vCPU, 3,8 GB), sa
 | AE12 konfirmasi Can't verify lalu push tanpa agent | lulus | PGS-1518 (PR #5) dan PGS-1521 (PR #8) setelah Decide AC. |
 | AE13 PR draft lalu Send to review | lulus | PGS-1518, 1519, 1521: PR keluar dari draft, Lark ke Waiting Review. |
 | AE14 DM laporan pagi | belum diuji | |
-| AE15 badge Queued for VM | belum diuji | |
+| AE15 badge Queued for VM | lulus | PGS-1524 di antrean: board laptop menampilkan "Queued for VM" menggantikan Start. |
 
 Review headless berbrowser penuh terbukti di **PGS-1522**: app dinyalakan otomatis, satu review dengan browser, 6 AC pass dengan bukti isi form, klik, dan baca halaman, lalu PR draft #9 tanpa campur tangan.
 

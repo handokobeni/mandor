@@ -71,7 +71,7 @@ VM `instance-lembur` (GCP `asia-southeast2-b`, Ubuntu 26.10, 2 vCPU, 3,8 GB), sa
 | AE8 laptop melihat kartu milik VM | sebagian | Badge **On VM** di board laptop terlihat; hanya-baca belum dicoba eksplisit. |
 | AE9 Waiting Fix siang saat VM kosong | belum diuji | PGS-1518 masuk Waiting Fix setelah PR #5 di-merge; tidak diamati sampai selesai. |
 | AE10 Waiting Fix mendahului antrean | belum diuji | |
-| AE11 Take over to laptop | belum diuji | |
+| AE11 Take over to laptop | lulus | PGS-1529 (tertahan `needs_confirmation`): VM commit "work in progress, handed off to the laptop" dan push branch tanpa PR, run VM ditutup, kartu laptop-only, laptop melanjutkan di branch yang sama, Lark tetap In Progress. Catatan: Take over ikut mem-push perubahan CI yang tadinya menunggu konfirmasi, dan workflow baru langsung terpicu di GitHub. |
 | AE12 konfirmasi Can't verify lalu push tanpa agent | lulus | PGS-1518 (PR #5) dan PGS-1521 (PR #8) setelah Decide AC. |
 | AE13 PR draft lalu Send to review | lulus | PGS-1518, 1519, 1521: PR keluar dari draft, Lark ke Waiting Review. |
 | AE14 DM laporan pagi | belum diuji | |
@@ -111,4 +111,6 @@ Review headless berbrowser penuh terbukti di **PGS-1522**: app dinyalakan otomat
 - Repo statis tanpa login harus menyalakan **Setup command prepares a test login** agar review headless memakai browser; usul ganti label ditunda pemilik produk.
 - Desain prototype hanya dipakai run laptop; antrean VM belum bisa memilih sumber desain.
 - R19 masih ditunda (Take over lalu review di laptop).
+- Reviewer bisa menilai AC tampilan "pass" hanya dari kode (PGS-1519, PGS-1528 AC-5 "Unduh" tidak diklik); AC yang butuh browser seharusnya Can't verify bila tidak dibuktikan di browser.
+- PGS-1528 (informasi brand sengaja tidak diberikan): agent tidak bertanya, tetapi membuat nilai sementara yang ditandai `PLACEHOLDER`; gerbang menahan kartu `ac_gate` karena AC-1 dan AC-3 Can't verify.
 - Sisa AE di atas perlu uji jam lembur sungguhan dan developer kedua.

@@ -584,6 +584,7 @@ pub fn mark_before(call: &ToolCall, state: &mut ReviewState) {
 pub fn record_post(call: &ToolCall, state: &mut ReviewState) {
     if let Some(tool) = call.tool_name.strip_prefix(PLAYWRIGHT_PREFIX) {
         record_pw(
+            tool,
             pw_kind(tool),
             call.response.as_deref().unwrap_or_default(),
             state,
@@ -634,11 +635,12 @@ pub fn record_post(call: &ToolCall, state: &mut ReviewState) {
 
 /// Mencatat alamat halaman Playwright dari baris `Page URL:` respons. Isi
 /// halaman bisa memuat baris palsu, jadi halaman dianggap di app hanya bila
-/// semua baris menunjuk origin yang diizinkan. Playwright MCP menyertakan
-/// bagian "Page" hanya bila tool meminta snapshot atau tab berpindah, jadi
-/// interaksi dan `wait_for` tanpa baris URL berarti alamat sebelumnya tetap;
-/// `navigate` tanpa baris URL membuat alamat tidak diketahui (gagal-tertutup).
-fn record_pw(kind: Option<Kind>, text: &str, state: &mut ReviewState) {
+/// semua baris menunjuk origin yang diizinkan; tanpa baris, alamat tidak
+/// diketahui (gagal-tertutup). Satu pengecualian: Playwright MCP tidak
+/// menyertakan bagian "Page" di respons `browser_fill_form` bila tab tidak
+/// berpindah, jadi isi form yang berhasil tanpa baris URL mempertahankan
+/// alamat sebelumnya (halaman tetap belum stabil sampai `wait_for`).
+fn record_pw(tool: &str, kind: Option<Kind>, text: &str, state: &mut ReviewState) {
     let Some(kind) = kind else {
         return;
     };
@@ -653,7 +655,7 @@ fn record_pw(kind: Option<Kind>, text: &str, state: &mut ReviewState) {
         .lines()
         .filter_map(|l| l.split_once("Page URL:").map(|(_, u)| u.trim()))
         .collect();
-    let unchanged = urls.is_empty() && matches!(kind, Kind::Interact | Kind::Wait);
+    let unchanged = urls.is_empty() && tool == "browser_fill_form" && !text.contains("### Error");
     let page = state.page.get_or_insert_with(TabState::default);
     let off = if unchanged {
         page.url.clone()
@@ -663,7 +665,8 @@ fn record_pw(kind: Option<Kind>, text: &str, state: &mut ReviewState) {
             .or_else(|| urls.first())
             .map(|u| (*u).to_owned())
     };
-    let known = off.is_some();
+    // Halaman stabil hanya dengan URL baru di respons ini.
+    let known = off.is_some() && !unchanged;
     // Pembaca hanya boleh memperketat, tidak memulihkan halaman ke app.
     if kind != Kind::Reader || !origin_allowed(&state.origins, off.as_deref()) {
         page.url = off;
@@ -1301,11 +1304,14 @@ mod tests {
         assert!(allows("browser_snapshot", &s));
     }
 
-    /// Playwright MCP 0.0.83 hanya menyertakan bagian "Page" (dengan
-    /// `Page URL`) bila tool meminta snapshot atau tab berpindah. Interaksi
-    /// tanpa baris URL berarti halaman tidak berpindah.
+    /// Playwright MCP 0.0.83 menyertakan bagian "Page" (dengan `Page URL`)
+    /// di respons setiap tool interaksi kecuali `browser_fill_form`. Isi form
+    /// tanpa error dan tanpa baris URL berarti halaman tidak berpindah; tool
+    /// lain tanpa baris URL tetap gagal-tertutup.
     #[test]
-    fn playwright_interaksi_tanpa_page_url_berarti_halaman_tidak_berpindah() {
+    fn playwright_isi_form_tanpa_page_url_berarti_halaman_tidak_berpindah() {
+        let filled =
+            "### Ran Playwright code\n```js\nawait page.getByRole('textbox').fill('1');\n```";
         let mut s = state();
         pw_post(
             "browser_navigate",
@@ -1313,30 +1319,52 @@ mod tests {
             &page_state("http://localhost:5173/"),
             &mut s,
         );
-        pw_post(
-            "browser_fill_form",
-            None,
-            "### Ran Playwright code\n```js\nawait page.getByRole('textbox').fill('12000000');\n```",
-            &mut s,
-        );
+        pw_post("browser_fill_form", None, filled, &mut s);
         assert!(
             !allows("browser_click", &s),
             "tetap tunggu dulu setelah interaksi"
         );
         assert!(allows("browser_wait_for", &s));
+        // wait_for tanpa URL baru tidak menstabilkan halaman.
         pw_post("browser_wait_for", None, "### Result\nWaited for 1", &mut s);
+        assert!(!allows("browser_snapshot", &s));
+        pw_post(
+            "browser_wait_for",
+            None,
+            &page_state("http://localhost:5173/"),
+            &mut s,
+        );
         assert!(allows("browser_snapshot", &s));
         assert!(allows("browser_click", &s));
 
-        // Tab berpindah ke luar app: Playwright menyertakan URL baru, ditolak.
+        // Isi form yang gagal tidak dipercaya.
         pw_post(
-            "browser_click",
+            "browser_fill_form",
             None,
-            "### Page\n- Page URL: https://evil.test/\n",
+            "### Error\nError: element is not attached",
             &mut s,
         );
-        pw_post("browser_wait_for", None, "### Result\nWaited for 1", &mut s);
-        assert!(!allows("browser_snapshot", &s));
+        assert!(
+            !allows("browser_wait_for", &s),
+            "alamat tidak diketahui setelah error"
+        );
+
+        // Tool yang bisa memindah halaman tanpa URL di respons: gagal-tertutup.
+        for tool in [
+            "browser_navigate_back",
+            "browser_click",
+            "browser_handle_dialog",
+        ] {
+            let mut s = state();
+            pw_post(
+                "browser_navigate",
+                Some("http://localhost:5173/"),
+                &page_state("http://localhost:5173/"),
+                &mut s,
+            );
+            pw_post(tool, None, "### Result\nok", &mut s);
+            assert!(!allows("browser_wait_for", &s), "{tool}");
+        }
 
         // Navigate tanpa URL di respons tetap gagal-tertutup.
         let mut s = state();

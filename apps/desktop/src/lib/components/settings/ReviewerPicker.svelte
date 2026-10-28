@@ -41,7 +41,7 @@
 <div class="list-editor">
   {#each items as item, i (item)}
     <div class="item">
-      <span title={item}>{reviewerLabel(known, item)}</span>
+      <span>{reviewerLabel(known, item)}</span>
       <Button
         variant="ghost"
         size="icon-xs"
@@ -68,7 +68,6 @@
           {#each candidates as p (p.open_id)}
             <Command.Item value={p.open_id} onSelect={() => add(p.open_id)}>
               <span class="min-w-0 flex-1 truncate">{p.name}</span>
-              <span class="text-muted-foreground shrink-0 font-mono text-xs">{p.open_id}</span>
             </Command.Item>
           {/each}
           {#if pasted}

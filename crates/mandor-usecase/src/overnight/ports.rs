@@ -35,8 +35,8 @@ pub struct OvernightSettings {
     pub end: String,
     /// Offset UTC tetap, mis. `+07:00` (KTD-58).
     pub offset: String,
-    /// Batas token (input + output) per siklus; `None` = belum diisi, VM tidak
-    /// memulai apa pun.
+    /// Batas token per siklus (lihat [`CycleUsage::counted`]); `None` = belum
+    /// diisi, VM tidak memulai apa pun.
     pub token_limit: Option<u64>,
 }
 
@@ -45,16 +45,23 @@ pub struct OvernightSettings {
 pub struct CycleUsage {
     pub input_tokens: u64,
     pub output_tokens: u64,
-    /// Dicatat terpisah untuk laporan; tidak dihitung ke batas.
     pub cache_read_tokens: u64,
     pub cache_write_tokens: u64,
 }
 
+/// Bobot cache baca terhadap token input biasa (harga cache baca 10%).
+const CACHE_READ_DIVISOR: u64 = 10;
+
 impl CycleUsage {
-    /// Token yang dihitung ke batas siklus (KTD-59).
+    /// Token yang dihitung ke batas siklus (KTD-59): input, output, dan cache
+    /// tulis penuh, cache baca berbobot 10%. Hampir semua input Claude Code
+    /// masuk cache, jadi tanpa cache batas hampir tidak pernah tercapai.
     #[must_use]
     pub fn counted(&self) -> u64 {
-        self.input_tokens.saturating_add(self.output_tokens)
+        self.input_tokens
+            .saturating_add(self.output_tokens)
+            .saturating_add(self.cache_write_tokens)
+            .saturating_add(self.cache_read_tokens / CACHE_READ_DIVISOR)
     }
 }
 

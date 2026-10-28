@@ -98,7 +98,8 @@ async fn hanya_laptop_setelan_dan_pemakaian_siklus() {
     s.add_cycle_usage(100, &u).await.unwrap();
     s.add_cycle_usage(100, &u).await.unwrap();
     let got = s.cycle_usage(100).await.unwrap();
-    assert_eq!(got.counted(), 30);
+    // 20 input + 10 output + 14 cache tulis + 200/10 cache baca.
+    assert_eq!(got.counted(), 64);
     assert_eq!(got.cache_read_tokens, 200);
     assert_eq!(s.cycle_usage(200).await.unwrap(), CycleUsage::default());
 
@@ -115,7 +116,7 @@ async fn hanya_laptop_setelan_dan_pemakaian_siklus() {
     );
     assert_eq!(
         s.cycle_usage(100).await.unwrap().counted(),
-        30,
+        64,
         "pemakaian tidak berubah"
     );
     s.record_report(300, true, 1).await.unwrap();

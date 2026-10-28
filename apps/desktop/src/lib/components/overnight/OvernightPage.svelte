@@ -159,7 +159,8 @@
           </div>
           <p class="field-help">
             A cycle runs from one start time to the next. Start now and Waiting Fix runs during the day count toward the
-            same limit.
+            same limit. The limit counts input, output and cache-write tokens, plus 10% of cache-read tokens, for the
+            agent and the AC reviewer.
           </p>
           <Button size="sm" onclick={saveSettings}>Save</Button>
         </div>

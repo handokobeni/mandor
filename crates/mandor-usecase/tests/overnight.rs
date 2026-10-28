@@ -988,3 +988,36 @@ async fn review_basi_di_vm_menahan_kartu_tanpa_review_berulang() {
     assert_eq!(reviews.len(), 1, "tidak ada review kedua");
     assert!(st.git.st().pushes.is_empty());
 }
+
+/// Hampir semua input Claude Code masuk cache: batas siklus menghitung cache
+/// tulis penuh dan cache baca berbobot 10%, sesuai harganya. Tanpa itu
+/// review berulang hampir tidak tercatat dan batas tidak pernah tercapai.
+#[tokio::test]
+async fn batas_siklus_ikut_menghitung_token_cache() {
+    let (_lark, _clock, st) = vm_with(&["a", "b"], wib(0, 19, 0)).await;
+    st.svc
+        .set_overnight_settings(&settings(Some(1_000)))
+        .await
+        .unwrap();
+    queue(&st, &["a", "b"]).await;
+    assert_eq!(
+        st.svc.overnight_tick().await.unwrap().started.as_deref(),
+        Some("a")
+    );
+    let a = st.agent.last();
+    a.emit(mandor_domain::AgentEvent::MessageUsage {
+        message_id: "m1".to_owned(),
+        usage: mandor_domain::Usage {
+            input_tokens: 0,
+            output_tokens: 0,
+            cache_creation_input_tokens: 600,
+            cache_read_input_tokens: 5_000,
+        },
+    });
+    eventually(|| held(&st, "a").is_some()).await;
+    assert_eq!(held(&st, "a"), Some(mandor_domain::HoldReason::UsageLimit));
+    assert_eq!(
+        st.svc.overnight_report().await.unwrap().usage.counted(),
+        1_100
+    );
+}

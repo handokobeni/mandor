@@ -97,7 +97,7 @@
           <div class="content">
             <div class="head">
               <span class="mono key">{key(c)}</span>
-              <span class="title">{c.title}</span>
+              <span class="title" title={c.title}>{c.title}</span>
               {#if c.pr_url}
                 <a class="pr-link" href={c.pr_url} target="_blank" rel="noopener noreferrer"><GitPullRequest class="icon-sm" aria-hidden="true" />PR</a>
               {/if}
@@ -196,11 +196,17 @@
     display: flex;
     align-items: center;
     gap: 8px;
-    flex-wrap: wrap;
+  }
+  .head > :not(.title) {
+    flex-shrink: 0;
+    white-space: nowrap;
   }
   .head .title {
     flex: 1;
     min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
   .hold {
     margin: 6px 0 0;

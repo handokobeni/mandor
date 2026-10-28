@@ -433,7 +433,8 @@ button.brand { border: 0; background: none; cursor: pointer; color: inherit; fon
 .settings-card > header { padding: 14px 16px 0; }
 .settings-card > header h2 { font-size: var(--text-base); font-weight: 600; }
 .settings-card > header p { color: var(--muted-foreground); font-size: var(--text-sm); margin-top: 2px; }
-.settings-card > .content { padding: 14px 16px; display: grid; gap: 14px; }
+/* minmax(0, 1fr): isi panjang (judul kartu) menyempit dan terpotong, tidak melebarkan kartu. */
+.settings-card > .content { padding: 14px 16px; display: grid; grid-template-columns: minmax(0, 1fr); gap: 14px; }
 .settings-card > footer { display: flex; justify-content: flex-end; gap: 8px; padding: 12px 16px; border-top: 1px solid var(--border); }
 .settings-nav button { justify-content: flex-start; }
 .tissue { display: inline-flex; align-items: center; gap: 4px; font-size: var(--text-xs); font-weight: 500; }

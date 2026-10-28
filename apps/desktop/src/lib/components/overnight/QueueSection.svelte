@@ -162,6 +162,10 @@
     padding: 4px 0;
     border-bottom: 1px solid var(--border);
   }
+  .queue li > :not(.title) {
+    flex-shrink: 0;
+    white-space: nowrap;
+  }
   .queue .title {
     flex: 1;
     min-width: 0;
@@ -184,5 +188,6 @@
   }
   .dequeued li {
     font-size: 13px;
+    overflow-wrap: anywhere;
   }
 </style>

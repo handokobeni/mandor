@@ -69,8 +69,8 @@ VM `instance-lembur` (GCP `asia-southeast2-b`, Ubuntu 26.10, 2 vCPU, 3,8 GB), sa
 | AE6 Can't verify menahan `ac_gate` tanpa push | lulus | PGS-1518 dan PGS-1520: 6 Can't verify, kartu ditahan, tidak ada push. |
 | AE7 isolasi dua developer | belum diuji | Baru satu developer di VM. |
 | AE8 laptop melihat kartu milik VM | lulus | PGS-1525 berjalan di VM: board laptop hanya menampilkan badge **On VM**, tanpa Start dan tanpa ambil alih; pemindahan hanya lewat Take over dari tab Overnight. |
-| AE9 Waiting Fix siang saat VM kosong | belum diuji | PGS-1518 masuk Waiting Fix setelah PR #5 di-merge; tidak diamati sampai selesai. |
-| AE10 Waiting Fix mendahului antrean | belum diuji | |
+| AE9 Waiting Fix siang saat VM kosong | lulus | PGS-1522: komentar assignee diteruskan, agent mengubah label tombol, review berbrowser 6 pass, commit di-push ke PR #9, Lark kembali ke Waiting Review tanpa konfirmasi (sekitar 1 menit 10 detik). |
+| AE10 Waiting Fix mendahului antrean | belum terbukti | Percobaan pertama: kartu Start now (PGS-1525) sudah selesai sebelum PGS-1522 dipindah ke Waiting Fix, jadi VM kosong. Perlu diulang dengan kartu yang lebih lama dan item antrean berikutnya yang siap jalan. |
 | AE11 Take over to laptop | lulus | PGS-1529 (tertahan `needs_confirmation`): VM commit "work in progress, handed off to the laptop" dan push branch tanpa PR, run VM ditutup, kartu laptop-only, laptop melanjutkan di branch yang sama, Lark tetap In Progress. Catatan: Take over ikut mem-push perubahan CI yang tadinya menunggu konfirmasi, dan workflow baru langsung terpicu di GitHub. |
 | AE12 konfirmasi Can't verify lalu push tanpa agent | lulus | PGS-1518 (PR #5) dan PGS-1521 (PR #8) setelah Decide AC. |
 | AE13 PR draft lalu Send to review | lulus | PGS-1518, 1519, 1521: PR keluar dari draft, Lark ke Waiting Review. |

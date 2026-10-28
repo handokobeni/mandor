@@ -11,7 +11,9 @@ use common::run_fakes::eventually;
 use common::{FakeClock, FakeLark, Station, ready_task, station, vm_station};
 use mandor_domain::{Claim, Reply, RunState, TaskStatus};
 use mandor_usecase::overnight::OvernightSettings;
-use mandor_usecase::run_ports::{AppRecords as _, RunPhase, RunRecord, SessionRef};
+use mandor_usecase::run_ports::{
+    AppRecords as _, ReviewHistory as _, RunPhase, RunRecord, SessionRef,
+};
 use mandor_usecase::waiting_fix::DEFAULT_QUIET_SECS as QUIET;
 use mandor_usecase::{RunError, StartTarget};
 use pretty_assertions::assert_eq;
@@ -957,4 +959,32 @@ async fn kartu_terputus_karena_vm_restart_bisa_diantre_ulang_dan_dilanjutkan() {
         1,
         "run yang sama, bukan run baru"
     );
+}
+
+/// Review yang basi karena kode berubah selama review tidak memicu review
+/// baru tanpa batas: kartu ditahan `ac_gate` setelah satu review.
+#[tokio::test(flavor = "multi_thread")]
+async fn review_basi_di_vm_menahan_kartu_tanpa_review_berulang() {
+    let (_lark, _clock, st) = vm_started(true).await;
+    changed(&st, "a", "src/form.rs");
+    st.agent.last().done();
+    eventually(|| run_of(&st, "a").state == RunState::Reviewing).await;
+    report_verdict(&st, "ac1", mandor_domain::Verdict::Pass);
+    let wt = run_of(&st, "a").worktree.unwrap();
+    st.git.st().trees.insert(wt, "tree-saat-review".to_owned());
+    st.agent.last().done();
+    eventually(|| held(&st, "a").is_some()).await;
+    let run = run_of(&st, "a");
+    assert_eq!(held(&st, "a"), Some(mandor_domain::HoldReason::AcGate));
+    assert!(
+        run.hold
+            .unwrap()
+            .note
+            .unwrap_or_default()
+            .contains("changed during the review"),
+        "alasan tahan menyebut review basi"
+    );
+    let reviews = st.reviews.reviews(&run.id).await.unwrap();
+    assert_eq!(reviews.len(), 1, "tidak ada review kedua");
+    assert!(st.git.st().pushes.is_empty());
 }

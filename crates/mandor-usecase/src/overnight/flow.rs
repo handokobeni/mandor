@@ -15,11 +15,14 @@ use super::{CycleUsage, OvernightStore};
 use crate::notify::notice;
 use crate::ports::{Clock, Deps};
 use crate::run::{PublishOutcome, RunError, RunService};
-use crate::run_ports::{Hold, NoticeKind, Notifier, RunRecord, RunStore};
+use crate::run_ports::{Hold, NoticeKind, Notifier, ReviewHistory as _, RunRecord, RunStore};
 
 /// Catatan untuk perubahan yang butuh konfirmasi dev.
 const SENSITIVE: &str =
     "Changes touch CI, agent config, or git hooks; push needs developer confirmation";
+
+/// Catatan untuk review yang basi karena kode berubah selama review.
+const STALE_REVIEW: &str = "Push held: the code changed during the review, so its results are out of date; review again or decide the AC";
 
 type Boxed<'a> = Pin<Box<dyn Future<Output = Result<(), RunError>> + Send + 'a>>;
 
@@ -199,6 +202,17 @@ impl<D: Deps> RunService<D> {
         ))
     }
 
+    /// Review terakhir run ini selesai sebagai basi.
+    async fn last_review_stale(&self, run_id: &str) -> Result<bool, RunError> {
+        Ok(self
+            .reviews
+            .reviews(run_id)
+            .await?
+            .into_iter()
+            .max_by_key(|r| r.started_at_ms)
+            .is_some_and(|r| r.stale))
+    }
+
     /// Review Push & PR di VM selesai atau gagal: lanjut publish, atau tahan
     /// `ac_gate` bila review tidak selesai.
     pub(crate) async fn vm_after_review(
@@ -208,6 +222,13 @@ impl<D: Deps> RunService<D> {
         why: &str,
     ) -> Result<(), RunError> {
         if finished {
+            // Review basi (kode berubah selama review) tidak diulang otomatis:
+            // review baru bisa basi lagi dan menguras kuota tanpa batas.
+            if self.last_review_stale(&run.id).await? {
+                return self
+                    .hold(&mut run, HoldReason::AcGate, Some(STALE_REVIEW.to_owned()))
+                    .await;
+            }
             return self.vm_publish(&run.id).await;
         }
         self.hold(

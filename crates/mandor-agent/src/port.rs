@@ -148,8 +148,9 @@ pub const PLAYWRIGHT_SERVER_NAME: &str = "playwright";
 
 /// Server MCP Playwright headless untuk reviewer VM (KTD-64 plan VM): profil
 /// terisolasi di memori, service worker diblokir, dan permintaan browser
-/// dibatasi ke origin app run ini.
-fn playwright_server(bin: &Path, origins: &[String]) -> serde_json::Value {
+/// dibatasi ke origin app run ini. Snapshot dan screenshot ditulis ke
+/// `output`, di luar worktree: berkas baru di worktree membuat review basi.
+fn playwright_server(bin: &Path, origins: &[String], output: &Path) -> serde_json::Value {
     let allowed = origins
         .iter()
         .map(|o| browser_origin(o))
@@ -165,6 +166,8 @@ fn playwright_server(bin: &Path, origins: &[String]) -> serde_json::Value {
             "--block-service-workers",
             "--allowed-origins",
             allowed,
+            "--output-dir",
+            output.display().to_string(),
         ],
     })
 }
@@ -456,9 +459,19 @@ impl ClaudeAgent {
             req.review.as_ref().filter(|r| r.browser),
             &self.cfg.headless_browser,
         ) {
+            // Direktori run bisa ditulis user agent (grup developer); tanpa
+            // runner, folder MCP daemon.
+            let base = self
+                .cfg
+                .runner
+                .as_ref()
+                .map_or_else(|| self.cfg.mcp_dir.clone(), |r| r.run_dir.clone());
+            let output = base
+                .join("playwright")
+                .join(wt_key(Path::new(&review.review_id)));
             picked.insert(
                 PLAYWRIGHT_SERVER_NAME.to_owned(),
-                playwright_server(bin, &review.origins),
+                playwright_server(bin, &review.origins, &output),
             );
         }
         if picked.is_empty() {
@@ -1412,6 +1425,11 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let mut cfg = test_agent(dir.path().join("mcp")).cfg;
         cfg.headless_browser = Some("/usr/local/bin/mcp-server-playwright".into());
+        cfg.runner = Some(crate::claude::command::AgentRunner {
+            exe: "/opt/mandord".into(),
+            user: "beni-agent".to_owned(),
+            run_dir: "/srv/m/beni/runs".into(),
+        });
         let agent = ClaudeAgent::new(cfg);
         let mut req = workspace_req(dir.path().to_path_buf());
         req.ledger = Some(LedgerAccess {
@@ -1445,6 +1463,14 @@ mod tests {
         }
         let at = args.iter().position(|a| *a == "--allowed-origins").unwrap();
         assert_eq!(args[at + 1], "http://localhost:5173;https://app.test");
+        // Snapshot dan screenshot Playwright tidak boleh masuk worktree: berkas
+        // baru membuat review basi dan bisa ikut ter-commit.
+        let at = args.iter().position(|a| *a == "--output-dir").unwrap();
+        assert!(
+            args[at + 1].starts_with("/srv/m/beni/runs/playwright/"),
+            "{}",
+            args[at + 1]
+        );
 
         let spec = agent.spec(&req, Some(path));
         assert!(

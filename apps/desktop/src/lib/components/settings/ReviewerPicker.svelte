@@ -67,7 +67,7 @@
           {/if}
           {#each candidates as p (p.open_id)}
             <Command.Item value={p.open_id} onSelect={() => add(p.open_id)}>
-              <span class="min-w-0 flex-1 truncate">{p.name}</span>
+              <span class="min-w-0 flex-1 truncate">{reviewerLabel(known, p.open_id)}</span>
             </Command.Item>
           {/each}
           {#if pasted}

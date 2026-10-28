@@ -152,6 +152,13 @@ describe('pemilih reviewer', () => {
     expect(reviewerCandidates(known, [], 'tidak ada')).toEqual([]);
   });
 
+  it('nama kembar diberi akhiran id agar orang yang dipercaya tidak tertukar', () => {
+    const twins = [...known, { open_id: 'ou_ayu9a2c', name: 'Ayu Lestari' }];
+    expect(reviewerLabel(twins, 'ou_qa1234')).toBe('Ayu Lestari (…1234)');
+    expect(reviewerLabel(twins, 'ou_ayu9a2c')).toBe('Ayu Lestari (…9a2c)');
+    expect(reviewerLabel(twins, 'ou_pm1234')).toBe('Citra');
+  });
+
   it('nama tampilan reviewer, open_id bila belum dikenal', () => {
     expect(reviewerLabel(known, 'ou_qa1234')).toBe('Ayu Lestari');
     expect(reviewerLabel(known, 'ou_baru999')).toBe('ou_baru999');

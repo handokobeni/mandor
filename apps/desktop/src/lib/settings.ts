@@ -193,7 +193,14 @@ export function reviewerCandidates(known: KnownPerson[], selected: string[], que
     .sort((a, b) => a.name.localeCompare(b.name));
 }
 
-/** Nama reviewer untuk ditampilkan; `open_id` bila namanya belum dikenal. */
+/**
+ * Nama reviewer untuk ditampilkan; `open_id` bila namanya belum dikenal. Bila
+ * dua orang bernama sama, empat karakter terakhir `open_id` ditambahkan agar
+ * orang yang dipercaya tidak tertukar.
+ */
 export function reviewerLabel(known: KnownPerson[], openId: string): string {
-  return known.find((p) => p.open_id === openId)?.name ?? openId;
+  const name = known.find((p) => p.open_id === openId)?.name;
+  if (name === undefined) return openId;
+  const twins = known.filter((p) => p.name === name).length > 1;
+  return twins ? `${name} (…${openId.slice(-4)})` : name;
 }

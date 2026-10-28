@@ -4,7 +4,11 @@
   import ArrowUp from '@lucide/svelte/icons/arrow-up';
   import Play from '@lucide/svelte/icons/play';
   import X from '@lucide/svelte/icons/x';
+  import Check from '@lucide/svelte/icons/check';
+  import ChevronsUpDown from '@lucide/svelte/icons/chevrons-up-down';
   import { Button } from '#lib/components/ui/button/index.ts';
+  import * as Command from '#lib/components/ui/command/index.ts';
+  import * as Popover from '#lib/components/ui/popover/index.ts';
   import * as Select from '#lib/components/ui/select/index.ts';
   import { canQueue } from '#lib/overnight.ts';
   import { board } from '#lib/stores/board.svelte.ts';
@@ -15,6 +19,7 @@
   const candidates = $derived(board.cards.filter((c) => canQueue(c, queued)));
 
   let pick = $state('');
+  let picking = $state(false);
   let target = $state('');
 
   function targetOf(value: string): QueueTarget | null {
@@ -84,19 +89,38 @@
         </ol>
       {/if}
       <div class="add">
-        <Select.Root type="single" bind:value={pick}>
-          <Select.Trigger class="w-80 max-w-full" aria-label="Card to queue">
+        <Popover.Root bind:open={picking}>
+          <Popover.Trigger
+            class="border-input dark:bg-input/30 dark:hover:bg-input/50 flex h-8 w-80 max-w-full items-center justify-between gap-1.5 rounded-lg border bg-transparent py-2 pr-2 pl-2.5 text-sm"
+            aria-label="Card to queue"
+            role="combobox"
+            aria-expanded={picking}
+          >
             <span class="min-w-0 truncate" class:placeholder={!pick}>{pickLabel}</span>
-          </Select.Trigger>
-          <Select.Content class="w-(--bits-select-anchor-width)">
-            {#each candidates as c (c.record_id)}
-              {@const text = `${c.key ?? c.record_id} · ${c.title}`}
-              <Select.Item value={c.record_id} label={text}>
-                {#snippet children()}<span class="truncate" title={text}>{text}</span>{/snippet}
-              </Select.Item>
-            {/each}
-          </Select.Content>
-        </Select.Root>
+            <ChevronsUpDown class="text-muted-foreground size-4 shrink-0" />
+          </Popover.Trigger>
+          <Popover.Content class="w-(--bits-popover-anchor-width) p-0" align="start">
+            <Command.Root>
+              <Command.Input placeholder="Search key or title" />
+              <Command.List>
+                <Command.Empty>No To Do card matches.</Command.Empty>
+                {#each candidates as c (c.record_id)}
+                  {@const text = `${c.key ?? c.record_id} · ${c.title}`}
+                  <Command.Item
+                    value={`${c.key ?? ''} ${c.title} ${c.record_id}`}
+                    onSelect={() => {
+                      pick = c.record_id;
+                      picking = false;
+                    }}
+                  >
+                    <span class="min-w-0 flex-1 truncate" title={text}>{text}</span>
+                    {#if pick === c.record_id}<Check class="size-4 shrink-0" />{/if}
+                  </Command.Item>
+                {/each}
+              </Command.List>
+            </Command.Root>
+          </Popover.Content>
+        </Popover.Root>
         <Select.Root type="single" bind:value={target}>
           <Select.Trigger class="w-44" aria-label="Repo on the VM">
             <span class="min-w-0 truncate" class:placeholder={!target}>{targetText}</span>

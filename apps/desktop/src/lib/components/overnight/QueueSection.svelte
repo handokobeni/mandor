@@ -88,9 +88,12 @@
           <Select.Trigger class="w-80 max-w-full" aria-label="Card to queue">
             <span class="min-w-0 truncate" class:placeholder={!pick}>{pickLabel}</span>
           </Select.Trigger>
-          <Select.Content>
+          <Select.Content class="w-(--bits-select-anchor-width)">
             {#each candidates as c (c.record_id)}
-              <Select.Item value={c.record_id} label={`${c.key ?? c.record_id} · ${c.title}`} />
+              {@const text = `${c.key ?? c.record_id} · ${c.title}`}
+              <Select.Item value={c.record_id} label={text}>
+                {#snippet children()}<span class="truncate" title={text}>{text}</span>{/snippet}
+              </Select.Item>
             {/each}
           </Select.Content>
         </Select.Root>
@@ -98,7 +101,7 @@
           <Select.Trigger class="w-44" aria-label="Repo on the VM">
             <span class="min-w-0 truncate" class:placeholder={!target}>{targetText}</span>
           </Select.Trigger>
-          <Select.Content>
+          <Select.Content class="w-(--bits-select-anchor-width)">
             {#each overnight.repos as r (r.id)}
               <Select.Item value={`repo:${r.id}`} label={r.id} />
             {/each}

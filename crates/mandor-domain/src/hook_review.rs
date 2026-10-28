@@ -634,8 +634,10 @@ pub fn record_post(call: &ToolCall, state: &mut ReviewState) {
 
 /// Mencatat alamat halaman Playwright dari baris `Page URL:` respons. Isi
 /// halaman bisa memuat baris palsu, jadi halaman dianggap di app hanya bila
-/// semua baris menunjuk origin yang diizinkan; tanpa baris, alamat tidak
-/// diketahui (gagal-tertutup).
+/// semua baris menunjuk origin yang diizinkan. Playwright MCP menyertakan
+/// bagian "Page" hanya bila tool meminta snapshot atau tab berpindah, jadi
+/// interaksi dan `wait_for` tanpa baris URL berarti alamat sebelumnya tetap;
+/// `navigate` tanpa baris URL membuat alamat tidak diketahui (gagal-tertutup).
 fn record_pw(kind: Option<Kind>, text: &str, state: &mut ReviewState) {
     let Some(kind) = kind else {
         return;
@@ -651,12 +653,16 @@ fn record_pw(kind: Option<Kind>, text: &str, state: &mut ReviewState) {
         .lines()
         .filter_map(|l| l.split_once("Page URL:").map(|(_, u)| u.trim()))
         .collect();
-    let off = urls
-        .iter()
-        .find(|u| !origin_allowed(&state.origins, Some(u)))
-        .or_else(|| urls.first())
-        .map(|u| (*u).to_owned());
+    let unchanged = urls.is_empty() && matches!(kind, Kind::Interact | Kind::Wait);
     let page = state.page.get_or_insert_with(TabState::default);
+    let off = if unchanged {
+        page.url.clone()
+    } else {
+        urls.iter()
+            .find(|u| !origin_allowed(&state.origins, Some(u)))
+            .or_else(|| urls.first())
+            .map(|u| (*u).to_owned())
+    };
     let known = off.is_some();
     // Pembaca hanya boleh memperketat, tidak memulihkan halaman ke app.
     if kind != Kind::Reader || !origin_allowed(&state.origins, off.as_deref()) {
@@ -1293,6 +1299,54 @@ mod tests {
             &mut s,
         );
         assert!(allows("browser_snapshot", &s));
+    }
+
+    /// Playwright MCP 0.0.83 hanya menyertakan bagian "Page" (dengan
+    /// `Page URL`) bila tool meminta snapshot atau tab berpindah. Interaksi
+    /// tanpa baris URL berarti halaman tidak berpindah.
+    #[test]
+    fn playwright_interaksi_tanpa_page_url_berarti_halaman_tidak_berpindah() {
+        let mut s = state();
+        pw_post(
+            "browser_navigate",
+            Some("http://localhost:5173/"),
+            &page_state("http://localhost:5173/"),
+            &mut s,
+        );
+        pw_post(
+            "browser_fill_form",
+            None,
+            "### Ran Playwright code\n```js\nawait page.getByRole('textbox').fill('12000000');\n```",
+            &mut s,
+        );
+        assert!(
+            !allows("browser_click", &s),
+            "tetap tunggu dulu setelah interaksi"
+        );
+        assert!(allows("browser_wait_for", &s));
+        pw_post("browser_wait_for", None, "### Result\nWaited for 1", &mut s);
+        assert!(allows("browser_snapshot", &s));
+        assert!(allows("browser_click", &s));
+
+        // Tab berpindah ke luar app: Playwright menyertakan URL baru, ditolak.
+        pw_post(
+            "browser_click",
+            None,
+            "### Page\n- Page URL: https://evil.test/\n",
+            &mut s,
+        );
+        pw_post("browser_wait_for", None, "### Result\nWaited for 1", &mut s);
+        assert!(!allows("browser_snapshot", &s));
+
+        // Navigate tanpa URL di respons tetap gagal-tertutup.
+        let mut s = state();
+        pw_post(
+            "browser_navigate",
+            Some("http://localhost:5173/"),
+            "### Result\nok",
+            &mut s,
+        );
+        assert!(!allows("browser_snapshot", &s));
     }
 
     #[test]

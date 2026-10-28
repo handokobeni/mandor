@@ -59,7 +59,8 @@ impl Git {
         let out = self
             .ok(
                 "diff --name-only (snapshot)",
-                self.git(worktree).args(["diff", "--name-only", from, to]),
+                self.git(worktree)
+                    .args(["diff", "--no-ext-diff", "--name-only", from, to]),
             )
             .await?;
         Ok(out.stdout.lines().map(str::to_owned).collect())

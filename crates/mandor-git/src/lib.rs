@@ -146,7 +146,9 @@ pub fn trusted_repo_config_key(key: &str) -> bool {
 
 /// Override konfigurasi untuk setiap proses git daemon VM, termasuk git yang
 /// dijalankan `gh`: menetralkan kunci yang mengeksekusi perintah walau
-/// konfigurasi repo diubah setelah diperiksa.
+/// konfigurasi repo diubah setelah diperiksa. `diff.external` tidak di sini:
+/// nilai kosong membuat git menjalankan program "" dan diff gagal; setiap
+/// `git diff` daemon memakai `--no-ext-diff`.
 const VM_OVERRIDES: &[(&str, &str)] = &[
     (NO_HOOKS_KEY, NO_HOOKS_VALUE),
     ("core.sshCommand", "ssh -o BatchMode=yes"),
@@ -156,7 +158,6 @@ const VM_OVERRIDES: &[(&str, &str)] = &[
     ("core.fsmonitor", "false"),
     ("core.gitProxy", ""),
     ("core.alternateRefsCommand", ""),
-    ("diff.external", ""),
     ("credential.helper", ""),
     ("protocol.ext.allow", "never"),
     ("http.proxy", ""),

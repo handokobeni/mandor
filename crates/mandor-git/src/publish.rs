@@ -21,7 +21,11 @@ impl Git {
         self.ok("add", self.git(worktree).args(["add", "-A"]))
             .await?;
         let staged = self
-            .exec(&self.git(worktree).args(["diff", "--cached", "--quiet"]))
+            .exec(
+                &self
+                    .git(worktree)
+                    .args(["diff", "--no-ext-diff", "--cached", "--quiet"]),
+            )
             .await?;
         if staged.success() {
             return Ok(None);

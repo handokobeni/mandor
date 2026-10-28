@@ -55,15 +55,21 @@ impl Git {
         let status = self
             .ok(
                 "diff --name-status",
-                self.git(worktree)
-                    .args(["diff", "--name-status", "-M", "-z", &mb]),
+                self.git(worktree).args([
+                    "diff",
+                    "--no-ext-diff",
+                    "--name-status",
+                    "-M",
+                    "-z",
+                    &mb,
+                ]),
             )
             .await?;
         let numstat = self
             .ok(
                 "diff --numstat",
                 self.git(worktree)
-                    .args(["diff", "--numstat", "-M", "-z", &mb]),
+                    .args(["diff", "--no-ext-diff", "--numstat", "-M", "-z", &mb]),
             )
             .await?;
         let untracked = self
@@ -101,7 +107,8 @@ impl Git {
         let out = self
             .ok(
                 "diff",
-                self.git(worktree).args(["diff", "-M", &mb, "--", path]),
+                self.git(worktree)
+                    .args(["diff", "--no-ext-diff", "-M", &mb, "--", path]),
             )
             .await?;
         if !out.stdout.is_empty() {
@@ -119,11 +126,14 @@ impl Git {
             return Ok(String::new());
         }
         let out = self
-            .exec(
-                &self
-                    .git(worktree)
-                    .args(["diff", "--no-index", "--", null_path(), path]),
-            )
+            .exec(&self.git(worktree).args([
+                "diff",
+                "--no-ext-diff",
+                "--no-index",
+                "--",
+                null_path(),
+                path,
+            ]))
             .await?;
         Ok(out.stdout)
     }
@@ -193,7 +203,11 @@ impl Git {
     /// [`GitError`] bila perintah git gagal.
     pub async fn working_diff(&self, worktree: &Path, max: usize) -> Result<String, GitError> {
         let diff = self
-            .ok("diff HEAD", self.git(worktree).args(["diff", "HEAD", "-M"]))
+            .ok(
+                "diff HEAD",
+                self.git(worktree)
+                    .args(["diff", "--no-ext-diff", "HEAD", "-M"]),
+            )
             .await?;
         let untracked = self
             .ok(
@@ -211,7 +225,8 @@ impl Git {
             let stat = self
                 .ok(
                     "diff --stat",
-                    self.git(worktree).args(["diff", "HEAD", "--stat"]),
+                    self.git(worktree)
+                        .args(["diff", "--no-ext-diff", "HEAD", "--stat"]),
                 )
                 .await?;
             out = format!("[Diff terlalu besar; ringkasan:]\n{}", stat.stdout);
@@ -234,7 +249,8 @@ impl Git {
         let out = self
             .ok(
                 "diff branch",
-                self.git(worktree).args(["diff", "-M", &range]),
+                self.git(worktree)
+                    .args(["diff", "--no-ext-diff", "-M", &range]),
             )
             .await?;
         if out.stdout.chars().count() <= max {
@@ -243,7 +259,8 @@ impl Git {
         let stat = self
             .ok(
                 "diff --stat",
-                self.git(worktree).args(["diff", "--stat", &range]),
+                self.git(worktree)
+                    .args(["diff", "--no-ext-diff", "--stat", &range]),
             )
             .await?;
         Ok(format!("[Diff terlalu besar; ringkasan:]\n{}", stat.stdout))

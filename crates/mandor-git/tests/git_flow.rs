@@ -694,3 +694,23 @@ fn allowlist_kunci_konfigurasi_repo() {
         assert!(trusted_repo_config_key(k), "{k}");
     }
 }
+
+/// Diff di VM berisi patch biasa: override VM tidak boleh membuat git
+/// menjalankan program diff eksternal kosong ("external diff died"), yang
+/// membuat deskripsi PR otomatis jatuh ke badan minimal.
+#[tokio::test]
+async fn diff_di_vm_menghasilkan_patch() {
+    let f = fixture();
+    let guarded = Git::new(guarded_cfg(&f));
+    let wt = guarded
+        .create_worktree(&f.repo, "ws-diff", "mandor/pgs-78-diff", "main", None)
+        .await
+        .unwrap();
+    std::fs::write(wt.path.join("bmi.txt"), "bmi\n").unwrap();
+    guarded.commit_all(&wt.path, "bmi").await.unwrap();
+    let branch = guarded.branch_diff(&wt.path, "main", 10_000).await.unwrap();
+    assert!(branch.contains("+bmi"), "{branch}");
+    std::fs::write(wt.path.join("bmi.txt"), "bmi\nkategori\n").unwrap();
+    let working = guarded.working_diff(&wt.path, 10_000).await.unwrap();
+    assert!(working.contains("+kategori"), "{working}");
+}

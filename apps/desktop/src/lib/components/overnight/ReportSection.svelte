@@ -29,6 +29,10 @@
     busy = card.run_id;
     try {
       await f();
+      // Keputusan sudah diterima VM: panel AC kartu ini tidak berlaku lagi.
+      delete gate[card.run_id];
+      delete confirmed[card.run_id];
+      delete reasons[card.run_id];
       toast.success(done);
     } catch (err) {
       toast.error('The VM refused', { description: err instanceof Error ? err.message : String(err) });
@@ -145,7 +149,7 @@
               </div>
             {/if}
 
-            {#if gate[c.run_id]}
+            {#if gate[c.run_id] && c.outcome === 'held' && c.hold_reason === 'ac_gate'}
               <div class="gate">
                 {#each gate[c.run_id] as row (row.ac_id)}
                   <label class="gate-row">

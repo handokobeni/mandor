@@ -211,3 +211,4 @@ Cabut juga token Lark di konsol Lark bila perlu.
 | Daemon tidak start: "MANDOR_ROLE=vm needs ..." | Drop-in langkah 5 tidak lengkap | Lengkapi keempat variabel |
 | "refusing to run git: the repo config sets ..." | Konfigurasi repo memuat kunci yang tidak dipercaya | `git config --unset <kunci>` di clone |
 | Link VM di app "Host key verification failed" | Host key VM berubah | Hapus VM di app, konfirmasi fingerprint baru dengan admin |
+| Tab Overnight "VM offline" dengan "Connection closed by UNKNOWN port 65535" (akses lewat IAP) | Login `gcloud` di laptop kedaluwarsa (akun organisasi Google meminta login ulang berkala); `ssh` dari app tidak bisa menampilkan prompt | `gcloud auth login <akun>` di WSL, lalu cek `ssh lembur hostname`. Daemon VM tetap bekerja; hanya akses dari laptop yang terputus |

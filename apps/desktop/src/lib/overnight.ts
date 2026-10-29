@@ -134,3 +134,12 @@ export function offsetOptions(current: string): { value: string; label: string }
 export function formatTokens(n: number): string {
   return n.toLocaleString('en-US');
 }
+
+/**
+ * Kartu laporan yang tertahan atau gagal tetapi sudah kembali ke antrean VM:
+ * run-nya baru berubah saat VM melanjutkannya, jadi laporan tidak lagi
+ * meminta keputusan. Link VM terputus (`queued` null) = tidak diketahui.
+ */
+export function backInQueue(card: Pick<ReportCardView, 'record_id' | 'outcome'>, queued: Set<string> | null): boolean {
+  return (card.outcome === 'held' || card.outcome === 'failed') && (queued?.has(card.record_id) ?? false);
+}

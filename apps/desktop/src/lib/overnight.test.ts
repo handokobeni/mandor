@@ -4,6 +4,7 @@ import type { LoginCheck } from '#lib/protocol/LoginCheck.ts';
 import type { OvernightReportView } from '#lib/protocol/OvernightReportView.ts';
 import type { ReportCardView } from '#lib/protocol/ReportCardView.ts';
 import {
+  backInQueue,
   canActivate,
   canQueue,
   formatTokens,
@@ -166,5 +167,16 @@ describe('pilihan jam dan offset lembur', () => {
 
   it('batas token dibaca dengan pemisah ribuan', () => {
     expect(formatTokens(10_000_000)).toBe('10,000,000');
+  });
+});
+
+describe('kartu laporan yang sudah diantre ulang', () => {
+  const card = { record_id: 'r1', outcome: 'held' } as ReportCardView;
+  it('kartu tertahan atau gagal yang ada di antrean menunggu VM', () => {
+    expect(backInQueue(card, new Set(['r1']))).toBe(true);
+    expect(backInQueue({ ...card, outcome: 'failed' } as ReportCardView, new Set(['r1']))).toBe(true);
+    expect(backInQueue(card, new Set())).toBe(false);
+    expect(backInQueue(card, null), 'link VM terputus: tidak diketahui').toBe(false);
+    expect(backInQueue({ ...card, outcome: 'draft' } as ReportCardView, new Set(['r1']))).toBe(false);
   });
 });

@@ -5,7 +5,7 @@
   import Send from '@lucide/svelte/icons/send';
   import { Button } from '#lib/components/ui/button/index.ts';
   import { Textarea } from '#lib/components/ui/textarea/index.ts';
-  import { holdLabel, reportGroups, usageText } from '#lib/overnight.ts';
+  import { backInQueue, holdLabel, reportGroups, usageText } from '#lib/overnight.ts';
   import type { AcRowView } from '#lib/protocol/AcRowView.ts';
   import type { ReportCardView } from '#lib/protocol/ReportCardView.ts';
   import type { Rpc } from '#lib/rpc.ts';
@@ -33,6 +33,7 @@
       delete gate[card.run_id];
       delete confirmed[card.run_id];
       delete reasons[card.run_id];
+      delete answers[card.run_id];
       toast.success(done);
     } catch (err) {
       toast.error('The VM refused', { description: err instanceof Error ? err.message : String(err) });
@@ -107,6 +108,9 @@
               {/if}
               <span class="muted">AC {c.ac_pass} pass · {c.ac_fail} fail · {c.ac_cant_verify} can't verify</span>
             </div>
+            {#if backInQueue(c, overnight.queuedIds)}
+              <p class="hold"><span class="chip" data-tone="ok">Back in the queue</span> The VM continues this card on the same branch.</p>
+            {:else}
             {#if c.outcome === 'held'}
               <p class="hold"><span class="chip" data-tone="warning">{holdLabel(c.hold_reason)}</span> {c.hold_note ?? ''}</p>
             {/if}
@@ -149,7 +153,9 @@
               </div>
             {/if}
 
-            {#if gate[c.run_id] && c.outcome === 'held' && c.hold_reason === 'ac_gate'}
+            {/if}
+
+            {#if gate[c.run_id] && c.outcome === 'held' && c.hold_reason === 'ac_gate' && !backInQueue(c, overnight.queuedIds)}
               <div class="gate">
                 {#each gate[c.run_id] as row (row.ac_id)}
                   <label class="gate-row">

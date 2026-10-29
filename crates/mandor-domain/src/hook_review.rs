@@ -636,10 +636,15 @@ pub fn record_post(call: &ToolCall, state: &mut ReviewState) {
 /// Mencatat alamat halaman Playwright dari baris `Page URL:` respons. Isi
 /// halaman bisa memuat baris palsu, jadi halaman dianggap di app hanya bila
 /// semua baris menunjuk origin yang diizinkan; tanpa baris, alamat tidak
-/// diketahui (gagal-tertutup). Satu pengecualian: Playwright MCP tidak
-/// menyertakan bagian "Page" di respons `browser_fill_form` bila tab tidak
-/// berpindah, jadi isi form yang berhasil tanpa baris URL mempertahankan
+/// diketahui (gagal-tertutup). Pengecualian: tool di
+/// [`NO_PAGE_UNLESS_MOVED`] yang berhasil tanpa baris URL mempertahankan
 /// alamat sebelumnya (halaman tetap belum stabil sampai `wait_for`).
+/// Tool Playwright MCP (0.0.83) yang responsnya tanpa bagian "Page" bila tab
+/// tidak berpindah: `browser_fill_form` selalu, `browser_type` tanpa `submit`
+/// atau `slowly`, `browser_press_key` selain Enter. Tab yang berpindah selalu
+/// dilaporkan dengan `Page URL` barunya.
+const NO_PAGE_UNLESS_MOVED: &[&str] = &["browser_fill_form", "browser_type", "browser_press_key"];
+
 fn record_pw(tool: &str, kind: Option<Kind>, text: &str, state: &mut ReviewState) {
     let Some(kind) = kind else {
         return;
@@ -655,7 +660,8 @@ fn record_pw(tool: &str, kind: Option<Kind>, text: &str, state: &mut ReviewState
         .lines()
         .filter_map(|l| l.split_once("Page URL:").map(|(_, u)| u.trim()))
         .collect();
-    let unchanged = urls.is_empty() && tool == "browser_fill_form" && !text.contains("### Error");
+    let unchanged =
+        urls.is_empty() && NO_PAGE_UNLESS_MOVED.contains(&tool) && !text.contains("### Error");
     let page = state.page.get_or_insert_with(TabState::default);
     let off = if unchanged {
         page.url.clone()
@@ -1336,6 +1342,20 @@ mod tests {
         );
         assert!(allows("browser_snapshot", &s));
         assert!(allows("browser_click", &s));
+
+        // browser_type (tanpa submit) dan browser_press_key (selain Enter)
+        // juga tidak menyertakan bagian Page bila tab tidak berpindah.
+        for tool in ["browser_type", "browser_press_key"] {
+            pw_post(tool, None, filled, &mut s);
+            assert!(allows("browser_wait_for", &s), "{tool}");
+            pw_post(
+                "browser_wait_for",
+                None,
+                &page_state("http://localhost:5173/"),
+                &mut s,
+            );
+            assert!(allows("browser_snapshot", &s), "{tool}");
+        }
 
         // Isi form yang gagal tidak dipercaya.
         pw_post(

@@ -15,7 +15,10 @@ use super::{CycleUsage, OvernightStore};
 use crate::notify::notice;
 use crate::ports::{Clock, Deps};
 use crate::run::{PublishOutcome, RunError, RunService};
-use crate::run_ports::{Hold, NoticeKind, Notifier, ReviewHistory as _, RunRecord, RunStore};
+use crate::run_ports::{
+    AgentPort as _, Hold, NoticeKind, Notifier, ReviewHistory as _, ReviewStatus, RunRecord,
+    RunStore,
+};
 
 /// Catatan untuk perubahan yang butuh konfirmasi dev.
 const SENSITIVE: &str =
@@ -183,13 +186,34 @@ impl<D: Deps> RunService<D> {
             return Ok(());
         }
         run.pid = None;
-        run.review_id = None;
+        if let Some(id) = run.review_id.take() {
+            self.close_review_for_limit(&run.id, &id).await?;
+        }
         self.hold(
             &mut run,
             HoldReason::UsageLimit,
             Some("Usage limit reached for this overnight cycle".to_owned()),
         )
         .await
+    }
+
+    /// Review yang dihentikan batas siklus ditutup sebagai gagal, agar tidak
+    /// tertinggal "running".
+    async fn close_review_for_limit(&self, run_id: &str, review_id: &str) -> Result<(), RunError> {
+        self.agent.end_review(review_id).await;
+        if let Some(mut r) = self
+            .reviews
+            .reviews(run_id)
+            .await?
+            .into_iter()
+            .find(|r| r.id == review_id)
+        {
+            r.status = ReviewStatus::Failed;
+            r.error = Some("stopped: usage limit reached for this overnight cycle".to_owned());
+            r.finished_at_ms = Some(self.now());
+            self.reviews.save_review(&r).await?;
+        }
+        Ok(())
     }
 
     /// Perubahan run menyentuh CI, konfigurasi agent, atau hook git.

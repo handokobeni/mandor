@@ -1061,3 +1061,28 @@ async fn keputusan_dev_setelah_review_putus_memulai_review_baru_di_vm() {
     eventually(|| !st.git.st().pushes.is_empty()).await;
     assert_eq!(st.git.st().drafts.len(), 1, "PR draft");
 }
+
+/// Batas tercapai di tengah review: kartu tertahan `usage_limit` dan catatan
+/// review ditutup sebagai gagal, bukan tertinggal "running".
+#[tokio::test(flavor = "multi_thread")]
+async fn batas_tercapai_saat_review_menutup_catatan_review() {
+    let (_lark, _clock, st) = vm_started(true).await;
+    st.svc
+        .set_overnight_settings(&settings(Some(1_000)))
+        .await
+        .unwrap();
+    changed(&st, "a", "src/form.rs");
+    st.agent.last().done();
+    eventually(|| run_of(&st, "a").state == RunState::Reviewing).await;
+    st.agent.last().emit(usage_event("rv1", 900, 300));
+    eventually(|| held(&st, "a").is_some()).await;
+    assert_eq!(held(&st, "a"), Some(mandor_domain::HoldReason::UsageLimit));
+    let run = run_of(&st, "a");
+    let review = st.reviews.reviews(&run.id).await.unwrap().remove(0);
+    assert_eq!(
+        review.status,
+        mandor_usecase::run_ports::ReviewStatus::Failed
+    );
+    assert!(review.error.unwrap_or_default().contains("usage limit"));
+    assert!(review.finished_at_ms.is_some());
+}

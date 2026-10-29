@@ -61,11 +61,11 @@ VM `instance-lembur` (GCP `asia-southeast2-b`, Ubuntu 26.10, 2 vCPU, 3,8 GB), sa
 
 | AE | Status | Bukti / catatan |
 |---|---|---|
-| AE1 antrean berurutan pada jam lembur | belum diuji | Semua kartu dijalankan lewat Start now; penjadwal jam lembur sungguhan belum diamati. |
+| AE1 antrean berurutan pada jam lembur | lulus | Malam 28 Okt (23:00–02:00 WIB): PGS-1526 mulai 23:00:35 tanpa Start now, PGS-1530 mulai 23:03:08 setelah PGS-1526 tertahan. |
 | AE2 kartu berjalan melewati akhir jam | belum diuji | |
 | AE3 Start now siang hari | lulus | PGS-1519, 1520, 1521, 1522: dikerjakan di VM, push hanya branch kartu, PR draft, Lark tetap In Progress. |
 | AE4 kartu antrean sudah dipindah orang lain | lulus | PGS-1527 diubah ke In Progress di Lark lalu Start now: tidak ada run, kartu dikeluarkan dari antrean dengan alasan "the card moved to In Progress in Lark". |
-| AE5 batas pemakaian tercapai | sebagian | Batas tidak pernah tercapai karena cache tidak dihitung (lihat temuan 6); setelah perbaikan, test unit/integrasi saja. |
+| AE5 batas pemakaian tercapai | lulus | Batas 350.000: tercapai 23:04:39 di tengah review PGS-1530 (357.010 terhitung), reviewer dihentikan, kartu `usage_limit`; PGS-1531 dan PGS-1532 tidak dimulai dan tetap di antrean untuk siklus berikutnya. Temuan: catatan review tertinggal "running" (diperbaiki). |
 | AE6 Can't verify menahan `ac_gate` tanpa push | lulus | PGS-1518 dan PGS-1520: 6 Can't verify, kartu ditahan, tidak ada push. |
 | AE7 isolasi dua developer | belum diuji | Baru satu developer di VM. |
 | AE8 laptop melihat kartu milik VM | lulus | PGS-1525 berjalan di VM: board laptop hanya menampilkan badge **On VM**, tanpa Start dan tanpa ambil alih; pemindahan hanya lewat Take over dari tab Overnight. |
@@ -74,7 +74,7 @@ VM `instance-lembur` (GCP `asia-southeast2-b`, Ubuntu 26.10, 2 vCPU, 3,8 GB), sa
 | AE11 Take over to laptop | lulus | PGS-1529 (tertahan `needs_confirmation`): VM commit "work in progress, handed off to the laptop" dan push branch tanpa PR, run VM ditutup, kartu laptop-only, laptop melanjutkan di branch yang sama, Lark tetap In Progress. Catatan: Take over ikut mem-push perubahan CI yang tadinya menunggu konfirmasi, dan workflow baru langsung terpicu di GitHub. |
 | AE12 konfirmasi Can't verify lalu push tanpa agent | lulus | PGS-1518 (PR #5) dan PGS-1521 (PR #8) setelah Decide AC. |
 | AE13 PR draft lalu Send to review | lulus | PGS-1518, 1519, 1521: PR keluar dari draft, Lark ke Waiting Review. |
-| AE14 DM laporan pagi | belum diuji | |
+| AE14 DM laporan pagi | lulus | DM bot Lark terkirim sekali pukul 02:00:10 (1 percobaan): 1 AC gate, 1 tertahan lain, perlu keputusan PGS-1526 dan PGS-1530, pemakaian 357.010 dari 350.000. |
 | AE15 badge Queued for VM | lulus | PGS-1524 di antrean: board laptop menampilkan "Queued for VM" menggantikan Start. |
 
 Skenario tambahan (R12, perubahan sensitif): **PGS-1529** (workflow GitHub Actions) lulus. Agent menambah `.github/workflows/test.yml`; VM menahan kartu `needs_confirmation` tanpa commit dan tanpa push.
@@ -114,4 +114,6 @@ Review headless berbrowser penuh terbukti di **PGS-1522**: app dinyalakan otomat
 - Reviewer bisa menilai AC tampilan "pass" hanya dari kode (PGS-1519, PGS-1528 AC-5 "Unduh" tidak diklik); AC yang butuh browser seharusnya Can't verify bila tidak dibuktikan di browser.
 - PGS-1528 (informasi brand sengaja tidak diberikan): agent tidak bertanya, tetapi membuat nilai sementara yang ditandai `PLACEHOLDER`; gerbang menahan kartu `ac_gate` karena AC-1 dan AC-3 Can't verify.
 - Kartu lembur di VM dimulai tanpa tahap plan (`Planning::Skip`, KTD-57); pengamannya di gerbang akhir. Opsi yang diusulkan, diputuskan pemilik produk setelah testing selesai: (1) plan disetujui siang di laptop lalu dieksekusi VM malam hari, atau (2) VM membuat plan sendiri tanpa persetujuan sebelum implementasi.
-- Sisa AE di atas perlu uji jam lembur sungguhan dan developer kedua.
+- Akses lewat IAP putus setiap kali login `gcloud` di laptop kedaluwarsa (akun organisasi Google meminta login ulang berkala); tab Overnight menampilkan "VM offline" walau daemon VM bekerja. Dicatat di tabel pemecahan masalah runbook.
+- Temuan malam 28 Okt: (1) hook review memblokir browser setelah `browser_type` tanpa submit (PGS-1526 AC-8879 Can't verify) karena Playwright juga tidak menyertakan `Page URL` untuk `browser_type` dan `browser_press_key` selain Enter; pengecualian diperluas ke kedua tool itu. (2) Catatan review tertinggal "running" saat batas siklus menghentikan review; kini ditutup sebagai gagal dengan alasan usage limit.
+- Sisa AE di atas perlu developer kedua (AE7) dan kartu yang melewati akhir jam lembur (AE2).

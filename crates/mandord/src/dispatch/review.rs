@@ -115,7 +115,10 @@ fn readiness_view(r: mandor_usecase::review::ReviewReadiness) -> ReviewReadiness
             login: r.confirmed.login,
         },
         app_urls: r.app_urls,
-        chrome_connected: r.chrome_connected,
+        chrome_connected: matches!(
+            r.driver,
+            mandor_usecase::review::BrowserDriver::Chrome { connected: true }
+        ),
     }
 }
 

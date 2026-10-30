@@ -7,7 +7,7 @@ use std::path::PathBuf;
 use std::sync::atomic::Ordering;
 
 use common::run_fakes::eventually;
-use common::{FakeClock, FakeLark, Station, ready_task, station};
+use common::{FakeClock, FakeLark, Station, ready_task, station, vm_station};
 use mandor_domain::{Claim, FlagKind, Reply, RunState, TaskStatus};
 use mandor_usecase::run_ports::{NoticeKind, RunRecord, SessionRef, WorkChanges};
 use mandor_usecase::waiting_fix::DEFAULT_QUIET_SECS as QUIET;
@@ -719,4 +719,34 @@ async fn komentar_kartu_tetap_tampil_setelah_daemon_start_dan_putaran_kartu_lain
     tick(&st).await;
     let views = st.svc.record_comments(&rec, &[]).await.unwrap();
     assert_eq!(views.len(), 1, "{views:?}");
+}
+
+#[tokio::test]
+async fn covers_ae8_laptop_tidak_memproses_waiting_fix_kartu_yang_dipegang_vm() {
+    // Plan VM U1: klaim kartu dipegang daemon VM milik developer yang sama.
+    let (lark, clock, laptop) = setup(false).await;
+    lark.edit("rec1", |t| {
+        t.claim = Some(Claim {
+            open_id: "ou_me".to_owned(),
+            ts_ms: NOW_MS,
+            nonce: "n~vm".to_owned(),
+        });
+    });
+    *lark.replies.lock().unwrap() = vec![reply("r1", "ou_qa", NOW - 600, "Tombol simpan error")];
+    laptop.svc.sync().poll(true, &[]).await.unwrap();
+    let report = tick(&laptop).await;
+    assert!(
+        report.entered.is_empty() && report.started.is_empty(),
+        "{report:?}"
+    );
+    assert!(laptop.runs.all().is_empty(), "laptop tidak membuat run");
+
+    let on_vm = vm_station(&lark, &clock, "ou_me");
+    on_vm.svc.sync().poll(true, &[]).await.unwrap();
+    let report = tick(&on_vm).await;
+    assert_eq!(
+        report.started,
+        ["rec1"],
+        "VM yang memegang kartu yang memprosesnya"
+    );
 }

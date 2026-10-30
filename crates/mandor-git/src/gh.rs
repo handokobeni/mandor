@@ -1,6 +1,6 @@
 use std::path::Path;
 
-use mandor_proc::{Cmd, run};
+use mandor_proc::Cmd;
 use secrecy::{ExposeSecret, SecretString};
 use serde::{Deserialize, Serialize};
 
@@ -23,6 +23,17 @@ pub enum ChecksState {
     Pending,
     Passing,
     Failing,
+}
+
+/// PR yang akan dibuat.
+#[derive(Debug, Clone, Copy)]
+pub struct NewPr<'a> {
+    pub base: &'a str,
+    pub head: &'a str,
+    pub title: &'a str,
+    pub body: &'a str,
+    /// PR draft (daemon VM).
+    pub draft: bool,
 }
 
 /// Info PR untuk sebuah branch.
@@ -64,46 +75,75 @@ impl Git {
     /// # Errors
     /// [`GitError::Command`] bila profil tidak login.
     pub async fn gh_token(&self, profile: &str) -> Result<SecretString, GitError> {
-        let out = self
-            .ok(
-                "gh auth token",
-                self.gh(Path::new("."), None)
-                    .args(["auth", "token", "--user", profile]),
-            )
-            .await?;
-        Ok(SecretString::from(out.stdout.trim().to_owned()))
+        self.auth_token(&["auth", "token", "--user", profile], None)
+            .await
     }
 
-    /// Membuat PR dari `head` ke `base`; mengembalikan URL PR.
+    /// Token akun `gh` yang aktif (`gh auth token`), untuk daemon VM yang
+    /// repo-nya tidak memilih profil.
+    ///
+    /// # Errors
+    /// [`GitError::Command`] bila `gh` belum login; pesannya menyebut caranya.
+    pub async fn gh_active_token(&self) -> Result<SecretString, GitError> {
+        self.auth_token(
+            &["auth", "token"],
+            Some("no GitHub account is logged in for the daemon; run `gh auth login` as the daemon's user on the VM, or set a gh profile for the repo"),
+        )
+        .await
+    }
+
+    /// `gh auth token` langsung, bukan lewat penjaga konfigurasi repo: perintah
+    /// ini tidak menjalankan git di dalam repo mana pun.
+    async fn auth_token(
+        &self,
+        args: &[&str],
+        hint: Option<&str>,
+    ) -> Result<SecretString, GitError> {
+        // Stdout `run` biasa diredaksi, yang akan merusak token itu sendiri.
+        let out = mandor_proc::run_secret(&self.gh(Path::new("."), None).args(args)).await?;
+        if !out.success() {
+            return Err(GitError::Command {
+                op: "gh auth token",
+                stderr: hint.map_or_else(|| out.stderr.trim().to_owned(), str::to_owned),
+            });
+        }
+        Ok(SecretString::from(
+            out.stdout.expose_secret().trim().to_owned(),
+        ))
+    }
+
+    /// Membuat PR dari `head` ke `base`; mengembalikan URL PR. PR draft di
+    /// daemon VM (KTD-68 plan VM).
     ///
     /// # Errors
     /// [`GitError::Command`] bila `gh pr create` gagal.
     pub async fn create_pr(
         &self,
         worktree: &Path,
-        base: &str,
-        head: &str,
-        title: &str,
-        body: &str,
+        pr: &NewPr<'_>,
         token: Option<&SecretString>,
     ) -> Result<String, GitError> {
+        let mut args = vec![
+            "pr",
+            "create",
+            "--base",
+            pr.base,
+            "--head",
+            pr.head,
+            "--title",
+            pr.title,
+            "--body-file",
+            "-",
+        ];
+        if pr.draft {
+            args.push("--draft");
+        }
         let out = self
             .ok(
                 "gh pr create",
                 self.gh(worktree, token)
-                    .args([
-                        "pr",
-                        "create",
-                        "--base",
-                        base,
-                        "--head",
-                        head,
-                        "--title",
-                        title,
-                        "--body-file",
-                        "-",
-                    ])
-                    .stdin_bytes(body.as_bytes().to_vec()),
+                    .args(args)
+                    .stdin_bytes(pr.body.as_bytes().to_vec()),
             )
             .await?;
         out.stdout
@@ -126,10 +166,13 @@ impl Git {
         url: &str,
         token: Option<&SecretString>,
     ) -> Result<Option<String>, GitError> {
-        let out = run(&self
-            .gh(repo, token)
-            .args(["pr", "view", url, "--json", "body"]))
-        .await?;
+        let out = self
+            .exec(
+                &self
+                    .gh(repo, token)
+                    .args(["pr", "view", url, "--json", "body"]),
+            )
+            .await?;
         if !out.success() {
             if out.stderr.contains("Could not resolve")
                 || out.stderr.contains("no pull requests found")
@@ -146,6 +189,24 @@ impl Git {
         Ok(v.get("body")
             .and_then(serde_json::Value::as_str)
             .map(str::to_owned))
+    }
+
+    /// Menandai PR draft siap di-review (`gh pr ready`, KTD-68 plan VM).
+    ///
+    /// # Errors
+    /// [`GitError::Command`] bila `gh pr ready` gagal atau melewati batas waktu.
+    pub async fn pr_ready(
+        &self,
+        repo: &Path,
+        url: &str,
+        token: Option<&SecretString>,
+    ) -> Result<(), GitError> {
+        self.ok(
+            "gh pr ready",
+            self.gh(repo, token).args(["pr", "ready", url]),
+        )
+        .await?;
+        Ok(())
     }
 
     /// Mengganti badan PR di `url`; badan dikirim lewat stdin.
@@ -179,14 +240,15 @@ impl Git {
         branch: &str,
         token: Option<&SecretString>,
     ) -> Result<Option<PrInfo>, GitError> {
-        let out = run(&self.gh(repo, token).args([
-            "pr",
-            "view",
-            branch,
-            "--json",
-            "number,url,state,statusCheckRollup",
-        ]))
-        .await?;
+        let out = self
+            .exec(&self.gh(repo, token).args([
+                "pr",
+                "view",
+                branch,
+                "--json",
+                "number,url,state,statusCheckRollup",
+            ]))
+            .await?;
         if !out.success() {
             if out.stderr.contains("no pull requests found") {
                 return Ok(None);

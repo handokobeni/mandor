@@ -433,6 +433,28 @@ impl LarkTasks for LarkGateway {
             .collect())
     }
 
+    async fn message_me(&self, text: &str) -> Result<(), PortError> {
+        let me = {
+            let guard = self.current.lock().await;
+            guard.as_ref().and_then(|t| t.open_id.clone())
+        };
+        let me = match me {
+            Some(id) => id,
+            None => self
+                .tokens
+                .load()
+                .await
+                .map_err(PortError::from)?
+                .and_then(|t| t.open_id)
+                .ok_or(PortError::Reauth)?,
+        };
+        Ok(with_retry(self.retry, || async {
+            let tenant = self.client.tenant_token().await?;
+            self.client.send_text(&tenant, &me, text).await
+        })
+        .await?)
+    }
+
     async fn user_names(&self, open_ids: &[String]) -> Result<HashMap<String, String>, PortError> {
         if open_ids.is_empty() {
             return Ok(HashMap::new());

@@ -96,23 +96,44 @@ impl<D: Deps> RunService<D> {
     ) {
         let mut end = TurnEnd::Error("agent stopped without a result".to_owned());
         let mut stats = ReviewEnd::default();
+        let mut tracker = mandor_domain::UsageTracker::default();
+        let mut limited = false;
         while let Some(event) = handle.next_event().await {
             observe(&event, &mut end, &mut stats);
-            // Sesi reviewer tidak masuk chat pelaksana; progresnya lewat buku AC.
-            match self.current_state(&run_id, generation).await {
-                Some(current) if current != RunState::Reviewing => {}
-                _ => continue,
+            // Batas siklus VM dihitung per pesan agar bisa berhenti di tengah
+            // giliran (KTD-59 plan VM).
+            if self.is_vm() && !limited && self.vm_count_usage(&event, &mut tracker).await {
+                limited = true;
+                handle.stopper().stop().await;
             }
-            if let Err(e) = self
-                .runs
-                .append(&run_id, &ChatItem::Agent(event), self.now())
-                .await
-            {
-                tracing::warn!(run_id, error = %e, "gagal menyimpan event agent");
-            }
+            self.record_event(&run_id, generation, event).await;
         }
-        if let Err(e) = self.finish_turn(&run_id, generation, end, stats).await {
+        let finished = if limited {
+            self.hold_for_limit(&run_id, generation).await
+        } else {
+            self.finish_turn(&run_id, generation, end, stats).await
+        };
+        if let Err(e) = finished {
             tracing::warn!(run_id, error = %e, "gagal menyelesaikan giliran agent");
+        }
+    }
+
+    /// Menyimpan event agent ke chat run. Pemakaian per pesan dan sesi reviewer
+    /// tidak masuk chat pelaksana; progres review lewat buku AC.
+    async fn record_event(&self, run_id: &str, generation: i64, event: AgentEvent) {
+        if matches!(event, AgentEvent::MessageUsage { .. }) {
+            return;
+        }
+        match self.current_state(run_id, generation).await {
+            Some(current) if current != RunState::Reviewing => {}
+            _ => return,
+        }
+        if let Err(e) = self
+            .runs
+            .append(run_id, &ChatItem::Agent(event), self.now())
+            .await
+        {
+            tracing::warn!(run_id, error = %e, "gagal menyimpan event agent");
         }
     }
 
@@ -157,12 +178,20 @@ impl<D: Deps> RunService<D> {
         match end {
             TurnEnd::Ok(result) => {
                 if run.phase == RunPhase::Plan && !result.trim().is_empty() {
-                    run.plan = Some(result);
+                    run.plan = Some(result.clone());
                 }
                 if !run.queue.is_empty() {
                     let next = run.queue.remove(0);
                     let req = self.resume_request(&mut run, next.clone()).await?;
                     return self.spawn_turn_boxed(run, req, next).await;
+                }
+                // VM: kartu dikerjakan sampai PR atau tertahan dengan alasan (U4 plan VM).
+                // Run grup di VM menyusul di U10 plan run grup.
+                if self.is_vm()
+                    && run.phase == RunPhase::Implement
+                    && self.runs.cards(&run.id).await?.is_empty()
+                {
+                    return self.vm_after_turn(run, result).await;
                 }
                 run.state = RunState::AwaitingDev;
                 self.runs.save(&run, generation, self.now()).await?;
@@ -352,7 +381,7 @@ impl<D: Deps> RunService<D> {
 
     /// Menaikkan generasi lebih dulu (event giliran lama jadi basi), lalu
     /// menghentikan prosesnya. Mengembalikan `true` bila ada giliran yang dihentikan.
-    async fn interrupt(&self, run_id: &str) -> Result<bool, RunError> {
+    pub(crate) async fn interrupt(&self, run_id: &str) -> Result<bool, RunError> {
         let mut run = self.load(run_id).await?;
         if !run.state.is_busy() {
             return Ok(false);

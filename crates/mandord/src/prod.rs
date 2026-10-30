@@ -35,6 +35,7 @@ impl Deps for Prod {
     type Spawner = TrackerSpawner;
     type Repos = ReposStore;
     type Prompts = ClaudePrompts;
+    type Overnight = mandor_store::OvernightsStore;
 }
 
 pub fn now_ms() -> i64 {

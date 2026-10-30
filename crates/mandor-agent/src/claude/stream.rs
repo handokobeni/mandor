@@ -99,7 +99,31 @@ fn assistant(v: &Value) -> Vec<AgentEvent> {
     if !joined.trim().is_empty() {
         out.insert(0, AgentEvent::AssistantMessage { text: joined });
     }
+    if let Some(u) = message_usage(v) {
+        out.push(u);
+    }
     out
+}
+
+/// Pemakaian pesan assistant utama; pesan subagent (`parent_tool_use_id`
+/// terisi) tidak dihitung (KTD-59 plan VM).
+fn message_usage(v: &Value) -> Option<AgentEvent> {
+    if v.get("parent_tool_use_id").is_some_and(|p| !p.is_null()) {
+        return None;
+    }
+    let message = v.get("message")?;
+    let message_id = message.get("id").and_then(Value::as_str)?.to_owned();
+    let u = message.get("usage")?;
+    let n = |k: &str| u.get(k).and_then(Value::as_u64).unwrap_or(0);
+    Some(AgentEvent::MessageUsage {
+        message_id,
+        usage: Usage {
+            input_tokens: n("input_tokens"),
+            output_tokens: n("output_tokens"),
+            cache_creation_input_tokens: n("cache_creation_input_tokens"),
+            cache_read_input_tokens: n("cache_read_input_tokens"),
+        },
+    })
 }
 
 /// Ringkasan input tool: perintah, path, pola, kueri, URL, atau string pendek pertama.

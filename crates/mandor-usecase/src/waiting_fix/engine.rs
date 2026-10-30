@@ -11,7 +11,7 @@ use mandor_domain::cursor::newer_than;
 use mandor_domain::push_gate::evaluate;
 use mandor_domain::run::touches_sensitive_path;
 use mandor_domain::trust::is_trusted;
-use mandor_domain::{AppField, Cursor, Reply, RunState, Task, TaskStatus, WriteOp};
+use mandor_domain::{AppField, Cursor, HoldReason, Reply, RunState, Task, TaskStatus, WriteOp};
 use mandor_domain::{GateDecision, GateOutcome};
 
 use super::feedback_qa::feedback_qa_replies;
@@ -185,7 +185,9 @@ impl<D: Deps> RunService<D> {
             .map(|c| c.task)
             .filter(|t| {
                 looped.contains(&t.record_id)
-                    || (t.status == TaskStatus::WaitingFix && t.claimed_by(me) && t.assigned_to(me))
+                    || (t.status == TaskStatus::WaitingFix
+                        && t.held_here(self.sync.identity())
+                        && t.assigned_to(me))
             })
             .collect())
     }
@@ -313,6 +315,9 @@ impl<D: Deps> RunService<D> {
             }
             return Ok(if entered { Step::Entered } else { Step::Idle });
         }
+        if self.defer_for_vm(&mut run).await? {
+            return Ok(if entered { Step::Entered } else { Step::Idle });
+        }
         self.start_fix_turn(run, vec![(task, batch)], &repo, None)
             .await?;
         Ok(Step::Started)
@@ -347,6 +352,8 @@ impl<D: Deps> RunService<D> {
         run.automatic = true;
         run.note = None;
         run.fix_requested_by.clone_from(&task.last_modified_by);
+        run.entered_waiting_fix_ms
+            .get_or_insert(self.sync.clock.now_ms());
         self.runs.save(&run, run.generation, self.now()).await?;
         self.notifier
             .notify(
@@ -605,6 +612,22 @@ impl<D: Deps> RunService<D> {
         Ok(())
     }
 
+    /// Daemon VM: perbaikan siap menunggu giliran bila VM sedang mengerjakan
+    /// kartu lain (R8, R21). Run ditandai `WfQuiet` dengan jeda yang sudah lewat
+    /// agar penjadwal tidak memulai kartu antrean lebih dulu.
+    pub(super) async fn defer_for_vm(&self, run: &mut RunRecord) -> Result<bool, RunError> {
+        if self.sync.role() != mandor_domain::DaemonRole::Vm || !self.vm_busy().await? {
+            return Ok(false);
+        }
+        let now = self.sync.clock.now_ms();
+        if run.state != RunState::WfQuiet || run.quiet_until_ms.is_none_or(|u| u > now) {
+            run.state = RunState::WfQuiet;
+            run.quiet_until_ms = Some(now);
+            self.runs.save(run, run.generation, self.now()).await?;
+        }
+        Ok(true)
+    }
+
     pub(crate) async fn ac_texts(&self, task: &Task) -> Result<Vec<String>, RunError> {
         Ok(self
             .sync
@@ -718,9 +741,9 @@ impl<D: Deps> RunService<D> {
             .flat_map(|(_, c)| c.files.iter().map(String::as_str));
         if touches_sensitive_path(files) {
             return self
-                .flag_fix(
+                .hold_fix(
                     run,
-                    RunState::AwaitingDev,
+                    HoldReason::NeedsConfirmation,
                     "Changes touch CI, agent config, or git hooks; push needs developer confirmation",
                 )
                 .await;
@@ -741,9 +764,9 @@ impl<D: Deps> RunService<D> {
                 Ok(_) => Ok(()),
                 Err(e) => {
                     let run = self.load(&run.id).await?;
-                    self.flag_fix(
+                    self.hold_fix(
                         run,
-                        RunState::AwaitingDev,
+                        HoldReason::AcGate,
                         &format!("Push held: the review could not start ({e})"),
                     )
                     .await
@@ -794,7 +817,7 @@ impl<D: Deps> RunService<D> {
         if !finished {
             let why = failure.unwrap_or_else(|| "the review did not finish".to_owned());
             return self
-                .flag_fix(run, RunState::AwaitingDev, &format!("Push held: {why}"))
+                .hold_fix(run, HoldReason::AcGate, &format!("Push held: {why}"))
                 .await;
         }
         let rows = self.gate_rows(&run).await?;
@@ -814,7 +837,17 @@ impl<D: Deps> RunService<D> {
             }
         };
         if let Some(note) = held {
-            return self.flag_fix(run, RunState::AwaitingDev, &note).await;
+            return self.hold_fix(run, HoldReason::AcGate, &note).await;
+        }
+        // Berkas bisa berubah selama review; periksa ulang sebelum push otomatis.
+        if self.touches_sensitive(&run.id).await? {
+            return self
+                .hold_fix(
+                    run,
+                    HoldReason::NeedsConfirmation,
+                    "Changes touch CI, agent config, or git hooks; push needs developer confirmation",
+                )
+                .await;
         }
         if !self.runs.cards(&run.id).await?.is_empty() && self.group_pr_merged(&run).await {
             return self.follow_up_fixing(run).await;
@@ -835,6 +868,21 @@ impl<D: Deps> RunService<D> {
     ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<(), RunError>> + Send + '_>>
     {
         Box::pin(async move { self.start_fix_turn(run, batches, &repo, None).await })
+    }
+
+    /// Push perbaikan tertahan: `Held` dengan alasan di daemon VM (KTD-60),
+    /// menunggu dev di laptop.
+    async fn hold_fix(
+        &self,
+        mut run: RunRecord,
+        reason: HoldReason,
+        note: &str,
+    ) -> Result<(), RunError> {
+        if self.is_vm() {
+            run.note = Some(note.to_owned());
+            return self.hold(&mut run, reason, Some(note.to_owned())).await;
+        }
+        self.flag_fix(run, RunState::AwaitingDev, note).await
     }
 
     pub(super) async fn flag_fix(

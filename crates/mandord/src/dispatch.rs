@@ -27,12 +27,14 @@ use crate::app::App;
 use crate::prod::{emit, now_ms};
 use crate::session::LarkSession;
 use crate::views::{
-    apply_group, card_view, notice_view, run_view, sprint_view, task_details_view, team_card_view,
+    apply_group, apply_holder, card_view, notice_view, run_view, sprint_view, task_details_view,
+    team_card_view,
 };
 
 mod app_run;
 mod design;
 mod group;
+mod overnight;
 mod review;
 mod workspaces;
 
@@ -177,11 +179,16 @@ impl AppDispatch {
             .await
             .map_err(internal)?;
         let power = self.app.power.get();
+        let lark = self.app.lark_status().await;
+        let logins = match &self.app.cfg.vm_agent {
+            Some(vm) => Some(crate::logins::check(&self.app.cfg, vm, &lark).await),
+            None => None,
+        };
         ok(&StatusResult {
             version: VERSION.to_owned(),
             uptime_ms: u64::try_from(self.app.started.elapsed().as_millis()).unwrap_or(u64::MAX),
             repos: repos.len() as u64,
-            lark: self.app.lark_status().await,
+            lark,
             busy: Some(mandor_domain::run::any_working(
                 active.iter().map(|r| r.state),
             )),
@@ -189,6 +196,8 @@ impl AppDispatch {
             draining: Some(self.app.drain.is_draining(now_ms())),
             keep_awake: Some(power.state.as_str().to_owned()),
             keep_awake_error: power.error,
+            logins,
+            daemon_id: Some(self.app.cfg.daemon_id.clone()),
         })
     }
 
@@ -231,6 +240,7 @@ impl AppDispatch {
             .map(|c| {
                 let run = runs.get(&c.task.record_id);
                 let mut card = card_view(c, run, &s.me, now);
+                apply_holder(&mut card, &c.task, s.sync.identity());
                 if let (Some(view), Some(r)) = (card.run.as_mut(), run) {
                     view.ac = summaries.get(&r.id).cloned();
                 }
@@ -419,6 +429,19 @@ impl AppDispatch {
         ok(&out)
     }
 
+    async fn known_people(&self) -> Result<Value, RpcError> {
+        let s = self.session().await?;
+        let out: Vec<PersonView> = s
+            .sync
+            .known_people()
+            .await
+            .map_err(sync_error)?
+            .into_iter()
+            .map(|(open_id, name)| PersonView { open_id, name })
+            .collect();
+        ok(&out)
+    }
+
     async fn details(&self, r: RecordRef) -> Result<Value, RpcError> {
         let s = self.session().await?;
         let d = s
@@ -504,6 +527,7 @@ impl AppDispatch {
             Some(view) => app_run::app_settings_from(view)?,
             None => mandor_store::app_settings_of(&current.settings),
         };
+        app_run::check_app_port(self.app.cfg.vm_agent.as_ref().map(|v| v.ports), &app)?;
         let gate_mode = match p.gate_mode.as_deref() {
             None => current
                 .settings
@@ -630,7 +654,11 @@ impl AppDispatch {
     /// Start dengan event `start.progress` per langkah untuk dialog Start.
     /// Push & PR dengan gerbang AC; keputusan dev dicatat atas nama akun Lark
     /// yang login (KTD-35).
-    async fn publish(&self, s: &LarkSession, p: PublishParams) -> Result<Value, RpcError> {
+    pub(super) async fn publish(
+        &self,
+        s: &LarkSession,
+        p: PublishParams,
+    ) -> Result<Value, RpcError> {
         let decision = mandor_domain::GateDecision {
             confirmed: p.confirmed.unwrap_or_default(),
             push_anyway_reason: p.push_anyway_reason.filter(|r| !r.trim().is_empty()),
@@ -736,7 +764,14 @@ impl AppDispatch {
             method::NOTIFICATIONS_TAKE => self.notifications().await,
             method::NOTIFICATIONS_LIST => self.notifications_list().await,
             method::NOTIFICATIONS_READ => self.notifications_read(params(v)?).await,
-            method::SYSTEM_CHECK => ok(&crate::prereq::check_all(&self.app.cfg.claude_bin).await),
+            method::SYSTEM_CHECK => {
+                let env = crate::session::login_env(&self.app.cfg).await;
+                ok(&crate::prereq::check_all(
+                    &self.app.cfg.claude_bin,
+                    env.get("PATH").map(String::as_str),
+                )
+                .await)
+            }
             method::REPOS_DISCOVER => self.repos_discover().await,
             method::FS_LIST_DIRS => self.list_dirs(params(v)?).await,
             method::AGENT_SKILLS => {
@@ -756,6 +791,7 @@ impl AppDispatch {
             other if Self::is_app_method(other) => self.app_call(other, v).await,
             other if Self::is_review_method(other) => self.review_call(other, v).await,
             other if Self::is_group_method(other) => self.group_call(other, v).await,
+            other if Self::is_overnight_method(other) => self.overnight_call(other, v).await,
             other => self.run_action(other, v).await,
         }
     }
@@ -973,6 +1009,7 @@ impl Dispatch for AppDispatch {
             method::CARD_COMMENTS => self.comments(params(v)?).await,
             method::CARD_DETAILS => self.details(params(v)?).await,
             method::PEOPLE_NAMES => self.people(params(v)?).await,
+            method::PEOPLE_KNOWN => self.known_people().await,
             method::RUNS_LIST => self.runs_list().await,
             method::RUNS_MESSAGES => self.messages(params(v)?).await,
             method::RUNS_CHANGES => self.changes(params(v)?).await,

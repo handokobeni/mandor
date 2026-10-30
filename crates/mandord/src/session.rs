@@ -7,7 +7,7 @@ use std::time::{Duration, Instant};
 
 use anyhow::Context;
 use mandor_agent::claude::guardrails::{agent_env, prepare_agent_home};
-use mandor_agent::{ClaudeAgent, ClaudeConfig, ClaudePrompts, LedgerServer};
+use mandor_agent::{AgentRunner, ClaudeAgent, ClaudeConfig, ClaudePrompts, LedgerServer};
 use mandor_git::{Git, GitAdapter, GitConfig};
 use mandor_lark::{FileTokenStore, LarkClient, LarkConfig, LarkGateway, TableRef};
 use mandor_protocol::{Notification, SyncStatusView, event};
@@ -17,7 +17,7 @@ use tokio::sync::{Notify, broadcast};
 use tokio_util::sync::CancellationToken;
 use tokio_util::task::TaskTracker;
 
-use crate::config::Config;
+use crate::config::{self, Config};
 use crate::prod::{
     BroadcastReviews, BroadcastRuns, BroadcastTasks, DaemonNotifier, Prod, SystemClock,
     TrackerSpawner, UuidIds,
@@ -33,6 +33,8 @@ const PR_EVERY: Duration = Duration::from_secs(60);
 /// Papan Team (kartu seluruh tim) lebih jarang dari kartu milik pengguna.
 const TEAM_EVERY: Duration = Duration::from_secs(60);
 const HEARTBEAT_EVERY: Duration = Duration::from_secs(5 * 60);
+/// Penjadwal lembur daemon VM (U2 plan VM).
+const OVERNIGHT_EVERY: Duration = Duration::from_secs(30);
 const OUTBOX_BATCH: u32 = 20;
 const LOGIN_ENV_TIMEOUT: Duration = Duration::from_secs(10);
 
@@ -118,16 +120,23 @@ pub async fn start(
     let scope = format!("{}/{}", settings.app_token, settings.table_id);
     let tasks = TaskStore::new(env.store.clone(), scope);
     let agent = build_agent(env.cfg, env.rpc_port).await?;
-    let git = Git::new(GitConfig::new(env.cfg.workspaces_dir()));
+    let mut git_cfg = GitConfig::new(env.cfg.workspaces_dir());
+    git_cfg.gh_bin.clone_from(&env.cfg.gh_bin);
+    // Di VM konfigurasi repo yang bisa diubah agent tidak dipercaya (KTD-65).
+    git_cfg.distrust_repo_config = env.cfg.vm_agent.is_some();
+    let git = Git::new(git_cfg);
 
-    let sync = Arc::new(SyncService::<Prod>::new(
-        gateway,
-        BroadcastTasks::new(tasks.clone(), env.events.clone()),
-        tasks,
-        SystemClock,
-        UuidIds,
-        me.clone(),
-    ));
+    let sync = Arc::new(
+        SyncService::<Prod>::new(
+            gateway,
+            BroadcastTasks::new(tasks.clone(), env.events.clone()),
+            tasks,
+            SystemClock,
+            UuidIds,
+            me.clone(),
+        )
+        .with_daemon(&env.cfg.daemon_id, env.cfg.role),
+    );
     let runs = Arc::new(
         RunService::new(
             Arc::clone(&sync),
@@ -148,6 +157,7 @@ pub async fn start(
                     mandor_store::AppStateStore::new(env.store.clone()),
                     env.events.clone(),
                 ),
+                overnight: mandor_store::OvernightsStore::new(env.store.clone()),
             },
         )
         .with_drain_gate(Arc::clone(env.drain)),
@@ -192,14 +202,25 @@ async fn build_agent(cfg: &Config, rpc_port: u16) -> anyhow::Result<ClaudeAgent>
     let agent_home = prepare_agent_home(&cfg.home)
         .await
         .context("menyiapkan config agent")?;
+    // Di VM berkas run ada di direktori grup yang bisa dibaca user agent (KTD-62).
+    let files = cfg
+        .vm_agent
+        .as_ref()
+        .map_or_else(|| cfg.home.join("agent"), config::VmAgent::run_dir);
     Ok(ClaudeAgent::new(ClaudeConfig {
         claude_bin: cfg.claude_bin.clone(),
-        hook_command: cfg.hook_command.clone(),
+        hook_command: agent_hook_command(&cfg.hook_command, cfg.vm_agent.as_ref()),
         env: agent_env(&login_env, &agent_home),
         model: None,
         commit_model: "haiku".to_owned(),
-        mcp_dir: cfg.home.join("agent").join("mcp"),
-        review_dir: cfg.home.join("agent").join("review"),
+        mcp_dir: files.join("mcp"),
+        review_dir: files.join("review"),
+        runner: cfg.vm_agent.as_ref().map(|v| AgentRunner {
+            exe: cfg.exe.clone(),
+            user: v.user.clone(),
+            run_dir: v.run_dir(),
+        }),
+        headless_browser: cfg.vm_agent.as_ref().map(|v| v.playwright_mcp.clone()),
         ledger_server: Some(LedgerServer {
             command: cfg.exe.clone(),
             port: rpc_port,
@@ -207,8 +228,21 @@ async fn build_agent(cfg: &Config, rpc_port: u16) -> anyhow::Result<ClaudeAgent>
     }))
 }
 
+/// Perintah hook semua sesi agent; di VM ditambah `--vm <run dir>` sehingga
+/// pagar lembur berlaku untuk setiap run, termasuk Start now dan Waiting Fix
+/// (U11 plan VM).
+fn agent_hook_command(base: &str, vm: Option<&config::VmAgent>) -> String {
+    match vm {
+        Some(v) => format!(
+            "{base} --vm {}",
+            config::shell_quote(&v.run_dir().display().to_string())
+        ),
+        None => base.to_owned(),
+    }
+}
+
 /// Environment login shell pengguna; fallback ke environment minimal dari config.
-async fn login_env(cfg: &Config) -> BTreeMap<String, String> {
+pub(crate) async fn login_env(cfg: &Config) -> BTreeMap<String, String> {
     match mandor_proc::capture_login_env(&cfg.shell, LOGIN_ENV_TIMEOUT).await {
         Ok(env) => env,
         Err(e) => {
@@ -249,6 +283,7 @@ struct Schedule {
     prs: Due,
     heartbeat: Due,
     team: Due,
+    overnight: Due,
 }
 
 impl Schedule {
@@ -260,6 +295,7 @@ impl Schedule {
             prs: Due::new(PR_EVERY),
             heartbeat: Due::new(HEARTBEAT_EVERY),
             team: Due::new(TEAM_EVERY),
+            overnight: Due::new(OVERNIGHT_EVERY),
         }
     }
 
@@ -296,7 +332,18 @@ impl Schedule {
         if self.heartbeat.take(now) {
             warn_err(s.runs.heartbeat_all().await, "heartbeat klaim gagal");
         }
+        if s.sync.role() == mandor_domain::DaemonRole::Vm && (poked || self.overnight.take(now)) {
+            overnight_once(s).await;
+        }
         drain(s).await;
+    }
+}
+
+/// Satu tick penjadwal lembur daemon VM (U2 plan VM).
+async fn overnight_once(s: &LarkSession) {
+    let tick = warn_err(s.runs.overnight_tick().await, "penjadwal lembur gagal");
+    if let Some(t) = tick.filter(|t| t.started.is_some() || !t.dequeued.is_empty()) {
+        tracing::info!(started = ?t.started, dequeued = ?t.dequeued, "penjadwal lembur");
     }
 }
 
@@ -360,5 +407,29 @@ async fn drain(s: &LarkSession) {
         Ok(_) => {}
         Err(SyncError::Port(PortError::Reauth)) => s.reauth.store(true, Ordering::Relaxed),
         Err(e) => tracing::warn!(error = %e, "outbox gagal"),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn hook_agent_vm_membawa_pagar_lembur() {
+        let vm = config::vm_agent_of(
+            mandor_domain::DaemonRole::Vm,
+            Some("beni-agent"),
+            Some("/srv/m/beni"),
+            Some("5100-5199"),
+        )
+        .unwrap();
+        assert_eq!(
+            agent_hook_command("/opt/mandord hook", vm.as_ref()),
+            "/opt/mandord hook --vm /srv/m/beni/runs"
+        );
+        assert_eq!(
+            agent_hook_command("/opt/mandord hook", None),
+            "/opt/mandord hook"
+        );
     }
 }

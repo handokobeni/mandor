@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "UPDATE overnight_queue SET position = position + ?",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": []
+  },
+  "hash": "87e36cf323ce13082d6a873ff7b2da346ec8ab1149726682a16e6d4815add1f9"
+}

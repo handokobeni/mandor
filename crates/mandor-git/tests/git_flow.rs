@@ -333,17 +333,17 @@ esac"#,
     cfg.gh_bin = gh;
     let git = Git::new(cfg);
     let token = secrecy::SecretString::from("ghs_ujiujiujiuji".to_owned());
-    let url = git
-        .create_pr(
-            &f.repo,
-            "main",
-            "mandor/pgs-6",
-            "feat: x",
-            "badan",
-            Some(&token),
-        )
-        .await
-        .unwrap();
+    let pr = mandor_git::NewPr {
+        base: "main",
+        head: "mandor/pgs-6",
+        title: "feat: x",
+        body: "badan",
+        draft: false,
+    };
+    let url = git.create_pr(&f.repo, &pr, Some(&token)).await.unwrap();
+    let draft = mandor_git::NewPr { draft: true, ..pr };
+    git.create_pr(&f.repo, &draft, Some(&token)).await.unwrap();
+    git.pr_ready(&f.repo, &url, Some(&token)).await.unwrap();
     assert_eq!(url, "https://github.com/o/r/pull/7");
     let pr = git
         .pr_for_branch(&f.repo, "mandor/pgs-6", Some(&token))
@@ -356,6 +356,14 @@ esac"#,
     let log = std::fs::read_to_string(&args_log).unwrap();
     assert!(
         log.contains("pr create --base main --head mandor/pgs-6"),
+        "{log}"
+    );
+    assert!(
+        log.contains("--body-file - --draft"),
+        "PR draft di VM: {log}"
+    );
+    assert!(
+        log.contains("pr ready https://github.com/o/r/pull/7"),
         "{log}"
     );
     assert!(log.contains("token=ghs_ujiujiujiuji"));
@@ -583,4 +591,126 @@ async fn revert_commit_bersih_atau_konflik_dibatalkan() {
         !f.git.is_dirty(&wt.path).await.unwrap(),
         "revert dibatalkan bersih"
     );
+}
+
+#[tokio::test]
+async fn git_daemon_vm_menolak_repo_dengan_konfigurasi_di_luar_allowlist() {
+    for (key, value) in [
+        ("core.sshCommand", "touch /tmp/x"),
+        ("credential.helper", "!evil"),
+        ("include.path", "../../evil.cfg"),
+        ("http.proxy", "http://evil:8080"),
+        ("remote.origin.uploadpack", "touch /tmp/x"),
+    ] {
+        let f = fixture();
+        sh(&f.repo, &["config", key, value]);
+        let guarded = Git::new(guarded_cfg(&f));
+        let err = guarded.default_branch(&f.repo).await.unwrap_err();
+        assert!(
+            matches!(err, mandor_git::GitError::UnsafeConfig(ref k) if k == &key.to_ascii_lowercase()),
+            "{key}: {err:?}"
+        );
+        // Daemon laptop tidak memeriksa (perilaku lama).
+        assert!(f.git.default_branch(&f.repo).await.is_ok(), "{key}");
+    }
+}
+
+#[tokio::test]
+async fn git_daemon_vm_gagal_tertutup_bila_konfigurasi_tidak_terbaca() {
+    let f = fixture();
+    let config = f.repo.join(".git/config");
+    let mut raw = std::fs::read_to_string(&config).unwrap();
+    raw.push_str("\n[rusak\n");
+    std::fs::write(&config, raw).unwrap();
+    let guarded = Git::new(guarded_cfg(&f));
+    assert!(matches!(
+        guarded.default_branch(&f.repo).await.unwrap_err(),
+        mandor_git::GitError::UnreadableConfig(_)
+    ));
+}
+
+#[tokio::test]
+async fn git_daemon_vm_berjalan_pada_repo_biasa() {
+    let f = fixture();
+    let guarded = Git::new(guarded_cfg(&f));
+    assert!(guarded.default_branch(&f.repo).await.is_ok());
+    let wt = guarded
+        .create_worktree(&f.repo, "ws-vm", "mandor/pgs-77-vm", "main", None)
+        .await
+        .unwrap();
+    std::fs::write(wt.path.join("vm.txt"), "vm\n").unwrap();
+    assert!(guarded.commit_all(&wt.path, "vm").await.unwrap().is_some());
+}
+
+fn guarded_cfg(f: &Fixture) -> GitConfig {
+    let mut cfg = GitConfig::new(f.root.join("workspaces"));
+    cfg.distrust_repo_config = true;
+    cfg
+}
+
+#[test]
+fn allowlist_kunci_konfigurasi_repo() {
+    use mandor_git::trusted_repo_config_key;
+    for k in [
+        "core.sshcommand",
+        "core.gitproxy",
+        "core.alternaterefscommand",
+        "core.worktree",
+        "credential.https://github.com.helper",
+        "url.git@evil:.insteadof",
+        "includeif.gitdir:/x.path",
+        "filter.lfs.process",
+        "diff.pdf.textconv",
+        "merge.ours.driver",
+        "gpg.ssh.program",
+        "http.proxy",
+        "http.sslverify",
+        "protocol.ext.allow",
+        "remote.origin.uploadpack",
+        "remote.origin.receivepack",
+        "remote.origin.vcs",
+        "remote.origin.proxy",
+        "branch.main.gh-merge-base.x",
+        "fetch.recursesubmodules",
+        "init.templatedir",
+        "extensions.partialclone",
+        "submodule.x.update",
+    ] {
+        assert!(!trusted_repo_config_key(k), "{k}");
+    }
+    for k in [
+        "core.repositoryformatversion",
+        "core.filemode",
+        "core.bare",
+        "core.autocrlf",
+        "user.name",
+        "remote.origin.url",
+        "remote.origin.fetch",
+        "remote.origin.gh-resolved",
+        "branch.main.remote",
+        "branch.main.merge",
+        "extensions.worktreeconfig",
+    ] {
+        assert!(trusted_repo_config_key(k), "{k}");
+    }
+}
+
+/// Diff di VM berisi patch biasa: override VM tidak boleh membuat git
+/// menjalankan program diff eksternal kosong ("external diff died"), yang
+/// membuat deskripsi PR otomatis jatuh ke badan minimal.
+#[tokio::test]
+async fn diff_di_vm_menghasilkan_patch() {
+    let f = fixture();
+    let guarded = Git::new(guarded_cfg(&f));
+    let wt = guarded
+        .create_worktree(&f.repo, "ws-diff", "mandor/pgs-78-diff", "main", None)
+        .await
+        .unwrap();
+    std::fs::write(wt.path.join("bmi.txt"), "bmi\n").unwrap();
+    guarded.commit_all(&wt.path, "bmi").await.unwrap();
+    let branch = guarded.branch_diff(&wt.path, "main", 10_000).await.unwrap();
+    assert!(branch.contains("+bmi"), "{branch}");
+    std::fs::write(wt.path.join("bmi.txt"), "bmi\nkategori\n").unwrap();
+    let working = guarded.working_diff(&wt.path, 10_000).await.unwrap();
+    assert!(working.contains("+kategori"), "{working}");
 }

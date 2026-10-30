@@ -171,7 +171,14 @@ pub trait GitPort: Send + Sync {
         branch: &str,
         title: &str,
         body: &str,
+        draft: bool,
     ) -> impl Future<Output = Result<String, PortError>> + Send;
+    /// Menandai PR draft siap di-review (KTD-68 plan VM).
+    fn mark_pr_ready(
+        &self,
+        repo: &RepoInfo,
+        url: &str,
+    ) -> impl Future<Output = Result<(), PortError>> + Send;
     /// Tree id isi worktree saat ini (KTD-28), tanpa mengubah index.
     fn snapshot(&self, worktree: &Path) -> impl Future<Output = Result<String, PortError>> + Send;
     /// Berkas yang berbeda antara dua tree.
@@ -232,8 +239,9 @@ pub struct ReviewRequest {
     pub review_id: String,
     /// Origin app yang boleh dibuka browser reviewer.
     pub origins: Vec<String>,
-    /// `--chrome` hanya bila semua syarat kesiapan terpenuhi.
-    pub chrome: bool,
+    /// Browser hanya bila semua syarat kesiapan terpenuhi: Claude in Chrome
+    /// di laptop, Playwright headless di VM (KTD-64 plan VM).
+    pub browser: bool,
     pub model: Option<String>,
     /// Batas biaya `--max-budget-usd`, dalam sen.
     pub budget_cents: u32,
@@ -288,6 +296,9 @@ pub trait AgentPort: Send + Sync {
     fn reap(&self, pid: u32) -> impl Future<Output = ()> + Send;
     /// Membersihkan berkas milik sesi reviewer (state pagar browser).
     fn end_review(&self, review_id: &str) -> impl Future<Output = ()> + Send;
+    /// Login Claude Code yang dipakai agent masih valid (KTD-59 plan VM).
+    /// Kegagalan memeriksa berarti tidak valid.
+    fn logged_in(&self) -> impl Future<Output = bool> + Send;
 }
 
 /// Bahan deskripsi PR. Semua teks berasal dari Lark atau diff dan diperlakukan
@@ -364,10 +375,24 @@ pub struct RunRecord {
     pub review_id: Option<String>,
     /// Skill reviewer pilihan dev saat Start; `None` = prompt bawaan.
     pub reviewer_skill: Option<String>,
+    /// Alasan dan catatan run `Held` (KTD-60 plan VM).
+    pub hold: Option<Hold>,
+    /// Waktu kartu pertama kali masuk Waiting Fix; metrik "lolos tanpa
+    /// Waiting Fix" (R18 plan VM).
+    pub entered_waiting_fix_ms: Option<i64>,
+    /// PR draft VM menunggu "Send to review" sejak waktu ini (KTD-68 plan VM).
+    pub draft_pending: Option<i64>,
     /// Diisi store saat membaca; diabaikan saat menyimpan.
     pub created_at_ms: i64,
     /// Diisi store saat membaca; diabaikan saat menyimpan.
     pub updated_at_ms: i64,
+}
+
+/// Run VM yang tertahan: alasannya dan pertanyaan atau catatan untuk dev.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Hold {
+    pub reason: mandor_domain::HoldReason,
+    pub note: Option<String>,
 }
 
 impl RunRecord {
@@ -402,6 +427,9 @@ impl RunRecord {
             design: Vec::new(),
             review_id: None,
             reviewer_skill: None,
+            hold: None,
+            entered_waiting_fix_ms: None,
+            draft_pending: None,
             created_at_ms: 0,
             updated_at_ms: 0,
         }

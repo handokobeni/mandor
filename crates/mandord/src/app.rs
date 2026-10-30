@@ -207,6 +207,13 @@ impl App {
     /// Input tidak lengkap atau berkas tidak bisa ditulis.
     pub async fn set_settings(&self, input: LarkSettingsInput) -> anyhow::Result<()> {
         let merged = LarkSettings::merge(self.settings.read().await.as_ref(), input)?;
+        if let Some(vm) = &self.cfg.vm_agent {
+            anyhow::ensure!(
+                vm.ports.contains(merged.redirect_port),
+                "On this VM your ports are {}; choose a login callback port in that range and register it in the Lark app",
+                vm.ports
+            );
+        }
         settings::save(&self.cfg.lark_settings_path(), &merged).await?;
         *self.settings.write().await = Some(merged.clone());
         if let Some(s) = self.session().await {

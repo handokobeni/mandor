@@ -209,6 +209,10 @@ pub fn settings_json(hook_command: &str) -> String {
     .to_string()
 }
 
+/// Tool browser yang hasilnya dicatat hook `PostToolUse`: Claude in Chrome di
+/// laptop, Playwright di VM.
+const REVIEW_POST_MATCHER: &str = "mcp__claude-in-chrome__.*|mcp__playwright__.*";
+
 /// Settings sesi reviewer: `PreToolUse` seperti biasa ditambah `PostToolUse`
 /// untuk tool browser, yang mencatat tab dan alamat terakhirnya (KTD-31).
 #[must_use]
@@ -221,7 +225,7 @@ pub fn review_settings_json(hook_command: &str, post_command: &str) -> String {
                 "hooks": [{"type": "command", "command": hook_command, "timeout": 30}]
             }],
             "PostToolUse": [{
-                "matcher": "mcp__claude-in-chrome__.*",
+                "matcher": REVIEW_POST_MATCHER,
                 "hooks": [{"type": "command", "command": post_command, "timeout": 30}]
             }]
         }
@@ -431,7 +435,7 @@ mod tests {
         .unwrap();
         assert_eq!(
             v["hooks"]["PostToolUse"][0]["matcher"],
-            "mcp__claude-in-chrome__.*"
+            "mcp__claude-in-chrome__.*|mcp__playwright__.*"
         );
         assert_eq!(
             v["hooks"]["PostToolUse"][0]["hooks"][0]["command"],

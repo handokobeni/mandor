@@ -1,14 +1,15 @@
 <script lang="ts">
+  import { untrack } from 'svelte';
   import LoaderCircle from '@lucide/svelte/icons/loader-circle';
   import { toast } from 'svelte-sonner';
   import { Button } from '#lib/components/ui/button/index.ts';
   import { Input } from '#lib/components/ui/input/index.ts';
   import { type LarkErrors, type LarkForm, larkFormDirty, validateLark } from '#lib/settings.ts';
-  import { lark } from '#lib/stores/lark.svelte.ts';
+  import { lark, type LarkStore } from '#lib/stores/lark.svelte.ts';
   import Field from './Field.svelte';
 
   function fromSettings(): LarkForm {
-    const s = lark.settings;
+    const s = store.settings;
     return {
       appId: s?.app_id ?? '',
       appSecret: '',
@@ -19,13 +20,14 @@
     };
   }
 
-  let { onsaved }: { onsaved?: () => void } = $props();
+  // Daemon VM memakai store miliknya sendiri (Settings › This laptop / VM).
+  let { onsaved, store = lark }: { onsaved?: () => void; store?: LarkStore } = $props();
 
   let form = $state<LarkForm>(fromSettings());
   // Pengaturan bisa tiba setelah layar dibuka; isi form sekali saat itu.
-  let filled = lark.settings !== null;
+  let filled = untrack(() => store.settings !== null);
   $effect(() => {
-    if (!filled && lark.settings) {
+    if (!filled && store.settings) {
       form = fromSettings();
       filled = true;
     }
@@ -34,7 +36,7 @@
   let saving = $state(false);
   let replaceSecret = $state(false);
 
-  const secretSaved = $derived(!!lark.settings?.has_secret && !replaceSecret);
+  const secretSaved = $derived(!!store.settings?.has_secret && !replaceSecret);
   // Reset hanya berarti bila ada perubahan yang belum disimpan.
   const dirty = $derived(larkFormDirty(form, fromSettings(), replaceSecret));
 
@@ -44,7 +46,7 @@
     if (Object.keys(errors).length > 0) return;
     saving = true;
     try {
-      await lark.save({
+      await store.save({
         app_id: form.appId.trim(),
         app_secret: secretSaved ? null : form.appSecret.trim(),
         app_token: form.appToken.trim(),
@@ -89,7 +91,7 @@
             bind:value={form.appSecret}
             aria-invalid={errors.appSecret ? 'true' : undefined}
           />
-          {#if lark.settings?.has_secret}
+          {#if store.settings?.has_secret}
             <Button variant="outline" type="button" onclick={() => (replaceSecret = !replaceSecret)}>
               {replaceSecret ? 'Keep saved' : 'Replace'}
             </Button>

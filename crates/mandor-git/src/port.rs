@@ -43,9 +43,13 @@ impl GitAdapter {
     }
 
     /// Token profil `gh` repo, bila diatur. Token hanya dipakai proses daemon.
+    /// Di daemon VM credential helper git dinonaktifkan (KTD-65), jadi repo
+    /// tanpa profil memakai token akun `gh` yang aktif; di laptop git memakai
+    /// credential helper pengguna seperti biasa.
     async fn token(&self, repo: &RepoInfo) -> Result<Option<SecretString>, GitError> {
         match &repo.gh_profile {
             Some(p) => self.git.gh_token(p).await.map(Some),
+            None if self.git.distrusts_repo_config() => self.git.gh_active_token().await.map(Some),
             None => Ok(None),
         }
     }
@@ -244,19 +248,22 @@ impl GitPort for GitAdapter {
         branch: &str,
         title: &str,
         body: &str,
+        draft: bool,
     ) -> Result<String, PortError> {
         let token = self.token(repo).await?;
-        Ok(self
-            .git
-            .create_pr(
-                worktree,
-                &repo.default_branch,
-                branch,
-                title,
-                body,
-                token.as_ref(),
-            )
-            .await?)
+        let pr = crate::NewPr {
+            base: &repo.default_branch,
+            head: branch,
+            title,
+            body,
+            draft,
+        };
+        Ok(self.git.create_pr(worktree, &pr, token.as_ref()).await?)
+    }
+
+    async fn mark_pr_ready(&self, repo: &RepoInfo, url: &str) -> Result<(), PortError> {
+        let token = self.token(repo).await?;
+        Ok(self.git.pr_ready(&repo.path, url, token.as_ref()).await?)
     }
 }
 
@@ -264,6 +271,7 @@ impl GitPort for GitAdapter {
 mod tests {
     use super::*;
     use crate::ChecksState;
+    use secrecy::ExposeSecret as _;
 
     fn info(state: PrState) -> PrInfo {
         PrInfo {
@@ -282,5 +290,56 @@ mod tests {
         assert!(!merged.open && merged.merged);
         let closed = pr_ref(info(PrState::Closed));
         assert!(!closed.open && !closed.merged);
+    }
+
+    fn repo(profile: Option<&str>) -> RepoInfo {
+        RepoInfo {
+            id: "mandor-smoke".to_owned(),
+            path: "/srv/mandor/dev/workspaces/mandor-smoke".into(),
+            default_branch: "main".to_owned(),
+            gh_profile: profile.map(str::to_owned),
+            companions: vec![],
+            trusted_reviewers: vec![],
+            extra_allowed: vec![],
+            app: mandor_domain::app_run::AppSettings::default(),
+            gate_mode: None,
+        }
+    }
+
+    /// `gh` palsu: mencetak token per argumen `auth token [--user X]`.
+    #[cfg(unix)]
+    fn adapter(dir: &std::path::Path, vm: bool) -> GitAdapter {
+        use std::os::unix::fs::PermissionsExt;
+        let gh = dir.join("gh");
+        std::fs::write(
+            &gh,
+            "#!/bin/sh\nif [ \"$3\" = --user ]; then echo \"ghp_$4000000000000000000000000000\"; else echo gho_aktif0000000000000000000000000000; fi\n",
+        )
+        .unwrap();
+        std::fs::set_permissions(&gh, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let mut cfg = crate::GitConfig::new(dir.join("ws"));
+        cfg.gh_bin = gh;
+        cfg.distrust_repo_config = vm;
+        GitAdapter::new(Git::new(cfg))
+    }
+
+    /// Di VM credential helper git dinonaktifkan (KTD-65), jadi repo tanpa
+    /// gh profile memakai token akun `gh` yang aktif; di laptop git tetap
+    /// memakai credential helper pengguna.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn token_repo_tanpa_profil_di_vm_memakai_akun_gh_aktif() {
+        let dir = tempfile::tempdir().unwrap();
+        let vm = adapter(dir.path(), true);
+        let t = vm.token(&repo(None)).await.unwrap().unwrap();
+        // Token berbentuk asli tidak boleh ikut diredaksi seperti output perintah lain.
+        assert_eq!(t.expose_secret(), "gho_aktif0000000000000000000000000000");
+        let t = vm.token(&repo(Some("handoko78"))).await.unwrap().unwrap();
+        assert_eq!(
+            t.expose_secret(),
+            "ghp_handoko78000000000000000000000000000"
+        );
+        let laptop = adapter(dir.path(), false);
+        assert!(laptop.token(&repo(None)).await.unwrap().is_none());
     }
 }

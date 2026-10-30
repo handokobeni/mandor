@@ -47,6 +47,26 @@ pub struct StatusResult {
     #[serde(default)]
     #[ts(optional)]
     pub keep_awake_error: Option<String>,
+    /// Daemon VM: login Lark, gh, dan Claude user agent beserta langkah
+    /// perbaikannya (KTD-66 plan VM). Daemon laptop tidak mengirimnya.
+    #[serde(default)]
+    #[ts(optional)]
+    pub logins: Option<Vec<LoginCheck>>,
+    /// Id daemon di klaim (KTD-55), untuk serah-terima VM → laptop.
+    #[serde(default)]
+    #[ts(optional)]
+    pub daemon_id: Option<String>,
+}
+
+/// Satu login yang dibutuhkan daemon VM.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+pub struct LoginCheck {
+    /// `lark`, `gh`, atau `claude`.
+    pub service: String,
+    /// `ok`, `missing`, atau `expired`.
+    pub state: String,
+    /// Langkah perbaikan untuk developer; `None` bila `ok`.
+    pub fix: Option<String>,
 }
 
 /// Hasil `daemon.drain`: `idle` (kerja baru ditolak sampai restart) atau
@@ -285,6 +305,9 @@ pub struct CardView {
     pub can_takeover: bool,
     pub flag: Option<FlagView>,
     pub run: Option<RunView>,
+    /// Pemegang klaim dilihat dari daemon ini: `self`, `own_other_daemon`
+    /// (mis. daemon VM, badge "On VM"), atau `other_person`; `None` tanpa klaim.
+    pub holder: Option<String>,
     pub pr_url: Option<String>,
     pub branch: Option<String>,
     pub repo_id: Option<String>,
@@ -558,6 +581,10 @@ pub struct RepoAppView {
     /// (opt-in; kode agent berjalan tanpa konfirmasi perubahan).
     #[serde(default)]
     pub auto_restart: bool,
+    /// Setup command menyiapkan login uji sendiri; review headless di VM
+    /// memakai browser tanpa konfirmasi login (KTD-64 plan VM).
+    #[serde(default)]
+    pub unattended_login: bool,
 }
 
 /// Parameter `repos.add`.
@@ -1046,4 +1073,122 @@ pub struct LedgerToolSetVerdict {
     pub verdict: String,
     #[serde(default)]
     pub evidence: Option<String>,
+}
+
+/// Parameter `runs.handoff`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+pub struct HandoffParams {
+    pub record_id: String,
+    /// Id daemon laptop penerima klaim (dari `status` daemon laptop).
+    pub to_daemon_id: String,
+}
+
+/// Hasil `runs.handoff`: branch kartu untuk dipulihkan laptop.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+pub struct HandoffResult {
+    pub branch: String,
+}
+
+/// Satu kartu di antrean VM.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+pub struct QueueItemView {
+    pub record_id: String,
+    pub key: Option<String>,
+    pub title: String,
+    /// Target satu repo; `None` bila workspace.
+    pub repo_id: Option<String>,
+    pub workspace_id: Option<String>,
+    /// Catatan atau jawaban dev untuk agent.
+    pub note: Option<String>,
+    pub start_now: bool,
+    #[ts(type = "number")]
+    pub added_at_ms: i64,
+    /// Kartu tertahan yang diantre ulang (lanjut di branch yang sama).
+    pub held: bool,
+}
+
+/// Kartu yang keluar dari antrean tanpa dikerjakan, beserta alasannya.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+pub struct DequeuedView {
+    pub record_id: String,
+    pub key: Option<String>,
+    pub title: String,
+    pub reason: String,
+    #[ts(type = "number")]
+    pub at_ms: i64,
+}
+
+/// Hasil `overnight.queue.list`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+pub struct OvernightQueueView {
+    pub items: Vec<QueueItemView>,
+    /// Dikeluarkan sejak awal siklus berjalan.
+    pub dequeued: Vec<DequeuedView>,
+}
+
+/// Parameter `overnight.queue.add`: satu repo, atau workspace bila diisi.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+pub struct QueueAddParams {
+    pub record_id: String,
+    pub repo_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub workspace: Option<StartWorkspace>,
+    pub note: Option<String>,
+}
+
+/// Parameter `overnight.queue.reorder`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+pub struct QueueReorderParams {
+    pub record_ids: Vec<String>,
+}
+
+/// Setelan lembur (R7, R10): jam lokal `HH:MM`, offset `+07:00`, batas token
+/// per siklus (`null` = belum diisi, VM tidak memulai apa pun).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+pub struct OvernightSettingsView {
+    pub start: String,
+    pub end: String,
+    pub offset: String,
+    #[ts(type = "number | null")]
+    pub token_limit: Option<u64>,
+}
+
+/// Satu kartu VM di laporan siklus.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+pub struct ReportCardView {
+    pub record_id: String,
+    pub key: Option<String>,
+    pub title: String,
+    pub run_id: String,
+    pub repo_id: String,
+    /// `draft`, `sent_to_review`, `held`, `failed`, atau `working`.
+    pub outcome: String,
+    /// Untuk `held`: `stuck`, `ac_gate`, `needs_confirmation`, `usage_limit`.
+    pub hold_reason: Option<String>,
+    /// Pertanyaan atau alasan tertahan.
+    pub hold_note: Option<String>,
+    pub pr_url: Option<String>,
+    pub ac_pass: u32,
+    pub ac_fail: u32,
+    pub ac_cant_verify: u32,
+    pub entered_waiting_fix: bool,
+}
+
+/// Hasil `overnight.report` (R18).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+pub struct OvernightReportView {
+    #[ts(type = "number | null")]
+    pub cycle_start_ms: Option<i64>,
+    /// Token terhitung (input + output) siklus ini.
+    #[ts(type = "number")]
+    pub used: u64,
+    #[ts(type = "number | null")]
+    pub limit: Option<u64>,
+    #[ts(type = "number")]
+    pub cache_read_tokens: u64,
+    pub cards: Vec<ReportCardView>,
+    pub dequeued: Vec<DequeuedView>,
+    /// Kartu yang sampai Waiting Review tanpa pernah masuk Waiting Fix.
+    pub reviewed_without_fix: u32,
 }

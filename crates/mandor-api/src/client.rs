@@ -115,8 +115,14 @@ impl DaemonClient {
                 Some(Ok(Message::Close(_))) | None => return Err(closed("closed")),
                 Some(Ok(_)) => continue,
             };
-            let resp: Response =
+            let value: Value =
                 serde_json::from_str(text.as_str()).map_err(|e| internal(&e.to_string()))?;
+            // Notifikasi daemon (tanpa `id`) di koneksi yang sama dilewati.
+            if value.get("id").is_none() {
+                continue;
+            }
+            let resp: Response =
+                serde_json::from_value(value).map_err(|e| internal(&e.to_string()))?;
             if resp.id != id {
                 continue;
             }

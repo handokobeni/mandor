@@ -8,8 +8,8 @@ use mandor_domain::app_run::{AppSettings, TestMode};
 use mandor_usecase::PortError;
 use mandor_usecase::review::DesignRoot;
 use mandor_usecase::run_ports::{
-    ChatItem, GroupCardRow, Journal, RepoInfo, Repos, RunMember, RunPhase, RunRecord, RunStore,
-    RunWorkspace, WorkspaceInfo,
+    ChatItem, GroupCardRow, Hold, Journal, RepoInfo, Repos, RunMember, RunPhase, RunRecord,
+    RunStore, RunWorkspace, WorkspaceInfo,
 };
 use serde::{Deserialize, Serialize};
 
@@ -61,6 +61,15 @@ struct RunExtra {
     /// Run grup dengan plan per kartu; `None` untuk run lain.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     group_plan: Option<bool>,
+    /// Alasan run `Held` (plan VM KTD-60).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    hold_reason: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    hold_note: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    entered_waiting_fix_ms: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    draft_pending: Option<i64>,
 }
 
 /// Bentuk simpan [`RunWorkspace`].
@@ -120,6 +129,8 @@ struct StoredApp {
     browser_tests: bool,
     #[serde(default)]
     auto_restart: bool,
+    #[serde(default)]
+    unattended_login: bool,
 }
 
 fn browser_tests_default() -> bool {
@@ -137,6 +148,7 @@ impl Default for StoredApp {
             env_keys: Vec::new(),
             browser_tests: true,
             auto_restart: false,
+            unattended_login: false,
         }
     }
 }
@@ -162,6 +174,7 @@ pub fn app_settings_of(settings: &serde_json::Value) -> AppSettings {
         env_keys: stored.env_keys,
         browser_tests: stored.browser_tests,
         auto_restart: stored.auto_restart,
+        unattended_login: stored.unattended_login,
     }
 }
 
@@ -177,6 +190,7 @@ pub fn app_settings_json(app: &AppSettings) -> serde_json::Value {
         env_keys: app.env_keys.clone(),
         browser_tests: app.browser_tests,
         auto_restart: app.auto_restart,
+        unattended_login: app.unattended_login,
     })
     .unwrap_or(serde_json::Value::Null)
 }
@@ -221,6 +235,10 @@ fn extra_of(r: &RunRecord) -> Result<String, StoreError> {
         plan: r.plan.clone(),
         plan_skill: r.plan_skill.clone(),
         group_plan: r.group_plan.then_some(true),
+        hold_reason: r.hold.as_ref().map(|h| h.reason.as_str().to_owned()),
+        hold_note: r.hold.as_ref().and_then(|h| h.note.clone()),
+        entered_waiting_fix_ms: r.entered_waiting_fix_ms,
+        draft_pending: r.draft_pending,
     })
     .map_err(StoreError::internal)
 }
@@ -310,6 +328,16 @@ fn to_record(row: Row) -> Result<RunRecord, StoreError> {
         plan: extra.plan,
         plan_skill: extra.plan_skill,
         group_plan: extra.group_plan.unwrap_or(false),
+        hold: extra
+            .hold_reason
+            .as_deref()
+            .and_then(mandor_domain::HoldReason::parse)
+            .map(|reason| Hold {
+                reason,
+                note: extra.hold_note,
+            }),
+        entered_waiting_fix_ms: extra.entered_waiting_fix_ms,
+        draft_pending: extra.draft_pending,
         created_at_ms: row.created_at_ms,
         updated_at_ms: row.updated_at_ms,
     })

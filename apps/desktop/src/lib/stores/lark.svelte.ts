@@ -92,3 +92,5 @@ export class LarkStore {
 }
 
 export const lark = new LarkStore();
+/** Lark App, repo, dan workspace daemon VM (Settings › VM, plan VM). */
+export const vmLark = new LarkStore();

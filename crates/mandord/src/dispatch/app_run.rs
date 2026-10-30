@@ -20,6 +20,7 @@ pub(super) fn repo_app_view(a: &AppSettings) -> RepoAppView {
         env_keys: a.env_keys.clone(),
         browser_tests: a.browser_tests,
         auto_restart: a.auto_restart,
+        unattended_login: a.unattended_login,
     }
 }
 
@@ -54,7 +55,21 @@ pub(super) fn app_settings_from(v: &RepoAppView) -> Result<AppSettings, RpcError
         env_keys: v.env_keys.clone(),
         browser_tests: v.browser_tests,
         auto_restart: v.auto_restart,
+        unattended_login: v.unattended_login,
     })
+}
+
+/// Di VM bersama port app repo harus di rentang port developer (R5 plan VM).
+pub(super) fn check_app_port(
+    ports: Option<crate::config::PortRange>,
+    app: &AppSettings,
+) -> Result<(), RpcError> {
+    match (ports, app.port) {
+        (Some(range), Some(port)) if !range.contains(port) => Err(rejected(format!(
+            "On this VM your ports are {range}; port {port} is outside it"
+        ))),
+        _ => Ok(()),
+    }
 }
 
 fn app_view(r: AppRecord) -> AppRunView {
@@ -161,7 +176,20 @@ mod tests {
             env_keys: vec!["API_URL".to_owned()],
             browser_tests: true,
             auto_restart: true,
+            unattended_login: true,
         }
+    }
+
+    #[test]
+    fn port_app_di_vm_harus_di_rentang_developer() {
+        let range = crate::config::PortRange::parse("6100-6199").ok();
+        let mut a = app_settings_from(&view()).unwrap();
+        assert!(check_app_port(range, &a).is_err(), "5173 di luar rentang");
+        assert!(check_app_port(None, &a).is_ok(), "laptop tidak dibatasi");
+        a.port = Some(6150);
+        assert!(check_app_port(range, &a).is_ok());
+        a.port = None;
+        assert!(check_app_port(range, &a).is_ok());
     }
 
     #[test]
@@ -171,6 +199,7 @@ mod tests {
         assert_eq!(a.start_command.as_deref(), Some("bun run dev"));
         assert_eq!(repo_app_view(&a).test_mode, "web");
         assert!(a.auto_restart && repo_app_view(&a).auto_restart);
+        assert!(a.unattended_login && repo_app_view(&a).unattended_login);
         let mut bad = view();
         bad.env_keys = vec!["API URL".to_owned()];
         assert!(app_settings_from(&bad).is_err());

@@ -9,17 +9,18 @@
   import { Input } from '#lib/components/ui/input/index.ts';
   import type { RepoView } from '#lib/protocol/RepoView.ts';
   import type { Rpc } from '#lib/rpc.ts';
-  import { lark } from '#lib/stores/lark.svelte.ts';
+  import { lark, type LarkStore } from '#lib/stores/lark.svelte.ts';
   import AddRepoDialog from './AddRepoDialog.svelte';
   import Field from './Field.svelte';
   import ListEditor from './ListEditor.svelte';
+  import ReviewerPicker from './ReviewerPicker.svelte';
   import { Switch } from '#lib/components/ui/switch/index.ts';
   import { type RepoAppForm, validateRepoApp } from '#lib/settings.ts';
 
-  let { rpc }: { rpc: Rpc } = $props();
+  let { rpc, store = lark }: { rpc: Rpc; store?: LarkStore } = $props();
 
   let selectedId = $state<string | null>(null);
-  const repo = $derived(lark.repos.find((r) => r.id === selectedId) ?? lark.repos[0]);
+  const repo = $derived(store.repos.find((r) => r.id === selectedId) ?? store.repos[0]);
 
   // Salinan yang bisa diedit; diganti setiap repo terpilih berubah.
   interface Edit {
@@ -30,6 +31,7 @@
     app: RepoAppForm;
     browserTests: boolean;
     autoRestart: boolean;
+    unattendedLogin: boolean;
     gate: 'inherit' | 'block' | 'warn';
   }
   let edit = $state<Edit | null>(null);
@@ -54,6 +56,7 @@
         },
         browserTests: repo.app.browser_tests,
         autoRestart: repo.app.auto_restart,
+        unattendedLogin: repo.app.unattended_login,
         gate: repo.gate_mode === 'block' || repo.gate_mode === 'warn' ? repo.gate_mode : 'inherit'
       };
     }
@@ -89,10 +92,11 @@
           app_url: web ? a.appUrl.trim() || null : null,
           env_keys: web ? a.envKeys : [],
           browser_tests: edit.browserTests,
-          auto_restart: web && edit.autoRestart
+          auto_restart: web && edit.autoRestart,
+          unattended_login: web && edit.unattendedLogin
         }
       });
-      await lark.refresh();
+      await store.refresh();
       toast.success('Repo saved', { description: `${r.id} · used on the next agent start` });
     } catch (err) {
       toast.error('Could not save the repo', { description: message(err) });
@@ -103,7 +107,7 @@
     removing = null;
     try {
       await rpc.request('repos.remove', { id: r.id });
-      await lark.refresh();
+      await store.refresh();
       selectedId = null;
       toast.success('Repo removed', { description: r.id });
     } catch (err) {
@@ -121,12 +125,12 @@
     <h1>Repos</h1>
     <p class="lede">Repos on the daemon machine that agents can work in.</p>
   </div>
-  {#if lark.repos.length > 0}
+  {#if store.repos.length > 0}
     <Button variant="secondary" size="sm" onclick={openAdd}><Plus />Add repo</Button>
   {/if}
 </section>
 
-{#if lark.repos.length === 0}
+{#if store.repos.length === 0}
   <section>
     <div class="settings-card">
       <EmptyState icon={FolderGit2} title="No repos yet">
@@ -141,7 +145,7 @@
       <table class="table">
         <thead><tr><th>Repo</th><th>Path</th><th>Default branch</th><th>gh profile</th></tr></thead>
         <tbody>
-          {#each lark.repos as r (r.id)}
+          {#each store.repos as r (r.id)}
             <tr
               aria-selected={repo?.id === r.id}
               tabindex="0"
@@ -181,10 +185,10 @@
           <div class="field">
             <span class="text-sm font-medium">Trusted reviewers and QA</span>
             <p class="field-help">
-              Lark open_ids whose record comments are forwarded to the agent automatically. Assignees and the reporter are
-              always trusted.
+              People whose record comments are forwarded to the agent automatically. Assignees and the reporter are always
+              trusted.
             </p>
-            <ListEditor list="reviewers" label="trusted reviewers" placeholder="ou_51aa6c" bind:items={edit.reviewers} />
+            <ReviewerPicker {rpc} bind:items={edit.reviewers} />
           </div>
           <div class="field">
             <span class="text-sm font-medium">Extra agent allowlist</span>
@@ -248,10 +252,22 @@
                   When this run's app runs older code, Mandor restarts it from the latest code before a browser review,
                   including automatic reviews after Waiting Fix. The agent's code then runs with the selected .env keys
                   without you checking the changes first. Use only with local or dev credentials. Needs a login you
-                  confirmed once; another run's app is never stopped.
+                  confirmed once. On the laptop, another run's app is never stopped. On the VM, Mandor also starts an
+                  app that is not running and stops the previous card's app, since overnight cards run one at a time.
                 </span>
               </div>
               <Switch bind:checked={edit.autoRestart} aria-label="Restart the app before reviews" />
+            </div>
+            <div class="row-setting">
+              <div class="txt">
+                Setup command prepares a test login
+                <span>
+                  For overnight work on the VM. The setup command creates a test user and signs in by itself, so the
+                  headless browser review can run without you confirming the login. Without this, browser checks on the
+                  VM are marked Can't verify and the card is held for you.
+                </span>
+              </div>
+              <Switch bind:checked={edit.unattendedLogin} aria-label="Setup command prepares a test login" />
             </div>
           {/if}
           <div class="field">
@@ -281,7 +297,7 @@
     oncancel={() => (adding = false)}
     onadded={async (r) => {
       adding = false;
-      await lark.refresh();
+      await store.refresh();
       selectedId = r.id;
       toast.success('Repo added', { description: `${r.id} · default branch ${r.default_branch ?? 'unknown'}` });
     }}

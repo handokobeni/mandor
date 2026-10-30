@@ -18,6 +18,10 @@ pub enum RunState {
     Orphaned,
     /// Record dihapus atau tidak lagi di-assign: agent dihentikan, dev menutup run.
     Stopped,
+    /// Kartu lembur VM tertahan dengan alasan (KTD-60 plan VM): menunggu
+    /// jawaban atau keputusan dev, lalu diantre ulang. Bukan parkir dan tidak
+    /// sibuk.
+    Held,
 }
 
 impl RunState {
@@ -36,6 +40,7 @@ impl RunState {
             Self::Failed => "failed",
             Self::Orphaned => "orphaned",
             Self::Stopped => "stopped",
+            Self::Held => "held",
         }
     }
 
@@ -54,6 +59,7 @@ impl RunState {
             "failed" => Self::Failed,
             "orphaned" => Self::Orphaned,
             "stopped" => Self::Stopped,
+            "held" => Self::Held,
             _ => return None,
         })
     }
@@ -86,6 +92,44 @@ impl RunState {
             self,
             Self::WfAwaitingComment | Self::WfQuiet | Self::WfRunning
         )
+    }
+}
+
+/// Alasan kartu VM tertahan (KTD-60 plan VM).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HoldReason {
+    /// Agent buntu dan meninggalkan pertanyaan (R15).
+    Stuck,
+    /// Gerbang AC tidak siap: AC Fail atau Can't verify belum diputuskan (R12).
+    AcGate,
+    /// Push butuh konfirmasi dev karena alasan lain, mis. mengubah CI (R12).
+    NeedsConfirmation,
+    /// Batas pemakaian siklus atau kuota langganan habis (R10).
+    UsageLimit,
+}
+
+impl HoldReason {
+    /// Nama stabil untuk penyimpanan dan protokol.
+    #[must_use]
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Stuck => "stuck",
+            Self::AcGate => "ac_gate",
+            Self::NeedsConfirmation => "needs_confirmation",
+            Self::UsageLimit => "usage_limit",
+        }
+    }
+
+    /// Kebalikan [`HoldReason::as_str`]; nilai tak dikenal menjadi `None`.
+    #[must_use]
+    pub fn parse(s: &str) -> Option<Self> {
+        Some(match s {
+            "stuck" => Self::Stuck,
+            "ac_gate" => Self::AcGate,
+            "needs_confirmation" => Self::NeedsConfirmation,
+            "usage_limit" => Self::UsageLimit,
+            _ => return None,
+        })
     }
 }
 
@@ -239,6 +283,7 @@ mod tests {
             RunState::Failed,
             RunState::Orphaned,
             RunState::Stopped,
+            RunState::Held,
         ] {
             assert!(!s.is_working(), "{s:?}");
         }
@@ -265,9 +310,20 @@ mod tests {
             RunState::Failed,
             RunState::Orphaned,
             RunState::Stopped,
+            RunState::Held,
         ] {
             assert_eq!(RunState::parse(s.as_str()), Some(s));
         }
+        assert!(!RunState::Held.is_parked() && !RunState::Held.is_busy());
+        for r in [
+            HoldReason::Stuck,
+            HoldReason::AcGate,
+            HoldReason::NeedsConfirmation,
+            HoldReason::UsageLimit,
+        ] {
+            assert_eq!(HoldReason::parse(r.as_str()), Some(r));
+        }
+        assert_eq!(HoldReason::parse("x"), None);
         assert_eq!(RunState::parse("x"), None);
         assert!(RunState::WfQuiet.in_fix_loop());
         assert!(!RunState::Running.in_fix_loop());

@@ -433,3 +433,39 @@ async fn nama_pengguna_dari_contact_batch_per_50_id() {
     assert!(log[0].query_has("user_ids=ou_a") && log[0].query_has("user_ids=ou_b"));
     assert_eq!(log[0].auth.as_deref(), Some("Bearer u-token"));
 }
+
+#[tokio::test]
+async fn dm_bot_memakai_token_tenant_dan_penerima_open_id() {
+    let mock = Mock::start(Arc::new(|r: &Req| {
+        if r.path() == "/open-apis/auth/v3/tenant_access_token/internal" {
+            (
+                200,
+                json!({"code": 0, "msg": "ok", "tenant_access_token": "t-bot", "expire": 7200})
+                    .to_string(),
+            )
+        } else {
+            (
+                200,
+                json!({"code": 0, "msg": "success", "data": {"message_id": "om_1"}}).to_string(),
+            )
+        }
+    }))
+    .await;
+    let client = mock.client();
+    let tenant = client.tenant_token().await.unwrap();
+    assert_eq!(tenant.expose_secret(), "t-bot");
+    client
+        .send_text(&tenant, "ou_dev", "Mandor overnight report")
+        .await
+        .unwrap();
+    let log = mock.requests();
+    assert_eq!(log[0].body["app_id"], json!("cli_app"));
+    let send = &log[1];
+    assert_eq!(send.path(), "/open-apis/im/v1/messages");
+    assert!(send.query_has("receive_id_type=open_id"));
+    assert_eq!(send.auth.as_deref(), Some("Bearer t-bot"));
+    assert_eq!(send.body["receive_id"], json!("ou_dev"));
+    assert_eq!(send.body["msg_type"], json!("text"));
+    let content: Value = serde_json::from_str(send.body["content"].as_str().unwrap()).unwrap();
+    assert_eq!(content["text"], json!("Mandor overnight report"));
+}

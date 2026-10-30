@@ -13,7 +13,7 @@ mod shell_env;
 mod supervised;
 
 pub use app::{APP_LOG_MAX, AppNotReady, AppProcess, AppSpec, app_marker, port_open, run_setup};
-pub use cmd::{Cmd, EnvPolicy, Output, ProcError, run};
+pub use cmd::{Cmd, EnvPolicy, Output, ProcError, SecretOutput, run, run_secret};
 pub use git_auth::git_credential_env;
 pub use reap::reap_group;
 pub use redact::redact;

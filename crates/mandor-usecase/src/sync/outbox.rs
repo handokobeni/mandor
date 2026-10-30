@@ -103,7 +103,7 @@ impl<D: Deps> SyncService<D> {
 
     async fn write_one(&self, record_id: &str, op: &WriteOp) -> Result<(), SyncError> {
         let fresh = self.fetch_one(record_id).await?;
-        revalidate(fresh.as_ref(), op, &self.me)?;
+        revalidate(fresh.as_ref(), op, &self.identity)?;
         let (status, fields) = match op {
             WriteOp::Transition { to, fields, .. } => (Some(to), fields.as_slice()),
             WriteOp::Fields(fields) => (None, fields.as_slice()),

@@ -1,0 +1,62 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT input_tokens, output_tokens, cache_read_tokens, cache_write_tokens\n             FROM overnight_cycles WHERE cycle_start_ms = ?",
+  "describe": {
+    "columns": [
+      {
+        "name": "input_tokens",
+        "ordinal": 0,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "overnight_cycles",
+            "name": "input_tokens"
+          }
+        }
+      },
+      {
+        "name": "output_tokens",
+        "ordinal": 1,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "overnight_cycles",
+            "name": "output_tokens"
+          }
+        }
+      },
+      {
+        "name": "cache_read_tokens",
+        "ordinal": 2,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "overnight_cycles",
+            "name": "cache_read_tokens"
+          }
+        }
+      },
+      {
+        "name": "cache_write_tokens",
+        "ordinal": 3,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "overnight_cycles",
+            "name": "cache_write_tokens"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "5b2752d3ee9f27ae6adfca3d51fc9c92b2ff75d949e79dd8b243222caf4d765b"
+}

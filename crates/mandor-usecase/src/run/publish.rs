@@ -3,7 +3,7 @@
 use std::sync::Arc;
 
 use mandor_domain::push_gate::{apply_decision, evaluate};
-use mandor_domain::{GateDecision, GateMode, GateOutcome, RunState};
+use mandor_domain::{AppField, GateDecision, GateMode, GateOutcome, RunState, WriteOp};
 
 use super::group_gate::labelled_rows;
 use super::{RunError, RunService};
@@ -137,8 +137,11 @@ impl<D: Deps> RunService<D> {
         self.gate_mode(&run).await
     }
 
-    /// Mode gerbang run (KTD-37).
+    /// Mode gerbang run (KTD-37). Di daemon VM selalu Block (KTD-61 plan VM).
     pub(crate) async fn gate_mode(&self, run: &RunRecord) -> Result<GateMode, RunError> {
+        if self.is_vm() {
+            return Ok(GateMode::Block);
+        }
         let overrides: Vec<_> = self
             .members(run)
             .await?
@@ -179,8 +182,65 @@ impl<D: Deps> RunService<D> {
     async fn publish_inner(self: &Arc<Self>, run: &mut RunRecord) -> Result<String, RunError> {
         let work = self.member_changes(run).await?;
         let url = self.publish_members(run, &work).await?;
-        self.mark_waiting_review(run, &url, !run.automatic).await?;
+        if run.draft_pending.is_some() {
+            self.mark_draft(run, &url).await?;
+        } else {
+            self.mark_waiting_review(run, &url, !run.automatic).await?;
+        }
         Ok(url)
+    }
+
+    /// PR draft VM: link PR ke Lark tanpa transisi; kartu tetap In Progress
+    /// sampai dev menekan Send to review (R11, KTD-68 plan VM).
+    async fn mark_draft(&self, run: &mut RunRecord, url: &str) -> Result<(), RunError> {
+        let op = WriteOp::Fields(vec![AppField::PrUrl(url.to_owned())]);
+        self.sync.request_write(&run.record_id, &op).await?;
+        if run.workspace.is_none() {
+            run.pr_url = Some(url.to_owned());
+        }
+        run.state = RunState::AwaitingDev;
+        run.hold = None;
+        run.last_error = None;
+        run.note =
+            Some("Draft PR ready. Send it to review when the change looks right.".to_owned());
+        self.runs.save(run, run.generation, self.now()).await?;
+        self.notifier
+            .notify(notice(self, NoticeKind::PrCreated, run, url).await)
+            .await;
+        Ok(())
+    }
+
+    /// "Send to review" (R23): PR draft ditandai siap lalu kartu pindah ke
+    /// Waiting Review. Gagal menandai PR berarti tidak ada transisi Lark.
+    ///
+    /// # Errors
+    /// Run tanpa PR draft, kartu tidak dipegang daemon ini, agent bekerja, atau
+    /// `gh pr ready` gagal.
+    pub async fn send_to_review(&self, run_id: &str) -> Result<(), RunError> {
+        let mut run = self.load(run_id).await?;
+        if run.draft_pending.is_none() {
+            return Err(RunError::InvalidState("no draft pull request to send"));
+        }
+        if run.state.is_working() {
+            return Err(RunError::InvalidState(run.state.as_str()));
+        }
+        let task = self.task_of(&run.record_id).await?;
+        if !task.held_here(self.sync.identity()) {
+            return Err(RunError::InvalidState("the card is held by another daemon"));
+        }
+        let mut urls = Vec::new();
+        for m in self.members(&run).await? {
+            if let Some(url) = m.pr_url {
+                self.git.mark_pr_ready(&m.repo, &url).await?;
+                urls.push(url);
+            }
+        }
+        if urls.is_empty() {
+            return Err(RunError::InvalidState("no draft pull request to send"));
+        }
+        run.draft_pending = None;
+        self.mark_waiting_review(&mut run, &urls.join("\n"), true)
+            .await
     }
 
     /// Link PR + Waiting Review. `cursor_now_too` menulis kursor "sejak sekarang"

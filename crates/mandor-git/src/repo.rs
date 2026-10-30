@@ -1,7 +1,5 @@
 use std::path::Path;
 
-use mandor_proc::run;
-
 use crate::{Git, GitError};
 
 impl Git {
@@ -12,14 +10,18 @@ impl Git {
     /// [`GitError::NotARepo`] bila `repo` bukan repo git, [`GitError::NoDefaultBranch`]
     /// bila tidak ada satu pun.
     pub async fn default_branch(&self, repo: &Path) -> Result<String, GitError> {
-        let inside = run(&self.git(repo).args(["rev-parse", "--is-inside-work-tree"])).await?;
+        let inside = self
+            .exec(&self.git(repo).args(["rev-parse", "--is-inside-work-tree"]))
+            .await?;
         if !inside.success() {
             return Err(GitError::NotARepo);
         }
-        let head =
-            run(&self
-                .git(repo)
-                .args(["symbolic-ref", "--quiet", "refs/remotes/origin/HEAD"]))
+        let head = self
+            .exec(
+                &self
+                    .git(repo)
+                    .args(["symbolic-ref", "--quiet", "refs/remotes/origin/HEAD"]),
+            )
             .await?;
         if head.success() {
             if let Some(name) = head.stdout.trim().strip_prefix("refs/remotes/origin/") {
@@ -28,10 +30,13 @@ impl Git {
         }
         for candidate in ["main", "master"] {
             let r = format!("refs/remotes/origin/{candidate}");
-            let out = run(&self
-                .git(repo)
-                .args(["rev-parse", "--verify", "--quiet", &r]))
-            .await?;
+            let out = self
+                .exec(
+                    &self
+                        .git(repo)
+                        .args(["rev-parse", "--verify", "--quiet", &r]),
+                )
+                .await?;
             if out.success() {
                 return Ok(candidate.to_owned());
             }
@@ -44,7 +49,9 @@ impl Git {
     /// # Errors
     /// [`GitError::InvalidBranch`] bila tidak valid.
     pub async fn validate_branch(&self, repo: &Path, name: &str) -> Result<(), GitError> {
-        let out = run(&self.git(repo).args(["check-ref-format", "--branch", name])).await?;
+        let out = self
+            .exec(&self.git(repo).args(["check-ref-format", "--branch", name]))
+            .await?;
         if out.success() && !name.starts_with('-') {
             Ok(())
         } else {

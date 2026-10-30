@@ -56,8 +56,14 @@ impl<D: Deps> RunService<D> {
         let skill = skill.as_deref();
         let allowed = match trigger {
             ReviewTrigger::AutomaticFix => run.state == RunState::WfRunning,
-            ReviewTrigger::Manual | ReviewTrigger::PushAndPr => {
+            ReviewTrigger::Manual => {
                 run.state == RunState::AwaitingDev && run.phase == RunPhase::Implement
+            }
+            // Di VM kartu `ac_gate` yang AC-nya belum di-review (review putus)
+            // di-review lagi lewat keputusan dev di gerbang.
+            ReviewTrigger::PushAndPr => {
+                run.phase == RunPhase::Implement
+                    && (run.state == RunState::AwaitingDev || self.held_at_ac_gate(&run))
             }
         };
         if !allowed {
@@ -126,6 +132,7 @@ impl<D: Deps> RunService<D> {
         run.review_snapshot = snapshot;
         run.review_id = Some(record.id.clone());
         run.state = RunState::Reviewing;
+        run.hold = None;
         let summary = match skill {
             Some(s) => format!("Review started with {s}."),
             None => "Review started.".to_owned(),
@@ -175,6 +182,16 @@ impl<D: Deps> RunService<D> {
         self.readiness(&run, &snapshot).await
     }
 
+    /// Kartu VM yang tertahan di gerbang AC.
+    fn held_at_ac_gate(&self, run: &RunRecord) -> bool {
+        self.is_vm()
+            && run.state == RunState::Held
+            && run
+                .hold
+                .as_ref()
+                .is_some_and(|h| h.reason == mandor_domain::HoldReason::AcGate)
+    }
+
     async fn readiness(
         &self,
         run: &RunRecord,
@@ -208,9 +225,20 @@ impl<D: Deps> RunService<D> {
             Some(a) if a.state == AppRunState::Running => AppReadiness::OlderCode,
             _ => AppReadiness::NotRunning,
         };
+        let driver = if self.is_vm() {
+            BrowserDriver::Headless {
+                unattended_login: !web.is_empty()
+                    && web.iter().all(|m| m.repo.app.unattended_login),
+            }
+        } else {
+            BrowserDriver::Chrome {
+                connected: self.reviews.chrome_connected().await,
+            }
+        };
         Ok(ReviewReadiness {
             web: !web.is_empty(),
             browser_tests,
+            driver,
             app: app_state,
             other_owner: owner.filter(|o| o != &run.id),
             confirmed: Confirmations {
@@ -220,7 +248,6 @@ impl<D: Deps> RunService<D> {
             app_urls: app
                 .map(|a| a.members.into_iter().filter_map(|m| m.url).collect())
                 .unwrap_or_default(),
-            chrome_connected: self.reviews.chrome_connected().await,
         })
     }
 
@@ -338,6 +365,16 @@ impl<D: Deps> RunService<D> {
                 .await;
         }
         run.state = RunState::AwaitingDev;
+        if self.is_vm()
+            && run.queue.is_empty()
+            && record
+                .as_ref()
+                .is_some_and(|r| r.trigger == ReviewTrigger::PushAndPr)
+        {
+            self.runs.save(&run, generation, self.now()).await?;
+            let finished = status == ReviewStatus::Finished;
+            return self.vm_after_review(run, finished, &summary).await;
+        }
         if !run.queue.is_empty() {
             let next = run.queue.remove(0);
             let req = self.resume_request(&mut run, next.clone()).await?;
@@ -490,7 +527,7 @@ fn review_request(
     ReviewRequest {
         review_id: review_id.to_owned(),
         origins,
-        chrome: facts.browser,
+        browser: facts.browser,
         model: settings.model.clone(),
         budget_cents: settings.budget_cents.max(1),
         timeout: Duration::from_secs(settings.timeout_secs.max(60)),
@@ -531,12 +568,28 @@ pub struct ReviewReadiness {
     /// Run punya repo dengan cara uji Web.
     pub web: bool,
     pub browser_tests: bool,
+    pub driver: BrowserDriver,
     pub app: AppReadiness,
     /// Run lain yang app-nya sedang menyala.
     pub other_owner: Option<String>,
     pub confirmed: Confirmations,
     pub app_urls: Vec<String>,
-    pub chrome_connected: bool,
+}
+
+/// Browser reviewer menurut peran daemon.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BrowserDriver {
+    /// Laptop: ekstensi Claude in Chrome, login dikonfirmasi dev.
+    Chrome { connected: bool },
+    /// VM: Playwright headless; semua repo Web menyiapkan login uji sendiri
+    /// lewat setup command (KTD-64 plan VM).
+    Headless { unattended_login: bool },
+}
+
+impl Default for BrowserDriver {
+    fn default() -> Self {
+        Self::Chrome { connected: false }
+    }
 }
 
 impl ReviewReadiness {
@@ -549,15 +602,41 @@ impl ReviewReadiness {
     /// App run ini perlu dinyalakan ulang otomatis sebelum review: restart
     /// aktif di semua repo Web (`auto_restart`), app run ini menyala dari kode lama, tidak ada app run lain yang
     /// menyala, login pernah dikonfirmasi, dan ekstensi tersambung, sehingga
-    /// restart membuat review bisa memakai browser.
+    /// restart membuat review bisa memakai browser. Di VM tidak ada dev yang
+    /// menyalakan app, jadi app yang belum menyala juga dinyalakan (R11), dan
+    /// app kartu sebelumnya dihentikan karena kartu lembur dikerjakan satu per
+    /// satu.
     #[must_use]
     pub fn restarts_app(&self, auto_restart: bool) -> bool {
+        let headless = matches!(self.driver, BrowserDriver::Headless { .. });
+        let stale = match self.app {
+            AppReadiness::OlderCode => true,
+            AppReadiness::NotRunning => headless,
+            AppReadiness::Current => false,
+        };
         self.needs_dialog()
             && auto_restart
-            && self.app == AppReadiness::OlderCode
-            && self.other_owner.is_none()
-            && self.confirmed.login
-            && self.chrome_connected
+            && stale
+            && (self.other_owner.is_none() || headless)
+            && self.login_ready()
+            && self.driver_ready()
+    }
+
+    /// Ekstensi Chrome tersambung; Playwright headless selalu tersedia.
+    fn driver_ready(&self) -> bool {
+        match self.driver {
+            BrowserDriver::Chrome { connected } => connected,
+            BrowserDriver::Headless { .. } => true,
+        }
+    }
+
+    /// Login app siap: dikonfirmasi dev di laptop, disiapkan setup command
+    /// repo di VM.
+    fn login_ready(&self) -> bool {
+        match self.driver {
+            BrowserDriver::Chrome { .. } => self.confirmed.login,
+            BrowserDriver::Headless { unattended_login } => unattended_login,
+        }
     }
 
     /// Fakta untuk prompt reviewer: browser hanya bila semua syarat terpenuhi.
@@ -571,9 +650,15 @@ impl ReviewReadiness {
             Some("The app is not running")
         } else if self.app == AppReadiness::OlderCode {
             Some("app running older code")
-        } else if !self.confirmed.login {
+        } else if self.driver
+            == (BrowserDriver::Headless {
+                unattended_login: false,
+            })
+        {
+            Some("No test login is prepared for unattended review")
+        } else if !self.login_ready() {
             Some("Login not confirmed")
-        } else if !self.chrome_connected {
+        } else if !self.driver_ready() {
             Some("Claude in Chrome extension not connected")
         } else {
             None

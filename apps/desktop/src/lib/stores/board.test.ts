@@ -23,6 +23,7 @@ function card(id: string, column: string, extra: Partial<CardView> = {}): CardVi
     can_takeover: false,
     flag: null,
     run: null,
+    holder: null,
     pr_url: null,
     branch: null,
     repo_id: null,

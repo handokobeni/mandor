@@ -7,6 +7,7 @@ mod poller;
 use std::collections::HashMap;
 use std::sync::{Mutex, PoisonError};
 
+use mandor_domain::{ClaimIdentity, DaemonRole};
 use mandor_domain::{ClaimRefused, GateRejection, Task, WriteRejected};
 
 use crate::ports::{AcItem, Clock, Deps, LarkTasks, PortError, SprintItem};
@@ -51,6 +52,10 @@ pub struct SyncService<D: Deps> {
     pub(crate) clock: D::Clock,
     pub(crate) ids: D::Ids,
     pub(crate) me: String,
+    /// Identitas daemon untuk klaim (KTD-55).
+    pub(crate) identity: ClaimIdentity,
+    /// Peran daemon (KTD-54).
+    pub(crate) role: DaemonRole,
     /// Nama orang per `open_id`; hanya di memori, terisi lagi setelah restart.
     names: Mutex<HashMap<String, String>>,
     /// Setelah Contact API gagal, jangan coba lagi sebelum waktu ini (ms epoch).
@@ -89,6 +94,8 @@ impl<D: Deps> SyncService<D> {
             outbox,
             clock,
             ids,
+            identity: ClaimIdentity::new(&me, "local", true),
+            role: DaemonRole::Laptop,
             me,
             names: Mutex::new(HashMap::new()),
             names_retry_at: Mutex::new(0),
@@ -190,10 +197,68 @@ impl<D: Deps> SyncService<D> {
             .collect()
     }
 
+    /// Orang yang muncul di kartu sendiri dan papan Team (assignee, reporter,
+    /// pengubah terakhir) beserta namanya, urut nama. Orang tanpa nama dari
+    /// Contact API tidak ikut. Dipakai pemilih reviewer di Settings.
+    ///
+    /// # Errors
+    /// Error penyimpanan cache kartu.
+    pub async fn known_people(&self) -> Result<Vec<(String, String)>, SyncError> {
+        let mut tasks: Vec<mandor_domain::Task> =
+            self.board().await?.into_iter().map(|c| c.task).collect();
+        tasks.extend(
+            self.team
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .iter()
+                .cloned(),
+        );
+        let mut ids: Vec<String> = tasks
+            .iter()
+            .flat_map(|t| {
+                t.assignees
+                    .iter()
+                    .chain(t.reporter.as_ref())
+                    .chain(t.last_modified_by.as_ref())
+                    .cloned()
+            })
+            .collect();
+        ids.sort();
+        ids.dedup();
+        let mut people: Vec<(String, String)> = self.user_names(&ids).await.into_iter().collect();
+        people.sort_by(|a, b| {
+            a.1.to_lowercase()
+                .cmp(&b.1.to_lowercase())
+                .then(a.0.cmp(&b.0))
+        });
+        Ok(people)
+    }
+
     /// `open_id` pengguna.
     #[must_use]
     pub fn me(&self) -> &str {
         &self.me
+    }
+
+    /// Menetapkan id dan peran daemon ini (KTD-54). Daemon laptop menganggap
+    /// klaim lama tanpa id daemon miliknya; daemon VM tidak.
+    #[must_use]
+    pub fn with_daemon(mut self, daemon_id: &str, role: DaemonRole) -> Self {
+        self.identity = ClaimIdentity::new(&self.me, daemon_id, role == DaemonRole::Laptop);
+        self.role = role;
+        self
+    }
+
+    /// Identitas klaim daemon ini.
+    #[must_use]
+    pub fn identity(&self) -> &ClaimIdentity {
+        &self.identity
+    }
+
+    /// Peran daemon ini.
+    #[must_use]
+    pub fn role(&self) -> DaemonRole {
+        self.role
     }
 
     /// Semua kartu di cache beserta penandanya.

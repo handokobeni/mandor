@@ -161,3 +161,46 @@ export function validateRepoApp(f: RepoAppForm): RepoAppErrors {
   if (bad) errors.envKeys = `${bad} is not a valid variable name.`;
   return errors;
 }
+
+/** Daemon yang diatur di Settings (laptop, atau daemon VM lewat link VM). */
+export type SettingsTarget = 'laptop' | 'vm';
+
+const VM_SECTIONS = ['lark', 'repos', 'workspaces'] as const;
+const LAPTOP_SECTIONS = ['lark', 'repos', 'workspaces', 'design-sources', 'general', 'background', 'vm', 'about'] as const;
+
+/** Bagian Settings yang tersedia untuk target; daemon VM hanya butuh Lark App, repo, dan workspace. */
+export function sectionsFor(target: SettingsTarget): string[] {
+  return target === 'vm' ? [...VM_SECTIONS] : [...LAPTOP_SECTIONS];
+}
+
+/** Bagian yang ditampilkan: bila tidak tersedia untuk target, kembali ke Lark. */
+export function sectionFor(target: SettingsTarget, section: string): string {
+  return sectionsFor(target).includes(section) ? section : 'lark';
+}
+
+/** Orang yang dikenal daemon (`people.known`): `open_id` dan nama. */
+export interface KnownPerson {
+  open_id: string;
+  name: string;
+}
+
+/** Calon reviewer: belum dipilih, cocok dengan nama atau `open_id` (tanpa beda huruf besar), urut nama. */
+export function reviewerCandidates(known: KnownPerson[], selected: string[], query: string): KnownPerson[] {
+  const q = query.trim().toLowerCase();
+  return known
+    .filter((p) => !selected.includes(p.open_id))
+    .filter((p) => !q || p.name.toLowerCase().includes(q) || p.open_id.toLowerCase().includes(q))
+    .sort((a, b) => a.name.localeCompare(b.name));
+}
+
+/**
+ * Nama reviewer untuk ditampilkan; `open_id` bila namanya belum dikenal. Bila
+ * dua orang bernama sama, empat karakter terakhir `open_id` ditambahkan agar
+ * orang yang dipercaya tidak tertukar.
+ */
+export function reviewerLabel(known: KnownPerson[], openId: string): string {
+  const name = known.find((p) => p.open_id === openId)?.name;
+  if (name === undefined) return openId;
+  const twins = known.filter((p) => p.name === name).length > 1;
+  return twins ? `${name} (…${openId.slice(-4)})` : name;
+}

@@ -87,6 +87,23 @@ impl Supervised {
         matches!(self.child.try_wait(), Ok(Some(_)))
     }
 
+    /// Mengirim sinyal ke seluruh process group (penerusan oleh `agent-exec`).
+    ///
+    /// # Errors
+    /// [`ProcError::Io`] bila sinyal tidak terkirim.
+    #[cfg(unix)]
+    pub fn signal(&self, sig: i32) -> Result<(), ProcError> {
+        self.child.signal(sig).map_err(|source| ProcError::Io {
+            program: self.program.clone(),
+            source,
+        })
+    }
+
+    /// Membunuh seluruh process group dan menunggu prosesnya selesai.
+    pub async fn kill(&mut self) {
+        kill_group(self.child.as_mut()).await;
+    }
+
     /// Menghentikan proses secara bertahap, masing-masing tahap menunggu `grace`.
     pub async fn stop(&mut self, grace: Duration) -> StopOutcome {
         if matches!(self.child.try_wait(), Ok(Some(_))) {

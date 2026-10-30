@@ -1,6 +1,6 @@
 //! Task dari Sprint Tasks, tulisan milik app, dan validasi ulang outbox (KTD-7).
 
-use crate::claim::Claim;
+use crate::claim::{Claim, ClaimIdentity, Holder};
 use crate::gate::transition_allowed;
 use crate::kanban::{Column, TaskStatus, column_of};
 
@@ -74,6 +74,19 @@ impl Task {
     #[must_use]
     pub fn claimed_by(&self, open_id: &str) -> bool {
         self.claim.as_ref().is_some_and(|c| c.open_id == open_id)
+    }
+
+    /// Pemegang klaim record dilihat dari daemon ini; `None` bila tanpa klaim.
+    #[must_use]
+    pub fn holder(&self, me: &ClaimIdentity) -> Option<Holder> {
+        self.claim.as_ref().map(|c| me.holder(c))
+    }
+
+    /// `true` bila daemon ini yang memegang klaim record (KTD-56). Dipakai
+    /// semua jalur yang bertindak atas kartu; `claimed_by` hanya untuk tampilan.
+    #[must_use]
+    pub fn held_here(&self, me: &ClaimIdentity) -> bool {
+        self.holder(me) == Some(Holder::ThisDaemon)
     }
 
     /// Nilai cermin `kanban_column` yang perlu ditulis, bila berbeda dari yang ada.
@@ -167,13 +180,17 @@ pub fn check_enqueue(op: &WriteOp) -> Result<(), WriteRejected> {
 /// # Errors
 /// [`WriteRejected`] bila record, assignee, pemilik, atau status sumber sudah
 /// tidak sesuai.
-pub fn revalidate(fresh: Option<&Task>, op: &WriteOp, me: &str) -> Result<(), WriteRejected> {
+pub fn revalidate(
+    fresh: Option<&Task>,
+    op: &WriteOp,
+    me: &ClaimIdentity,
+) -> Result<(), WriteRejected> {
     check_enqueue(op)?;
     let task = fresh.ok_or(WriteRejected::Deleted)?;
-    if !task.assigned_to(me) {
+    if !task.assigned_to(&me.open_id) {
         return Err(WriteRejected::Unassigned);
     }
-    if !task.claimed_by(me) {
+    if !task.held_here(me) {
         return Err(WriteRejected::NotOwner);
     }
     if let WriteOp::Transition { from, .. } = op
@@ -317,6 +334,10 @@ mod tests {
         assert_eq!(t.comment_cursor.as_deref(), Some("9:9"));
     }
 
+    fn ou_me() -> ClaimIdentity {
+        ClaimIdentity::new("ou_me", "laptop", true)
+    }
+
     fn start_op() -> WriteOp {
         WriteOp::Transition {
             from: TaskStatus::ToDo,
@@ -328,14 +349,14 @@ mod tests {
     #[test]
     fn revalidasi_lolos_bila_semua_masih_sesuai() {
         assert_eq!(
-            revalidate(Some(&mine(TaskStatus::ToDo)), &start_op(), "ou_me"),
+            revalidate(Some(&mine(TaskStatus::ToDo)), &start_op(), &ou_me()),
             Ok(())
         );
     }
 
     #[test]
     fn revalidasi_membatalkan_bila_status_bukan_lagi_to_do() {
-        let err = revalidate(Some(&mine(TaskStatus::InReview)), &start_op(), "ou_me").unwrap_err();
+        let err = revalidate(Some(&mine(TaskStatus::InReview)), &start_op(), &ou_me()).unwrap_err();
         assert!(matches!(err, WriteRejected::StatusChanged { .. }));
         assert_eq!(CardFlag::from(&err).kind, FlagKind::Overwritten);
     }
@@ -343,21 +364,40 @@ mod tests {
     #[test]
     fn revalidasi_mendeteksi_hapus_pindah_assignee_dan_pemilik() {
         assert_eq!(
-            revalidate(None, &start_op(), "ou_me"),
+            revalidate(None, &start_op(), &ou_me()),
             Err(WriteRejected::Deleted)
         );
         let mut t = mine(TaskStatus::ToDo);
         t.assignees = vec!["ou_other".to_owned()];
         assert_eq!(
-            revalidate(Some(&t), &start_op(), "ou_me"),
+            revalidate(Some(&t), &start_op(), &ou_me()),
             Err(WriteRejected::Unassigned)
         );
         let mut t = mine(TaskStatus::ToDo);
         t.claim = None;
         assert_eq!(
-            revalidate(Some(&t), &start_op(), "ou_me"),
+            revalidate(Some(&t), &start_op(), &ou_me()),
             Err(WriteRejected::NotOwner)
         );
+    }
+
+    #[test]
+    fn revalidasi_menolak_kartu_yang_dipegang_daemon_lain_milik_sendiri() {
+        let vm = ClaimIdentity::new("ou_me", "vm", false);
+        let mut t = mine(TaskStatus::ToDo);
+        t.claim = Some(Claim {
+            open_id: "ou_me".to_owned(),
+            ts_ms: 1,
+            nonce: vm.nonce("r"),
+        });
+        assert_eq!(
+            revalidate(Some(&t), &start_op(), &ou_me()),
+            Err(WriteRejected::NotOwner),
+            "laptop tidak menulis ke kartu yang dipegang VM"
+        );
+        assert_eq!(revalidate(Some(&t), &start_op(), &vm), Ok(()));
+        assert_eq!(t.holder(&ou_me()), Some(Holder::OwnOtherDaemon));
+        assert!(t.claimed_by("ou_me"), "tampilan tetap milik saya");
     }
 
     #[test]

@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO overnight_laptop_only (record_id, at_ms) VALUES (?, ?)\n             ON CONFLICT (record_id) DO NOTHING",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": []
+  },
+  "hash": "9c698432eb12fb13f054b9ecc059e8b6e98a27fac79dab5b3b439691e178bc87"
+}

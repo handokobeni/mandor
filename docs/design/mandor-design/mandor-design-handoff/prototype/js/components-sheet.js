@@ -17,6 +17,7 @@
     ['shadcn', [['button', 'Button'], ['badge', 'Badge, Kbd, Avatar'], ['form', 'Form controls'], ['tabs', 'Tabs, Toggle group'], ['alert', 'Alert'], ['card', 'Card'], ['overlay', 'Dialog, Alert Dialog'], ['menu', 'Dropdown, Command, Tooltip'], ['feedback', 'Sonner, Skeleton, Spinner']]],
     ['Mandor', [['runstatus', 'RunStatusBadge'], ['flags', 'CardFlagBadge'], ['taskcard', 'TaskCard'], ['agentrow', 'AgentRow'], ['chat', 'ChatMessage'], ['tools', 'ToolCallGroup'], ['diff', 'DiffViewer'], ['composer', 'Composer'], ['steps', 'StepProgress'], ['comment', 'CommentItem'], ['empty', 'Empty state'], ['stepper', 'Stepper'], ['notif', 'NotificationCenter'], ['tray', 'TrayMenu, tray icon']]],
     ['Release 2', [['acchips', 'DesignChip, VerdictChip'], ['acrow', 'ACLedgerRow'], ['acsummary', 'ACReviewSummary'], ['gatebtn', 'GateButton'], ['runapp', 'RunAppControl'], ['readiness', 'ReadinessItem'], ['sources', 'DesignSourceItem'], ['plangaps', 'PlanTab design gaps'], ['r2board', 'Board, sidebar, title bar'], ['logs', 'AppLogs drawer']]],
+    ['Release 3', [['planvm', 'Plan by day, queue for VM']]],
     ['Reserved', [['reserved', 'Slots for later releases']]]
   ];
 
@@ -359,7 +360,52 @@
       spec('Sheet / side=bottom / AppLogs · failed', '<section class="logs-drawer" style="width:720px;border:1px solid var(--border);border-radius:var(--radius)"><div class="ld-head"><b>' + ic('scroll-text', 'icon-sm') + 'App logs</b><div class="toggle-group"><button aria-pressed="false">kelola-api</button><button aria-pressed="true">kelola-web ' + ic('circle-x', 'icon-sm') + '</button></div><span class="muted ld-meta">Failed to start · kelola-web</span><button class="btn btn-ghost btn-xs">' + ic('copy') + 'Copy</button><button class="btn btn-ghost btn-xs btn-icon" aria-label="Close logs">' + ic('x') + '</button></div><pre class="ld-body">$ bun run dev\nerror: Cannot find module "./lib/po/RejectDialog.svelte" from "src/routes/po/[id]/+page.svelte"\nerror: script "dev" exited with code 1</pre></section>', 'block'));
   }
 
-  var BUILDERS = { plangaps: plangaps, r2board: r2board, logs: logs, acchips: acchips, acrow: acrow, acsummary: acsummary, gatebtn: gatebtn, runapp: runapp, readiness: readiness, sources: sources, theme: theme, type: type, button: button, badge: badge, form: form, tabs: tabs, alert: alert, card: card, overlay: overlay, menu: menu, feedback: feedback,
+  /* ---------- plan by day, queue for VM (plan 2026-10-30-001) ---------- */
+  function planvm() {
+    var both = '<div class="alert alert-info plan-ready" style="width:640px">' + ic('file-check') + '<div><div class="alert-title">Plan ready</div><div class="muted">Review the gaps and the plan, then approve to start implementing.</div></div><div class="alert-actions">' +
+      '<button class="btn btn-outline btn-sm">' + ic('play') + 'Approve plan &amp; implement</button>' +
+      '<button class="btn btn-outline btn-sm">' + ic('moon-star') + 'Approve &amp; queue for VM</button></div></div>';
+    function pop(opts) {
+      var sources = opts.sources.length ? opts.sources.map(function (n, i) {
+        return '<label style="display:flex;gap:8px;align-items:center;padding:4px 0"><input type="checkbox" class="checkbox"' + (i === 0 && opts.picked ? ' checked' : '') + '><span>' + esc(n) + '</span></label>';
+      }).join('') : '<p class="muted" style="margin:4px 0">No design sources on the VM. <a href="#">Add one in Settings › VM</a>.</p>';
+      return '<div class="popover popover-static" style="width:340px;padding:14px">' +
+        '<div class="field"><label class="label">Repo on the VM</label><select class="input select"><option>kelola-api</option></select></div>' +
+        '<div class="field"><label class="label">Design sources on the VM</label>' + sources +
+        '<div class="field-help">On the laptop the plan used: <b>kelola-mock</b></div></div>' +
+        (opts.warn ? '<div class="alert alert-warning" style="margin-top:10px">' + ic('triangle-alert') + '<div class="muted">AC-4 follows the design. Pick a design source on the VM.</div></div>' : '') +
+        '<div style="display:flex;justify-content:flex-end;gap:8px;margin-top:12px"><button class="btn btn-ghost btn-sm">Cancel</button><button class="btn btn-sm"' + (opts.warn ? ' disabled' : '') + '>' + ic('moon-star') + 'Queue</button></div></div>';
+    }
+    var steps = ['Pushing the branch…', 'Adding to the VM queue…', 'Handing over the card…'].map(function (t, i) {
+      return '<div style="display:flex;gap:8px;align-items:center">' + ic(i < 2 ? 'circle-check' : 'loader-circle', 'icon-sm') + '<span' + (i < 2 ? ' class="muted"' : '') + '>' + t + '</span></div>';
+    }).join('');
+    function row(key, title, badge, extra, actions) {
+      return '<div class="card" style="width:640px;padding:10px 12px;display:flex;gap:10px;align-items:center"><span class="mono">' + key + '</span>' + badge +
+        '<div style="flex:1;min-width:0"><div class="truncate">' + esc(title) + '</div>' + (extra ? '<div class="muted" style="font-size:12px">' + extra + '</div>' : '') + '</div>' + actions + '</div>';
+    }
+    var planned = '<span class="badge">' + ic('list-checks') + 'Planned</span>';
+    var noPlan = '<span class="badge badge-outline">No plan</span>';
+    var moves = '<button class="btn btn-ghost btn-xs btn-icon" aria-label="Move up">' + ic('arrow-up') + '</button><button class="btn btn-ghost btn-xs btn-icon" aria-label="Move down">' + ic('arrow-down') + '</button><button class="btn btn-outline btn-xs">Start now</button>';
+    var queue = '<div style="display:grid;gap:6px">' +
+      row('PGS-1426', 'PO approval with reasons', planned, 'Design: kelola-mock', moves + '<button class="btn btn-outline btn-xs">' + ic('laptop') + 'Take over to laptop</button>') +
+      row('PGS-1427', 'Export approved POs', noPlan, null, moves + '<button class="btn btn-ghost btn-xs btn-icon" aria-label="Remove">' + ic('x') + '</button>') +
+      row('PGS-1428', 'Reject with a reason', planned, '<span style="color:var(--status-warning)">Claim not moved</span>: the laptop did not hand the card over.', '<button class="btn btn-outline btn-xs">' + ic('refresh-cw') + 'Retry handing over</button><button class="btn btn-ghost btn-xs">Remove from VM queue</button>') + '</div>';
+    var held = row('PGS-1429', 'Audit entries for approvals', planned, 'Held: Design source "kelola-mock" is not available: Path missing. The plan is kept on the VM.', '<button class="btn btn-outline btn-xs">' + ic('laptop') + 'Take over to laptop</button>');
+    var vmOff = '<div class="card" style="width:560px;padding:14px"><div style="display:flex;justify-content:space-between;align-items:center"><b>Design sources on the VM</b><button class="btn btn-outline btn-sm" disabled>' + ic('plus') + 'Add</button></div><p class="muted" style="margin:8px 0 0">VM not connected. Connect the VM in Settings › VM to manage its design sources.</p></div>';
+    var vmEmpty = '<div class="card" style="width:560px;padding:14px"><div style="display:flex;justify-content:space-between;align-items:center"><b>Design sources on the VM</b><button class="btn btn-outline btn-sm">' + ic('plus') + 'Add</button></div><p class="muted" style="margin:8px 0 0">Folders on the VM, not on this laptop. A folder that is a git repo is updated (fast-forward only) before each card starts.</p></div>';
+    return sec('planvm', 'Plan by day, queue for VM', 'Approve a plan on the laptop and queue it for the VM, or queue a card without a plan. The VM keeps its own design sources.',
+      spec('PlanReady / two approve actions', both, 'block') +
+      spec('QueueForVmPopover / sources', pop({ sources: ['kelola-mock', 'pegasus-mock'], picked: true })) +
+      spec('QueueForVmPopover / no VM sources', pop({ sources: [] })) +
+      spec('QueueForVmPopover / follow design needs a source', pop({ sources: ['kelola-mock'], warn: true })) +
+      spec('QueueForVm / progress, step 3', '<div class="card" style="width:340px;padding:12px;display:grid;gap:6px">' + steps + '</div>') +
+      spec('VM queue rows / Planned, No plan, Claim not moved', queue, 'block') +
+      spec('Morning report / planned card held', held, 'block') +
+      spec('Settings › VM / design sources, VM offline', vmOff, 'block') +
+      spec('Settings › VM / design sources, empty', vmEmpty, 'block'));
+  }
+
+  var BUILDERS = { planvm: planvm, plangaps: plangaps, r2board: r2board, logs: logs, acchips: acchips, acrow: acrow, acsummary: acsummary, gatebtn: gatebtn, runapp: runapp, readiness: readiness, sources: sources, theme: theme, type: type, button: button, badge: badge, form: form, tabs: tabs, alert: alert, card: card, overlay: overlay, menu: menu, feedback: feedback,
     runstatus: runstatus, flags: flags, taskcard: taskcard, agentrow: agentrow, chat: chat, tools: tools, diff: diff, composer: composer, steps: steps, comment: comment, empty: empty, reserved: reserved, stepper: stepper, notif: notif, tray: tray };
 
   function sheet(p) {

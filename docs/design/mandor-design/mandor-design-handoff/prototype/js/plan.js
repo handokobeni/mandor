@@ -72,7 +72,7 @@
             : '<div class="pg-foot">' + ic('info', 'icon-sm') + 'Missing and Partly rows are informational: the agent still builds them. Follow design changes that, until you approve the plan.</div>') +
           '</section>';
       panel.innerHTML = '<div class="plan-doc" data-ui="PlanTab">' +
-        (approved ? '' : '<div class="alert alert-info plan-ready">' + ic('file-check') + '<div><div class="alert-title">Plan ready</div><div class="muted">Review the gaps and the plan, then approve to start implementing. Push &amp; create PR stays unavailable until then.</div></div><div class="alert-actions"><button class="btn btn-outline btn-sm" id="pl-approve">' + ic('play') + 'Approve plan &amp; implement</button></div></div>') +
+        (approved ? '' : '<div class="alert alert-info plan-ready">' + ic('file-check') + '<div><div class="alert-title">Plan ready</div><div class="muted">Review the gaps and the plan, then approve to start implementing. Push &amp; create PR stays unavailable until then.</div></div><div class="alert-actions"><button class="btn btn-outline btn-sm" id="pl-approve">' + ic('play') + 'Approve plan &amp; implement</button><button class="btn btn-outline btn-sm" id="pl-queue-vm" title="Approve the plan and let the VM implement it overnight">' + ic('moon-star') + 'Approve &amp; queue for VM</button></div></div>') +
         gapHtml +
         '<section class="plan-md"><div class="pm-head"><span class="mono muted">docs/plans/pgs-1426-po-approval.md</span><button class="btn btn-ghost btn-sm" id="pl-copy">' + ic('copy') + 'Copy Markdown</button></div><div class="md">' + md(PLAN_MD) + '</div></section></div>';
       U.icons();
@@ -80,6 +80,7 @@
       $$('[data-undo]', panel).forEach(function (b) { b.onclick = function () { host.ac.setFollow(b.dataset.undo, false); render(); }; });
       var c = $('#pl-copy', panel); if (c) c.onclick = function () { if (navigator.clipboard) navigator.clipboard.writeText(PLAN_MD); U.toast('Copied the plan as Markdown', null, 'copy'); };
       var a = $('#pl-approve', panel); if (a) a.onclick = host.onApprove;
+      var q = $('#pl-queue-vm', panel); if (q) q.onclick = function () { U.toast('Queued for the VM', 'The VM implements the approved plan tonight', 'moon-star'); };
     }
     return { render: render, gaps: function () { return gaps(host.ac.ledger()); } };
   }

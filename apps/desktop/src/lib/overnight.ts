@@ -1,6 +1,8 @@
 // Logika tab Overnight dan badge kartu VM di board laptop (U10 plan VM).
 
 import type { CardView } from '#lib/protocol/CardView.ts';
+import type { DesignSourceView } from '#lib/protocol/DesignSourceView.ts';
+import type { QueueItemView } from '#lib/protocol/QueueItemView.ts';
 import type { LoginCheck } from '#lib/protocol/LoginCheck.ts';
 import type { OvernightReportView } from '#lib/protocol/OvernightReportView.ts';
 import type { OvernightSettingsView } from '#lib/protocol/OvernightSettingsView.ts';
@@ -142,4 +144,45 @@ export function formatTokens(n: number): string {
  */
 export function backInQueue(card: Pick<ReportCardView, 'record_id' | 'outcome'>, queued: Set<string> | null): boolean {
   return (card.outcome === 'held' || card.outcome === 'failed') && (queued?.has(card.record_id) ?? false);
+}
+
+/** Label pemilih sumber desain VM; id dipakai bila sumber sudah dihapus. */
+export function designPickerLabel(sources: Pick<DesignSourceView, 'id' | 'name'>[], selected: string[]): string {
+  if (selected.length === 0) return 'No design source';
+  const names = selected.map((id) => sources.find((s) => s.id === id)?.name ?? id);
+  return `Design: ${names.join(', ')}`;
+}
+
+/** Alasan tombol "Queue" untuk kartu Planned dinonaktifkan; `null` bila boleh (R11). */
+export function queueForVmBlocker(q: { target: string | null; follow: string[]; designSources: string[] }): string | null {
+  if (!q.target) return 'Choose a repo on the VM';
+  if (q.follow.length > 0 && q.designSources.length === 0) return 'Some AC follow the design. Pick a design source on the VM.';
+  return null;
+}
+
+/** Teks progres "Approve and queue for VM". */
+export function queueStepLabel(step: 'pushing' | 'queuing' | 'handing_over'): string {
+  switch (step) {
+    case 'pushing':
+      return 'Pushing the branch…';
+    case 'queuing':
+      return 'Adding to the VM queue…';
+    case 'handing_over':
+      return 'Handing over the card…';
+  }
+}
+
+/**
+ * Aksi baris antrean: `pending` = klaim belum pindah (Retry atau Remove),
+ * `planned` = VM memegang kartu Planned (Take over, bukan Remove), `no_plan`
+ * = kartu biasa (Remove).
+ */
+export function queueRowMode(item: Pick<QueueItemView, 'planned_state'>): 'pending' | 'planned' | 'no_plan' {
+  if (item.planned_state === 'handover_pending') return 'pending';
+  return item.planned_state ? 'planned' : 'no_plan';
+}
+
+/** Tombol "Approve & queue for VM" tampil (R1): VM siap dan run bukan run grup. */
+export function showQueueForVm(vm: { statusLoaded: boolean; vmRole: boolean; larkReady: boolean }, grouped: boolean): boolean {
+  return vm.statusLoaded && vm.vmRole && vm.larkReady && !grouped;
 }

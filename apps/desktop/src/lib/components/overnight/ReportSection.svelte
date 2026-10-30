@@ -61,17 +61,17 @@
     return c.key ?? c.record_id;
   }
 
-  async function takeover(card: ReportCardView): Promise<void> {
+  async function takeover(card: { record_id: string; key: string | null }, busyKey: string): Promise<void> {
     if (!laptopDaemonId) {
       toast.error('Update Mandor on this laptop to take cards over from the VM');
       return;
     }
-    busy = card.run_id;
+    busy = busyKey;
     try {
-      const runId = await overnight.takeover(card, laptop, laptopDaemonId);
+      const runId = await overnight.takeover(card.record_id, laptop, laptopDaemonId);
       await runs.load();
       nav.run(runId);
-      toast.success(`${key(card)} is on this laptop now`);
+      toast.success(`${card.key ?? card.record_id} is on this laptop now`);
     } catch (err) {
       toast.error('Take over failed', { description: err instanceof Error ? err.message : String(err) });
     } finally {
@@ -92,8 +92,27 @@
         {#if report.dequeued.length > 0}<span>Removed from queue: <b>{report.dequeued.length}</b></span>{/if}
       </div>
     </div>
-    {#if groups.length === 0}
+    {#if groups.length === 0 && report.planned_held.length === 0}
       <p class="field-help">No VM cards yet in this cycle.</p>
+    {/if}
+    {#if report.planned_held.length > 0}
+      <h3>Planned, not started <span class="muted mono">{report.planned_held.length}</span></h3>
+      {#each report.planned_held as h (h.record_id)}
+        <div class="settings-card report-card">
+          <div class="content">
+            <div class="head">
+              <span class="mono key">{h.key ?? h.record_id}</span>
+              <span class="title" title={h.title}>{h.title}</span>
+            </div>
+            <p class="hold"><span class="chip" data-tone="warning">Held</span> {h.reason} The plan is kept on the VM.</p>
+            <div class="actions">
+              <Button size="sm" variant="outline" disabled={busy === h.record_id} onclick={() => takeover(h, h.record_id)}>
+                <ArrowLeftRight />Take over to laptop
+              </Button>
+            </div>
+          </div>
+        </div>
+      {/each}
     {/if}
     {#each groups as g (g.id)}
       <h3>{g.label} <span class="muted mono">{g.cards.length}</span></h3>
@@ -108,6 +127,9 @@
               {/if}
               <span class="muted">AC {c.ac_pass} pass · {c.ac_fail} fail · {c.ac_cant_verify} can't verify</span>
             </div>
+            {#each c.design_notes as note (note)}
+              <p class="hold"><span class="chip" data-tone="warning">Design</span> {note}</p>
+            {/each}
             {#if backInQueue(c, overnight.queuedIds)}
               <p class="hold"><span class="chip" data-tone="ok">Back in the queue</span> The VM continues this card on the same branch.</p>
             {:else}
@@ -130,7 +152,7 @@
                 </Button>
               {/if}
               {#if c.outcome === 'held' || c.outcome === 'failed' || c.entered_waiting_fix}
-                <Button size="sm" variant="outline" disabled={busy === c.run_id} onclick={() => takeover(c)}>
+                <Button size="sm" variant="outline" disabled={busy === c.run_id} onclick={() => takeover(c, c.run_id)}>
                   <ArrowLeftRight />Take over to laptop
                 </Button>
               {/if}

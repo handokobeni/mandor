@@ -3,6 +3,8 @@
 
 import { publishParams } from '#lib/ac-review.ts';
 import type { AcLedgerView } from '#lib/protocol/AcLedgerView.ts';
+import type { DesignSourceView } from '#lib/protocol/DesignSourceView.ts';
+import type { HandoffResult } from '#lib/protocol/HandoffResult.ts';
 import type { LoginCheck } from '#lib/protocol/LoginCheck.ts';
 import type { OvernightQueueView } from '#lib/protocol/OvernightQueueView.ts';
 import type { OvernightReportView } from '#lib/protocol/OvernightReportView.ts';
@@ -11,6 +13,7 @@ import type { ReportCardView } from '#lib/protocol/ReportCardView.ts';
 import type { RepoView } from '#lib/protocol/RepoView.ts';
 import type { StartWorkspace } from '#lib/protocol/StartWorkspace.ts';
 import type { StatusResult } from '#lib/protocol/StatusResult.ts';
+import type { VmHandoverView } from '#lib/protocol/VmHandoverView.ts';
 import type { WorkspaceView } from '#lib/protocol/WorkspaceView.ts';
 import type { Rpc } from '#lib/rpc.ts';
 
@@ -19,6 +22,22 @@ const POLL_MS = 30_000;
 
 /** Target kartu saat diantre: satu repo, atau workspace. */
 export type QueueTarget = { repo_id: string } | { workspace: StartWorkspace };
+
+/** Langkah "Approve and queue for VM" (plan 2026-10-30-001, KTD-1). */
+export type QueueStep = 'pushing' | 'queuing' | 'handing_over';
+
+/** Permintaan "Approve and queue for VM" untuk satu run laptop. */
+export interface PlannedQueueRequest {
+  runId: string;
+  recordId: string;
+  /** `ac_id` yang mengikuti desain. */
+  follow: string[];
+  /** Repo atau workspace di VM. */
+  target: QueueTarget;
+  /** Id sumber desain VM. */
+  designSources: string[];
+  laptopDaemonId: string;
+}
 
 function message(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
@@ -31,6 +50,10 @@ export class OvernightStore {
   logins = $state<LoginCheck[]>([]);
   repos = $state<RepoView[]>([]);
   workspaces = $state<WorkspaceView[]>([]);
+  /** Sumber desain milik VM. */
+  designSources = $state<DesignSourceView[]>([]);
+  /** Id daemon VM, untuk menyerahkan klaim ke VM. */
+  vmDaemonId = $state<string | null>(null);
   error = $state<string | null>(null);
   /** Status daemon VM sudah terbaca sekali. */
   statusLoaded = $state(false);
@@ -76,13 +99,16 @@ export class OvernightStore {
     if (!rpc) return;
     // Status dan repo selalu bisa dibaca; data lembur butuh sesi Lark di VM.
     try {
-      const [status, repos, workspaces] = await Promise.all([
+      const [status, repos, workspaces, designSources] = await Promise.all([
         rpc.request<StatusResult>('status'),
         rpc.request<RepoView[]>('repos.list'),
-        rpc.request<WorkspaceView[]>('workspaces.list')
+        rpc.request<WorkspaceView[]>('workspaces.list'),
+        rpc.request<DesignSourceView[]>('design_sources.list').catch(() => [] as DesignSourceView[])
       ]);
       if (this.rpc !== rpc) return;
       this.statusLoaded = true;
+      this.vmDaemonId = status.daemon_id ?? null;
+      this.designSources = designSources;
       this.vmRole = status.logins !== undefined && status.logins !== null;
       this.logins = status.logins ?? [];
       this.larkReady = status.lark.logged_in && !status.lark.reauth_required;
@@ -122,9 +148,55 @@ export class OvernightStore {
     await this.refresh();
   }
 
-  /** Mengirim kartu To Do ke antrean VM (R6). */
-  add(recordId: string, target: QueueTarget, note: string | null = null): Promise<void> {
-    return this.call('overnight.queue.add', { record_id: recordId, repo_id: null, note, ...target });
+  /** Mengirim kartu To Do ke antrean VM (R6), dengan sumber desain VM bila dipilih. */
+  add(recordId: string, target: QueueTarget, note: string | null = null, designSources: string[] = []): Promise<void> {
+    const design = designSources.length > 0 ? { design_sources: designSources } : {};
+    return this.call('overnight.queue.add', { record_id: recordId, repo_id: null, note, ...target, ...design });
+  }
+
+  /**
+   * "Approve and queue for VM": (1) laptop commit dan push plan, (2) VM
+   * mengantre kartu Planned, (3) laptop menyerahkan klaim dan menutup run.
+   * Gagal di (1) atau (2) tidak mengubah run laptop; gagal di (3) meninggalkan
+   * item "Claim not moved" yang bisa dicoba lagi atau dikeluarkan.
+   */
+  async queuePlanned(laptop: Rpc, req: PlannedQueueRequest, step: (s: QueueStep) => void): Promise<void> {
+    const vm = this.rpc;
+    if (!vm) throw new Error('The VM is not connected');
+    const vmDaemonId = this.vmDaemonId;
+    if (!vmDaemonId) throw new Error('The VM did not report its daemon id');
+    step('pushing');
+    const handover = await laptop.request<VmHandoverView>('runs.prepare_for_vm', {
+      run_id: req.runId,
+      follow_design: req.follow
+    });
+    step('queuing');
+    await vm.request('overnight.queue.add', {
+      record_id: req.recordId,
+      repo_id: null,
+      note: null,
+      ...req.target,
+      design_sources: req.designSources,
+      planned: handover.planned,
+      origin_daemon: req.laptopDaemonId
+    });
+    step('handing_over');
+    try {
+      await laptop.request('runs.send_to_vm', { run_id: req.runId, vm_daemon_id: vmDaemonId });
+    } finally {
+      await this.refresh();
+    }
+  }
+
+  /** Mengulang langkah (3) untuk item "Claim not moved". */
+  async retryHandover(laptop: Rpc, recordId: string, runId: string): Promise<void> {
+    await this.refresh();
+    const pending = this.queue?.items.some((i) => i.record_id === recordId && i.planned_state === 'handover_pending');
+    if (!pending) throw new Error('The card is no longer waiting in the VM queue');
+    const vmDaemonId = this.vmDaemonId;
+    if (!vmDaemonId) throw new Error('The VM did not report its daemon id');
+    await laptop.request('runs.send_to_vm', { run_id: runId, vm_daemon_id: vmDaemonId });
+    await this.refresh();
   }
 
   remove(recordId: string): Promise<void> {
@@ -177,11 +249,17 @@ export class OvernightStore {
    * daemon laptop, lalu laptop memulihkan branch kartu. Mengembalikan id run
    * laptop.
    */
-  async takeover(card: ReportCardView, laptop: Rpc, laptopDaemonId: string): Promise<string> {
-    await this.call('runs.handoff', { record_id: card.record_id, to_daemon_id: laptopDaemonId });
+  async takeover(recordId: string, laptop: Rpc, laptopDaemonId: string): Promise<string> {
+    const vm = this.rpc;
+    if (!vm) throw new Error('The VM is not connected');
+    const back = await vm.request<HandoffResult>('runs.handoff', { record_id: recordId, to_daemon_id: laptopDaemonId });
+    await this.refresh();
+    // Target laptop: id yang sama dengan target VM.
     const run = await laptop.request<{ id: string }>('runs.takeover', {
-      record_id: card.record_id,
-      repo_id: card.repo_id
+      record_id: recordId,
+      repo_id: back.repo_id ?? back.workspace?.repo_ids[0] ?? '',
+      ...(back.workspace ? { workspace: back.workspace } : {}),
+      ...(back.planned ? { planned: back.planned } : {})
     });
     return run.id;
   }

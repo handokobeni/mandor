@@ -7,6 +7,11 @@ import {
   backInQueue,
   canActivate,
   canQueue,
+  designPickerLabel,
+  queueForVmBlocker,
+  queueRowMode,
+  queueStepLabel,
+  showQueueForVm,
   formatTokens,
   loginNotices,
   offsetOptions,
@@ -180,5 +185,48 @@ describe('kartu laporan yang sudah diantre ulang', () => {
     expect(backInQueue(card, new Set())).toBe(false);
     expect(backInQueue(card, null), 'link VM terputus: tidak diketahui').toBe(false);
     expect(backInQueue({ ...card, outcome: 'draft' } as ReportCardView, new Set(['r1']))).toBe(false);
+  });
+});
+
+describe('antre kartu Planned ke VM', () => {
+  const src = (id: string, name: string) => ({ id, name, kind: 'folder', path: `/d/${name}`, ready: true, status: 'Ready' });
+
+  it('label pemilih desain memakai nama, atau id bila sumber sudah dihapus', () => {
+    const sources = [src('d1', 'kelola-mock'), src('d2', 'pegasus-mock')];
+    expect(designPickerLabel(sources, [])).toBe('No design source');
+    expect(designPickerLabel(sources, ['d1', 'x'])).toBe('Design: kelola-mock, x');
+  });
+
+  it('Follow design wajib punya sumber desain VM; target juga wajib', () => {
+    expect(queueForVmBlocker({ target: null, follow: [], designSources: [] })).toBe('Choose a repo on the VM');
+    expect(queueForVmBlocker({ target: 'repo:api', follow: ['ac2'], designSources: [] })).toBe(
+      'Some AC follow the design. Pick a design source on the VM.'
+    );
+    expect(queueForVmBlocker({ target: 'repo:api', follow: ['ac2'], designSources: ['d1'] })).toBeNull();
+    expect(queueForVmBlocker({ target: 'repo:api', follow: [], designSources: [] })).toBeNull();
+  });
+
+  it('teks langkah serah-terima', () => {
+    expect(queueStepLabel('pushing')).toBe('Pushing the branch…');
+    expect(queueStepLabel('queuing')).toBe('Adding to the VM queue…');
+    expect(queueStepLabel('handing_over')).toBe('Handing over the card…');
+  });
+});
+
+describe('tampilan kartu Planned', () => {
+  it('baris antrean: serah-terima tertunda, Planned, atau No plan', () => {
+    expect(queueRowMode({ planned_state: 'handover_pending' })).toBe('pending');
+    expect(queueRowMode({ planned_state: 'waiting' })).toBe('planned');
+    expect(queueRowMode({ planned_state: 'held' })).toBe('planned');
+    expect(queueRowMode({ planned_state: null })).toBe('no_plan');
+  });
+
+  it('tombol antre ke VM tersembunyi untuk run grup dan saat VM belum siap', () => {
+    const ready = { statusLoaded: true, vmRole: true, larkReady: true };
+    expect(showQueueForVm(ready, false)).toBe(true);
+    expect(showQueueForVm(ready, true)).toBe(false);
+    expect(showQueueForVm({ ...ready, statusLoaded: false }, false)).toBe(false);
+    expect(showQueueForVm({ ...ready, vmRole: false }, false)).toBe(false);
+    expect(showQueueForVm({ ...ready, larkReady: false }, false)).toBe(false);
   });
 });

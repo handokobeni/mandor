@@ -200,7 +200,7 @@
       </div>
     </section>
 
-    <QueueSection />
+    <QueueSection {laptop} {laptopDaemonId} />
     <ReportSection {laptop} {laptopDaemonId} />
     {/if}
   {/if}

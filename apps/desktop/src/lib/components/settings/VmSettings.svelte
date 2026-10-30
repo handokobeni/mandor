@@ -2,6 +2,8 @@
   import { Button } from '#lib/components/ui/button/index.ts';
   import { Input } from '#lib/components/ui/input/index.ts';
   import { connection, vmConnection } from '#lib/stores/connection.svelte.ts';
+  import { overnight } from '#lib/stores/overnight.svelte.ts';
+  import DesignSourceSettings from './DesignSourceSettings.svelte';
   import { vm } from '#lib/stores/vm.svelte.ts';
   import { supportsVmLink } from '#lib/vm.ts';
 
@@ -106,6 +108,19 @@
       </div>
     </div>
   </section>
+{/if}
+
+{#if supported && vm.host}
+  {#if linkState.kind === 'ready' && vmConnection.client}
+    <DesignSourceSettings rpc={vmConnection.client} vm onchange={() => void overnight.refresh()} />
+  {:else}
+    <section>
+      <h2>Design sources on the VM</h2>
+      <div class="settings-card">
+        <div class="content muted">VM not connected. Its design sources show here once the VM link is ready.</div>
+      </div>
+    </section>
+  {/if}
 {/if}
 
 {#if vm.error}

@@ -281,6 +281,7 @@ mod tests {
             ac_fail: 0,
             ac_cant_verify: 1,
             entered_waiting_fix: false,
+            design_notes: vec![],
         };
         let v = report_card_view(&card, Some(&task));
         assert_eq!(

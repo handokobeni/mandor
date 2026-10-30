@@ -10,6 +10,7 @@ use mandor_domain::{ClaimLoss, DaemonRole, TaskStatus};
 use super::{OvernightStore, PlannedEntry, QueueItem, resumable};
 use crate::StartTarget;
 use crate::ports::{Clock, Deps, PortError};
+use crate::review::DesignSources as _;
 use crate::run::{RunError, RunService};
 use crate::run_ports::RunStore;
 use crate::sync::Heartbeat;
@@ -59,6 +60,12 @@ impl<D: Deps> RunService<D> {
             ));
         }
         let active = self.runs.active_for(record_id).await?;
+        if !req.design_sources.is_empty() {
+            let check = self.design.prepare(&req.design_sources, false).await?;
+            if let Some(refusal) = check.refusal() {
+                return Err(rejected(refusal));
+            }
+        }
         let planned = if let Some((work, origin)) = &req.planned {
             if active.is_some() {
                 return Err(RunError::InvalidState("the card already has a run"));

@@ -37,6 +37,8 @@ pub struct ReportCard {
     pub ac_cant_verify: u32,
     /// Kartu pernah masuk Waiting Fix.
     pub entered_waiting_fix: bool,
+    /// Sumber desain yang gagal diperbarui saat kartu dimulai.
+    pub design_notes: Vec<String>,
 }
 
 /// Kartu Planned yang ditahan di antrean tanpa dikerjakan (R15).
@@ -123,6 +125,7 @@ impl<D: Deps> RunService<D> {
                 ac_fail: count(Verdict::Fail),
                 ac_cant_verify: count(Verdict::CantVerify),
                 entered_waiting_fix: run.entered_waiting_fix_ms.is_some(),
+                design_notes: run.design_notes.clone(),
             };
             if card.outcome == CardOutcome::SentToReview && !card.entered_waiting_fix {
                 report.reviewed_without_fix += 1;

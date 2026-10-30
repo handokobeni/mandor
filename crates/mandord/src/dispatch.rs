@@ -32,7 +32,7 @@ use crate::views::{
 };
 
 mod app_run;
-mod design;
+pub(crate) mod design;
 mod group;
 mod overnight;
 mod review;

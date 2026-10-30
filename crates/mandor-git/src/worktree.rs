@@ -35,6 +35,41 @@ impl Git {
         self.ok("fetch", cmd).await.map(drop)
     }
 
+    /// Memperbarui folder sumber desain yang berupa repo git (plan
+    /// 2026-10-30-001, KTD-8): fetch branch yang sedang aktif lalu fast-forward
+    /// saja. Di VM konfigurasi repo diperiksa dan kunci yang mengeksekusi
+    /// dinetralkan seperti git daemon lainnya (KTD-65).
+    ///
+    /// # Errors
+    /// HEAD terlepas, fetch gagal, atau riwayat lokal bercabang dari remote.
+    pub async fn update_design(
+        &self,
+        dir: &Path,
+        token: Option<&SecretString>,
+    ) -> Result<(), GitError> {
+        let head = self
+            .ok(
+                "rev-parse",
+                self.git(dir).args(["rev-parse", "--abbrev-ref", "HEAD"]),
+            )
+            .await?;
+        let branch = head.stdout.trim();
+        if branch.is_empty() || branch == "HEAD" {
+            return Err(GitError::Command {
+                op: "update design",
+                stderr: "the design folder is not on a branch".to_owned(),
+            });
+        }
+        self.validate_branch(dir, branch).await?;
+        self.fetch(dir, branch, token).await?;
+        self.ok(
+            "merge --ff-only",
+            self.git(dir).args(["merge", "--ff-only", "FETCH_HEAD"]),
+        )
+        .await
+        .map(drop)
+    }
+
     /// Membuat worktree `dir_name` di bawah direktori workspace pada branch baru
     /// `branch` dari `origin/<base>` terbaru. Bila gagal di tengah jalan, folder
     /// dan branch yang sempat dibuat dihapus (KTD-9).

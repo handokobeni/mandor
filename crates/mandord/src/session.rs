@@ -158,6 +158,11 @@ pub async fn start(
                     env.events.clone(),
                 ),
                 overnight: mandor_store::OvernightsStore::new(env.store.clone()),
+                design: crate::design_port::DesignStore::new(
+                    env.store.clone(),
+                    git.clone(),
+                    env.cfg.home.clone(),
+                ),
             },
         )
         .with_drain_gate(Arc::clone(env.drain)),

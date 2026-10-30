@@ -299,7 +299,7 @@ async fn covers_ae3_take_over_dengan_paket_kembali_ke_plan_dan_approve_mengirim_
         req.message
     );
     assert!(
-        req.message.contains("DESIGN kelola-mock"),
+        req.message.contains("DESIGN REF kelola-mock"),
         "{}",
         req.message
     );

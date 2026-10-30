@@ -387,6 +387,9 @@ pub struct RunRecord {
     pub entered_waiting_fix_ms: Option<i64>,
     /// PR draft VM menunggu "Send to review" sejak waktu ini (KTD-68 plan VM).
     pub draft_pending: Option<i64>,
+    /// Sumber desain yang gagal diperbarui saat kartu VM dimulai (R12 plan
+    /// 2026-10-30-001); untuk laporan pagi.
+    pub design_notes: Vec<String>,
     /// Diisi store saat membaca; diabaikan saat menyimpan.
     pub created_at_ms: i64,
     /// Diisi store saat membaca; diabaikan saat menyimpan.
@@ -434,6 +437,7 @@ impl RunRecord {
             reviewer_skill: None,
             hold: None,
             entered_waiting_fix_ms: None,
+            design_notes: Vec::new(),
             draft_pending: None,
             created_at_ms: 0,
             updated_at_ms: 0,
@@ -734,6 +738,8 @@ pub trait Prompts: Send + Sync {
     /// Tambahan pesan brainstorm/plan bila run punya sumber desain: baca
     /// sumber dan isi kolom Design per AC lewat tool ledger.
     fn design_message(&self, sources: &[crate::review::DesignRoot]) -> String;
+    /// Sumber desain untuk giliran implementasi: acuan tampilan saja.
+    fn design_reference_message(&self, sources: &[crate::review::DesignRoot]) -> String;
     /// Pesan pertama sesi reviewer: AC sebagai data, fakta kesiapan, dan
     /// instruksi melapor lewat `ac_set_verdict` (KTD-38).
     fn review_message(&self, brief: &ReviewBrief<'_>) -> String;

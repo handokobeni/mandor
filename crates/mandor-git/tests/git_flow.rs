@@ -733,3 +733,64 @@ async fn untracked_files_hanya_berkas_baru_yang_tidak_diabaikan() {
     got.sort();
     assert_eq!(got, [".gitignore", "docs/plans/p.md"]);
 }
+
+/// Clone kedua di `name` (folder desain di VM) dari origin fixture.
+fn design_clone(f: &Fixture, name: &str) -> PathBuf {
+    let dir = f.root.join(name);
+    sh(
+        &f.root,
+        &[
+            "clone",
+            "-q",
+            f.origin.to_str().unwrap(),
+            dir.to_str().unwrap(),
+        ],
+    );
+    dir
+}
+
+#[tokio::test]
+async fn folder_desain_diperbarui_fast_forward() {
+    let f = fixture();
+    let design = design_clone(&f, "mock");
+    std::fs::write(f.repo.join("layar.html"), "<p>baru</p>\n").unwrap();
+    sh(&f.repo, &["add", "-A"]);
+    sh(&f.repo, &["commit", "-q", "-m", "layar"]);
+    sh(&f.repo, &["push", "-q", "origin", "main"]);
+
+    f.git.update_design(&design, None).await.unwrap();
+    assert!(design.join("layar.html").exists());
+}
+
+#[tokio::test]
+async fn folder_desain_yang_bercabang_tidak_di_merge() {
+    let f = fixture();
+    let design = design_clone(&f, "mock2");
+    sh(&design, &["config", "user.name", "uji"]);
+    sh(&design, &["config", "user.email", "uji@example.com"]);
+    std::fs::write(design.join("lokal.txt"), "lokal\n").unwrap();
+    sh(&design, &["add", "-A"]);
+    sh(&design, &["commit", "-q", "-m", "lokal"]);
+    std::fs::write(f.repo.join("remote.txt"), "remote\n").unwrap();
+    sh(&f.repo, &["add", "-A"]);
+    sh(&f.repo, &["commit", "-q", "-m", "remote"]);
+    sh(&f.repo, &["push", "-q", "origin", "main"]);
+
+    assert!(f.git.update_design(&design, None).await.is_err());
+    assert!(!design.join("remote.txt").exists(), "tidak ada merge");
+}
+
+#[tokio::test]
+async fn folder_desain_dengan_hook_ditolak_di_vm() {
+    let f = fixture();
+    let design = design_clone(&f, "mock3");
+    sh(
+        &design,
+        &["config", "core.fsmonitor", "touch /tmp/mandor-pwned"],
+    );
+    let mut cfg = GitConfig::new(f.root.join("workspaces"));
+    cfg.distrust_repo_config = true;
+    let vm = Git::new(cfg);
+    let err = vm.update_design(&design, None).await.unwrap_err();
+    assert!(matches!(err, GitError::UnsafeConfig(_)), "{err}");
+}

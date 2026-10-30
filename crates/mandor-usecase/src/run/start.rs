@@ -75,6 +75,7 @@ pub(crate) struct Plan {
     pub(super) repos: Vec<RepoInfo>,
     pub(super) workspace: Option<WorkspaceInfo>,
     pub(super) design: Vec<DesignRoot>,
+    pub(super) design_notes: Vec<String>,
 }
 
 /// Langkah Start yang dilaporkan ke client (dialog Start).
@@ -148,15 +149,43 @@ impl<D: Deps> RunService<D> {
         design: &[DesignRoot],
         progress: impl Fn(StartStep) + Send + Sync,
     ) -> Result<RunRecord, RunError> {
-        let _work = self.enter_work()?;
         let mut plan = self.resolve(target).await?;
         plan.design = design.to_vec();
+        self.start_resolved(record_id, &plan, dev_note, planning, progress)
+            .await
+    }
+
+    /// Kartu No plan dari antrean VM: tanpa plan, dengan sumber desain dan
+    /// catatan desain untuk laporan pagi (R12 plan 2026-10-30-001).
+    pub(crate) async fn start_queued_card(
+        self: &Arc<Self>,
+        record_id: &str,
+        target: &StartTarget,
+        design: &[DesignRoot],
+        design_notes: &[String],
+    ) -> Result<RunRecord, RunError> {
+        let mut plan = self.resolve(target).await?;
+        plan.design = design.to_vec();
+        plan.design_notes = design_notes.to_vec();
+        self.start_resolved(record_id, &plan, None, &Planning::Skip, |_| {})
+            .await
+    }
+
+    async fn start_resolved(
+        self: &Arc<Self>,
+        record_id: &str,
+        plan: &Plan,
+        dev_note: Option<&str>,
+        planning: &Planning,
+        progress: impl Fn(StartStep) + Send + Sync,
+    ) -> Result<RunRecord, RunError> {
+        let _work = self.enter_work()?;
         // Gerbang dan klaim dari baca segar; kalah klaim berhenti sebelum worktree.
         progress(StartStep::Claiming);
         self.sync.claim(record_id, false).await?;
 
         match self
-            .prepare_and_spawn(record_id, &plan, dev_note, planning, &progress)
+            .prepare_and_spawn(record_id, plan, dev_note, planning, &progress)
             .await
         {
             Ok(run) => Ok(run),
@@ -206,6 +235,7 @@ impl<D: Deps> RunService<D> {
             repos,
             workspace,
             design: Vec::new(),
+            design_notes: Vec::new(),
         })
     }
 
@@ -263,6 +293,7 @@ impl<D: Deps> RunService<D> {
                 .collect();
         }
         run.design.clone_from(&plan.design);
+        run.design_notes.clone_from(&plan.design_notes);
         let now = self.now();
         if let Err(e) = self.runs.create(&run, now).await {
             self.discard_members(&prepared, &branch, root.as_deref())
@@ -272,7 +303,15 @@ impl<D: Deps> RunService<D> {
         self.init_ledger(&run.id, &ac_items).await;
 
         let message = match planning {
-            Planning::Skip => self.prompts.task_message(&task, &acs, dev_note),
+            Planning::Skip => {
+                let msg = self.prompts.task_message(&task, &acs, dev_note);
+                // Laptop: desain hanya untuk reviewer, seperti sebelumnya.
+                if self.is_vm() {
+                    self.with_design_reference(&run, msg)
+                } else {
+                    msg
+                }
+            }
             Planning::Plan { skill } => {
                 run.phase = RunPhase::Plan;
                 let msg = self

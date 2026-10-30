@@ -1201,3 +1201,56 @@ impl mandor_usecase::overnight::OvernightStore for FakeOvernight {
         Ok(())
     }
 }
+
+/// Sumber desain daemon palsu: id → nama, dengan sumber yang hilang dan yang
+/// gagal diperbarui.
+#[derive(Clone, Default)]
+pub struct FakeDesign {
+    pub sources: Arc<Mutex<HashMap<String, String>>>,
+    pub missing: Arc<Mutex<HashSet<String>>>,
+    pub stale: Arc<Mutex<HashMap<String, String>>>,
+    /// Id yang diminta diperbarui.
+    pub refreshed: Arc<Mutex<Vec<String>>>,
+}
+
+impl FakeDesign {
+    pub fn add(&self, id: &str, name: &str) {
+        self.sources
+            .lock()
+            .unwrap()
+            .insert(id.to_owned(), name.to_owned());
+    }
+}
+
+impl mandor_usecase::review::DesignSources for FakeDesign {
+    async fn prepare(
+        &self,
+        ids: &[String],
+        refresh: bool,
+    ) -> Result<mandor_usecase::review::DesignCheck, PortError> {
+        let mut out = mandor_usecase::review::DesignCheck::default();
+        for id in ids {
+            let Some(name) = self.sources.lock().unwrap().get(id).cloned() else {
+                out.unavailable
+                    .push((id.clone(), "it was removed from the VM".to_owned()));
+                continue;
+            };
+            if self.missing.lock().unwrap().contains(id) {
+                out.unavailable.push((name, "Path missing".to_owned()));
+                continue;
+            }
+            if refresh {
+                self.refreshed.lock().unwrap().push(id.clone());
+                if let Some(why) = self.stale.lock().unwrap().get(id) {
+                    out.stale.push((name.clone(), why.clone()));
+                }
+            }
+            out.roots.push(mandor_usecase::review::DesignRoot {
+                id: id.clone(),
+                path: PathBuf::from(format!("/design/{name}")),
+                name,
+            });
+        }
+        Ok(out)
+    }
+}

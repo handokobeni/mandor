@@ -36,6 +36,7 @@ impl Deps for Prod {
     type Repos = ReposStore;
     type Prompts = ClaudePrompts;
     type Overnight = mandor_store::OvernightsStore;
+    type Design = crate::design_port::DesignStore;
 }
 
 pub fn now_ms() -> i64 {

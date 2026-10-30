@@ -87,6 +87,7 @@ impl<D: Deps> RunService<D> {
         target: &StartTarget,
         work: &PlannedWork,
         design: &[DesignRoot],
+        design_notes: &[String],
     ) -> Result<RunRecord, RunError> {
         let _work = self.enter_work()?;
         let task = self.task_of(record_id).await?;
@@ -94,6 +95,7 @@ impl<D: Deps> RunService<D> {
         run.phase = RunPhase::Implement;
         run.plan = Some(work.plan.clone());
         run.design = design.to_vec();
+        run.design_notes = design_notes.to_vec();
         run.pr_url.clone_from(&task.pr_url);
         let root = run.workspace.as_ref().map(|w| w.root.clone());
         let started = async {
@@ -144,6 +146,17 @@ impl<D: Deps> RunService<D> {
             .await
     }
 
+    /// Pesan implementasi ditambah sumber desain run sebagai acuan, bila ada.
+    pub(crate) fn with_design_reference(&self, run: &RunRecord, message: String) -> String {
+        if run.design.is_empty() {
+            return message;
+        }
+        format!(
+            "{message}\n\n{}",
+            self.prompts.design_reference_message(&run.design)
+        )
+    }
+
     /// Mengisi buku AC run dari Lark lalu menimpa kolom Design dengan hasil
     /// tahap plan. Baris paket untuk AC yang sudah tidak ada diabaikan.
     pub(super) async fn seed_planned_ledger(
@@ -185,6 +198,6 @@ impl<D: Deps> RunService<D> {
         let message = self
             .prompts
             .approved_plan_message(&task, &acs, plan, &followed);
-        Ok(self.with_design(run, message))
+        Ok(self.with_design_reference(run, message))
     }
 }

@@ -23,10 +23,11 @@ pub use ports::{
 };
 pub use report::{CardOutcome, HeldPlanned, OvernightReport, ReportCard};
 
+use crate::StartTarget;
 use crate::ports::{Clock, Deps, LarkTasks, PortError, TaskCache};
+use crate::review::DesignSources as _;
 use crate::run::{RunError, RunService};
 use crate::run_ports::{AgentPort, RunPhase, RunRecord, RunStore};
-use crate::{Planning, StartTarget};
 
 /// Batas percobaan kirim DM laporan per siklus.
 const REPORT_ATTEMPTS: u32 = 5;
@@ -260,7 +261,8 @@ impl<D: Deps> RunService<D> {
             .map_err(|e| e.to_string())?
             .ok_or_else(|| "the card was deleted in Lark".to_owned())?;
         check_planned_start(&task, self.sync.identity())?;
-        self.start_from_plan(&item.record_id, &item.target, work, &[])
+        let (design, notes) = self.queue_design(item).await?;
+        self.start_from_plan(&item.record_id, &item.target, work, &design, &notes)
             .await
             .map(|_| ())
             .map_err(|e| e.to_string())
@@ -285,6 +287,24 @@ impl<D: Deps> RunService<D> {
             .into_iter()
             .filter(startable)
             .collect())
+    }
+
+    /// Sumber desain kartu antrean: repo git diperbarui lalu di-resolve (R12,
+    /// R13). `Err` berisi alasan bila ada sumber yang tidak tersedia.
+    async fn queue_design(
+        &self,
+        item: &QueueItem,
+    ) -> Result<(Vec<crate::review::DesignRoot>, Vec<String>), String> {
+        let check = self
+            .design
+            .prepare(&item.design_sources, true)
+            .await
+            .map_err(|e| e.to_string())?;
+        if let Some(refusal) = check.refusal() {
+            return Err(refusal);
+        }
+        let notes = check.notes();
+        Ok((check.roots, notes))
     }
 
     /// Item `Starting` tanpa run tersisa dari tick yang terputus (mis. daemon
@@ -347,17 +367,11 @@ impl<D: Deps> RunService<D> {
             ));
         }
         check_start(&task.status, task.readiness.as_deref()).map_err(|e| e.to_string())?;
-        self.start_planned(
-            &item.record_id,
-            &item.target,
-            None,
-            &Planning::Skip,
-            &[],
-            |_| {},
-        )
-        .await
-        .map(|_| ())
-        .map_err(|e| e.to_string())
+        let (design, notes) = self.queue_design(item).await?;
+        self.start_queued_card(&item.record_id, &item.target, &design, &notes)
+            .await
+            .map(|_| ())
+            .map_err(|e| e.to_string())
     }
 
     /// Ada run VM yang sedang bekerja; perbaikan Waiting Fix menunggu (R8).

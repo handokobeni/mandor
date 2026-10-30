@@ -137,6 +137,7 @@ fn reason(st: &Station) -> Option<String> {
 #[tokio::test]
 async fn covers_ae1_kartu_planned_dimulai_dari_branch_dengan_plan_yang_disetujui() {
     let (lark, clock, st) = vm(wib(0, 15, 0)).await;
+    st.design.add("ds1", "kelola-mock");
     let mut w = work();
     w.design[0].design = Design::FollowDesign;
     st.svc
@@ -380,4 +381,120 @@ async fn restart_sebelum_pesan_pertama_mengirim_ulang_plan() {
     assert!(req.message.starts_with("IMPLEMENT PLAN"), "{}", req.message);
     assert!(req.message.contains("## Plan lama"));
     assert!(matches!(req.session, SessionRef::New(_)));
+}
+
+/// Kartu To Do `nd` (No plan) di VM yang sama.
+fn no_plan_card(lark: &FakeLark, now: i64) {
+    let mut t = ready_task("nd", &["ou_me"]);
+    t.last_modified_ms = now;
+    lark.put(t);
+}
+
+async fn queue_no_plan(st: &Station, design: &[&str]) -> Result<(), mandor_usecase::RunError> {
+    st.svc
+        .enqueue_card(
+            "nd",
+            &QueueRequest {
+                target: repo1(),
+                note: None,
+                design_sources: design.iter().map(|d| (*d).to_owned()).collect(),
+                planned: None,
+            },
+        )
+        .await
+}
+
+#[tokio::test]
+async fn covers_ae5_desain_repo_diperbarui_dan_dikirim_ke_agent() {
+    let (lark, clock, st) = vm(wib(0, 18, 0)).await;
+    no_plan_card(&lark, wib(0, 18, 0));
+    st.svc.sync().poll(true, &[]).await.unwrap();
+    st.design.add("ds1", "kelola-mock");
+    queue_no_plan(&st, &["ds1"]).await.unwrap();
+    assert!(
+        st.design.refreshed.lock().unwrap().is_empty(),
+        "belum diperbarui saat antre"
+    );
+
+    at(&lark, &clock, wib(0, 19, 0));
+    assert_eq!(
+        st.svc.overnight_tick().await.unwrap().started.as_deref(),
+        Some("nd")
+    );
+    assert_eq!(*st.design.refreshed.lock().unwrap(), ["ds1"]);
+    let req = st.agent.last().req;
+    assert!(
+        req.message.contains("DESIGN REF kelola-mock"),
+        "{}",
+        req.message
+    );
+    assert_eq!(req.design.len(), 1);
+}
+
+#[tokio::test]
+async fn covers_ae6_desain_gagal_diperbarui_tetap_dimulai_dan_dicatat() {
+    let (lark, clock, st) = vm(wib(0, 18, 0)).await;
+    no_plan_card(&lark, wib(0, 18, 0));
+    st.svc.sync().poll(true, &[]).await.unwrap();
+    st.design.add("ds1", "kelola-mock");
+    st.design
+        .stale
+        .lock()
+        .unwrap()
+        .insert("ds1".to_owned(), "fetch failed".to_owned());
+    queue_no_plan(&st, &["ds1"]).await.unwrap();
+    at(&lark, &clock, wib(0, 19, 0));
+    assert!(st.svc.overnight_tick().await.unwrap().started.is_some());
+    let report = st.svc.overnight_report().await.unwrap();
+    assert_eq!(
+        report.cards[0].design_notes,
+        ["Design kelola-mock not updated: fetch failed"]
+    );
+}
+
+#[tokio::test]
+async fn covers_ae7_desain_hilang_mengeluarkan_no_plan_dan_menahan_planned() {
+    let (lark, clock, st) = vm(wib(0, 15, 0)).await;
+    no_plan_card(&lark, wib(0, 15, 0));
+    st.svc.sync().poll(true, &[]).await.unwrap();
+    st.design.add("ds1", "kelola-mock");
+    queue_no_plan(&st, &["ds1"]).await.unwrap();
+    st.svc
+        .enqueue_card(
+            "rec1",
+            &QueueRequest {
+                target: repo1(),
+                note: None,
+                design_sources: vec!["ds1".to_owned()],
+                planned: Some((work(), "local".to_owned())),
+            },
+        )
+        .await
+        .unwrap();
+    claim_to_vm(&lark, &st, wib(0, 15, 0)).await;
+    st.svc.heartbeat_all().await.unwrap();
+    st.design.missing.lock().unwrap().insert("ds1".to_owned());
+
+    at(&lark, &clock, wib(0, 19, 0));
+    let tick = st.svc.overnight_tick().await.unwrap();
+    assert_eq!(tick.started, None);
+    let want = "Design source \"kelola-mock\" is not available: Path missing";
+    assert_eq!(tick.dequeued.len(), 2, "{tick:?}");
+    assert!(tick.dequeued.iter().all(|(_, r)| r == want), "{tick:?}");
+    assert_eq!(st.overnight.ids(), ["rec1"], "Planned tetap di antrean");
+    assert_eq!(state(&st), Some(PlannedState::Held));
+    assert_eq!(reason(&st).as_deref(), Some(want));
+}
+
+#[tokio::test]
+async fn sumber_desain_tak_dikenal_ditolak_saat_antre() {
+    let (lark, _clock, st) = vm(wib(0, 15, 0)).await;
+    no_plan_card(&lark, wib(0, 15, 0));
+    st.svc.sync().poll(true, &[]).await.unwrap();
+    let err = queue_no_plan(&st, &["hilang"]).await.unwrap_err();
+    assert!(
+        format!("{err}").contains("Design source \"hilang\""),
+        "{err}"
+    );
+    assert!(st.overnight.ids().is_empty());
 }

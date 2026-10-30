@@ -11,6 +11,9 @@ use mandor_usecase::review::{DesignCheck, DesignRoot, DesignSources, SourceCheck
 
 use crate::dispatch::design::{check, folder_path};
 
+/// Batas waktu memeriksa berkas sumber desain.
+const FS_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
+
 /// Adapter sumber desain milik daemon.
 #[derive(Debug, Clone)]
 pub struct DesignStore {
@@ -35,10 +38,16 @@ impl DesignStore {
     /// bila gagal atau dilewati.
     async fn refresh(&self, path: &Path) -> Option<String> {
         let dot_git = path.join(".git");
-        if tokio::fs::metadata(&dot_git).await.is_err() {
+        let is_repo = tokio::time::timeout(FS_TIMEOUT, tokio::fs::metadata(&dot_git))
+            .await
+            .is_ok_and(|m| m.is_ok());
+        if !is_repo {
             return None;
         }
-        if !same_owner(&dot_git, &self.owner_ref).await {
+        let owned = tokio::time::timeout(FS_TIMEOUT, same_owner(&dot_git, &self.owner_ref))
+            .await
+            .unwrap_or(false);
+        if !owned {
             return Some("its .git folder is not owned by the Mandor user".to_owned());
         }
         let token = if self.git.distrusts_repo_config() {

@@ -14,7 +14,9 @@ use std::sync::Arc;
 use mandor_domain::gate::check_start;
 use mandor_domain::overnight::{CycleReport, Next, Slot, TickState, Window, decide, report_text};
 use mandor_domain::{DaemonRole, HoldReason, RunState, TaskStatus};
-pub use ports::{CycleUsage, Dequeued, OvernightSettings, OvernightStore, QueueItem, ReportState};
+pub use ports::{
+    CycleUsage, Dequeued, OvernightSettings, OvernightStore, PlannedEntry, QueueItem, ReportState,
+};
 pub use report::{CardOutcome, OvernightReport, ReportCard};
 
 use crate::ports::{Clock, Deps, LarkTasks, PortError, TaskCache};
@@ -329,6 +331,8 @@ impl<D: Deps> RunService<D> {
                 .map(str::to_owned),
             start_now: false,
             added_at_ms: self.sync.clock.now_ms(),
+            design_sources: Vec::new(),
+            planned: None,
         };
         match self.overnight.enqueue(&item).await {
             Err(PortError::Conflict) => Err(RunError::InvalidState("the card is already queued")),

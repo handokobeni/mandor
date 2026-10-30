@@ -1,10 +1,12 @@
 //! Port `OvernightStore` usecase di atas tabel `overnight_*` dan setelan
 //! `overnight` (KTD-57 plan VM).
 
+use mandor_domain::Design;
+use mandor_domain::planned::{DesignMark, PlannedState, PlannedWork};
 use mandor_usecase::PortError;
 use mandor_usecase::StartTarget;
 use mandor_usecase::overnight::{
-    CycleUsage, Dequeued, OvernightSettings, OvernightStore, QueueItem, ReportState,
+    CycleUsage, Dequeued, OvernightSettings, OvernightStore, PlannedEntry, QueueItem, ReportState,
 };
 use serde::{Deserialize, Serialize};
 
@@ -45,6 +47,87 @@ impl From<TargetJson> for StartTarget {
     }
 }
 
+/// Satu baris Design di `planned_json`.
+#[derive(Serialize, Deserialize)]
+struct DesignMarkJson {
+    ac_id: String,
+    design: String,
+    note: Option<String>,
+}
+
+/// Paket plan di `planned_json`.
+#[derive(Serialize, Deserialize)]
+struct PlannedJson {
+    plan: String,
+    branch: String,
+    design: Vec<DesignMarkJson>,
+    laptop_design: Vec<String>,
+}
+
+impl From<&PlannedWork> for PlannedJson {
+    fn from(w: &PlannedWork) -> Self {
+        Self {
+            plan: w.plan.clone(),
+            branch: w.branch.clone(),
+            design: w
+                .design
+                .iter()
+                .map(|d| DesignMarkJson {
+                    ac_id: d.ac_id.clone(),
+                    design: d.design.as_str().to_owned(),
+                    note: d.note.clone(),
+                })
+                .collect(),
+            laptop_design: w.laptop_design.clone(),
+        }
+    }
+}
+
+impl TryFrom<PlannedJson> for PlannedWork {
+    type Error = StoreError;
+
+    fn try_from(j: PlannedJson) -> Result<Self, StoreError> {
+        let mut design = Vec::with_capacity(j.design.len());
+        for d in j.design {
+            let value = Design::parse(&d.design)
+                .ok_or_else(|| StoreError::corrupt(format!("unknown design {:?}", d.design)))?;
+            design.push(DesignMark {
+                ac_id: d.ac_id,
+                design: value,
+                note: d.note,
+            });
+        }
+        Ok(Self {
+            plan: j.plan,
+            branch: j.branch,
+            design,
+            laptop_design: j.laptop_design,
+        })
+    }
+}
+
+/// Bagian Planned dari kolom baris antrean; `None` untuk item No plan.
+fn planned_entry(
+    planned_json: Option<String>,
+    state: Option<&str>,
+    origin_daemon: Option<String>,
+    reason: Option<String>,
+) -> Result<Option<PlannedEntry>, StoreError> {
+    let Some(json) = planned_json else {
+        return Ok(None);
+    };
+    let work: PlannedJson = serde_json::from_str(&json).map_err(StoreError::internal)?;
+    let state = state
+        .and_then(PlannedState::parse)
+        .ok_or_else(|| StoreError::corrupt(format!("unknown planned state {state:?}")))?;
+    Ok(Some(PlannedEntry {
+        work: work.try_into()?,
+        state,
+        origin_daemon,
+        reason,
+    }))
+}
+
 /// Setelan lembur di tabel `settings`.
 #[derive(Serialize, Deserialize)]
 struct SettingsJson {
@@ -79,7 +162,8 @@ impl OvernightsStore {
 impl OvernightStore for OvernightsStore {
     async fn queue(&self) -> Result<Vec<QueueItem>, PortError> {
         let rows = sqlx::query!(
-            "SELECT record_id, target_json, note, start_now, added_at_ms
+            "SELECT record_id, target_json, note, start_now, added_at_ms, design_json,
+                    planned_json, planned_state, origin_daemon, planned_reason
              FROM overnight_queue ORDER BY position, added_at_ms"
         )
         .fetch_all(&self.store.pool)
@@ -89,12 +173,23 @@ impl OvernightStore for OvernightsStore {
         for r in rows {
             let target: TargetJson =
                 serde_json::from_str(&r.target_json).map_err(StoreError::internal)?;
+            let design_sources: Vec<String> = match r.design_json {
+                Some(j) => serde_json::from_str(&j).map_err(StoreError::internal)?,
+                None => Vec::new(),
+            };
             out.push(QueueItem {
                 record_id: r.record_id,
                 target: target.into(),
                 note: r.note,
                 start_now: r.start_now != 0,
                 added_at_ms: r.added_at_ms,
+                design_sources,
+                planned: planned_entry(
+                    r.planned_json,
+                    r.planned_state.as_deref(),
+                    r.origin_daemon,
+                    r.planned_reason,
+                )?,
             });
         }
         Ok(out)
@@ -104,14 +199,38 @@ impl OvernightStore for OvernightsStore {
         let target =
             serde_json::to_string(&TargetJson::from(&item.target)).map_err(StoreError::internal)?;
         let start_now = i64::from(item.start_now);
+        let design = if item.design_sources.is_empty() {
+            None
+        } else {
+            Some(serde_json::to_string(&item.design_sources).map_err(StoreError::internal)?)
+        };
+        let planned = item
+            .planned
+            .as_ref()
+            .map(|p| serde_json::to_string(&PlannedJson::from(&p.work)))
+            .transpose()
+            .map_err(StoreError::internal)?;
+        let state = item.planned.as_ref().map(|p| p.state.as_str());
+        let origin = item
+            .planned
+            .as_ref()
+            .and_then(|p| p.origin_daemon.as_deref());
+        let reason = item.planned.as_ref().and_then(|p| p.reason.as_deref());
         sqlx::query!(
-            "INSERT INTO overnight_queue (record_id, position, target_json, note, start_now, added_at_ms)
-             VALUES (?, (SELECT COALESCE(MAX(position), 0) + 1 FROM overnight_queue), ?, ?, ?, ?)",
+            "INSERT INTO overnight_queue (record_id, position, target_json, note, start_now,
+                added_at_ms, design_json, planned_json, planned_state, origin_daemon, planned_reason)
+             VALUES (?, (SELECT COALESCE(MAX(position), 0) + 1 FROM overnight_queue),
+                ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             item.record_id,
             target,
             item.note,
             start_now,
-            item.added_at_ms
+            item.added_at_ms,
+            design,
+            planned,
+            state,
+            origin,
+            reason
         )
         .execute(&self.store.pool)
         .await
@@ -175,6 +294,31 @@ impl OvernightStore for OvernightsStore {
             .map_err(StoreError::internal)?;
         }
         tx.commit().await.map_err(StoreError::internal)?;
+        Ok(())
+    }
+
+    async fn set_planned_state(
+        &self,
+        record_id: &str,
+        state: PlannedState,
+        reason: Option<&str>,
+    ) -> Result<(), PortError> {
+        let state = state.as_str();
+        let done = sqlx::query!(
+            "UPDATE overnight_queue SET planned_state = ?, planned_reason = ?
+             WHERE record_id = ? AND planned_json IS NOT NULL",
+            state,
+            reason,
+            record_id
+        )
+        .execute(&self.store.pool)
+        .await
+        .map_err(StoreError::internal)?;
+        if done.rows_affected() == 0 {
+            return Err(PortError::Rejected(
+                "the card is not a planned queue item".to_owned(),
+            ));
+        }
         Ok(())
     }
 
@@ -338,5 +482,26 @@ impl OvernightStore for OvernightsStore {
         .await
         .map_err(StoreError::internal)?;
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn kolom_planned_rusak_adalah_error_bukan_no_plan() {
+        let state = || Some("waiting");
+        assert!(planned_entry(Some("{".to_owned()), state(), None, None).is_err());
+        let bad_design = r#"{"plan":"p","branch":"b","design":[{"ac_id":"a","design":"x","note":null}],"laptop_design":[]}"#;
+        assert!(planned_entry(Some(bad_design.to_owned()), state(), None, None).is_err());
+        let ok = r#"{"plan":"p","branch":"b","design":[],"laptop_design":[]}"#;
+        assert!(planned_entry(Some(ok.to_owned()), Some("x"), None, None).is_err());
+        assert!(
+            planned_entry(Some(ok.to_owned()), state(), None, None)
+                .unwrap()
+                .is_some()
+        );
+        assert!(planned_entry(None, None, None, None).unwrap().is_none());
     }
 }

@@ -1068,6 +1068,24 @@ impl mandor_usecase::overnight::OvernightStore for FakeOvernight {
         });
         Ok(())
     }
+    async fn set_planned_state(
+        &self,
+        record_id: &str,
+        state: mandor_domain::planned::PlannedState,
+        reason: Option<&str>,
+    ) -> Result<(), PortError> {
+        let mut q = self.queue.lock().unwrap();
+        let p = q
+            .iter_mut()
+            .find(|i| i.record_id == record_id)
+            .and_then(|i| i.planned.as_mut())
+            .ok_or_else(|| {
+                PortError::Rejected("the card is not a planned queue item".to_owned())
+            })?;
+        p.state = state;
+        p.reason = reason.map(str::to_owned);
+        Ok(())
+    }
     async fn set_start_now(&self, record_id: &str) -> Result<(), PortError> {
         let mut q = self.queue.lock().unwrap();
         let item = q

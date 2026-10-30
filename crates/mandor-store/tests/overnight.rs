@@ -1,9 +1,11 @@
 //! Antrean, siklus, dan setelan lembur VM (U2 plan VM).
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
+use mandor_domain::Design;
+use mandor_domain::planned::{DesignMark, PlannedState, PlannedWork};
 use mandor_store::{OvernightsStore, Store};
 use mandor_usecase::overnight::{
-    CycleUsage, OvernightSettings, OvernightStore, QueueItem, ReportState,
+    CycleUsage, OvernightSettings, OvernightStore, PlannedEntry, QueueItem, ReportState,
 };
 use mandor_usecase::{PortError, StartTarget};
 use pretty_assertions::assert_eq;
@@ -21,7 +23,37 @@ fn item(id: &str, at: i64) -> QueueItem {
         note: None,
         start_now: false,
         added_at_ms: at,
+        design_sources: Vec::new(),
+        planned: None,
     }
+}
+
+fn planned(id: &str, at: i64) -> QueueItem {
+    let mut it = item(id, at);
+    it.design_sources = vec!["ds1".to_owned(), "ds2".to_owned()];
+    it.planned = Some(PlannedEntry {
+        work: PlannedWork {
+            plan: "## Plan\n1. Tambah tombol".to_owned(),
+            branch: "pgs-1/tombol".to_owned(),
+            design: vec![
+                DesignMark {
+                    ac_id: "ac1".to_owned(),
+                    design: Design::FollowDesign,
+                    note: Some("Header beda".to_owned()),
+                },
+                DesignMark {
+                    ac_id: "ac2".to_owned(),
+                    design: Design::InDesign,
+                    note: None,
+                },
+            ],
+            laptop_design: vec!["lap1".to_owned()],
+        },
+        state: PlannedState::HandoverPending,
+        origin_daemon: Some("laptop".to_owned()),
+        reason: None,
+    });
+    it
 }
 
 fn ids(q: &[QueueItem]) -> Vec<&str> {
@@ -121,4 +153,39 @@ async fn hanya_laptop_setelan_dan_pemakaian_siklus() {
     );
     s.record_report(300, true, 1).await.unwrap();
     assert!(s.report_state(300).await.unwrap().sent);
+}
+
+#[tokio::test]
+async fn item_planned_dan_sumber_desain_bolak_balik() {
+    let (s, _d) = open().await;
+    s.enqueue(&item("a", 1)).await.unwrap();
+    let p = planned("b", 2);
+    s.enqueue(&p).await.unwrap();
+
+    let q = s.queue().await.unwrap();
+    assert_eq!(q[0], item("a", 1), "item lama: No plan tanpa desain");
+    assert_eq!(q[1], p);
+
+    s.set_planned_state("b", PlannedState::Waiting, None)
+        .await
+        .unwrap();
+    s.set_planned_state("b", PlannedState::Held, Some("the card has no claim"))
+        .await
+        .unwrap();
+    let got = s.queue().await.unwrap()[1].planned.clone().unwrap();
+    assert_eq!(got.state, PlannedState::Held);
+    assert_eq!(got.reason.as_deref(), Some("the card has no claim"));
+
+    s.set_planned_state("b", PlannedState::Waiting, None)
+        .await
+        .unwrap();
+    let got = s.queue().await.unwrap()[1].planned.clone().unwrap();
+    assert_eq!(got.reason, None, "alasan dihapus saat status berubah");
+
+    assert!(matches!(
+        s.set_planned_state("a", PlannedState::Waiting, None).await,
+        Err(PortError::Rejected(_))
+    ));
+    s.reorder(&["b".to_owned()]).await.unwrap();
+    assert_eq!(ids(&s.queue().await.unwrap()), ["b", "a"]);
 }

@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "UPDATE overnight_queue SET planned_state = ?, planned_reason = ?\n             WHERE record_id = ? AND planned_json IS NOT NULL",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 3
+    },
+    "nullable": []
+  },
+  "hash": "f84c691a893ed1445ef953ede8573eb114fee27766d74a438d5a5220b0383403"
+}

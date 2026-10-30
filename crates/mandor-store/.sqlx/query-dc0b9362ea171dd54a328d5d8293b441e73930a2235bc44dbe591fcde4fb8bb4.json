@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO overnight_queue (record_id, position, target_json, note, start_now,\n                added_at_ms, design_json, planned_json, planned_state, origin_daemon, planned_reason)\n             VALUES (?, (SELECT COALESCE(MAX(position), 0) + 1 FROM overnight_queue),\n                ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 10
+    },
+    "nullable": []
+  },
+  "hash": "dc0b9362ea171dd54a328d5d8293b441e73930a2235bc44dbe591fcde4fb8bb4"
+}

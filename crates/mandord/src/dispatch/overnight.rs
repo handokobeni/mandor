@@ -303,6 +303,8 @@ mod tests {
             note: None,
             start_now: true,
             added_at_ms: 5,
+            design_sources: Vec::new(),
+            planned: None,
         };
         let q = queue_item_view(&item, None, true);
         assert_eq!(

@@ -473,6 +473,10 @@ pub struct PlannedWorkDto {
     pub design: Vec<DesignMarkDto>,
     /// Sumber desain laptop saat plan disusun (id laptop).
     pub laptop_design: Vec<String>,
+    /// Repo run laptop: satu repo, atau anggota workspace. VM menolak target
+    /// dengan repo berbeda; kosong dari laptop versi lama.
+    #[serde(default)]
+    pub repos: Vec<String>,
 }
 
 /// Parameter `runs.prepare_for_vm`.

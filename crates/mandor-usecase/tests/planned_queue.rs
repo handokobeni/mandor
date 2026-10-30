@@ -88,6 +88,7 @@ fn work() -> PlannedWork {
             note: Some("Header beda".to_owned()),
         }],
         laptop_design: vec![],
+        repos: vec!["repo1".to_owned()],
     }
 }
 
@@ -316,7 +317,10 @@ async fn antrean_planned_divalidasi() {
     other.branch = "mandor/lain".to_owned();
     let mut follow = work();
     follow.design[0].design = Design::FollowDesign;
+    let mut workspace = work();
+    workspace.repos = vec!["repo1".to_owned(), "repo2".to_owned()];
     let cases = [
+        ("workspace ke satu repo", repo1(), workspace, "same repos"),
         ("branch", repo1(), other, "branch"),
         ("follow", repo1(), follow, "design source"),
         (

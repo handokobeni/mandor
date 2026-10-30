@@ -22,6 +22,17 @@ pub enum StartTarget {
     Workspace { id: String, repo_ids: Vec<String> },
 }
 
+impl StartTarget {
+    /// Repo yang dikerjakan target ini.
+    #[must_use]
+    pub fn repo_ids(&self) -> Vec<String> {
+        match self {
+            Self::Repo(id) => vec![id.clone()],
+            Self::Workspace { repo_ids, .. } => repo_ids.clone(),
+        }
+    }
+}
+
 /// Planning sebelum implementasi, dipilih dev saat Start.
 #[derive(Debug, Clone, PartialEq, Eq)]
 /// Skill `None` berarti prompt bawaan mandor; selain itu skill plugin Claude,

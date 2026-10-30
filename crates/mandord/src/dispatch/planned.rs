@@ -22,6 +22,7 @@ pub(super) fn planned_dto(w: &PlannedWork) -> PlannedWorkDto {
             })
             .collect(),
         laptop_design: w.laptop_design.clone(),
+        repos: w.repos.clone(),
     }
 }
 
@@ -42,6 +43,7 @@ pub(super) fn planned_of(d: PlannedWorkDto) -> Result<PlannedWork, RpcError> {
         branch: d.branch,
         design,
         laptop_design: d.laptop_design,
+        repos: d.repos,
     })
 }
 
@@ -90,6 +92,7 @@ mod tests {
                 note: Some("x".to_owned()),
             }],
             laptop_design: vec!["ds1".to_owned()],
+            repos: vec!["web".to_owned(), "api".to_owned()],
         };
         let dto = planned_dto(&w);
         let json = serde_json::to_string(&dto).unwrap();

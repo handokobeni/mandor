@@ -9,6 +9,8 @@ import {
   canQueue,
   designPickerLabel,
   queueForVmBlocker,
+  defaultVmTarget,
+  vmTargetRepos,
   queueRowMode,
   queueStepLabel,
   showQueueForVm,
@@ -198,12 +200,43 @@ describe('antre kartu Planned ke VM', () => {
   });
 
   it('Follow design wajib punya sumber desain VM; target juga wajib', () => {
-    expect(queueForVmBlocker({ target: null, follow: [], designSources: [] })).toBe('Choose a repo on the VM');
-    expect(queueForVmBlocker({ target: 'repo:api', follow: ['ac2'], designSources: [] })).toBe(
+    const one = { laptopRepos: ['api'], targetRepos: ['api'] };
+    expect(queueForVmBlocker({ target: null, follow: [], designSources: [], ...one })).toBe('Choose a repo on the VM');
+    expect(queueForVmBlocker({ target: 'repo:api', follow: ['ac2'], designSources: [], ...one })).toBe(
       'Some AC follow the design. Pick a design source on the VM.'
     );
-    expect(queueForVmBlocker({ target: 'repo:api', follow: ['ac2'], designSources: ['d1'] })).toBeNull();
-    expect(queueForVmBlocker({ target: 'repo:api', follow: [], designSources: [] })).toBeNull();
+    expect(queueForVmBlocker({ target: 'repo:api', follow: ['ac2'], designSources: ['d1'], ...one })).toBeNull();
+    expect(queueForVmBlocker({ target: 'repo:api', follow: [], designSources: [], ...one })).toBeNull();
+  });
+
+  it('plan workspace tidak boleh diantre ke satu repo atau repo lain', () => {
+    const q = { target: 'repo:web', follow: [], designSources: [], laptopRepos: ['web', 'api'] };
+    expect(queueForVmBlocker({ ...q, targetRepos: ['web'] })).toBe(
+      'This plan covers web, api. Pick a VM target with the same repos.'
+    );
+    expect(queueForVmBlocker({ ...q, target: 'ws:x', targetRepos: ['api', 'web'] })).toBeNull();
+    expect(queueForVmBlocker({ ...q, laptopRepos: ['web'], target: 'ws:x', targetRepos: ['web', 'api'] })).toBe(
+      'This plan covers web. Pick a VM target with the same repos.'
+    );
+  });
+
+  it('target VM bawaan mengikuti repo run laptop', () => {
+    const vm = {
+      repos: [{ id: 'web' }, { id: 'api' }],
+      workspaces: [
+        { id: 'lain', repo_ids: ['web'] },
+        { id: 'smoke', repo_ids: ['api', 'web', 'docs'] }
+      ]
+    };
+    expect(defaultVmTarget(['web'], null, vm)).toBe('repo:web');
+    expect(defaultVmTarget(['tidak-ada'], null, vm)).toBe('');
+    expect(defaultVmTarget(['web', 'api'], 'work-smoke', vm)).toBe('ws:smoke');
+    expect(defaultVmTarget(['web', 'api'], 'lain', vm)).toBe('ws:smoke');
+    expect(defaultVmTarget(['web', 'gone'], 'x', vm)).toBe('');
+    expect(vmTargetRepos('repo:web', ['web', 'api'], vm.workspaces)).toEqual(['web']);
+    expect(vmTargetRepos('ws:smoke', ['web', 'api'], vm.workspaces)).toEqual(['api', 'web']);
+    expect(vmTargetRepos('ws:smoke', ['web'], vm.workspaces)).toEqual(['web']);
+    expect(vmTargetRepos('ws:gone', ['web'], vm.workspaces)).toEqual([]);
   });
 
   it('teks langkah serah-terima', () => {

@@ -24,6 +24,9 @@ pub struct PlannedWork {
     pub design: Vec<DesignMark>,
     /// Sumber desain laptop saat plan disusun; dipulihkan saat Take over.
     pub laptop_design: Vec<String>,
+    /// Repo run laptop: satu repo, atau anggota workspace. Kosong untuk paket
+    /// dari laptop versi lama.
+    pub repos: Vec<String>,
 }
 
 impl PlannedWork {
@@ -31,6 +34,23 @@ impl PlannedWork {
     #[must_use]
     pub fn follows_design(&self) -> bool {
         self.design.iter().any(|d| d.design == Design::FollowDesign)
+    }
+
+    /// `true` bila target VM mengerjakan repo yang sama dengan run laptop,
+    /// urutan diabaikan; plan workspace tidak boleh jatuh ke satu repo. Paket
+    /// tanpa daftar repo selalu cocok.
+    #[must_use]
+    pub fn same_repos(&self, target: &[String]) -> bool {
+        if self.repos.is_empty() {
+            return true;
+        }
+        let set = |v: &[String]| {
+            let mut v = v.to_vec();
+            v.sort();
+            v.dedup();
+            v
+        };
+        set(&self.repos) == set(target)
     }
 }
 
@@ -330,9 +350,30 @@ mod tests {
                 note: None,
             }],
             laptop_design: Vec::new(),
+            repos: Vec::new(),
         };
         assert!(!work.follows_design());
         work.design[0].design = Design::FollowDesign;
         assert!(work.follows_design());
+    }
+
+    #[test]
+    fn target_vm_harus_mengerjakan_repo_yang_sama_dengan_run_laptop() {
+        let ids = |v: &[&str]| v.iter().map(|s| (*s).to_owned()).collect::<Vec<_>>();
+        let mut work = PlannedWork {
+            plan: "p".to_owned(),
+            branch: "b".to_owned(),
+            design: Vec::new(),
+            laptop_design: Vec::new(),
+            repos: ids(&["web", "api"]),
+        };
+        assert!(work.same_repos(&ids(&["api", "web"])), "urutan diabaikan");
+        assert!(!work.same_repos(&ids(&["web"])), "workspace ke satu repo");
+        assert!(!work.same_repos(&ids(&["web", "api", "docs"])));
+        work.repos = ids(&["web"]);
+        assert!(work.same_repos(&ids(&["web"])));
+        assert!(!work.same_repos(&ids(&["web", "api"])));
+        work.repos.clear();
+        assert!(work.same_repos(&ids(&["apa", "saja"])), "paket laptop lama");
     }
 }

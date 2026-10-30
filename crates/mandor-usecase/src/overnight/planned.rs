@@ -149,6 +149,12 @@ impl<D: Deps> RunService<D> {
                 work.branch
             )));
         }
+        if !work.same_repos(&target.repo_ids()) {
+            return Err(rejected(format!(
+                "this plan covers {}; queue it to a VM target with the same repos",
+                work.repos.join(", ")
+            )));
+        }
         if work.follows_design() && design_sources.is_empty() {
             return Err(rejected(
                 "pick a design source on the VM: the plan follows the design for some acceptance criteria",

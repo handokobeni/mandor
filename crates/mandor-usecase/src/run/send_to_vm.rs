@@ -85,6 +85,7 @@ impl<D: Deps> RunService<D> {
         }
 
         let task = self.task_of(&run.record_id).await?;
+        let target = target_of(&run);
         let message = format!(
             "{}: approved plan",
             task.key.as_deref().unwrap_or(&run.record_id)
@@ -109,8 +110,9 @@ impl<D: Deps> RunService<D> {
                     })
                     .collect(),
                 laptop_design: run.design.iter().map(|d| d.id.clone()).collect(),
+                repos: target.repo_ids(),
             },
-            target: target_of(&run),
+            target,
         })
     }
 

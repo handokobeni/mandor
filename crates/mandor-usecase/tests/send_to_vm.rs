@@ -142,6 +142,7 @@ async fn covers_ae1_plan_di_commit_dan_push_lalu_paket_berisi_plan_dan_follow_de
     assert_eq!(git.pushes.len(), 1);
     drop(git);
     assert_eq!(out.target, repo1());
+    assert_eq!(out.work.repos, ["repo1"]);
     assert_eq!(out.work.plan, PLAN);
     assert_eq!(Some(out.work.branch.clone()), st.runs.only().branch);
     assert_eq!(out.work.laptop_design, ["ds1"]);
@@ -184,6 +185,11 @@ async fn run_workspace_semua_anggota_di_push() {
 
     let out = st.svc.prepare_for_vm(&run, &[]).await.unwrap();
     assert_eq!(out.target, target);
+    assert_eq!(
+        out.work.repos,
+        ["api", "web"],
+        "paket membawa anggota workspace"
+    );
     assert_eq!(
         st.git.st().pushes.len(),
         2,

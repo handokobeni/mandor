@@ -62,6 +62,9 @@ struct PlannedJson {
     branch: String,
     design: Vec<DesignMarkJson>,
     laptop_design: Vec<String>,
+    /// Tidak ada pada baris dari versi sebelum daftar repo dibawa.
+    #[serde(default)]
+    repos: Vec<String>,
 }
 
 impl From<&PlannedWork> for PlannedJson {
@@ -79,6 +82,7 @@ impl From<&PlannedWork> for PlannedJson {
                 })
                 .collect(),
             laptop_design: w.laptop_design.clone(),
+            repos: w.repos.clone(),
         }
     }
 }
@@ -102,6 +106,7 @@ impl TryFrom<PlannedJson> for PlannedWork {
             branch: j.branch,
             design,
             laptop_design: j.laptop_design,
+            repos: j.repos,
         })
     }
 }

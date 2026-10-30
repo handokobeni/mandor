@@ -561,7 +561,7 @@
           {rpc}
           runId={run.id}
           recordId={run.record_id}
-          repoId={run.repo_id}
+          repoIds={run.repos.map((r) => r.repo_id)}
           workspaceId={run.workspace_id}
           {follow}
           laptopSources={ledger.ledger?.design_sources ?? []}

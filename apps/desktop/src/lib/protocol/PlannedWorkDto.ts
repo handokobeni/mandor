@@ -8,4 +8,9 @@ export type PlannedWorkDto = { plan: string, branch: string, design: Array<Desig
 /**
  * Sumber desain laptop saat plan disusun (id laptop).
  */
-laptop_design: Array<string>, };
+laptop_design: Array<string>, 
+/**
+ * Repo run laptop: satu repo, atau anggota workspace. VM menolak target
+ * dengan repo berbeda; kosong dari laptop versi lama.
+ */
+repos: Array<string>, };

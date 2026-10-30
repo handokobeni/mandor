@@ -10,7 +10,7 @@
   import { Button } from '#lib/components/ui/button/index.ts';
   import * as Popover from '#lib/components/ui/popover/index.ts';
   import * as Select from '#lib/components/ui/select/index.ts';
-  import { queueForVmBlocker, queueStepLabel } from '#lib/overnight.ts';
+  import { defaultVmTarget, queueForVmBlocker, queueStepLabel, vmTargetRepos } from '#lib/overnight.ts';
   import type { Rpc } from '#lib/rpc.ts';
   import { background } from '#lib/stores/background.svelte.ts';
   import { nav } from '#lib/stores/nav.svelte.ts';
@@ -21,7 +21,7 @@
     runId: string;
     recordId: string;
     /** Target run laptop: repo, atau workspace dengan anggotanya. */
-    repoId: string;
+    repoIds: string[];
     workspaceId: string | null;
     follow: string[];
     /** Nama sumber desain laptop yang dipakai saat plan disusun. */
@@ -29,21 +29,24 @@
     disabled: boolean;
     ondone: () => void;
   }
-  let { rpc, runId, recordId, repoId, workspaceId, follow, laptopSources, disabled, ondone }: Props = $props();
+  let { rpc, runId, recordId, repoIds, workspaceId, follow, laptopSources, disabled, ondone }: Props = $props();
 
   let open = $state(false);
   let target = $state('');
   let design = $state<string[]>([]);
   let step = $state<QueueStep | null>(null);
 
-  // Target VM bawaan: id yang sama dengan target laptop.
+  // Target VM bawaan: repo yang sama, atau workspace VM yang memuat semua
+  // repo run workspace laptop.
   $effect(() => {
     if (!open || target) return;
-    if (workspaceId && overnight.workspaces.some((w) => w.id === workspaceId)) target = `ws:${workspaceId}`;
-    else if (overnight.repos.some((r) => r.id === repoId)) target = `repo:${repoId}`;
+    target = defaultVmTarget(repoIds, workspaceId, overnight);
   });
 
-  const blocker = $derived(queueForVmBlocker({ target: target || null, follow, designSources: design }));
+  const targetRepos = $derived(vmTargetRepos(target, repoIds, overnight.workspaces));
+  const blocker = $derived(
+    queueForVmBlocker({ target: target || null, follow, designSources: design, laptopRepos: repoIds, targetRepos })
+  );
   const targetText = $derived.by(() => {
     if (target.startsWith('repo:')) return target.slice(5);
     const ws = overnight.workspaces.find((w) => `ws:${w.id}` === target);
@@ -53,7 +56,7 @@
   function targetOf(value: string): QueueTarget | null {
     if (value.startsWith('repo:')) return { repo_id: value.slice(5) };
     const ws = overnight.workspaces.find((w) => `ws:${w.id}` === value);
-    return ws ? { workspace: { id: ws.id, repo_ids: ws.repo_ids } } : null;
+    return ws ? { workspace: { id: ws.id, repo_ids: vmTargetRepos(value, repoIds, overnight.workspaces) } } : null;
   }
 
   async function queue(): Promise<void> {

@@ -240,6 +240,7 @@ fn package() -> PlannedWork {
             note: Some("Header beda".to_owned()),
         }],
         laptop_design: vec!["ds1".to_owned(), "old-mock".to_owned()],
+        repos: vec!["repo1".to_owned()],
     }
 }
 

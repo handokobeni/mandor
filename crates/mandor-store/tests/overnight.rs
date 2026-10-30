@@ -48,6 +48,7 @@ fn planned(id: &str, at: i64) -> QueueItem {
                 },
             ],
             laptop_design: vec!["lap1".to_owned()],
+            repos: vec!["web".to_owned(), "api".to_owned()],
         },
         state: PlannedState::HandoverPending,
         origin_daemon: Some("laptop".to_owned()),

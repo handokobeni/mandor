@@ -23,6 +23,7 @@ Plan: `docs/plans/2026-10-30-001-feat-vm-planned-queue-plan.md`. Branch: `feat/v
 - Pesan desain untuk giliran implementasi memakai `design_reference_message` (acuan tampilan), bukan `design_message` tahap plan yang meminta mengisi kolom Design lewat tool ledger. Dipakai untuk plan yang disetujui (VM dan setelah Take over) dan Start tanpa plan di VM. Start Skip di laptop tidak berubah (desain hanya untuk reviewer).
 - `takeover` menerima `PlannedWork` langsung dan me-resolve sumber desain laptop lewat port `DesignSources`; sumber yang hilang dicatat di chat run.
 - Folder desain hanya di-pull bila `.git` dimiliki user yang sama dengan `~/.mandor` daemon.
+- Temuan uji langsung AE9 (2026-10-30): id workspace laptop (`work-smoke`) dan VM (`mandor-smoke-test`) berbeda, popover diam-diam memilih repo `mandor-smoke` dan VM menjalankan plan workspace sebagai satu repo. Perbaikan: paket plan membawa `repos` run laptop; VM menolak target dengan repo berbeda ("this plan covers …; queue it to a VM target with the same repos"); popover memilih workspace VM yang memuat semua repo run (id boleh beda) dan memblok target yang tidak cocok. Paket dari laptop lama (tanpa `repos`) tetap diterima.
 
 ## Uji langsung (U8)
 
@@ -30,13 +31,13 @@ Menunggu biner baru dipasang di VM oleh pemilik produk. Kartu uji di Base salina
 
 | AE | Skenario | Hasil |
 |---|---|---|
-| AE1 | Approve & queue for VM, VM mulai dari plan malam hari | |
-| AE2 | VM menolak antrean, run laptop tetap | |
-| AE3 | Take over kartu Planned siang hari, approve di laptop | |
+| AE1 | Approve & queue for VM, VM mulai dari plan malam hari | Lulus 2026-10-30 (PGS-1535, dalam jendela 22:00–00:00): branch ter-push, klaim `~handoko_ben-vm`, run laptop ditutup; VM langsung "Started: implement the approved plan." tanpa giliran plan, agent membuka `/srv/mandor/handoko_ben/design/mandor-smoke-design/kata`, selesai dengan draft PR mandor-smoke#17. PGS-1536 juga dimulai dari plan. |
+| AE2 | VM menolak antrean, run laptop tetap | Lulus 2026-10-30 (PGS-1533): folder desain VM disembunyikan setelah popover dibuka → "rejected: Design source "mandor-smoke-design" is not available: Path missing"; run tetap `awaiting_dev`, klaim tetap `~handokobeni-laptop`. Branch sudah ter-push oleh langkah 1 (tanpa commit baru, sama dengan main), sesuai KTD. Catatan: mematikan service VM tidak mensimulasikan VM mati karena `mandord connect` menyalakan daemon lagi; percobaan itu (PGS-1535) justru antre sukses. |
+| AE3 | Take over kartu Planned siang hari, approve di laptop | Lulus 2026-10-30 (PGS-1537, di luar jendela): Take over to laptop → antrean VM kosong, klaim kembali `~handokobeni-laptop`; run laptop baru membawa plan identik (hash sama dengan run lama); "Plan approved; implement it" langsung implement dan membaca desain `pace/`. |
 | AE4 | Klaim Planned tetap segar 6 jam | |
-| AE5 | Desain repo git di-pull dan dikirim ke agent | |
-| AE6 | Pull gagal, kartu tetap jalan, dicatat | |
-| AE7 | Folder desain hilang, Planned ditahan, Take over | |
-| AE8 | Follow design tanpa desain VM: Queue nonaktif | |
+| AE5 | Desain repo git di-pull dan dikirim ke agent | Lulus 2026-10-30 (PGS-1539, No plan): commit "Desain bensin v2" di-push; VM fast-forward pukul 16:03:22 UTC, run dimulai 16:03:29 UTC (7 detik kemudian); agent langsung membuka `/srv/mandor/handoko_ben/design/mandor-smoke-design/bensin`. |
+| AE6 | Pull gagal, kartu tetap jalan, dicatat | Lulus 2026-10-30 (PGS-1540, No plan): remote desain VM diarahkan ke repo yang tidak ada; kartu tetap dimulai dengan salinan lama; run mencatat "Design mandor-smoke-design not updated: fetch failed: remote: Repository not found. fatal: repository <remote> not found" (URL disamarkan). Teks di laporan pagi dicek setelah laporan terbit. |
+| AE7 | Folder desain hilang, Planned ditahan, Take over | Lulus 2026-10-30 (PGS-1541): folder desain VM diganti nama, Start now → item `held` dengan alasan "Design source "mandor-smoke-design" is not available: Path missing", tidak ada run VM, klaim tetap `~handoko_ben-vm`; Take over → antrean kosong, klaim `~handokobeni-laptop`, run laptop baru `awaiting_dev` dengan plan identik (hash sama). |
+| AE8 | Follow design tanpa desain VM: Queue nonaktif | Lulus 2026-10-30 (PGS-1533): AC-4 Follow design, sumber desain VM tidak dipilih, Queue nonaktif dengan "Some AC follow the design. Pick a design source on the VM." |
 | AE9 | Take over kartu workspace | |
-| AE10 | Berkas liar menahan pengiriman | |
+| AE10 | Berkas liar menahan pengiriman | Lulus 2026-10-30 (PGS-1534): `notes.txt` tak di-ignore → "Commit or remove these new files before queueing for the VM: notes.txt"; branch tidak ada di remote, tidak ada commit baru, run tetap `awaiting_dev` |

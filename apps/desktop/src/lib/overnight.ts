@@ -154,10 +154,51 @@ export function designPickerLabel(sources: Pick<DesignSourceView, 'id' | 'name'>
 }
 
 /** Alasan tombol "Queue" untuk kartu Planned dinonaktifkan; `null` bila boleh (R11). */
-export function queueForVmBlocker(q: { target: string | null; follow: string[]; designSources: string[] }): string | null {
+export function queueForVmBlocker(q: {
+  target: string | null;
+  follow: string[];
+  designSources: string[];
+  laptopRepos: string[];
+  targetRepos: string[];
+}): string | null {
   if (!q.target) return 'Choose a repo on the VM';
+  if (!sameRepos(q.laptopRepos, q.targetRepos)) {
+    return `This plan covers ${q.laptopRepos.join(', ')}. Pick a VM target with the same repos.`;
+  }
   if (q.follow.length > 0 && q.designSources.length === 0) return 'Some AC follow the design. Pick a design source on the VM.';
   return null;
+}
+
+function sameRepos(a: string[], b: string[]): boolean {
+  const set = (v: string[]) => [...new Set(v)].sort().join('\n');
+  return set(a) === set(b);
+}
+
+interface VmTargets {
+  repos: { id: string }[];
+  workspaces: { id: string; repo_ids: string[] }[];
+}
+
+/**
+ * Target VM bawaan untuk run laptop: repo yang sama, atau workspace VM yang
+ * memuat semua repo run workspace (id workspace boleh berbeda). `''` bila
+ * tidak ada yang cocok, agar dev memilih sendiri.
+ */
+export function defaultVmTarget(laptopRepos: string[], workspaceId: string | null, vm: VmTargets): string {
+  if (laptopRepos.length > 1 || workspaceId) {
+    const fits = vm.workspaces.filter((w) => laptopRepos.every((r) => w.repo_ids.includes(r)));
+    const ws = fits.find((w) => w.id === workspaceId) ?? fits[0];
+    return ws ? `ws:${ws.id}` : '';
+  }
+  const repo = laptopRepos[0];
+  return repo && vm.repos.some((r) => r.id === repo) ? `repo:${repo}` : '';
+}
+
+/** Repo yang dikerjakan target VM: anggota workspace yang juga ada di run laptop. */
+export function vmTargetRepos(value: string, laptopRepos: string[], workspaces: VmTargets['workspaces']): string[] {
+  if (value.startsWith('repo:')) return [value.slice(5)];
+  const ws = workspaces.find((w) => `ws:${w.id}` === value);
+  return ws ? ws.repo_ids.filter((r) => laptopRepos.includes(r)) : [];
 }
 
 /** Teks progres "Approve and queue for VM". */

@@ -257,11 +257,18 @@ impl<D: Deps> RunService<D> {
         let rows = follow_design_rows(self.reviews.ac_rows(run_id).await?, follow_design)?;
         let followed: Vec<String> = rows
             .iter()
-            .filter(|r| follow_design.contains(&r.ac_id))
+            .filter(|r| r.design == Design::FollowDesign)
             .map(|r| format!("{}: {}", r.display_label(), r.text))
             .collect();
         run.phase = RunPhase::Implement;
-        let message = self.prompts.approve_message(&followed);
+        let message = if run.session_started {
+            self.prompts.approve_message(&followed)
+        } else {
+            // Run hasil Take over: sesi baru belum pernah melihat plan-nya.
+            self.reviews.save_ac_rows(run_id, &rows).await?;
+            let plan = run.plan.clone().unwrap_or_default();
+            self.approved_plan_turn(&run, &plan).await?
+        };
         let req = self.resume_request(&mut run, message).await?;
         self.spawn_turn(
             &mut run,

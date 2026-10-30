@@ -8,9 +8,11 @@ use std::path::PathBuf;
 use std::sync::atomic::Ordering;
 
 use common::{FakeClock, FakeLark, Station, ready_task, station, vm_station};
-use mandor_domain::{Claim, RunState, TaskStatus};
-use mandor_usecase::StartTarget;
-use mandor_usecase::run_ports::{RunRecord, WorkChanges};
+use mandor_domain::planned::{DesignMark, PlannedWork};
+use mandor_domain::{Claim, Design, RunState, TaskStatus};
+use mandor_usecase::review::DesignRoot;
+use mandor_usecase::run_ports::{RepoInfo, RunPhase, RunRecord, WorkChanges, WorkspaceInfo};
+use mandor_usecase::{AcItem, StartTarget, TakeoverPlan};
 use pretty_assertions::assert_eq;
 
 const NOW: i64 = 1_792_800_000_000;
@@ -83,7 +85,11 @@ async fn covers_ae11_kerja_malam_di_push_klaim_pindah_dan_laptop_melanjutkan() {
     );
 
     laptop.svc.sync().poll(true, &[]).await.unwrap();
-    let run = laptop.svc.takeover("a", "repo1").await.unwrap();
+    let run = laptop
+        .svc
+        .takeover("a", &StartTarget::Repo("repo1".to_owned()), None)
+        .await
+        .unwrap();
     assert_eq!(run.state, RunState::AwaitingDev);
     assert_eq!(run.branch.as_deref(), Some(BRANCH));
     assert_eq!(laptop.git.st().restored, [BRANCH]);
@@ -140,4 +146,163 @@ async fn kartu_yang_dipegang_daemon_lain_atau_di_laptop_ditolak() {
         laptop.svc.handoff("a", "local").await.is_err(),
         "serah-terima hanya dari daemon VM"
     );
+}
+
+/// Kartu `a` sudah diserahkan VM ke daemon laptop (`local`).
+fn handed_to_laptop() -> (FakeLark, FakeClock, Station) {
+    let lark = FakeLark::default();
+    let clock = FakeClock::default();
+    clock.set(NOW);
+    lark.clock.store(NOW, Ordering::SeqCst);
+    let mut t = ready_task("a", &["ou_me"]);
+    t.key = Some("PGS-9".to_owned());
+    "Job".clone_into(&mut t.title);
+    t.status = TaskStatus::InProgress;
+    t.branch = Some(BRANCH.to_owned());
+    t.ac_ids = vec!["ac1".to_owned(), "ac2".to_owned()];
+    t.claim = Some(Claim {
+        open_id: "ou_me".to_owned(),
+        ts_ms: NOW,
+        nonce: "r~local".to_owned(),
+    });
+    lark.put(t);
+    for id in ["ac1", "ac2"] {
+        lark.acs.lock().unwrap().insert(
+            id.to_owned(),
+            AcItem {
+                record_id: id.to_owned(),
+                label: Some(format!("AC-{id}")),
+                text: format!("teks {id}"),
+                ..Default::default()
+            },
+        );
+    }
+    let laptop = station(&lark, &clock, "ou_me");
+    (lark, clock, laptop)
+}
+
+fn repo(id: &str) -> RepoInfo {
+    RepoInfo {
+        id: id.to_owned(),
+        path: PathBuf::from(format!("/src/{id}")),
+        default_branch: "main".to_owned(),
+        gh_profile: None,
+        companions: vec![],
+        trusted_reviewers: vec![],
+        extra_allowed: vec![],
+        app: mandor_domain::app_run::AppSettings::default(),
+        gate_mode: None,
+    }
+}
+
+#[tokio::test]
+async fn covers_ae9_take_over_workspace_memulihkan_folder_run_dan_semua_anggota() {
+    let (_lark, _clock, laptop) = handed_to_laptop();
+    laptop.repos.add(repo("api"));
+    laptop.repos.add(repo("web"));
+    laptop.repos.add_workspace(WorkspaceInfo {
+        id: "kelola".to_owned(),
+        name: "kelola".to_owned(),
+        root: PathBuf::from("/src/kelola"),
+        repo_ids: vec!["api".to_owned(), "web".to_owned()],
+        mcp_servers: vec![],
+        browser_tests: false,
+        gate_mode: None,
+    });
+    laptop.svc.sync().poll(true, &[]).await.unwrap();
+    let target = StartTarget::Workspace {
+        id: "kelola".to_owned(),
+        repo_ids: vec!["api".to_owned(), "web".to_owned()],
+    };
+    let run = laptop.svc.takeover("a", &target, None).await.unwrap();
+
+    assert_eq!(run.state, RunState::AwaitingDev);
+    assert_eq!(laptop.git.st().restored, [BRANCH, BRANCH]);
+    assert_eq!(run.repo_id, "api");
+    let ws = run.workspace.clone().unwrap();
+    assert_eq!(ws.id, "kelola");
+    assert_eq!(
+        run.worktree.as_deref().unwrap().parent(),
+        Some(ws.root.as_path())
+    );
+    assert_eq!(run.extra.len(), 1);
+    assert_eq!(run.extra[0].repo_id, "web");
+}
+
+fn package() -> TakeoverPlan {
+    TakeoverPlan {
+        work: PlannedWork {
+            plan: "## Plan\n1. Ubah".to_owned(),
+            branch: BRANCH.to_owned(),
+            design: vec![DesignMark {
+                ac_id: "ac2".to_owned(),
+                design: Design::FollowDesign,
+                note: Some("Header beda".to_owned()),
+            }],
+            laptop_design: vec!["ds1".to_owned(), "hilang".to_owned()],
+        },
+        design: vec![DesignRoot {
+            id: "ds1".to_owned(),
+            name: "kelola-mock".to_owned(),
+            path: "/design/kelola-mock".into(),
+        }],
+        missing_design: vec!["old-mock".to_owned()],
+    }
+}
+
+#[tokio::test]
+async fn covers_ae3_take_over_dengan_paket_kembali_ke_plan_dan_approve_mengirim_plan() {
+    let (_lark, _clock, laptop) = handed_to_laptop();
+    laptop.svc.sync().poll(true, &[]).await.unwrap();
+    let run = laptop
+        .svc
+        .takeover(
+            "a",
+            &StartTarget::Repo("repo1".to_owned()),
+            Some(&package()),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(
+        (run.state, run.phase),
+        (RunState::AwaitingDev, RunPhase::Plan)
+    );
+    assert_eq!(run.plan.as_deref(), Some("## Plan\n1. Ubah"));
+    assert_eq!(run.design.len(), 1);
+    let rows = laptop.svc.ledger(&run.id).await.unwrap();
+    assert_eq!(rows.len(), 2, "buku AC diisi dari Lark");
+    assert_eq!(rows[1].design, Design::FollowDesign);
+    assert_eq!(rows[1].design_note.as_deref(), Some("Header beda"));
+    assert!(
+        laptop
+            .runs
+            .system_messages()
+            .iter()
+            .any(|m| m.contains("old-mock")),
+        "sumber desain yang hilang dicatat"
+    );
+
+    laptop.svc.approve_plan(&run.id, &[]).await.unwrap();
+    let req = laptop.agent.last().req;
+    assert!(
+        req.message.starts_with("IMPLEMENT PLAN Job"),
+        "{}",
+        req.message
+    );
+    assert!(req.message.contains("PLAN:## Plan"));
+    assert!(
+        req.message.contains("FOLLOW:AC-ac2: teks ac2"),
+        "{}",
+        req.message
+    );
+    assert!(
+        req.message.contains("DESIGN kelola-mock"),
+        "{}",
+        req.message
+    );
+    assert!(matches!(
+        req.session,
+        mandor_usecase::run_ports::SessionRef::New(_)
+    ));
 }

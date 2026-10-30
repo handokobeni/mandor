@@ -38,6 +38,18 @@ pub enum Planning {
     },
 }
 
+/// Teks AC yang masih berlaku, dengan label, untuk pesan agent.
+pub(super) fn ac_texts(items: &[crate::AcItem]) -> Vec<String> {
+    items
+        .iter()
+        .filter(|ac| !ac.dropped)
+        .map(|ac| match &ac.label {
+            Some(l) => format!("{l}: {}", ac.text),
+            None => ac.text.clone(),
+        })
+        .collect()
+}
+
 /// Ringkasan Start untuk chat dev. Prompt lengkap (dengan blok data Lark)
 /// hanya dikirim ke agent.
 pub(super) fn start_summary(planning: &Planning, dev_note: Option<&str>) -> String {
@@ -216,14 +228,7 @@ impl<D: Deps> RunService<D> {
     ) -> Result<RunRecord, RunError> {
         let task = self.task_of(record_id).await?;
         let ac_items = self.sync.lark.acceptance_criteria(&task.ac_ids).await?;
-        let acs: Vec<String> = ac_items
-            .iter()
-            .filter(|ac| !ac.dropped)
-            .map(|ac| match &ac.label {
-                Some(l) => format!("{l}: {}", ac.text),
-                None => ac.text.clone(),
-            })
-            .collect();
+        let acs = ac_texts(&ac_items);
         let branch = branch_name(task.key.as_deref(), &task.record_id, &task.title);
         progress(StartStep::CreatingWorktree);
         let group = plan.workspace.as_ref().map(|w| group_name(&w.id, &branch));

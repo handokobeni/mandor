@@ -4,10 +4,13 @@ use std::sync::Arc;
 
 use mandor_domain::{ClaimLoss, RunState};
 
-use super::{RunError, RunService};
+use super::members::group_name;
+use super::{RunError, RunService, StartTarget, TakeoverPlan};
 use crate::notify::notice;
 use crate::ports::{Deps, Ids};
-use crate::run_ports::{GitPort, NoticeKind, Notifier, Repos, RunRecord, RunStore};
+use crate::run_ports::{
+    ChatItem, GitPort, NoticeKind, Notifier, RunMember, RunPhase, RunRecord, RunStore, RunWorkspace,
+};
 use crate::sync::Heartbeat;
 
 impl<D: Deps> RunService<D> {
@@ -120,36 +123,79 @@ impl<D: Deps> RunService<D> {
         Ok(())
     }
 
-    /// "Ambil alih" task yang klaimnya tidak aktif 30 menit: klaim dengan baca
-    /// ulang, lalu run baru dari branch task (worktree dipulihkan).
+    /// "Ambil alih" task yang klaimnya tidak aktif 30 menit atau diserahkan
+    /// VM: klaim dengan baca ulang, lalu run baru dari branch task. Run
+    /// workspace memulihkan folder run dan worktree tiap anggota. Dengan paket
+    /// plan (KTD-12), run kembali menunggu persetujuan plan.
     ///
     /// # Errors
-    /// Klaim masih aktif, kalah klaim, atau git gagal.
+    /// Klaim masih aktif, kalah klaim, target tidak valid, atau git gagal.
     pub async fn takeover(
         self: &Arc<Self>,
         record_id: &str,
-        repo_id: &str,
+        target: &StartTarget,
+        planned: Option<&TakeoverPlan>,
     ) -> Result<RunRecord, RunError> {
         let _work = self.enter_work()?;
         self.sync.claim(record_id, true).await?;
         let task = self.task_of(record_id).await?;
-        let repo = self
-            .repos
-            .repo(repo_id)
-            .await?
-            .ok_or(RunError::NotFound("repo"))?;
-        let branch = task
-            .branch
-            .clone()
+        let branch = planned
+            .map(|p| p.work.branch.clone())
+            .or_else(|| task.branch.clone())
             .ok_or(RunError::InvalidState("no branch"))?;
-        let worktree = self.git.restore_worktree(&repo, &branch, None).await?;
-        let mut run = RunRecord::new(self.sync.ids.nonce(), repo.id.clone(), record_id.to_owned());
+        let plan = self.resolve(target).await?;
+        let group = plan.workspace.as_ref().map(|w| group_name(&w.id, &branch));
+        let mut restored = Vec::with_capacity(plan.repos.len());
+        for repo in &plan.repos {
+            let wt = self
+                .git
+                .restore_worktree(repo, &branch, group.as_deref())
+                .await?;
+            restored.push((repo.id.clone(), wt));
+        }
+        let Some((primary_repo, primary_wt)) = restored.first().cloned() else {
+            return Err(RunError::InvalidState("no repo selected"));
+        };
+        let mut run = RunRecord::new(self.sync.ids.nonce(), primary_repo, record_id.to_owned());
         run.state = RunState::AwaitingDev;
         run.branch = Some(branch);
-        run.worktree = Some(worktree);
+        if let (Some(ws), Some(root)) = (&plan.workspace, primary_wt.parent()) {
+            run.workspace = Some(RunWorkspace {
+                id: ws.id.clone(),
+                root: root.to_path_buf(),
+            });
+            run.extra = restored[1..]
+                .iter()
+                .map(|(repo_id, wt)| RunMember {
+                    repo_id: repo_id.clone(),
+                    worktree: wt.clone(),
+                    pr_url: None,
+                })
+                .collect();
+        }
+        run.worktree = Some(primary_wt);
         run.session_id = Some(self.sync.ids.nonce());
         run.pr_url.clone_from(&task.pr_url);
-        self.runs.create(&run, self.now()).await?;
+        if let Some(p) = planned {
+            run.phase = RunPhase::Plan;
+            run.plan = Some(p.work.plan.clone());
+            run.design.clone_from(&p.design);
+        }
+        let now = self.now();
+        self.runs.create(&run, now).await?;
+        if let Some(p) = planned {
+            self.seed_planned_ledger(&run.id, &task, &p.work.design)
+                .await?;
+            if !p.missing_design.is_empty() {
+                let note = format!(
+                    "Design sources no longer on this laptop: {}",
+                    p.missing_design.join(", ")
+                );
+                self.runs
+                    .append(&run.id, &ChatItem::System(note), now)
+                    .await?;
+            }
+        }
         Ok(run)
     }
 

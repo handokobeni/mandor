@@ -549,6 +549,21 @@ impl mandor_usecase::run_ports::Prompts for PlainMessage {
         }
     }
 
+    fn approved_plan_message(
+        &self,
+        task: &Task,
+        acs: &[String],
+        plan: &str,
+        follow_design: &[String],
+    ) -> String {
+        format!(
+            "IMPLEMENT PLAN {}\nAC:{}\nPLAN:{plan}\nFOLLOW:{}",
+            task.title,
+            acs.join("|"),
+            follow_design.join("|")
+        )
+    }
+
     fn brainstorm_message(
         &self,
         task: &Task,

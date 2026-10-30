@@ -709,6 +709,15 @@ pub trait Prompts: Send + Sync {
     /// Pesan setelah dev menyetujui plan: kerjakan plan itu. `follow_design`:
     /// teks AC (dengan label) yang mengikuti desain, bukan AC (R8a).
     fn approve_message(&self, follow_design: &[String]) -> String;
+    /// Pesan pertama sesi baru yang mengimplementasikan plan yang disetujui di
+    /// sesi lain: tugas, AC, plan, dan AC Follow design sebagai data.
+    fn approved_plan_message(
+        &self,
+        task: &Task,
+        acs: &[String],
+        plan: &str,
+        follow_design: &[String],
+    ) -> String;
     /// Pesan giliran brainstorm: baca kode, tanyakan hal yang belum jelas satu
     /// per satu, lalu ringkas requirements yang disepakati.
     fn brainstorm_message(

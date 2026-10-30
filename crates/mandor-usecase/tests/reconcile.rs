@@ -149,7 +149,15 @@ mod ownership {
             });
         });
         let st = station(&lark, &clock, "ou_me");
-        let run = st.svc.takeover("rec1", "repo1").await.unwrap();
+        let run = st
+            .svc
+            .takeover(
+                "rec1",
+                &mandor_usecase::StartTarget::Repo("repo1".to_owned()),
+                None,
+            )
+            .await
+            .unwrap();
         assert_eq!(run.state, RunState::AwaitingDev);
         assert_eq!(st.git.st().restored, ["mandor/rec1"]);
         assert_eq!(lark.get("rec1").unwrap().claim.unwrap().open_id, "ou_me");

@@ -848,7 +848,7 @@ impl AppDispatch {
             method::RUNS_TAKEOVER => {
                 let p: TakeoverParams = params(v)?;
                 let run = runs
-                    .takeover(&p.record_id, &p.repo_id)
+                    .takeover(&p.record_id, &StartTarget::Repo(p.repo_id.clone()), None)
                     .await
                     .map_err(run_error)?;
                 ok(&run_view(&run, None))

@@ -135,6 +135,12 @@ pub mod method {
     /// Serah-terima kartu VM ke daemon laptop (R22, KTD-63 plan VM); dipanggil
     /// ke daemon VM. `HandoffParams` → `HandoffResult`.
     pub const RUNS_HANDOFF: &str = "runs.handoff";
+    /// Laptop: commit dan push plan, kembalikan paket plan (plan 2026-10-30-001).
+    /// `PrepareForVmParams` → `VmHandoverView`.
+    pub const RUNS_PREPARE_FOR_VM: &str = "runs.prepare_for_vm";
+    /// Laptop: klaim ke daemon VM, tutup run (plan 2026-10-30-001).
+    /// `SendToVmParams` → `{}`; aman diulang.
+    pub const RUNS_SEND_TO_VM: &str = "runs.send_to_vm";
     /// Antrean VM dan kartu yang dikeluarkan siklus ini (R6 plan VM).
     /// `null` → `OvernightQueueView`.
     pub const OVERNIGHT_QUEUE_LIST: &str = "overnight.queue.list";
@@ -322,6 +328,18 @@ fn group_bindings() -> Result<Vec<(&'static str, String)>, String> {
         one("GroupCardRef.ts", GroupCardRef::export_to_string(&cfg))?,
         one("HandoffParams.ts", HandoffParams::export_to_string(&cfg))?,
         one("HandoffResult.ts", HandoffResult::export_to_string(&cfg))?,
+        one("DesignMarkDto.ts", DesignMarkDto::export_to_string(&cfg))?,
+        one("PlannedWorkDto.ts", PlannedWorkDto::export_to_string(&cfg))?,
+        one(
+            "PrepareForVmParams.ts",
+            PrepareForVmParams::export_to_string(&cfg),
+        )?,
+        one("VmHandoverView.ts", VmHandoverView::export_to_string(&cfg))?,
+        one("SendToVmParams.ts", SendToVmParams::export_to_string(&cfg))?,
+        one(
+            "HeldPlannedView.ts",
+            HeldPlannedView::export_to_string(&cfg),
+        )?,
         one(
             "OvernightQueueView.ts",
             OvernightQueueView::export_to_string(&cfg),

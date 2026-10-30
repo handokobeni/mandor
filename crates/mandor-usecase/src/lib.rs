@@ -17,7 +17,6 @@ pub use ports::{
     SprintItem, TaskCache,
 };
 pub use run::{
-    Planning, RunError, RunPorts, RunService, SendOutcome, StartStep, StartTarget, TakeoverPlan,
-    VmHandover,
+    Planning, RunError, RunPorts, RunService, SendOutcome, StartStep, StartTarget, VmHandover,
 };
 pub use sync::{DrainReport, Heartbeat, PollReport, SyncError, SyncService, TaskDetails};

@@ -58,6 +58,7 @@ function rc(over: Partial<ReportCardView>): ReportCardView {
     ac_fail: 0,
     ac_cant_verify: 0,
     entered_waiting_fix: false,
+    design_notes: [],
     ...over
   };
 }
@@ -125,7 +126,8 @@ describe('laporan pagi', () => {
       rc({ record_id: 'e', outcome: 'failed' })
     ],
     dequeued: [{ record_id: 'f', key: 'PGS-6', title: 'x', reason: 'the card moved to In Progress in Lark', at_ms: 2 }],
-    reviewed_without_fix: 1
+    reviewed_without_fix: 1,
+    planned_held: []
   };
 
   it('kartu dikelompokkan per hasil, ac_gate terpisah dari parkir lain', () => {

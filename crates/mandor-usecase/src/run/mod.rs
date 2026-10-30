@@ -10,7 +10,6 @@ mod ownership;
 mod publish;
 pub use publish::PublishOutcome;
 mod planned;
-pub use planned::TakeoverPlan;
 mod reconcile;
 mod send_to_vm;
 pub use send_to_vm::VmHandover;

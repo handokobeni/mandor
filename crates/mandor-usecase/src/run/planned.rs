@@ -17,15 +17,6 @@ use crate::run_ports::{
     GitPort, LedgerStore, Prompts, RepoInfo, RunMember, RunPhase, RunRecord, RunStore, RunWorkspace,
 };
 
-/// Paket plan untuk Take over ke laptop: sumber desain laptop yang masih ada
-/// sudah di-resolve oleh adapter; yang hilang hanya dicatat namanya.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct TakeoverPlan {
-    pub work: PlannedWork,
-    pub design: Vec<DesignRoot>,
-    pub missing_design: Vec<String>,
-}
-
 /// Ringkasan chat saat VM memulai kartu Planned.
 const START_SUMMARY: &str = "Started: implement the approved plan.";
 

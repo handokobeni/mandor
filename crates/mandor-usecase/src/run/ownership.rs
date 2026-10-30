@@ -4,9 +4,12 @@ use std::sync::Arc;
 
 use mandor_domain::{ClaimLoss, RunState};
 
-use super::{RunError, RunService, StartTarget, TakeoverPlan};
+use mandor_domain::planned::PlannedWork;
+
+use super::{RunError, RunService, StartTarget};
 use crate::notify::notice;
 use crate::ports::Deps;
+use crate::review::DesignSources as _;
 use crate::run_ports::{ChatItem, GitPort, NoticeKind, Notifier, RunPhase, RunRecord, RunStore};
 use crate::sync::Heartbeat;
 
@@ -135,31 +138,37 @@ impl<D: Deps> RunService<D> {
         self: &Arc<Self>,
         record_id: &str,
         target: &StartTarget,
-        planned: Option<&TakeoverPlan>,
+        planned: Option<&PlannedWork>,
     ) -> Result<RunRecord, RunError> {
         let _work = self.enter_work()?;
         self.sync.claim(record_id, true).await?;
         let task = self.task_of(record_id).await?;
         let branch = planned
-            .map(|p| p.work.branch.clone())
+            .map(|p| p.branch.clone())
             .or_else(|| task.branch.clone())
             .ok_or(RunError::InvalidState("no branch"))?;
         let (mut run, _) = self.restore_run(record_id, target, &branch).await?;
         run.pr_url.clone_from(&task.pr_url);
+        let mut missing = Vec::new();
         if let Some(p) = planned {
+            let check = self.design.prepare(&p.laptop_design, false).await?;
+            missing = check
+                .unavailable
+                .into_iter()
+                .map(|(name, _)| name)
+                .collect();
             run.phase = RunPhase::Plan;
-            run.plan = Some(p.work.plan.clone());
-            run.design.clone_from(&p.design);
+            run.plan = Some(p.plan.clone());
+            run.design = check.roots;
         }
         let now = self.now();
         self.runs.create(&run, now).await?;
         if let Some(p) = planned {
-            self.seed_planned_ledger(&run.id, &task, &p.work.design)
-                .await?;
-            if !p.missing_design.is_empty() {
+            self.seed_planned_ledger(&run.id, &task, &p.design).await?;
+            if !missing.is_empty() {
                 let note = format!(
                     "Design sources no longer on this laptop: {}",
-                    p.missing_design.join(", ")
+                    missing.join(", ")
                 );
                 self.runs
                     .append(&run.id, &ChatItem::System(note), now)

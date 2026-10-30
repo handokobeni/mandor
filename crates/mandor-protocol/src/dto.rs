@@ -441,11 +441,64 @@ pub struct SendResult {
     pub outcome: String,
 }
 
-/// Parameter `runs.takeover`.
+/// Parameter `runs.takeover`: satu repo, atau workspace bila diisi.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
 pub struct TakeoverParams {
     pub record_id: String,
     pub repo_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub workspace: Option<StartWorkspace>,
+    /// Plan kartu Planned yang dikembalikan VM; run kembali menunggu
+    /// persetujuan plan.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub planned: Option<PlannedWorkDto>,
+}
+
+/// Status Design satu AC hasil tahap plan.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+pub struct DesignMarkDto {
+    pub ac_id: String,
+    /// `not_checked`, `in_design`, `partly`, `missing`, `conflicts`, `follow_design`.
+    pub design: String,
+    pub note: Option<String>,
+}
+
+/// Plan yang disetujui di laptop dan dibawa ke VM.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+pub struct PlannedWorkDto {
+    pub plan: String,
+    pub branch: String,
+    pub design: Vec<DesignMarkDto>,
+    /// Sumber desain laptop saat plan disusun (id laptop).
+    pub laptop_design: Vec<String>,
+}
+
+/// Parameter `runs.prepare_for_vm`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+pub struct PrepareForVmParams {
+    pub run_id: String,
+    /// `ac_id` baris berselisih desain yang mengikuti desain (R8a).
+    #[serde(default)]
+    pub follow_design: Vec<String>,
+}
+
+/// Hasil `runs.prepare_for_vm`: paket plan dan target run laptop.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+pub struct VmHandoverView {
+    pub planned: PlannedWorkDto,
+    /// Target satu repo; `None` bila workspace.
+    pub repo_id: Option<String>,
+    pub workspace: Option<StartWorkspace>,
+}
+
+/// Parameter `runs.send_to_vm`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+pub struct SendToVmParams {
+    pub run_id: String,
+    /// Id daemon VM penerima klaim (dari `status` daemon VM).
+    pub vm_daemon_id: String,
 }
 
 /// Parameter `runs.start_fix` ("Mulai perbaikan").
@@ -1087,6 +1140,14 @@ pub struct HandoffParams {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
 pub struct HandoffResult {
     pub branch: String,
+    /// Target kartu di VM; `None` bila workspace.
+    #[serde(default)]
+    pub repo_id: Option<String>,
+    #[serde(default)]
+    pub workspace: Option<StartWorkspace>,
+    /// Plan kartu Planned yang belum dimulai VM.
+    #[serde(default)]
+    pub planned: Option<PlannedWorkDto>,
 }
 
 /// Satu kartu di antrean VM.
@@ -1105,6 +1166,13 @@ pub struct QueueItemView {
     pub added_at_ms: i64,
     /// Kartu tertahan yang diantre ulang (lanjut di branch yang sama).
     pub held: bool,
+    /// Kartu Planned: `handover_pending`, `waiting`, `starting`, `held`;
+    /// `None` = No plan.
+    pub planned_state: Option<String>,
+    /// Alasan item Planned ditahan.
+    pub planned_reason: Option<String>,
+    /// Nama sumber desain VM yang dipilih (id bila sudah dihapus).
+    pub design_sources: Vec<String>,
 }
 
 /// Kartu yang keluar dari antrean tanpa dikerjakan, beserta alasannya.
@@ -1135,6 +1203,18 @@ pub struct QueueAddParams {
     #[ts(optional)]
     pub workspace: Option<StartWorkspace>,
     pub note: Option<String>,
+    /// Id sumber desain VM.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub design_sources: Option<Vec<String>>,
+    /// Plan yang disetujui di laptop (kartu Planned).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub planned: Option<PlannedWorkDto>,
+    /// Id daemon laptop yang menyerahkan kartu Planned.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub origin_daemon: Option<String>,
 }
 
 /// Parameter `overnight.queue.reorder`.
@@ -1173,6 +1253,18 @@ pub struct ReportCardView {
     pub ac_fail: u32,
     pub ac_cant_verify: u32,
     pub entered_waiting_fix: bool,
+    /// Sumber desain yang gagal diperbarui saat kartu dimulai.
+    pub design_notes: Vec<String>,
+}
+
+/// Kartu Planned yang ditahan di antrean; plan dan klaimnya masih di VM.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+pub struct HeldPlannedView {
+    pub record_id: String,
+    pub key: Option<String>,
+    pub title: String,
+    pub repo_id: Option<String>,
+    pub reason: String,
 }
 
 /// Hasil `overnight.report` (R18).
@@ -1191,4 +1283,6 @@ pub struct OvernightReportView {
     pub dequeued: Vec<DequeuedView>,
     /// Kartu yang sampai Waiting Review tanpa pernah masuk Waiting Fix.
     pub reviewed_without_fix: u32,
+    /// Kartu Planned yang ditahan (R15 plan 2026-10-30-001).
+    pub planned_held: Vec<HeldPlannedView>,
 }

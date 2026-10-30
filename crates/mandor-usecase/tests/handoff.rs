@@ -10,9 +10,8 @@ use std::sync::atomic::Ordering;
 use common::{FakeClock, FakeLark, Station, ready_task, station, vm_station};
 use mandor_domain::planned::{DesignMark, PlannedWork};
 use mandor_domain::{Claim, Design, RunState, TaskStatus};
-use mandor_usecase::review::DesignRoot;
 use mandor_usecase::run_ports::{RepoInfo, RunPhase, RunRecord, WorkChanges, WorkspaceInfo};
-use mandor_usecase::{AcItem, StartTarget, TakeoverPlan};
+use mandor_usecase::{AcItem, StartTarget};
 use pretty_assertions::assert_eq;
 
 const NOW: i64 = 1_792_800_000_000;
@@ -231,30 +230,23 @@ async fn covers_ae9_take_over_workspace_memulihkan_folder_run_dan_semua_anggota(
     assert_eq!(run.extra[0].repo_id, "web");
 }
 
-fn package() -> TakeoverPlan {
-    TakeoverPlan {
-        work: PlannedWork {
-            plan: "## Plan\n1. Ubah".to_owned(),
-            branch: BRANCH.to_owned(),
-            design: vec![DesignMark {
-                ac_id: "ac2".to_owned(),
-                design: Design::FollowDesign,
-                note: Some("Header beda".to_owned()),
-            }],
-            laptop_design: vec!["ds1".to_owned(), "hilang".to_owned()],
-        },
-        design: vec![DesignRoot {
-            id: "ds1".to_owned(),
-            name: "kelola-mock".to_owned(),
-            path: "/design/kelola-mock".into(),
+fn package() -> PlannedWork {
+    PlannedWork {
+        plan: "## Plan\n1. Ubah".to_owned(),
+        branch: BRANCH.to_owned(),
+        design: vec![DesignMark {
+            ac_id: "ac2".to_owned(),
+            design: Design::FollowDesign,
+            note: Some("Header beda".to_owned()),
         }],
-        missing_design: vec!["old-mock".to_owned()],
+        laptop_design: vec!["ds1".to_owned(), "old-mock".to_owned()],
     }
 }
 
 #[tokio::test]
 async fn covers_ae3_take_over_dengan_paket_kembali_ke_plan_dan_approve_mengirim_plan() {
     let (_lark, _clock, laptop) = handed_to_laptop();
+    laptop.design.add("ds1", "kelola-mock");
     laptop.svc.sync().poll(true, &[]).await.unwrap();
     let run = laptop
         .svc

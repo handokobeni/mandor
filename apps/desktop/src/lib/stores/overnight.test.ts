@@ -71,7 +71,8 @@ const held: ReportCardView = {
   ac_pass: 0,
   ac_fail: 0,
   ac_cant_verify: 0,
-  entered_waiting_fix: false
+  entered_waiting_fix: false,
+  design_notes: []
 };
 
 async function attached(): Promise<[OvernightStore, FakeVm]> {

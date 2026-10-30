@@ -338,6 +338,60 @@ fn method_run_grup_dikenal_dan_butuh_sesi_lark() {
 }
 
 #[test]
+fn method_kirim_plan_ke_vm_dikenal_dan_butuh_sesi_lark() {
+    let home = tempfile::tempdir().unwrap();
+    let mut daemon = serve(home.path());
+    let token = wait_for_info(home.path())["token"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let planned = json!({
+        "plan": "## Plan",
+        "branch": "mandor/pgs-1",
+        "design": [{"ac_id": "ac1", "design": "follow_design", "note": null}],
+        "laptop_design": []
+    });
+    let replies = connect_roundtrip(
+        home.path(),
+        &[
+            hello(&token),
+            rpc(
+                2,
+                "runs.prepare_for_vm",
+                &json!({"run_id": "r1", "follow_design": []}),
+            ),
+            rpc(
+                3,
+                "runs.send_to_vm",
+                &json!({"run_id": "r1", "vm_daemon_id": "vm"}),
+            ),
+            rpc(
+                4,
+                "runs.takeover",
+                &json!({"record_id": "a", "repo_id": "r", "planned": planned}),
+            ),
+            rpc(
+                5,
+                "overnight.queue.add",
+                &json!({
+                    "record_id": "a",
+                    "repo_id": "r",
+                    "note": null,
+                    "design_sources": ["ds1"],
+                    "planned": planned,
+                    "origin_daemon": "local"
+                }),
+            ),
+        ],
+    );
+    for r in &replies[1..5] {
+        assert_eq!(r["error"]["code"], "unauthorized", "{r}");
+    }
+    stop(home.path());
+    let _ = daemon.wait();
+}
+
+#[test]
 fn jeda_tenang_diatur_terpisah_dan_tidak_direset_saat_simpan_pengaturan_lark() {
     let home = tempfile::tempdir().unwrap();
     let mut daemon = serve(home.path());

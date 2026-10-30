@@ -15,4 +15,17 @@ note: string | null, start_now: boolean, added_at_ms: number,
 /**
  * Kartu tertahan yang diantre ulang (lanjut di branch yang sama).
  */
-held: boolean, };
+held: boolean, 
+/**
+ * Kartu Planned: `handover_pending`, `waiting`, `starting`, `held`;
+ * `None` = No plan.
+ */
+planned_state: string | null, 
+/**
+ * Alasan item Planned ditahan.
+ */
+planned_reason: string | null, 
+/**
+ * Nama sumber desain VM yang dipilih (id bila sudah dihapus).
+ */
+design_sources: Array<string>, };

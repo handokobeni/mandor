@@ -19,7 +19,10 @@ let queue: QueueItemView[] = [
     note: null,
     start_now: false,
     added_at_ms: Date.now() - 2 * HOUR,
-    held: false
+    held: false,
+    planned_state: null,
+    planned_reason: null,
+    design_sources: []
   }
 ];
 
@@ -38,6 +41,7 @@ function rc(over: Partial<ReportCardView>): ReportCardView {
     ac_fail: 0,
     ac_cant_verify: 0,
     entered_waiting_fix: false,
+    design_notes: [],
     ...over
   };
 }
@@ -159,7 +163,10 @@ function handle(method: string, p: Record<string, unknown>): unknown {
           note: (p.note as string) ?? null,
           start_now: false,
           added_at_ms: Date.now(),
-          held: cards.some((c) => c.record_id === id)
+          held: cards.some((c) => c.record_id === id),
+          planned_state: p.planned ? 'handover_pending' : null,
+          planned_reason: null,
+          design_sources: (p.design_sources as string[] | undefined) ?? []
         }
       ];
       return {};
@@ -188,7 +195,8 @@ function handle(method: string, p: Record<string, unknown>): unknown {
         cache_read_tokens: 3_100_000,
         cards,
         dequeued: [],
-        reviewed_without_fix: cards.filter((c) => c.outcome === 'sent_to_review' && !c.entered_waiting_fix).length
+        reviewed_without_fix: cards.filter((c) => c.outcome === 'sent_to_review' && !c.entered_waiting_fix).length,
+        planned_held: []
       };
     case 'overnight.send_to_review':
       cards = cards.map((c) => (c.run_id === p.run_id ? { ...c, outcome: 'sent_to_review' } : c));

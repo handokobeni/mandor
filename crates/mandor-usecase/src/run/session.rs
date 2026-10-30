@@ -407,7 +407,10 @@ const DESIGN_GAPS_LIMIT: usize = 4_000;
 
 /// Buku AC dengan baris follow design diterapkan. Hanya baris Missing, Partly,
 /// atau Conflicts milik run yang boleh mengikuti desain.
-fn follow_design_rows(mut rows: Vec<AcRow>, ids: &[String]) -> Result<Vec<AcRow>, RunError> {
+pub(super) fn follow_design_rows(
+    mut rows: Vec<AcRow>,
+    ids: &[String],
+) -> Result<Vec<AcRow>, RunError> {
     for id in ids {
         let row = rows
             .iter_mut()
@@ -424,7 +427,7 @@ fn follow_design_rows(mut rows: Vec<AcRow>, ids: &[String]) -> Result<Vec<AcRow>
     Ok(rows)
 }
 
-fn rejected(message: String) -> RunError {
+pub(super) fn rejected(message: String) -> RunError {
     RunError::Port(PortError::Rejected(message))
 }
 

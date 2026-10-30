@@ -714,3 +714,22 @@ async fn diff_di_vm_menghasilkan_patch() {
     let working = guarded.working_diff(&wt.path, 10_000).await.unwrap();
     assert!(working.contains("+kategori"), "{working}");
 }
+
+#[tokio::test]
+async fn untracked_files_hanya_berkas_baru_yang_tidak_diabaikan() {
+    let f = fixture();
+    let wt = f
+        .git
+        .create_worktree(&f.repo, "ws9", "mandor/pgs-9", "main", None)
+        .await
+        .unwrap();
+    std::fs::write(wt.path.join("README.md"), "ubah\n").unwrap();
+    std::fs::create_dir_all(wt.path.join("docs/plans")).unwrap();
+    std::fs::write(wt.path.join("docs/plans/p.md"), "plan\n").unwrap();
+    std::fs::write(wt.path.join(".gitignore"), "*.log\n").unwrap();
+    std::fs::write(wt.path.join("debug.log"), "x\n").unwrap();
+
+    let mut got = f.git.untracked_files(&wt.path).await.unwrap();
+    got.sort();
+    assert_eq!(got, [".gitignore", "docs/plans/p.md"]);
+}

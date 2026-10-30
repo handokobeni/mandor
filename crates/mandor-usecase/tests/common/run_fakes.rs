@@ -32,6 +32,8 @@ pub struct GitState {
     /// Diff branch per worktree; default `+diff pr`.
     pub branch_diffs: HashMap<PathBuf, String>,
     pub changes: HashMap<PathBuf, WorkChanges>,
+    /// Berkas baru yang belum dilacak per worktree.
+    pub untracked: HashMap<PathBuf, Vec<String>>,
     pub commits: Vec<(PathBuf, String)>,
     pub pushes: Vec<String>,
     pub prs: HashMap<String, String>,
@@ -172,6 +174,16 @@ impl GitPort for FakeGit {
         }
         st.reverts.push(sha.to_owned());
         Ok(true)
+    }
+    async fn untracked(&self, wt: &Path) -> Result<Vec<String>, PortError> {
+        Ok(self
+            .state
+            .lock()
+            .unwrap()
+            .untracked
+            .get(wt)
+            .cloned()
+            .unwrap_or_default())
     }
     async fn push(&self, _r: &RepoInfo, wt: &Path, branch: &str) -> Result<(), PortError> {
         let mut st = self.state.lock().unwrap();
@@ -581,6 +593,17 @@ impl FakeRuns {
     }
     pub fn insert(&self, r: RunRecord) {
         self.rows.lock().unwrap().insert(r.id.clone(), (r, false));
+    }
+    pub fn system_messages(&self) -> Vec<String> {
+        self.chat
+            .lock()
+            .unwrap()
+            .iter()
+            .filter_map(|(_, c)| match c {
+                ChatItem::System(m) => Some(m.clone()),
+                _ => None,
+            })
+            .collect()
     }
     pub fn dev_messages(&self) -> Vec<String> {
         self.chat

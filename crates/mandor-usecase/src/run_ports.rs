@@ -126,6 +126,11 @@ pub trait GitPort: Send + Sync {
         worktree: &Path,
         branch: &str,
     ) -> impl Future<Output = Result<WorkChanges, PortError>> + Send;
+    /// Berkas baru yang belum dilacak dan tidak diabaikan.
+    fn untracked(
+        &self,
+        worktree: &Path,
+    ) -> impl Future<Output = Result<Vec<String>, PortError>> + Send;
     /// Mengembalikan satu berkas yang berubah ke isinya di base branch.
     fn discard_file(
         &self,

@@ -10,6 +10,8 @@ mod ownership;
 mod publish;
 pub use publish::PublishOutcome;
 mod reconcile;
+mod send_to_vm;
+pub use send_to_vm::VmHandover;
 mod session;
 mod start;
 pub use start::{Planning, StartStep, StartTarget};

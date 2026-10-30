@@ -71,6 +71,20 @@ impl PlannedState {
     }
 }
 
+/// Folder tempat skill plan dan brainstorm menulis dokumennya.
+const PLAN_DIRS: [&str; 2] = ["docs/plans/", "docs/brainstorms/"];
+
+/// Berkas baru yang tidak boleh ikut ter-push saat kartu dikirim ke VM
+/// (KTD-10): semua yang di luar folder plan dan brainstorm.
+#[must_use]
+pub fn stray_files(untracked: &[String]) -> Vec<String> {
+    untracked
+        .iter()
+        .filter(|p| !PLAN_DIRS.iter().any(|d| p.starts_with(d)) || p.contains(".."))
+        .cloned()
+        .collect()
+}
+
 /// Alasan klaim masih di daemon laptop asal.
 pub const CLAIM_ON_LAPTOP: &str = "the claim is still on the laptop";
 
@@ -271,6 +285,29 @@ mod tests {
             planned_claim_action(PlannedState::Waiting, None, 0, &task, &vm(), 5),
             ClaimAction::Drop("the card moved to Waiting Review in Lark".to_owned())
         );
+    }
+
+    #[test]
+    fn hanya_dokumen_plan_dan_brainstorm_yang_boleh_ikut() {
+        let files = [
+            "docs/plans/2026-10-30-001-plan.md",
+            "docs/brainstorms/x-requirements.md",
+            "notes.txt",
+            ".env.local",
+            "docs/plans/../../.env",
+            "src/docs/plans/x.md",
+        ]
+        .map(str::to_owned);
+        assert_eq!(
+            stray_files(&files),
+            [
+                "notes.txt",
+                ".env.local",
+                "docs/plans/../../.env",
+                "src/docs/plans/x.md"
+            ]
+        );
+        assert!(stray_files(&[]).is_empty());
     }
 
     #[test]

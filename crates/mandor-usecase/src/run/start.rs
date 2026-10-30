@@ -71,7 +71,7 @@ pub(super) fn start_summary(planning: &Planning, dev_note: Option<&str>) -> Stri
 }
 
 /// Target yang sudah divalidasi: repo dalam urutan workspace, repo utama pertama.
-pub(super) struct Plan {
+pub(crate) struct Plan {
     pub(super) repos: Vec<RepoInfo>,
     pub(super) workspace: Option<WorkspaceInfo>,
     pub(super) design: Vec<DesignRoot>,
@@ -169,7 +169,7 @@ impl<D: Deps> RunService<D> {
         }
     }
 
-    pub(super) async fn resolve(&self, target: &StartTarget) -> Result<Plan, RunError> {
+    pub(crate) async fn resolve(&self, target: &StartTarget) -> Result<Plan, RunError> {
         let (ids, workspace) = match target {
             StartTarget::Repo(id) => (vec![id.clone()], None),
             StartTarget::Workspace { id, repo_ids } => {

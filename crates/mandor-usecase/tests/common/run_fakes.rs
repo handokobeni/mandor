@@ -777,6 +777,9 @@ impl FakeRepos {
     pub fn add_workspace(&self, w: WorkspaceInfo) {
         self.workspaces.lock().unwrap().push(w);
     }
+    pub fn remove(&self, id: &str) {
+        self.repos.lock().unwrap().retain(|r| r.id != id);
+    }
 }
 
 impl Default for FakeRepos {

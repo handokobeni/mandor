@@ -47,13 +47,15 @@ impl AppDispatch {
             }
             method::RUNS_HANDOFF => {
                 let p: HandoffParams = params(v)?;
-                let branch = s
+                let back = s
                     .runs
                     .handoff(&p.record_id, &p.to_daemon_id)
                     .await
                     .map_err(run_error)?;
                 s.poke.notify_one();
-                ok(&HandoffResult { branch })
+                ok(&HandoffResult {
+                    branch: back.branch,
+                })
             }
             other => self.overnight_queue_call(&s, other, v).await,
         }

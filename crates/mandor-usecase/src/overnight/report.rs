@@ -1,9 +1,10 @@
 //! Laporan siklus lembur untuk tab Overnight (R18 plan VM): hasil per kartu,
 //! kartu yang dikeluarkan dari antrean, dan pemakaian terhadap batas.
 
+use mandor_domain::planned::PlannedState;
 use mandor_domain::{HoldReason, RunState, Verdict};
 
-use super::{CycleUsage, Dequeued, OvernightStore, window_of};
+use super::{CycleUsage, Dequeued, OvernightStore, QueueItem, window_of};
 use crate::ports::{Clock, Deps};
 use crate::run::{RunError, RunService};
 use crate::run_ports::{LedgerStore, RunRecord, RunStore};
@@ -38,6 +39,13 @@ pub struct ReportCard {
     pub entered_waiting_fix: bool,
 }
 
+/// Kartu Planned yang ditahan di antrean tanpa dikerjakan (R15).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HeldPlanned {
+    pub record_id: String,
+    pub reason: String,
+}
+
 /// Laporan siklus berjalan (atau siklus semalam, di pagi hari).
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct OvernightReport {
@@ -49,6 +57,22 @@ pub struct OvernightReport {
     pub dequeued: Vec<Dequeued>,
     /// Kartu yang sampai Waiting Review tanpa pernah masuk Waiting Fix.
     pub reviewed_without_fix: u32,
+    /// Kartu Planned yang ditahan; plan dan klaimnya masih di VM.
+    pub planned_held: Vec<HeldPlanned>,
+}
+
+/// Item Planned berstatus `Held` di antrean.
+pub(super) fn held_planned(queue: &[QueueItem]) -> Vec<HeldPlanned> {
+    queue
+        .iter()
+        .filter_map(|i| {
+            let p = i.planned.as_ref()?;
+            (p.state == PlannedState::Held).then(|| HeldPlanned {
+                record_id: i.record_id.clone(),
+                reason: p.reason.clone().unwrap_or_default(),
+            })
+        })
+        .collect()
 }
 
 fn outcome_of(run: &RunRecord) -> CardOutcome {
@@ -82,6 +106,7 @@ impl<D: Deps> RunService<D> {
             report.usage = self.overnight.cycle_usage(start).await?;
             report.dequeued = self.overnight.dequeued_since(start).await?;
         }
+        report.planned_held = held_planned(&self.overnight.queue().await?);
         for run in self.runs.list_active().await? {
             let rows = self.reviews.ac_rows(&run.id).await?;
             let count = |v: Verdict| {

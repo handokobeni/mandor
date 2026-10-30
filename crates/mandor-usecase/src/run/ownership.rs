@@ -4,13 +4,10 @@ use std::sync::Arc;
 
 use mandor_domain::{ClaimLoss, RunState};
 
-use super::members::group_name;
 use super::{RunError, RunService, StartTarget, TakeoverPlan};
 use crate::notify::notice;
-use crate::ports::{Deps, Ids};
-use crate::run_ports::{
-    ChatItem, GitPort, NoticeKind, Notifier, RunMember, RunPhase, RunRecord, RunStore, RunWorkspace,
-};
+use crate::ports::Deps;
+use crate::run_ports::{ChatItem, GitPort, NoticeKind, Notifier, RunPhase, RunRecord, RunStore};
 use crate::sync::Heartbeat;
 
 impl<D: Deps> RunService<D> {
@@ -43,6 +40,10 @@ impl<D: Deps> RunService<D> {
                     tracing::warn!(record_id = %run.record_id, error = %e, "heartbeat klaim gagal");
                 }
             }
+        }
+        // Kartu Planned di antrean VM belum punya run (KTD-5).
+        if self.is_vm() {
+            self.tend_planned(true).await?;
         }
         Ok(orphaned)
     }
@@ -143,38 +144,7 @@ impl<D: Deps> RunService<D> {
             .map(|p| p.work.branch.clone())
             .or_else(|| task.branch.clone())
             .ok_or(RunError::InvalidState("no branch"))?;
-        let plan = self.resolve(target).await?;
-        let group = plan.workspace.as_ref().map(|w| group_name(&w.id, &branch));
-        let mut restored = Vec::with_capacity(plan.repos.len());
-        for repo in &plan.repos {
-            let wt = self
-                .git
-                .restore_worktree(repo, &branch, group.as_deref())
-                .await?;
-            restored.push((repo.id.clone(), wt));
-        }
-        let Some((primary_repo, primary_wt)) = restored.first().cloned() else {
-            return Err(RunError::InvalidState("no repo selected"));
-        };
-        let mut run = RunRecord::new(self.sync.ids.nonce(), primary_repo, record_id.to_owned());
-        run.state = RunState::AwaitingDev;
-        run.branch = Some(branch);
-        if let (Some(ws), Some(root)) = (&plan.workspace, primary_wt.parent()) {
-            run.workspace = Some(RunWorkspace {
-                id: ws.id.clone(),
-                root: root.to_path_buf(),
-            });
-            run.extra = restored[1..]
-                .iter()
-                .map(|(repo_id, wt)| RunMember {
-                    repo_id: repo_id.clone(),
-                    worktree: wt.clone(),
-                    pr_url: None,
-                })
-                .collect();
-        }
-        run.worktree = Some(primary_wt);
-        run.session_id = Some(self.sync.ids.nonce());
+        let (mut run, _) = self.restore_run(record_id, target, &branch).await?;
         run.pr_url.clone_from(&task.pr_url);
         if let Some(p) = planned {
             run.phase = RunPhase::Plan;

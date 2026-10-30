@@ -14,6 +14,7 @@ pub use planned::TakeoverPlan;
 mod reconcile;
 mod send_to_vm;
 pub use send_to_vm::VmHandover;
+pub(crate) use send_to_vm::target_of;
 mod session;
 mod start;
 pub use start::{Planning, StartStep, StartTarget};

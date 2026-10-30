@@ -63,8 +63,10 @@ async fn held_on_vm() -> (FakeLark, FakeClock, Station, Station) {
 async fn covers_ae11_kerja_malam_di_push_klaim_pindah_dan_laptop_melanjutkan() {
     let (lark, _clock, on_vm, laptop) = held_on_vm().await;
     let to = laptop.svc.sync().identity().daemon_id.clone();
-    let branch = on_vm.svc.handoff("a", &to).await.unwrap();
-    assert_eq!(branch, BRANCH);
+    let back = on_vm.svc.handoff("a", &to).await.unwrap();
+    assert_eq!(back.branch, BRANCH);
+    assert_eq!(back.target, Some(StartTarget::Repo("repo1".to_owned())));
+    assert_eq!(back.planned, None);
     {
         let git = on_vm.git.st();
         assert!(

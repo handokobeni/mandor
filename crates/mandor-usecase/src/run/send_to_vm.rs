@@ -20,7 +20,7 @@ pub struct VmHandover {
 }
 
 /// Target Start run: repo tunggal atau workspace dengan anggotanya.
-fn target_of(run: &RunRecord) -> StartTarget {
+pub(crate) fn target_of(run: &RunRecord) -> StartTarget {
     match &run.workspace {
         Some(ws) => StartTarget::Workspace {
             id: ws.id.clone(),

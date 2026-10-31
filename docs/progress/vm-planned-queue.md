@@ -39,5 +39,12 @@ Menunggu biner baru dipasang di VM oleh pemilik produk. Kartu uji di Base salina
 | AE6 | Pull gagal, kartu tetap jalan, dicatat | Lulus 2026-10-30 (PGS-1540, No plan): remote desain VM diarahkan ke repo yang tidak ada; kartu tetap dimulai dengan salinan lama; run mencatat "Design mandor-smoke-design not updated: fetch failed: remote: Repository not found. fatal: repository <remote> not found" (URL disamarkan). Teks di laporan pagi dicek setelah laporan terbit. |
 | AE7 | Folder desain hilang, Planned ditahan, Take over | Lulus 2026-10-30 (PGS-1541): folder desain VM diganti nama, Start now → item `held` dengan alasan "Design source "mandor-smoke-design" is not available: Path missing", tidak ada run VM, klaim tetap `~handoko_ben-vm`; Take over → antrean kosong, klaim `~handokobeni-laptop`, run laptop baru `awaiting_dev` dengan plan identik (hash sama). |
 | AE8 | Follow design tanpa desain VM: Queue nonaktif | Lulus 2026-10-30 (PGS-1533): AC-4 Follow design, sumber desain VM tidak dipilih, Queue nonaktif dengan "Some AC follow the design. Pick a design source on the VM." |
-| AE9 | Take over kartu workspace | |
+| AE9 | Take over kartu workspace | Lulus 2026-10-31 (PGS-1544, setelah perbaikan `5f42d15` dan `3c8bd91`): Approve & queue for VM memilih workspace VM `mandor-smoke-test` (laptop `work-smoke`), VM mengerjakan dua worktree; setelah Waiting Fix, Take over membuat run laptop baru pada workspace `work-smoke` dengan worktree `mandor-smoke` dan `mandor-smoke-api` berisi commit VM (`e936533`, `aa44314`) dan sinkron dengan branch remote. Run masuk Waiting Fix laptop (`wf_quiet`), sesuai status kartu. |
 | AE10 | Berkas liar menahan pengiriman | Lulus 2026-10-30 (PGS-1534): `notes.txt` tak di-ignore → "Commit or remove these new files before queueing for the VM: notes.txt"; branch tidak ada di remote, tidak ada commit baru, run tetap `awaiting_dev` |
+
+### Temuan lain saat uji langsung (belum diperbaiki)
+
+- PGS-1543 (Take over sebelum perbaikan `3c8bd91`): klaim sudah pindah ke laptop tetapi run laptop tidak dibuat; mesin Waiting Fix laptop lalu membuat run satu repo (`mandor-smoke`) untuk kartu workspace itu. Jalur ini tidak terjadi lagi setelah perbaikan, tetapi Take over sebaiknya bisa diulang bila langkah laptop gagal.
+- Kartu workspace menyimpan dua URL PR dipisah baris di `mandor_pr`; pembaruan badan PR laptop gagal dengan "gh pr view failed: invalid qualified head ref format" karena kedua URL dibaca sebagai satu.
+- Diagram status di plan VM (2026-10-23-002) menggambarkan draft PR bisa di-Take over, sedangkan R22 dan UI hanya untuk Waiting Fix, tertahan, atau gagal. Perlu keputusan pemilik produk.
+

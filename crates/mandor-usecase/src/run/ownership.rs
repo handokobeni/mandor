@@ -130,7 +130,9 @@ impl<D: Deps> RunService<D> {
     /// "Ambil alih" task yang klaimnya tidak aktif 30 menit atau diserahkan
     /// VM: klaim dengan baca ulang, lalu run baru dari branch task. Run
     /// workspace memulihkan folder run dan worktree tiap anggota. Dengan paket
-    /// plan (KTD-12), run kembali menunggu persetujuan plan.
+    /// plan (KTD-12), run kembali menunggu persetujuan plan. Dengan `draft`,
+    /// PR draft VM dipakai lagi: tiap anggota mengenali PR-nya dari branch dan
+    /// run menunggu Send to review.
     ///
     /// # Errors
     /// Klaim masih aktif, kalah klaim, target tidak valid, atau git gagal.
@@ -139,6 +141,7 @@ impl<D: Deps> RunService<D> {
         record_id: &str,
         target: &StartTarget,
         planned: Option<&PlannedWork>,
+        draft: bool,
     ) -> Result<RunRecord, RunError> {
         let _work = self.enter_work()?;
         self.sync.claim(record_id, true).await?;
@@ -149,6 +152,9 @@ impl<D: Deps> RunService<D> {
             .ok_or(RunError::InvalidState("no branch"))?;
         let (mut run, _) = self.restore_run(record_id, target, &branch).await?;
         run.pr_url = task.single_pr_url();
+        if draft {
+            self.adopt_draft(&mut run, &branch).await?;
+        }
         let mut missing = Vec::new();
         if let Some(p) = planned {
             let check = self.design.prepare(&p.laptop_design, false).await?;
@@ -176,6 +182,25 @@ impl<D: Deps> RunService<D> {
             }
         }
         Ok(run)
+    }
+
+    /// PR draft VM per anggota ditemukan dari branch; run menunggu Send to
+    /// review dan publish berikutnya tetap di PR yang sama.
+    async fn adopt_draft(&self, run: &mut RunRecord, branch: &str) -> Result<(), RunError> {
+        for (index, m) in self.members(run).await?.iter().enumerate() {
+            if let Some(pr) = self.git.find_pr(&m.repo, branch).await? {
+                let url = Some(pr.url);
+                if index == 0 {
+                    run.pr_url = url;
+                } else if let Some(extra) = run.extra.get_mut(index - 1) {
+                    extra.pr_url = url;
+                }
+            }
+        }
+        run.draft_pending = Some(self.now());
+        run.note =
+            Some("Draft PR from the VM. Send it to review when the change looks right.".to_owned());
+        Ok(())
     }
 
     /// "Discard changes" satu berkas: hanya berkas yang memang berubah, dan

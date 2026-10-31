@@ -160,6 +160,8 @@ pub struct RunView {
     pub plan: Option<String>,
     pub last_error: Option<String>,
     pub note: Option<String>,
+    /// PR masih draft dan menunggu "Send to review".
+    pub draft: bool,
     pub queued: Vec<String>,
     pub automatic: bool,
     /// Akhir jeda tenang (ms epoch) saat state `wf_quiet`.
@@ -454,6 +456,10 @@ pub struct TakeoverParams {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub planned: Option<PlannedWorkDto>,
+    /// PR draft VM dipakai lagi; run menunggu Send to review.
+    #[serde(default)]
+    #[ts(optional)]
+    pub draft: Option<bool>,
 }
 
 /// Status Design satu AC hasil tahap plan.
@@ -1152,6 +1158,9 @@ pub struct HandoffResult {
     /// Plan kartu Planned yang belum dimulai VM.
     #[serde(default)]
     pub planned: Option<PlannedWorkDto>,
+    /// PR VM masih draft; diteruskan ke `runs.takeover`.
+    #[serde(default)]
+    pub draft: bool,
 }
 
 /// Satu kartu di antrean VM.

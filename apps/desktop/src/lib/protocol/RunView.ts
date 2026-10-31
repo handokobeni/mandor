@@ -30,7 +30,11 @@ phase: string,
 /**
  * Plan terakhir dari agent (Markdown).
  */
-plan: string | null, last_error: string | null, note: string | null, queued: Array<string>, automatic: boolean, 
+plan: string | null, last_error: string | null, note: string | null, 
+/**
+ * PR masih draft dan menunggu "Send to review".
+ */
+draft: boolean, queued: Array<string>, automatic: boolean, 
 /**
  * Akhir jeda tenang (ms epoch) saat state `wf_quiet`.
  */

@@ -11,6 +11,7 @@
   import GitPullRequestArrow from '@lucide/svelte/icons/git-pull-request-arrow';
   import Info from '@lucide/svelte/icons/info';
   import ListChecks from '@lucide/svelte/icons/list-checks';
+  import Send from '@lucide/svelte/icons/send';
   import LoaderCircle from '@lucide/svelte/icons/loader-circle';
   import MessageSquareText from '@lucide/svelte/icons/message-square-text';
   import MessagesSquare from '@lucide/svelte/icons/messages-square';
@@ -578,6 +579,16 @@
         {#if nextAction === 'next'}<SkipForward />Next card{:else if nextAction === 'finish'}<CircleCheck />Finish card{:else}<Play />Continue with {nextKey}{/if}
       </Button>
     {:else if run.state === 'awaiting_dev'}
+      {#if run.draft}
+        <!-- PR draft dari VM yang di-Take over: perubahan baru tetap di PR itu. -->
+        <Button
+          size="sm"
+          variant="outline"
+          disabled={busy}
+          title="Mark the draft PR ready and move the card to Waiting Review"
+          onclick={() => act(() => rpc.request('overnight.send_to_review', { run_id: run.id }).then(() => runs.load()), 'Sent to review')}
+        ><Send />Send to review</Button>
+      {/if}
       {#if files !== null && files.length === 0}<span class="muted" style="font-size:12px">No changes to push yet</span>{/if}
       <Popover.Root bind:open={blockedOpen}>
         <Popover.Trigger>

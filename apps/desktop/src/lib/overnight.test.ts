@@ -9,6 +9,7 @@ import {
   canQueue,
   designPickerLabel,
   queueForVmBlocker,
+  canTakeOverReport,
   defaultVmTarget,
   vmTargetRepos,
   queueRowMode,
@@ -218,6 +219,15 @@ describe('antre kartu Planned ke VM', () => {
     expect(queueForVmBlocker({ ...q, laptopRepos: ['web'], target: 'ws:x', targetRepos: ['web', 'api'] })).toBe(
       'This plan covers web. Pick a VM target with the same repos.'
     );
+  });
+
+  it('Take over dari laporan: draft, tertahan, gagal, atau Waiting Fix', () => {
+    const c = (outcome: string, entered_waiting_fix = false) => ({ outcome, entered_waiting_fix });
+    expect(canTakeOverReport(c('draft'))).toBe(true);
+    expect(canTakeOverReport(c('held'))).toBe(true);
+    expect(canTakeOverReport(c('failed'))).toBe(true);
+    expect(canTakeOverReport(c('waiting_review', true))).toBe(true);
+    expect(canTakeOverReport(c('waiting_review'))).toBe(false);
   });
 
   it('target VM bawaan mengikuti repo run laptop', () => {

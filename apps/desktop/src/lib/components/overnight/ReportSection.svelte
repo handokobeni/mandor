@@ -5,7 +5,7 @@
   import Send from '@lucide/svelte/icons/send';
   import { Button } from '#lib/components/ui/button/index.ts';
   import { Textarea } from '#lib/components/ui/textarea/index.ts';
-  import { backInQueue, holdLabel, reportGroups, usageText } from '#lib/overnight.ts';
+  import { backInQueue, canTakeOverReport, holdLabel, reportGroups, usageText } from '#lib/overnight.ts';
   import type { AcRowView } from '#lib/protocol/AcRowView.ts';
   import type { ReportCardView } from '#lib/protocol/ReportCardView.ts';
   import type { Rpc } from '#lib/rpc.ts';
@@ -151,7 +151,7 @@
                   Confirm and push
                 </Button>
               {/if}
-              {#if c.outcome === 'held' || c.outcome === 'failed' || c.entered_waiting_fix}
+              {#if canTakeOverReport(c)}
                 <Button size="sm" variant="outline" disabled={busy === c.run_id} onclick={() => takeover(c, c.run_id)}>
                   <ArrowLeftRight />Take over to laptop
                 </Button>

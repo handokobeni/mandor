@@ -35,6 +35,7 @@ pub fn run_view(run: &RunRecord, task: Option<&Task>) -> RunView {
         plan: run.plan.clone(),
         last_error: run.last_error.clone(),
         note: run.note.clone(),
+        draft: run.draft_pending.is_some(),
         queued: run.queue.clone(),
         automatic: run.automatic,
         quiet_until_ms: run.quiet_until_ms,
@@ -461,6 +462,9 @@ mod tests {
         let v = run_view(&r, None);
         assert_eq!((v.started_at_ms, v.updated_at_ms), (10, 20));
         assert_eq!(v.quiet_until_ms, Some(30));
+        assert!(!v.draft);
+        r.draft_pending = Some(40);
+        assert!(run_view(&r, None).draft, "PR draft menunggu Send to review");
     }
 
     #[test]

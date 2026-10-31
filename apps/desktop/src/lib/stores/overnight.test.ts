@@ -186,6 +186,14 @@ describe('aksi kartu VM', () => {
     expect(runId).toBe('run-laptop');
   });
 
+  it('Take over draft PR VM: laptop diberi tahu PR masih draft', async () => {
+    const [store, vm] = await attached();
+    vm.handback = { branch: 'b', repo_id: 'repo1', workspace: null, planned: null, draft: true };
+    const laptop = new FakeVm();
+    await store.takeover('h', laptop, 'beni@laptop~laptop');
+    expect(laptop.calls.find(([m]) => m === 'runs.takeover')?.[1]).toEqual({ record_id: 'h', repo_id: 'repo1', draft: true });
+  });
+
   it('Take over workspace: workspace laptop dicari dari repo-nya, id boleh beda dengan VM', async () => {
     const [store, vm] = await attached();
     vm.handback = { branch: 'b', repo_id: null, workspace: { id: 'vm-ws', repo_ids: ['web', 'api'] }, planned: null };

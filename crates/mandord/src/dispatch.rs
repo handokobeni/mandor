@@ -875,16 +875,7 @@ impl AppDispatch {
                 s.poke.notify_one();
                 ok(&json!({}))
             }
-            method::RUNS_TAKEOVER => {
-                let p: TakeoverParams = params(v)?;
-                let target = planned::target_of(Some(p.repo_id), p.workspace)?;
-                let work = p.planned.map(planned::planned_of).transpose()?;
-                let run = runs
-                    .takeover(&p.record_id, &target, work.as_ref())
-                    .await
-                    .map_err(run_error)?;
-                ok(&run_view(&run, None))
-            }
+            method::RUNS_TAKEOVER => takeover(runs, params(v)?).await,
             method::RUNS_PREPARE_FOR_VM | method::RUNS_SEND_TO_VM => {
                 vm_handover(runs, name, v).await
             }
@@ -985,6 +976,26 @@ impl AppDispatch {
             _ => ok(&self.app.settings_view().await),
         }
     }
+}
+
+/// `runs.takeover`: run laptop dari branch kartu, membawa paket plan atau PR
+/// draft VM bila ada.
+async fn takeover<D: mandor_usecase::Deps>(
+    runs: &Arc<mandor_usecase::RunService<D>>,
+    p: TakeoverParams,
+) -> Result<Value, RpcError> {
+    let target = planned::target_of(Some(p.repo_id), p.workspace)?;
+    let work = p.planned.map(planned::planned_of).transpose()?;
+    let run = runs
+        .takeover(
+            &p.record_id,
+            &target,
+            work.as_ref(),
+            p.draft.unwrap_or(false),
+        )
+        .await
+        .map_err(run_error)?;
+    ok(&run_view(&run, None))
 }
 
 async fn approve<D: mandor_usecase::Deps>(

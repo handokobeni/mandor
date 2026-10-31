@@ -167,7 +167,8 @@ async fn drain_idle_menolak_review_takeover_plan_dan_fix() {
             .takeover(
                 "rec1",
                 &mandor_usecase::StartTarget::Repo("repo1".to_owned()),
-                None
+                None,
+                false,
             )
             .await
             .unwrap_err(),

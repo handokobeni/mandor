@@ -13,4 +13,8 @@ repo_id: string | null, workspace: StartWorkspace | null,
 /**
  * Plan kartu Planned yang belum dimulai VM.
  */
-planned: PlannedWorkDto | null, };
+planned: PlannedWorkDto | null, 
+/**
+ * PR VM masih draft; diteruskan ke `runs.takeover`.
+ */
+draft: boolean, };

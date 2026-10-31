@@ -52,6 +52,7 @@ function run(id: string, key: string, title: string, state: string, extra: Parti
     note: null,
     queued: [],
     automatic: false,
+    draft: false,
     quiet_until_ms: state === 'wf_quiet' ? Date.now() + 95_000 : null,
     started_at_ms: Date.now() - 42 * 60_000,
     updated_at_ms: Date.now() - 60_000,

@@ -275,7 +275,8 @@ export class OvernightStore {
     const run = await laptop.request<{ id: string }>('runs.takeover', {
       record_id: recordId,
       ...target,
-      ...(back.planned ? { planned: back.planned } : {})
+      ...(back.planned ? { planned: back.planned } : {}),
+      ...(back.draft ? { draft: true } : {})
     });
     return run.id;
   }

@@ -63,6 +63,7 @@ impl AppDispatch {
                     repo_id,
                     workspace,
                     planned: back.planned.as_ref().map(planned_dto),
+                    draft: back.draft,
                 })
             }
             other => self.overnight_queue_call(&s, other, v).await,

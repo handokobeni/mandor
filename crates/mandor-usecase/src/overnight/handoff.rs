@@ -22,6 +22,9 @@ pub struct Handback {
     pub target: Option<StartTarget>,
     /// Plan kartu Planned yang belum dimulai.
     pub planned: Option<PlannedWork>,
+    /// PR VM masih draft: laptop melanjutkan di PR itu dan Send to review
+    /// menandainya siap.
+    pub draft: bool,
 }
 
 impl<D: Deps> RunService<D> {
@@ -85,6 +88,7 @@ impl<D: Deps> RunService<D> {
             branch,
             target: Some(target_of(&run)),
             planned: None,
+            draft: run.draft_pending.is_some(),
         })
     }
 
@@ -111,6 +115,7 @@ impl<D: Deps> RunService<D> {
             branch,
             target: Some(target_of(&run)),
             planned: None,
+            draft: run.draft_pending.is_some(),
         }))
     }
 
@@ -152,6 +157,7 @@ impl<D: Deps> RunService<D> {
             branch: planned.work.branch.clone(),
             target: Some(item.target),
             planned: Some(planned.work),
+            draft: false,
         })
     }
 }

@@ -88,7 +88,7 @@ async fn covers_ae11_kerja_malam_di_push_klaim_pindah_dan_laptop_melanjutkan() {
     laptop.svc.sync().poll(true, &[]).await.unwrap();
     let run = laptop
         .svc
-        .takeover("a", &StartTarget::Repo("repo1".to_owned()), None)
+        .takeover("a", &StartTarget::Repo("repo1".to_owned()), None, false)
         .await
         .unwrap();
     assert_eq!(run.state, RunState::AwaitingDev);
@@ -105,6 +105,48 @@ async fn covers_ae11_kerja_malam_di_push_klaim_pindah_dan_laptop_melanjutkan() {
         format!("{err}").contains("taken over to the laptop"),
         "{err}"
     );
+}
+
+#[tokio::test]
+async fn take_over_draft_pr_vm_lanjut_di_pr_yang_sama_lalu_send_to_review_dari_laptop() {
+    let (lark, _clock, on_vm, laptop) = held_on_vm().await;
+    let url = "https://github.com/o/r/pull/9".to_owned();
+    let mut r = on_vm.runs.only();
+    r.state = RunState::AwaitingDev;
+    r.draft_pending = Some(NOW);
+    r.pr_url = Some(url.clone());
+    on_vm.runs.insert(r);
+    let to = laptop.svc.sync().identity().daemon_id.clone();
+    let back = on_vm.svc.handoff("a", &to).await.unwrap();
+    assert!(back.draft, "VM menandai PR masih draft");
+
+    laptop.svc.sync().poll(true, &[]).await.unwrap();
+    laptop
+        .git
+        .st()
+        .prs
+        .insert(format!("repo1:{BRANCH}"), url.clone());
+    let run = laptop
+        .svc
+        .takeover(
+            "a",
+            &StartTarget::Repo("repo1".to_owned()),
+            None,
+            back.draft,
+        )
+        .await
+        .unwrap();
+    assert_eq!(run.state, RunState::AwaitingDev);
+    assert!(
+        run.draft_pending.is_some(),
+        "perubahan laptop tetap di PR draft"
+    );
+    assert_eq!(run.pr_url.as_deref(), Some(url.as_str()));
+
+    laptop.svc.send_to_review(&run.id).await.unwrap();
+    assert_eq!(laptop.git.st().ready, std::slice::from_ref(&url));
+    laptop.svc.sync().drain_outbox(10).await.unwrap();
+    assert_eq!(lark.get("a").unwrap().status, TaskStatus::WaitingReview);
 }
 
 #[tokio::test]
@@ -231,7 +273,11 @@ async fn covers_ae9_take_over_workspace_memulihkan_folder_run_dan_semua_anggota(
         id: "kelola".to_owned(),
         repo_ids: vec!["api".to_owned(), "web".to_owned()],
     };
-    let run = laptop.svc.takeover("a", &target, None).await.unwrap();
+    let run = laptop
+        .svc
+        .takeover("a", &target, None, false)
+        .await
+        .unwrap();
 
     assert_eq!(run.state, RunState::AwaitingDev);
     assert_eq!(laptop.git.st().restored, [BRANCH, BRANCH]);
@@ -271,6 +317,7 @@ async fn covers_ae3_take_over_dengan_paket_kembali_ke_plan_dan_approve_mengirim_
             "a",
             &StartTarget::Repo("repo1".to_owned()),
             Some(&package()),
+            false,
         )
         .await
         .unwrap();

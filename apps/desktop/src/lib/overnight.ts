@@ -239,3 +239,8 @@ export function laptopWorkspaceFor<W extends { id: string; repo_ids: string[] }>
   if (!ws) throw new Error(`Add a workspace on this laptop with ${repoIds.join(', ')}, then take over again.`);
   return ws;
 }
+
+/** Kartu laporan yang bisa di-Take over ke laptop: draft, tertahan, gagal, atau sudah masuk Waiting Fix. */
+export function canTakeOverReport(c: { outcome: string; entered_waiting_fix: boolean }): boolean {
+  return c.outcome === 'draft' || c.outcome === 'held' || c.outcome === 'failed' || c.entered_waiting_fix;
+}

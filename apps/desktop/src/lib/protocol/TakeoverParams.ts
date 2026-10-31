@@ -10,4 +10,8 @@ export type TakeoverParams = { record_id: string, repo_id: string, workspace?: S
  * Plan kartu Planned yang dikembalikan VM; run kembali menunggu
  * persetujuan plan.
  */
-planned?: PlannedWorkDto, };
+planned?: PlannedWorkDto, 
+/**
+ * PR draft VM dipakai lagi; run menunggu Send to review.
+ */
+draft?: boolean, };

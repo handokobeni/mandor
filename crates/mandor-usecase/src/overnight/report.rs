@@ -1,6 +1,7 @@
 //! Laporan siklus lembur untuk tab Overnight (R18 plan VM): hasil per kartu,
 //! kartu yang dikeluarkan dari antrean, dan pemakaian terhadap batas.
 
+use mandor_domain::group::CardState;
 use mandor_domain::planned::PlannedState;
 use mandor_domain::{HoldReason, RunState, Verdict};
 
@@ -22,6 +23,41 @@ pub enum CardOutcome {
     Working,
 }
 
+/// Keadaan satu kartu grup di laporan (R23 plan grup).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GroupCardStatus {
+    /// Sudah di-commit di branch grup.
+    Committed,
+    /// Sedang dikerjakan atau tempat grup berhenti.
+    Active,
+    /// Belum dimulai.
+    Pending,
+    /// Dikeluarkan dari grup.
+    Removed,
+}
+
+impl GroupCardStatus {
+    fn of(state: &CardState) -> Self {
+        match state {
+            CardState::Done => Self::Committed,
+            CardState::Active => Self::Active,
+            CardState::Pending => Self::Pending,
+            CardState::Removed(_) => Self::Removed,
+        }
+    }
+
+    /// Nama stabil untuk protokol.
+    #[must_use]
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Committed => "committed",
+            Self::Active => "active",
+            Self::Pending => "pending",
+            Self::Removed => "removed",
+        }
+    }
+}
+
 /// Satu kartu VM di laporan.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ReportCard {
@@ -39,6 +75,8 @@ pub struct ReportCard {
     pub entered_waiting_fix: bool,
     /// Sumber desain yang gagal diperbarui saat kartu dimulai.
     pub design_notes: Vec<String>,
+    /// Keadaan kartu di grupnya; `None` untuk kartu tunggal.
+    pub group: Option<GroupCardStatus>,
 }
 
 /// Kartu Planned yang ditahan di antrean tanpa dikerjakan (R15).
@@ -111,26 +149,46 @@ impl<D: Deps> RunService<D> {
         report.planned_held = held_planned(&self.overnight.queue().await?);
         for run in self.runs.list_active().await? {
             let rows = self.reviews.ac_rows(&run.id).await?;
-            let count = |v: Verdict| {
-                u32::try_from(rows.iter().filter(|r| r.verdict == v).count()).unwrap_or(u32::MAX)
+            let cards = self.runs.cards(&run.id).await?;
+            // Run grup: satu baris per kartu dengan hasil grupnya (KTD-G16).
+            let entries: Vec<(String, Option<GroupCardStatus>)> = if cards.is_empty() {
+                vec![(run.record_id.clone(), None)]
+            } else {
+                cards
+                    .iter()
+                    .map(|c| (c.record_id.clone(), Some(GroupCardStatus::of(&c.state))))
+                    .collect()
             };
-            let card = ReportCard {
-                record_id: run.record_id.clone(),
-                run_id: run.id.clone(),
-                repo_id: run.repo_id.clone(),
-                outcome: outcome_of(&run),
-                hold_note: run.hold.as_ref().and_then(|h| h.note.clone()),
-                pr_url: run.pr_url.clone(),
-                ac_pass: count(Verdict::Pass),
-                ac_fail: count(Verdict::Fail),
-                ac_cant_verify: count(Verdict::CantVerify),
-                entered_waiting_fix: run.entered_waiting_fix_ms.is_some(),
-                design_notes: run.design_notes.clone(),
-            };
-            if card.outcome == CardOutcome::SentToReview && !card.entered_waiting_fix {
-                report.reviewed_without_fix += 1;
+            for (record_id, group) in entries {
+                let count = |v: Verdict| {
+                    let n = rows
+                        .iter()
+                        .filter(|r| r.verdict == v)
+                        .filter(|r| {
+                            group.is_none() || r.card.as_deref() == Some(record_id.as_str())
+                        })
+                        .count();
+                    u32::try_from(n).unwrap_or(u32::MAX)
+                };
+                let card = ReportCard {
+                    record_id: record_id.clone(),
+                    run_id: run.id.clone(),
+                    repo_id: run.repo_id.clone(),
+                    outcome: outcome_of(&run),
+                    hold_note: run.hold.as_ref().and_then(|h| h.note.clone()),
+                    pr_url: run.pr_url.clone(),
+                    ac_pass: count(Verdict::Pass),
+                    ac_fail: count(Verdict::Fail),
+                    ac_cant_verify: count(Verdict::CantVerify),
+                    entered_waiting_fix: run.entered_waiting_fix_ms.is_some(),
+                    design_notes: run.design_notes.clone(),
+                    group,
+                };
+                if card.outcome == CardOutcome::SentToReview && !card.entered_waiting_fix {
+                    report.reviewed_without_fix += 1;
+                }
+                report.cards.push(card);
             }
-            report.cards.push(card);
         }
         Ok(report)
     }

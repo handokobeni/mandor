@@ -15,6 +15,7 @@ use std::sync::Arc;
 
 pub use handoff::Handback;
 use mandor_domain::gate::check_start;
+use mandor_domain::group::CardState;
 use mandor_domain::overnight::{CycleReport, Next, Slot, TickState, Window, decide, report_text};
 use mandor_domain::planned::{PlannedState, PlannedWork, check_planned_start};
 use mandor_domain::{DaemonRole, HoldReason, RunState, TaskStatus};
@@ -22,7 +23,7 @@ pub use planned::QueueRequest;
 pub use ports::{
     CycleUsage, Dequeued, OvernightSettings, OvernightStore, PlannedEntry, QueueItem, ReportState,
 };
-pub use report::{CardOutcome, HeldPlanned, OvernightReport, ReportCard};
+pub use report::{CardOutcome, GroupCardStatus, HeldPlanned, OvernightReport, ReportCard};
 
 use crate::StartTarget;
 use crate::ports::{Clock, Deps, LarkTasks, PortError, TaskCache};
@@ -157,6 +158,11 @@ impl<D: Deps> RunService<D> {
             ..CycleReport::default()
         };
         for run in active {
+            let cards = self.runs.cards(&run.id).await?;
+            if !cards.is_empty() {
+                self.group_cycle_report(run, &cards, &mut report).await;
+                continue;
+            }
             let key = self.key_of_record(&run.record_id).await;
             match (&run.state, &run.hold) {
                 (RunState::Held, Some(h)) if h.reason == HoldReason::AcGate => {
@@ -177,6 +183,46 @@ impl<D: Deps> RunService<D> {
                 .push(self.key_of_record(&h.record_id).await);
         }
         Ok(report)
+    }
+
+    /// Hasil grup per kartu untuk DM laporan (R23, KTD-G16): kartu ter-commit
+    /// dihitung PR draft hanya bila PR grup ada; selain itu diparkir dengan
+    /// alasan grup, atau lanjut siklus berikutnya bila grup berjeda.
+    async fn group_cycle_report(
+        &self,
+        run: &RunRecord,
+        cards: &[crate::run_ports::GroupCardRow],
+        report: &mut CycleReport,
+    ) {
+        let has_pr = run.draft_pending.is_some();
+        let hold = run.hold.as_ref().filter(|_| run.state == RunState::Held);
+        let paused = hold.is_some_and(|h| !h.reason.needs_attention());
+        let mut line = Vec::with_capacity(cards.len());
+        for c in cards {
+            let key = self.key_of_record(&c.record_id).await;
+            let status = match &c.state {
+                CardState::Removed(_) => "removed".to_owned(),
+                CardState::Pending => "not started".to_owned(),
+                CardState::Done => "committed".to_owned(),
+                CardState::Active => match hold {
+                    Some(h) => format!("parked: {}", h.reason.as_str()),
+                    None if run.state == RunState::Failed => "failed".to_owned(),
+                    None => "working".to_owned(),
+                },
+            };
+            let started = matches!(c.state, CardState::Done | CardState::Active);
+            if started {
+                if has_pr && c.state == CardState::Done {
+                    report.drafts.push(key.clone());
+                } else if paused {
+                    report.continuing.push(key.clone());
+                } else if hold.is_some() || run.state == RunState::Failed {
+                    report.held_group.push(key.clone());
+                }
+            }
+            line.push((key, status));
+        }
+        report.groups.push(line);
     }
 
     /// Kunci kartu dari cache; `record_id` bila tidak ada.

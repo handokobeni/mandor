@@ -658,3 +658,100 @@ async fn handoff_grup_diulang_mengembalikan_hasil_yang_sama() {
     let again = vm.svc.handoff("c1", &to).await.unwrap();
     assert_eq!(again, first);
 }
+
+// --- U15: laporan pagi per kartu (R23, AE7, KTD-G16) ---
+
+#[tokio::test(flavor = "multi_thread")]
+async fn covers_ae7_laporan_menghitung_grup_per_kartu() {
+    use mandor_usecase::overnight::{CardOutcome, GroupCardStatus};
+    let (lark, clock, st) = vm_with(&["c1", "c2", "c3"], wib(0, 20, 0)).await;
+    st.svc
+        .set_overnight_settings(&OvernightSettings {
+            start: "19:00".to_owned(),
+            end: "06:00".to_owned(),
+            offset: "+07:00".to_owned(),
+            token_limit: Some(1_000),
+        })
+        .await
+        .unwrap();
+    queue_group(&st, &["c1", "c2", "c3"]).await;
+    tick(&st).await;
+    edits(&st);
+    st.agent.last().done();
+    eventually(|| turns(&st) == 2).await;
+    st.agent
+        .last()
+        .emit(mandor_domain::AgentEvent::MessageUsage {
+            message_id: "m1".to_owned(),
+            usage: mandor_domain::Usage {
+                input_tokens: 900,
+                output_tokens: 200,
+                ..mandor_domain::Usage::default()
+            },
+        });
+    eventually(|| held(&st).is_some()).await;
+
+    let report = st.svc.overnight_report().await.unwrap();
+    let rows: Vec<(String, Option<GroupCardStatus>, CardOutcome)> = report
+        .cards
+        .iter()
+        .map(|c| (c.record_id.clone(), c.group, c.outcome.clone()))
+        .collect();
+    assert_eq!(
+        rows,
+        [
+            (
+                "c1".to_owned(),
+                Some(GroupCardStatus::Committed),
+                CardOutcome::Held(HoldReason::UsageLimit)
+            ),
+            (
+                "c2".to_owned(),
+                Some(GroupCardStatus::Active),
+                CardOutcome::Held(HoldReason::UsageLimit)
+            ),
+            (
+                "c3".to_owned(),
+                Some(GroupCardStatus::Pending),
+                CardOutcome::Held(HoldReason::UsageLimit)
+            ),
+        ]
+    );
+
+    at(&lark, &clock, wib(1, 6, 30));
+    tick(&st).await;
+    let dm = lark.dms.lock().unwrap().last().cloned().unwrap();
+    assert!(dm.contains("Draft PRs ready: 0"), "{dm}");
+    assert!(dm.contains("Parked (group): 2"), "{dm}");
+    assert!(
+        dm.contains(
+            "Group: PGS-1401 committed, PGS-1402 parked: usage_limit, PGS-1403 not started"
+        ),
+        "{dm}"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn laporan_grup_selesai_semua_kartu_draft_dengan_pr_yang_sama() {
+    use mandor_usecase::overnight::CardOutcome;
+    let (_lark, _clock, st) = vm_with(&["c1", "c2"], wib(0, 20, 0)).await;
+    queue_group(&st, &["c1", "c2"]).await;
+    tick(&st).await;
+    for n in 1..=2 {
+        edits(&st);
+        st.agent.last().done();
+        if n == 1 {
+            eventually(|| turns(&st) == 2).await;
+        }
+    }
+    eventually(|| group_run(&st).draft_pending.is_some()).await;
+    let report = st.svc.overnight_report().await.unwrap();
+    assert_eq!(report.cards.len(), 2);
+    assert!(report.cards.iter().all(|c| c.outcome == CardOutcome::Draft));
+    assert!(
+        report
+            .cards
+            .iter()
+            .all(|c| c.pr_url == report.cards[0].pr_url)
+    );
+}

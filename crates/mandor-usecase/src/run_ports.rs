@@ -325,6 +325,28 @@ pub struct PrContext<'a> {
     pub decided: &'a [String],
 }
 
+/// Cara run VM dimulai dari antrean.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum VmStart {
+    /// Penjadwal di jam lembur.
+    #[default]
+    Window,
+    /// "Start now" dari dev, di luar jam lembur pun.
+    Now,
+}
+
+impl VmStart {
+    #[must_use]
+    pub fn from_start_now(start_now: bool) -> Self {
+        if start_now { Self::Now } else { Self::Window }
+    }
+
+    #[must_use]
+    pub fn is_now(self) -> bool {
+        self == Self::Now
+    }
+}
+
 /// Run untuk satu record di laptop pemilik.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RunRecord {
@@ -390,6 +412,9 @@ pub struct RunRecord {
     /// Sumber desain yang gagal diperbarui saat kartu VM dimulai (R12 plan
     /// 2026-10-30-001); untuk laporan pagi.
     pub design_notes: Vec<String>,
+    /// Cara grup VM dimulai; grup "Start now" tidak berjeda karena jam lembur
+    /// (R21 plan grup, KTD-G12).
+    pub vm_start: VmStart,
     /// Diisi store saat membaca; diabaikan saat menyimpan.
     pub created_at_ms: i64,
     /// Diisi store saat membaca; diabaikan saat menyimpan.
@@ -439,6 +464,7 @@ impl RunRecord {
             entered_waiting_fix_ms: None,
             design_notes: Vec::new(),
             draft_pending: None,
+            vm_start: VmStart::Window,
             created_at_ms: 0,
             updated_at_ms: 0,
         }

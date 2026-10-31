@@ -5,7 +5,7 @@
 use std::sync::Arc;
 
 use mandor_domain::group::{self, Candidate, CardState, Unselectable};
-use mandor_domain::{AcRow, AppField, RunState, Task, TaskStatus, WriteOp};
+use mandor_domain::{AcRow, AppField, HoldReason, RunState, Task, TaskStatus, WriteOp};
 
 use super::members::{COMMIT_DIFF_MAX, group_name};
 use super::start::{Plan, start_summary};
@@ -144,6 +144,39 @@ impl<D: Deps> RunService<D> {
         }
         let mut plan = self.resolve(target).await?;
         plan.design = design.to_vec();
+        self.start_group_plan(record_ids, &plan, dev_note, planning, progress)
+            .await
+    }
+
+    /// Grup dari antrean VM (U12 plan grup): tanpa persetujuan plan (R6 VM),
+    /// sumber desain item untuk seluruh grup, dan tanda Start now.
+    pub(crate) async fn start_vm_group(
+        self: &Arc<Self>,
+        record_ids: &[String],
+        target: &StartTarget,
+        dev_note: Option<&str>,
+        design: (&[DesignRoot], &[String]),
+        start_now: bool,
+    ) -> Result<RunRecord, RunError> {
+        let _work = self.enter_work()?;
+        let mut plan = self.resolve(target).await?;
+        plan.design = design.0.to_vec();
+        plan.design_notes = design.1.to_vec();
+        plan.vm_start = crate::run_ports::VmStart::from_start_now(start_now);
+        self.start_group_plan(record_ids, &plan, dev_note, &Planning::Skip, |_| {})
+            .await
+    }
+
+    /// Klaim, worktree, dan giliran pertama grup untuk target yang sudah
+    /// di-resolve (dipakai juga oleh antrean VM, U12 plan grup).
+    pub(crate) async fn start_group_plan(
+        self: &Arc<Self>,
+        record_ids: &[String],
+        plan: &Plan,
+        dev_note: Option<&str>,
+        planning: &Planning,
+        progress: impl Fn(StartStep) + Send + Sync,
+    ) -> Result<RunRecord, RunError> {
         progress(StartStep::Claiming);
         let mut claimed: Vec<&String> = Vec::with_capacity(record_ids.len());
         let mut result = Ok(());
@@ -158,7 +191,7 @@ impl<D: Deps> RunService<D> {
         }
         let outcome = match result {
             Ok(()) => {
-                self.prepare_group(record_ids, &plan, dev_note, planning, &progress)
+                self.prepare_group(record_ids, plan, dev_note, planning, &progress)
                     .await
             }
             Err(e) => Err(e),
@@ -327,15 +360,26 @@ impl<D: Deps> RunService<D> {
             return Err(RunError::InvalidState("the card is not finished yet"));
         }
         let mut cards = self.group_of(run_id).await?;
+        self.finish_active_card(&mut run, &mut cards).await?;
+        self.advance(&mut run, &mut cards, None).await
+    }
+
+    /// Commit lokal kartu aktif dengan kuncinya di pesan commit, lalu tandai
+    /// selesai beserta plan-nya (KTD-G3).
+    pub(crate) async fn finish_active_card(
+        &self,
+        run: &mut RunRecord,
+        cards: &mut [GroupCardRow],
+    ) -> Result<(), RunError> {
         let idx = cards
             .iter()
             .position(|c| c.state == CardState::Active)
             .ok_or(RunError::InvalidState("no active card"))?;
         let task = self.task_of(&cards[idx].record_id).await?;
-        cards[idx].commits = self.commit_card(&run, key_of(&task)).await?;
+        cards[idx].commits = self.commit_card(run, key_of(&task)).await?;
         cards[idx].state = CardState::Done;
         cards[idx].plan = run.plan.take();
-        self.advance(&mut run, &mut cards).await
+        Ok(())
     }
 
     /// Melanjutkan grup setelah kartu dikeluarkan (R9): mulai kartu berikutnya.
@@ -352,7 +396,7 @@ impl<D: Deps> RunService<D> {
         if group::active_card(&group_cards_domain(&cards)).is_some() {
             return Err(RunError::InvalidState("a card is still active"));
         }
-        self.advance(&mut run, &mut cards).await
+        self.advance(&mut run, &mut cards, None).await
     }
 
     /// Mengeluarkan kartu yang belum dimulai (R10): klaim dilepas, dev diminta
@@ -405,7 +449,7 @@ impl<D: Deps> RunService<D> {
     }
 
     /// Kartu run grup; `InvalidState` untuk run tunggal.
-    pub(super) async fn group_of(&self, run_id: &str) -> Result<Vec<GroupCardRow>, RunError> {
+    pub(crate) async fn group_of(&self, run_id: &str) -> Result<Vec<GroupCardRow>, RunError> {
         let cards = self.runs.cards(run_id).await?;
         if cards.is_empty() {
             return Err(RunError::InvalidState("not a group run"));
@@ -441,11 +485,13 @@ impl<D: Deps> RunService<D> {
     }
 
     /// Memulai kartu berikutnya setelah memeriksa ulang kartu itu di Lark (R9),
-    /// atau menunggu Push & PR bila tidak ada kartu lagi.
-    async fn advance(
+    /// atau menunggu Push & PR bila tidak ada kartu lagi. `dev_note` ikut ke
+    /// pesan kartu berikutnya (jawaban dev saat grup VM diantre ulang).
+    pub(crate) async fn advance(
         self: &Arc<Self>,
         run: &mut RunRecord,
         cards: &mut [GroupCardRow],
+        dev_note: Option<&str>,
     ) -> Result<(), RunError> {
         let Some(next) = cards.iter().position(|c| c.state == CardState::Pending) else {
             run.note = Some("All cards are done. Review the AC, then Push & PR.".to_owned());
@@ -458,6 +504,14 @@ impl<D: Deps> RunService<D> {
             cards[next].state = CardState::Removed(group::RemovedReason::ChangedInLark);
             self.release_quietly(&id).await;
             let key = task.as_ref().map_or(id.clone(), |t| key_of(t).to_owned());
+            if self.is_vm() {
+                // VM tidak menunggu dev: grup diparkir (R9, KTD-G13).
+                self.save_group(run, cards).await?;
+                let note = format!(
+                    "{key} changed in Lark and was removed from the group. Queue the group again to continue without it."
+                );
+                return self.hold(run, HoldReason::CardRemoved, Some(note)).await;
+            }
             run.note = Some(format!(
                 "{key} changed in Lark and was removed from the group. Continue without it, or stop the group."
             ));
@@ -480,7 +534,7 @@ impl<D: Deps> RunService<D> {
         };
         run.note = None;
         run.phase = RunPhase::Implement;
-        let message = self.card_message(run, &input, index, None, &planning);
+        let message = self.card_message(run, &input, index, dev_note, &planning);
         self.save_group(run, cards).await?;
         let req = self.resume_request(run, message).await?;
         let summary = format!("Next card: {}", key_of(&input.tasks[index]));
@@ -625,6 +679,8 @@ fn new_run(
             .collect();
     }
     run.design.clone_from(&plan.design);
+    run.design_notes.clone_from(&plan.design_notes);
+    run.vm_start = plan.vm_start;
     run
 }
 

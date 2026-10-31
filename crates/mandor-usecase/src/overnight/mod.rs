@@ -5,6 +5,7 @@
 //! lanjutan sesi, dan mesin Waiting Fix yang sudah ada.
 
 mod flow;
+mod group;
 mod handoff;
 mod planned;
 mod ports;
@@ -201,7 +202,7 @@ impl<D: Deps> RunService<D> {
         Ok(used.counted() < limit)
     }
 
-    async fn window(&self) -> Result<Option<Window>, RunError> {
+    pub(super) async fn window(&self) -> Result<Option<Window>, RunError> {
         Ok(self
             .overnight
             .settings()
@@ -291,7 +292,7 @@ impl<D: Deps> RunService<D> {
 
     /// Sumber desain kartu antrean: repo git diperbarui lalu di-resolve (R12,
     /// R13). `Err` berisi alasan bila ada sumber yang tidak tersedia.
-    async fn queue_design(
+    pub(super) async fn queue_design(
         &self,
         item: &QueueItem,
     ) -> Result<(Vec<crate::review::DesignRoot>, Vec<String>), String> {
@@ -326,14 +327,23 @@ impl<D: Deps> RunService<D> {
 
     /// Cek ulang lalu mulai; error berisi alasan untuk laporan pagi.
     async fn try_start(self: &Arc<Self>, item: &QueueItem) -> Result<(), String> {
-        let existing = self
-            .runs
-            .active_for(&item.record_id)
-            .await
-            .map_err(|e| e.to_string())?;
+        let existing = self.group_item_run(item).await.map_err(|e| e.to_string())?;
         if let Some(run) = existing {
             if !resumable(run.state) {
                 return Err("the card already has a run".to_owned());
+            }
+            // Grup tertahan atau berjeda: lanjut menurut keadaan kartunya.
+            let group = !self
+                .runs
+                .cards(&run.id)
+                .await
+                .map_err(|e| e.to_string())?
+                .is_empty();
+            if group {
+                return self
+                    .resume_group(run, item)
+                    .await
+                    .map_err(|e| e.to_string());
             }
             // Kartu Planned terputus sebelum pesan pertamanya sampai.
             if run.plan.is_some() && run.phase == RunPhase::Implement && !run.session_started {
@@ -350,6 +360,9 @@ impl<D: Deps> RunService<D> {
                 .await
                 .map(|_| ())
                 .map_err(|e| e.to_string());
+        }
+        if !item.group.is_empty() {
+            return self.try_start_group(item).await;
         }
         let task = self
             .sync
@@ -504,6 +517,6 @@ pub(crate) fn window_of(s: &OvernightSettings) -> Option<Window> {
 }
 
 /// Perbaikan Waiting Fix yang siap dimulai dan menunggu giliran (R21).
-fn fix_waiting(run: &RunRecord, now: i64) -> bool {
+pub(super) fn fix_waiting(run: &RunRecord, now: i64) -> bool {
     run.state == RunState::WfQuiet && run.quiet_until_ms.is_some_and(|u| u <= now)
 }

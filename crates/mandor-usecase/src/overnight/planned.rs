@@ -59,6 +59,9 @@ impl<D: Deps> RunService<D> {
                 "this card was taken over to the laptop",
             ));
         }
+        if self.queued_cards().await?.iter().any(|c| c == record_id) {
+            return Err(RunError::InvalidState("the card is already queued"));
+        }
         let active = self.runs.active_for(record_id).await?;
         if !req.design_sources.is_empty() {
             let check = self.design.prepare(&req.design_sources, false).await?;
@@ -106,7 +109,7 @@ impl<D: Deps> RunService<D> {
 
     /// Kartu No plan: To Do yang lolos gerbang Start, atau run yang boleh
     /// dilanjutkan.
-    async fn check_no_plan(
+    pub(super) async fn check_no_plan(
         &self,
         record_id: &str,
         active: Option<mandor_domain::RunState>,

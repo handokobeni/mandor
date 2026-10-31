@@ -48,6 +48,9 @@ impl<D: Deps> RunService<D> {
             note: note.clone(),
         });
         self.runs.save(run, run.generation, self.now()).await?;
+        if !reason.needs_attention() {
+            return Ok(());
+        }
         let body = note.unwrap_or_else(|| format!("Parked: {}", reason.as_str()));
         self.notifier
             .notify(notice(self, NoticeKind::NeedsAttention, run, &body).await)
@@ -60,6 +63,9 @@ impl<D: Deps> RunService<D> {
     /// Push & PR lewat gerbang AC yang selalu memblokir (R11, R12).
     pub(crate) fn vm_after_turn(self: &Arc<Self>, mut run: RunRecord, result: String) -> Boxed<'_> {
         Box::pin(async move {
+            if !self.runs.cards(&run.id).await?.is_empty() {
+                return self.vm_group_after_turn(run, result).await;
+            }
             run.state = RunState::AwaitingDev;
             run.hold = None;
             self.runs.save(&run, run.generation, self.now()).await?;

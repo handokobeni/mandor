@@ -185,12 +185,9 @@ impl<D: Deps> RunService<D> {
                     let req = self.resume_request(&mut run, next.clone()).await?;
                     return self.spawn_turn_boxed(run, req, next).await;
                 }
-                // VM: kartu dikerjakan sampai PR atau tertahan dengan alasan (U4 plan VM).
-                // Run grup di VM menyusul di U10 plan run grup.
-                if self.is_vm()
-                    && run.phase == RunPhase::Implement
-                    && self.runs.cards(&run.id).await?.is_empty()
-                {
+                // VM: kartu (atau grup, U12 plan grup) dikerjakan sampai PR atau
+                // tertahan dengan alasan (U4 plan VM).
+                if self.is_vm() && run.phase == RunPhase::Implement {
                     return self.vm_after_turn(run, result).await;
                 }
                 run.state = RunState::AwaitingDev;

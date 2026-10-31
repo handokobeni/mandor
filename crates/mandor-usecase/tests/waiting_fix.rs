@@ -303,6 +303,23 @@ async fn balasan_waktu_sama_diproses_tepat_sekali_dan_balasan_di_thread_lama_ter
 }
 
 #[tokio::test]
+async fn kartu_workspace_dengan_beberapa_link_pr_tidak_menyalin_link_ke_run() {
+    let (lark, _clock, st) = setup(false).await;
+    lark.edit("rec1", |t| {
+        t.pr_url =
+            Some("https://github.com/o/web/pull/2\nhttps://github.com/o/api/pull/1".to_owned());
+    });
+    st.svc.sync().poll(true, &[]).await.unwrap();
+    *lark.replies.lock().unwrap() = vec![reply("r1", "ou_qa", NOW - 600, "Label salah")];
+    assert_eq!(tick(&st).await.started, ["rec1"]);
+    assert_eq!(
+        st.runs.only().pr_url,
+        None,
+        "anggota mencari PR-nya dari branch"
+    );
+}
+
+#[tokio::test]
 async fn app_mati_saat_waiting_fix_membuat_ulang_worktree_dan_sesi_baru_dengan_konteks() {
     let (lark, _clock, st) = setup(false).await;
     lark.edit("rec1", |t| t.ac_ids = vec!["ac1".to_owned()]);

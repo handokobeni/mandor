@@ -475,6 +475,20 @@ impl RunStore for RunsStore {
         Ok(self.fetch(id).await?)
     }
 
+    async fn latest_for(&self, record_id: &str) -> Result<Option<RunRecord>, PortError> {
+        let id = sqlx::query_scalar!(
+            "SELECT id FROM runs WHERE record_id = ? ORDER BY created_at_ms DESC LIMIT 1",
+            record_id
+        )
+        .fetch_optional(&self.store.pool)
+        .await
+        .map_err(StoreError::internal)?;
+        match id {
+            Some(id) => Ok(self.fetch(&id).await?),
+            None => Ok(None),
+        }
+    }
+
     async fn active_for(&self, record_id: &str) -> Result<Option<RunRecord>, PortError> {
         let mut conn = self
             .store

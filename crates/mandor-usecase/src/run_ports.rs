@@ -581,6 +581,11 @@ pub trait RunStore: Send + Sync {
         record_id: &str,
     ) -> impl Future<Output = Result<Option<RunRecord>, PortError>> + Send;
     fn list_active(&self) -> impl Future<Output = Result<Vec<RunRecord>, PortError>> + Send;
+    /// Run terbaru kartu, termasuk yang sudah ditutup.
+    fn latest_for(
+        &self,
+        record_id: &str,
+    ) -> impl Future<Output = Result<Option<RunRecord>, PortError>> + Send;
     /// Menyimpan run bila generasi di penyimpanan masih `expected_generation`;
     /// selain itu `PortError::Conflict`.
     fn save(

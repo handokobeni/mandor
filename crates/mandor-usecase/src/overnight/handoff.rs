@@ -40,6 +40,9 @@ impl<D: Deps> RunService<D> {
             return Err(RunError::InvalidState("handoff runs on the VM daemon"));
         }
         let Some(run) = self.runs.active_for(record_id).await? else {
+            if let Some(back) = self.handed_back(record_id, to_daemon).await? {
+                return Ok(back);
+            }
             return self.hand_back_planned(record_id, to_daemon).await;
         };
         if matches!(run.state, RunState::Preparing | RunState::Publishing) {
@@ -83,6 +86,32 @@ impl<D: Deps> RunService<D> {
             target: Some(target_of(&run)),
             planned: None,
         })
+    }
+
+    /// Serah-terima yang sudah selesai ke `to_daemon` diulang tanpa efek, agar
+    /// Take over bisa dicoba lagi bila langkah laptop gagal.
+    async fn handed_back(
+        &self,
+        record_id: &str,
+        to_daemon: &str,
+    ) -> Result<Option<Handback>, RunError> {
+        if !self.overnight.laptop_only(record_id).await? {
+            return Ok(None);
+        }
+        let task = self.task_of(record_id).await?;
+        if task.claim.as_ref().and_then(|c| c.daemon_id()) != Some(to_daemon) {
+            return Err(RunError::InvalidState(
+                "the card was already handed to another daemon",
+            ));
+        }
+        let Some(run) = self.runs.latest_for(record_id).await? else {
+            return Ok(None);
+        };
+        Ok(run.branch.clone().map(|branch| Handback {
+            branch,
+            target: Some(target_of(&run)),
+            planned: None,
+        }))
     }
 
     /// Kartu Planned di antrean tanpa run: keluar dari antrean, klaim ke

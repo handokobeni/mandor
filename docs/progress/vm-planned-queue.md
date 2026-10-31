@@ -44,7 +44,7 @@ Menunggu biner baru dipasang di VM oleh pemilik produk. Kartu uji di Base salina
 
 ### Temuan lain saat uji langsung (belum diperbaiki)
 
-- PGS-1543 (Take over sebelum perbaikan `3c8bd91`): klaim sudah pindah ke laptop tetapi run laptop tidak dibuat; mesin Waiting Fix laptop lalu membuat run satu repo (`mandor-smoke`) untuk kartu workspace itu. Jalur ini tidak terjadi lagi setelah perbaikan, tetapi Take over sebaiknya bisa diulang bila langkah laptop gagal.
-- Kartu workspace menyimpan dua URL PR dipisah baris di `mandor_pr`; pembaruan badan PR laptop gagal dengan "gh pr view failed: invalid qualified head ref format" karena kedua URL dibaca sebagai satu.
+- PGS-1543 (Take over sebelum perbaikan `3c8bd91`): klaim sudah pindah ke laptop tetapi run laptop tidak dibuat; mesin Waiting Fix laptop lalu membuat run satu repo (`mandor-smoke`) untuk kartu workspace itu. **Diperbaiki:** `runs.handoff` di VM kini aman diulang; serah-terima yang sudah selesai ke daemon laptop yang sama mengembalikan branch dan target run terakhir tanpa push ulang, jadi Take over bisa dicoba lagi.
+- Kartu workspace menyimpan dua URL PR dipisah baris di `mandor_pr`; pembaruan badan PR laptop gagal dengan "gh pr view failed: invalid qualified head ref format" karena kedua URL dibaca sebagai satu. **Diperbaiki:** run yang dipulihkan (Take over, Waiting Fix otomatis) hanya menyalin link bila satu; bila beberapa, tiap anggota mencari PR-nya dari branch.
 - Diagram status di plan VM (2026-10-23-002) menggambarkan draft PR bisa di-Take over, sedangkan R22 dan UI hanya untuk Waiting Fix, tertahan, atau gagal. Perlu keputusan pemilik produk.
 

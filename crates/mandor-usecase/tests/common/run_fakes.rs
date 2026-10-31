@@ -702,6 +702,16 @@ impl RunStore for FakeRuns {
             .find(|(r, c)| !c && r.record_id == record_id)
             .map(|(r, _)| r.clone()))
     }
+    async fn latest_for(&self, record_id: &str) -> Result<Option<RunRecord>, PortError> {
+        Ok(self
+            .rows
+            .lock()
+            .unwrap()
+            .values()
+            .filter(|(r, _)| r.record_id == record_id)
+            .map(|(r, _)| r.clone())
+            .max_by(|a, b| a.id.cmp(&b.id)))
+    }
     async fn list_active(&self) -> Result<Vec<RunRecord>, PortError> {
         Ok(self
             .rows

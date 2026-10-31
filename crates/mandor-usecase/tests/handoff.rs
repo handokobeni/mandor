@@ -108,6 +108,22 @@ async fn covers_ae11_kerja_malam_di_push_klaim_pindah_dan_laptop_melanjutkan() {
 }
 
 #[tokio::test]
+async fn take_over_bisa_diulang_bila_langkah_laptop_gagal() {
+    let (_lark, _clock, on_vm, laptop) = held_on_vm().await;
+    let to = laptop.svc.sync().identity().daemon_id.clone();
+    let first = on_vm.svc.handoff("a", &to).await.unwrap();
+    let pushes = on_vm.git.st().pushes.len();
+    let again = on_vm.svc.handoff("a", &to).await.unwrap();
+    assert_eq!(
+        again, first,
+        "serah-terima yang sudah selesai dikembalikan lagi"
+    );
+    assert_eq!(on_vm.git.st().pushes.len(), pushes, "tidak push ulang");
+    let err = on_vm.svc.handoff("a", "lain").await.unwrap_err();
+    assert!(format!("{err}").contains("another daemon"), "{err}");
+}
+
+#[tokio::test]
 async fn push_gagal_klaim_tidak_pindah() {
     let (lark, _clock, on_vm, _laptop) = held_on_vm().await;
     on_vm.git.st().fail_push = true;

@@ -249,6 +249,10 @@ impl RunStore for BroadcastRuns {
         self.inner.list_active().await
     }
 
+    async fn latest_for(&self, record_id: &str) -> Result<Option<RunRecord>, PortError> {
+        self.inner.latest_for(record_id).await
+    }
+
     async fn save(&self, run: &RunRecord, expected: i64, now_ms: i64) -> Result<(), PortError> {
         self.inner.save(run, expected, now_ms).await?;
         self.run_event(event::RUN_UPDATED, &run.id);

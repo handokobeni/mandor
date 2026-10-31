@@ -148,7 +148,7 @@ impl<D: Deps> RunService<D> {
             .or_else(|| task.branch.clone())
             .ok_or(RunError::InvalidState("no branch"))?;
         let (mut run, _) = self.restore_run(record_id, target, &branch).await?;
-        run.pr_url.clone_from(&task.pr_url);
+        run.pr_url = task.single_pr_url();
         let mut missing = Vec::new();
         if let Some(p) = planned {
             let check = self.design.prepare(&p.laptop_design, false).await?;

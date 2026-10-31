@@ -186,7 +186,7 @@
 </script>
 
 <Dialog.Root open {onOpenChange}>
-  <Dialog.Content class="sm:max-w-[520px]" showCloseButton={phase !== 'running'}>
+  <Dialog.Content class="sm:max-w-[520px] max-h-[90vh] overflow-y-auto" showCloseButton={phase !== 'running'}>
     <Dialog.Header>
       <div class="flex items-center gap-2">
         <span class="mono muted">{key}</span>

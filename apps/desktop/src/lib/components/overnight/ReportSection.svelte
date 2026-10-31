@@ -7,7 +7,7 @@
   import { Button } from '#lib/components/ui/button/index.ts';
   import { Input } from '#lib/components/ui/input/index.ts';
   import { Textarea } from '#lib/components/ui/textarea/index.ts';
-  import { backInQueue, canTakeOverReport, groupCardLabel, holdLabel, leadRow, reportGroups, usageText } from '#lib/overnight.ts';
+  import { backInQueue, canTakeOverReport, groupCardLabel, heldAction, holdLabel, leadRow, reportGroups, usageText } from '#lib/overnight.ts';
   import type { AcRowView } from '#lib/protocol/AcRowView.ts';
   import type { ReportCardView } from '#lib/protocol/ReportCardView.ts';
   import type { Rpc } from '#lib/rpc.ts';
@@ -140,6 +140,7 @@
       <h3>{g.label} <span class="muted mono">{g.cards.length}</span></h3>
       {#each g.cards as c (c.run_id + c.record_id)}
         {@const lead = leadRow(c, g.cards)}
+        {@const held = heldAction(c, g.cards)}
         <div class="settings-card report-card" class:group-row={c.group_card !== null && !lead}>
           <div class="content">
             <div class="head">
@@ -180,7 +181,7 @@
               {#if c.outcome === 'held' && c.hold_reason === 'ac_gate' && !gate[c.run_id]}
                 <Button size="sm" variant="outline" onclick={() => openGate(c)}>Decide AC…</Button>
               {/if}
-              {#if c.outcome === 'held' && c.hold_reason === 'needs_confirmation'}
+              {#if held === 'confirm'}
                 <Button size="sm" disabled={busy === c.run_id} onclick={() => act(c, () => overnight.decide(c.run_id, [], null), `${key(c)} pushed as a draft PR`)}>
                   Confirm and push
                 </Button>
@@ -192,7 +193,7 @@
               {/if}
             </div>
 
-            {#if c.outcome === 'held' && (c.hold_reason === 'stuck' || c.hold_reason === 'usage_limit')}
+            {#if held === 'answer'}
               <div class="answer">
                 <Textarea rows={2} placeholder="Answer the agent, then the card goes back to the queue" bind:value={answers[c.run_id]} />
                 <Button size="sm" disabled={busy === c.run_id} onclick={() => act(c, () => overnight.answer(c, answers[c.run_id] ?? ''), `${key(c)} is back in the queue`)}>

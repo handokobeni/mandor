@@ -17,6 +17,7 @@ import {
   groupCardLabel,
   holdLabel,
   leadRow,
+  heldAction,
   queueAddLabel,
   queueStepLabel,
   showQueueForVm,
@@ -269,6 +270,23 @@ describe('laporan grup', () => {
   it('aksi run hanya di baris pertama tiap run; kartu tunggal selalu baris pertama', () => {
     const cards = [row('a', 'r1'), row('b', 'r1'), row('c', 'r2')];
     expect(cards.map((c) => leadRow(c, cards))).toEqual([true, false, true]);
+  });
+
+  it('aksi run tertahan: jawab/antre lagi, konfirmasi push, atau tunggu Keep/Revert kartu grup', () => {
+    const r = (hold_reason: string, changed_in_lark = false, record_id = 'a') => ({
+      record_id,
+      run_id: 'r1',
+      outcome: 'held',
+      hold_reason,
+      changed_in_lark
+    });
+    expect(heldAction(r('stuck'), [r('stuck')])).toBe('answer');
+    expect(heldAction(r('usage_limit'), [r('usage_limit')])).toBe('answer');
+    expect(heldAction(r('card_removed'), [r('card_removed')]), 'kartu berikutnya dikeluarkan: antre lagi').toBe('answer');
+    expect(heldAction(r('needs_confirmation'), [r('needs_confirmation')])).toBe('confirm');
+    const rows = [r('needs_confirmation'), r('needs_confirmation', true, 'b')];
+    expect(heldAction(rows[0], rows), 'kartu ter-commit berubah di Lark: putuskan di barisnya').toBeNull();
+    expect(heldAction({ ...r('stuck'), outcome: 'draft' }, [])).toBeNull();
   });
 
   it('label keadaan kartu grup', () => {

@@ -95,6 +95,21 @@ export function leadRow<C extends { run_id: string }>(c: C, list: C[]): boolean 
   return list.find((x) => x.run_id === c.run_id) === c;
 }
 
+type HeldRow = { run_id: string; outcome: string; hold_reason: string | null; changed_in_lark: boolean };
+
+/**
+ * Aksi untuk run tertahan di laporan: `answer` (jawab agent atau antre lagi,
+ * termasuk grup yang kartu berikutnya dikeluarkan), `confirm` (Confirm and
+ * push), atau `null`. Selama kartu grup menunggu Keep/Revert (R13), keputusan
+ * ada di baris kartunya.
+ */
+export function heldAction<C extends HeldRow>(c: C, list: C[]): 'answer' | 'confirm' | null {
+  if (c.outcome !== 'held') return null;
+  if (list.some((x) => x.run_id === c.run_id && x.changed_in_lark)) return null;
+  if (c.hold_reason === 'stuck' || c.hold_reason === 'usage_limit' || c.hold_reason === 'card_removed') return 'answer';
+  return c.hold_reason === 'needs_confirmation' ? 'confirm' : null;
+}
+
 const GROUP_CARD_LABEL: Record<string, string> = {
   committed: 'Committed',
   active: 'In progress',

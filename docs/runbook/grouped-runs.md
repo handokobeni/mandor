@@ -50,7 +50,28 @@ Setelah giliran kartu selesai (state **Waiting for you**), panel **Group** di wo
 - Selama ada kartu Waiting Fix, deskripsi PR memuat **Do not merge: <kartu> is in Waiting Fix**. Mandor tidak memblokir merge di GitHub.
 - Bila PR grup sudah merged, perbaikan kartu itu pindah ke run lanjutan dari branch default (PR baru) dan tidak di-push ke branch grup.
 
-## 6. Uji langsung (U11)
+## 6. Grup di VM lembur
+
+Grup bisa dikerjakan VM lembur (lihat `docs/runbook/setup-vm.md`) sebagai satu item antrean.
+
+**Mengantre grup.**
+- **Tanpa plan:** tab **Overnight → Queue**, pilih kartu pertama, repo VM, dan sumber desain VM (dipilih sekali untuk seluruh grup). Di **Queue together**, centang kartu lain epic itu lalu **Queue N cards together**. Kartu yang sudah di antrean VM tampil nonaktif "Queued for VM".
+- **Dengan plan (kartu pertama diplan siang):** Start together di laptop, lalu di panel plan kartu pertama pilih **Approve & queue for VM**. Tombol ini hanya ada selama kartu pertama masih di fase plan. Laptop mem-push branch, VM mengantre seluruh grup dengan plan kartu pertama, lalu klaim semua kartu pindah ke VM (kartu pertama paling akhir).
+
+Baris antrean grup menampilkan **Group of N** dan urutan kartunya. Semua kartu grup di papan bertanda "Queued for VM".
+
+**Cara VM mengerjakan grup.**
+- Kartu dikerjakan berurutan di satu branch tanpa persetujuan plan. Tiap kartu di-commit lokal saat gilirannya selesai.
+- Giliran yang berakhir **tanpa perubahan kode** dianggap buntu: grup diparkir dengan pertanyaan agent di laporan pagi.
+- Sebelum kartu berikutnya, VM berjeda bila jam lembur sudah berakhir (dan grup tidak Start now) atau ada Waiting Fix lain yang siap. Grup kembali di posisi pertama antrean ("Continues") dan lanjut siklus berikutnya tanpa notifikasi.
+- Kartu berikutnya yang berubah di Lark (dipindah, PIC diganti) dikeluarkan dari grup dan klaimnya dilepas; grup diparkir "Card changed in Lark". Di laporan, **Answer and queue** mengantre grup lagi tanpa kartu itu.
+- Setelah kartu terakhir: kartu ter-commit diperiksa ulang di Lark. Yang berubah menahan push sampai diputuskan (lihat Laporan pagi). Selain itu review AC sekali, lalu satu PR draft grup.
+
+**Laporan pagi.** Run grup tampil satu baris per kartu dengan keadaannya (Committed, In progress, Not started, Removed). Aksi run (Send to review, Take over to laptop, jawaban untuk agent, keputusan AC) ada di baris pertama grup. Kartu bertanda **Changed in Lark** diputuskan dari laporan: **Keep** dengan alasan (dicatat di PR) atau **Revert** commit kartu itu; setelahnya grup kembali ke antrean. Revert yang konflik membiarkan grup tertahan; ambil alih ke laptop untuk menyelesaikannya.
+
+**Take over grup.** **Take over to laptop** memindahkan seluruh grup: klaim semua kartu, branch, commit per kartu, PR draft (Send to review dari laptop), dan hasil review AC VM. Kartu yang tersisa dilanjutkan di laptop dengan plan per kartu.
+
+## 7. Uji langsung (U11)
 
 Di Base salinan (`Sv1NbPJh5aD7SesHvtGlmga8g2f`) dengan repo `handokobeni/mandor-smoke`:
 
@@ -59,5 +80,19 @@ Di Base salinan (`Sv1NbPJh5aD7SesHvtGlmga8g2f`) dengan repo `handokobeni/mandor-
 3. **F3**: jawab pertanyaan agent di kartu ketiga lalu lanjutkan.
 4. **F4**: pindah satu kartu ke Waiting Fix dengan komentar; cek perbaikan di PR grup, peringatan "Do not merge", dan hanya kartu itu yang kembali ke Waiting Review.
 5. **AE8**: ulangi grup baru, pindah kartu pertama ke status lain setelah Next card, lalu Push & PR; cek dialog kartu berubah, keep dengan alasan, dan revert.
+
+Catat hasil di `docs/progress/grouped-runs.md`.
+
+## 8. Uji langsung grup di VM (U17)
+
+Di Base salinan dengan repo `handokobeni/mandor-smoke` di VM dan sumber desain `mandor-smoke-design`. Biner VM dipasang pemilik produk.
+
+1. Buat 3–4 kartu uji To Do baru dalam satu epic uji, PIC Anda, readiness siap.
+2. **F2/AE6**: Queue together tanpa plan, Start now. Cek commit per kartu, satu PR draft grup, laporan per kartu, lalu Send to review grup.
+3. **F5/AE9**: Start together di laptop, Approve & queue for VM di kartu pertama. Cek klaim semua kartu pindah ke VM dan VM mulai dari plan kartu pertama.
+4. **AE4 (VM)**: pindah satu kartu yang belum gilirannya ke Blocked; cek kartu dikeluarkan dan grup diparkir "Card changed in Lark" bila kartu sudah ter-commit.
+5. **AE7**: pasang batas token kecil sehingga grup berhenti di kartu kedua; cek laporan.
+6. **R21**: jam lembur berakhir di tengah grup; cek baris "Continues" dan lanjut siklus berikutnya.
+7. **Take over grup**: ambil alih grup dengan PR draft ke laptop, lalu Send to review dari laptop.
 
 Catat hasil di `docs/progress/grouped-runs.md`.

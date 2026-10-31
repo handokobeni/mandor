@@ -7,10 +7,11 @@ use std::sync::Arc;
 
 use mandor_domain::gate::check_start;
 use mandor_domain::group::{CardState, PauseInput, vm_pause};
+use mandor_domain::planned::{PlannedState, PlannedWork, check_planned_start};
 use mandor_domain::run::touches_sensitive_path;
 use mandor_domain::{DaemonRole, HoldReason, RunState, TaskStatus};
 
-use super::{CONTINUE, OvernightStore, QueueItem, QueueRequest, fix_waiting};
+use super::{CONTINUE, OvernightStore, PlannedEntry, QueueItem, QueueRequest, fix_waiting};
 use crate::Deps;
 use crate::ports::{Clock, PortError};
 use crate::review::DesignSources as _;
@@ -54,7 +55,13 @@ impl<D: Deps> RunService<D> {
             if self.runs.active_for(id).await?.is_some() {
                 return Err(RunError::InvalidState("a card already has a run"));
             }
-            self.check_no_plan(id, None).await?;
+            match &req.planned {
+                Some((work, _)) => {
+                    self.check_planned(id, &req.target, work, &req.design_sources)
+                        .await?;
+                }
+                None => self.check_no_plan(id, None).await?,
+            }
         }
         if !req.design_sources.is_empty() {
             let check = self.design.prepare(&req.design_sources, false).await?;
@@ -74,7 +81,12 @@ impl<D: Deps> RunService<D> {
             start_now: false,
             added_at_ms: self.sync.clock.now_ms(),
             design_sources: req.design_sources.clone(),
-            planned: None,
+            planned: req.planned.as_ref().map(|(work, origin)| PlannedEntry {
+                work: work.clone(),
+                state: PlannedState::HandoverPending,
+                origin_daemon: Some(origin.clone()),
+                reason: None,
+            }),
             group: record_ids.to_vec(),
         };
         match self.overnight.enqueue(&item).await {
@@ -132,6 +144,36 @@ impl<D: Deps> RunService<D> {
             &item.group,
             &item.target,
             item.note.as_deref(),
+            (&design, &notes),
+            item.start_now,
+        )
+        .await
+        .map(|_| ())
+        .map_err(|e| e.to_string())
+    }
+
+    /// Item grup Planned (R24, KTD-G14): setiap kartu masih dipegang VM, lalu
+    /// grup dimulai dari plan kartu pertama.
+    pub(super) async fn try_start_planned_group(
+        self: &Arc<Self>,
+        item: &QueueItem,
+        work: &PlannedWork,
+    ) -> Result<(), String> {
+        for id in &item.group {
+            let task = self
+                .sync
+                .fetch_one(id)
+                .await
+                .map_err(|e| e.to_string())?
+                .ok_or_else(|| format!("{id} was deleted in Lark"))?;
+            let key = task.key.clone().unwrap_or_else(|| id.clone());
+            check_planned_start(&task, self.sync.identity()).map_err(|e| format!("{key}: {e}"))?;
+        }
+        let (design, notes) = self.queue_design(item).await?;
+        self.start_group_from_plan(
+            &item.group,
+            &item.target,
+            work,
             (&design, &notes),
             item.start_now,
         )

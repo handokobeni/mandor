@@ -255,6 +255,9 @@ impl<D: Deps> RunService<D> {
         item: &QueueItem,
         work: &PlannedWork,
     ) -> Result<(), String> {
+        if !item.group.is_empty() {
+            return self.try_start_planned_group(item, work).await;
+        }
         let task = self
             .sync
             .fetch_one(&item.record_id)

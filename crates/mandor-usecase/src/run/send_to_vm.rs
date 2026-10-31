@@ -4,19 +4,24 @@
 
 use std::sync::Arc;
 
+use mandor_domain::group::CardState;
 use mandor_domain::planned::{DesignMark, PlannedWork, stray_files};
 use mandor_domain::{Holder, RunState};
 
 use super::session::{follow_design_rows, rejected};
 use super::{RunError, RunService, StartTarget};
 use crate::ports::Deps;
-use crate::run_ports::{ChatItem, GitPort, LedgerStore, RunPhase, RunRecord, RunStore};
+use crate::run_ports::{
+    ChatItem, GitPort, GroupCardRow, LedgerStore, RunPhase, RunRecord, RunStore,
+};
 
 /// Hasil langkah pertama: paket plan dan target run laptop.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct VmHandover {
     pub work: PlannedWork,
     pub target: StartTarget,
+    /// Kartu grup urut pengerjaan (R24 plan grup); kosong untuk kartu tunggal.
+    pub cards: Vec<String>,
 }
 
 /// Target Start run: repo tunggal atau workspace dengan anggotanya.
@@ -30,6 +35,26 @@ pub(crate) fn target_of(run: &RunRecord) -> StartTarget {
         },
         None => StartTarget::Repo(run.repo_id.clone()),
     }
+}
+
+/// Kartu grup yang diantre ke VM (R24 plan grup): hanya selama kartu
+/// pertama yang masih disertakan aktif. Kosong untuk run tunggal.
+fn queued_group_cards(cards: &[GroupCardRow]) -> Result<Vec<String>, RunError> {
+    if cards.is_empty() {
+        return Ok(Vec::new());
+    }
+    let kept: Vec<&GroupCardRow> = cards
+        .iter()
+        .filter(|c| !matches!(c.state, CardState::Removed(_)))
+        .collect();
+    if kept.first().map(|c| &c.state) != Some(&CardState::Active)
+        || kept.iter().any(|c| c.state == CardState::Done)
+    {
+        return Err(RunError::InvalidState(
+            "only a group still planning its first card can be queued for the VM",
+        ));
+    }
+    Ok(kept.iter().map(|c| c.record_id.clone()).collect())
 }
 
 impl<D: Deps> RunService<D> {
@@ -56,11 +81,7 @@ impl<D: Deps> RunService<D> {
         let Some(plan) = run.plan.clone().filter(|_| run.phase == RunPhase::Plan) else {
             return Err(RunError::InvalidState("no plan to approve"));
         };
-        if !self.runs.cards(run_id).await?.is_empty() {
-            return Err(RunError::InvalidState(
-                "grouped runs cannot be queued for the VM yet",
-            ));
-        }
+        let cards = queued_group_cards(&self.runs.cards(run_id).await?)?;
         let branch = run
             .branch
             .clone()
@@ -113,6 +134,7 @@ impl<D: Deps> RunService<D> {
                 repos: target.repo_ids(),
             },
             target,
+            cards,
         })
     }
 
@@ -135,17 +157,30 @@ impl<D: Deps> RunService<D> {
         if run.state != RunState::AwaitingDev || run.phase != RunPhase::Plan {
             return Err(RunError::InvalidState("no plan to approve"));
         }
-        let fresh = self
-            .sync
-            .fetch_one(&run.record_id)
+        // Kartu grup lain dulu, kartu utama paling akhir: VM baru memulai
+        // setelah semua klaim pindah (KTD-G14 plan grup).
+        let mut ids: Vec<String> = self
+            .runs
+            .cards(run_id)
             .await?
-            .ok_or(RunError::NotFound("task"))?;
-        let identity = self.sync.identity();
-        let at_vm = fresh.claim.as_ref().is_some_and(|c| {
-            identity.holder(c) == Holder::OwnOtherDaemon && c.daemon_id() == Some(vm_daemon)
-        });
-        if !at_vm {
-            self.sync.hand_over_claim(&run.record_id, vm_daemon).await?;
+            .into_iter()
+            .filter(|c| !matches!(c.state, CardState::Removed(_)) && c.record_id != run.record_id)
+            .map(|c| c.record_id)
+            .collect();
+        ids.push(run.record_id.clone());
+        for id in &ids {
+            let fresh = self
+                .sync
+                .fetch_one(id)
+                .await?
+                .ok_or(RunError::NotFound("task"))?;
+            let identity = self.sync.identity();
+            let at_vm = fresh.claim.as_ref().is_some_and(|c| {
+                identity.holder(c) == Holder::OwnOtherDaemon && c.daemon_id() == Some(vm_daemon)
+            });
+            if !at_vm {
+                self.sync.hand_over_claim(id, vm_daemon).await?;
+            }
         }
         self.runs
             .append(

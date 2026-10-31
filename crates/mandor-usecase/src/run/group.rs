@@ -5,6 +5,7 @@
 use std::sync::Arc;
 
 use mandor_domain::group::{self, Candidate, CardState, Unselectable};
+use mandor_domain::planned::PlannedWork;
 use mandor_domain::{AcRow, AppField, HoldReason, RunState, Task, TaskStatus, WriteOp};
 
 use super::members::{COMMIT_DIFF_MAX, group_name};
@@ -165,6 +166,82 @@ impl<D: Deps> RunService<D> {
         plan.vm_start = crate::run_ports::VmStart::from_start_now(start_now);
         self.start_group_plan(record_ids, &plan, dev_note, &Planning::Skip, |_| {})
             .await
+    }
+
+    /// Grup Planned di VM (R24, KTD-G14 plan grup): worktree dari branch grup,
+    /// run grup dengan kartu pertama aktif membawa plan yang disetujui, buku
+    /// AC semua kartu dengan tanda Design dari laptop, lalu giliran
+    /// implementasi kartu pertama. Kartu berikutnya tanpa persetujuan plan.
+    pub(crate) async fn start_group_from_plan(
+        self: &Arc<Self>,
+        record_ids: &[String],
+        target: &StartTarget,
+        work: &PlannedWork,
+        design: (&[DesignRoot], &[String]),
+        start_now: bool,
+    ) -> Result<RunRecord, RunError> {
+        let _work = self.enter_work()?;
+        let first = record_ids
+            .first()
+            .ok_or(RunError::InvalidState("a group needs at least two cards"))?;
+        let input = self.load_group(record_ids).await?;
+        let (mut run, restored) = self.restore_run(first, target, &work.branch).await?;
+        run.phase = RunPhase::Implement;
+        run.plan = Some(work.plan.clone());
+        run.design = design.0.to_vec();
+        run.design_notes = design.1.to_vec();
+        run.vm_start = crate::run_ports::VmStart::from_start_now(start_now);
+        let mut cards: Vec<GroupCardRow> = record_ids
+            .iter()
+            .map(|id| GroupCardRow::pending(id))
+            .collect();
+        cards[0].state = CardState::Active;
+        let root = run.workspace.as_ref().map(|w| w.root.clone());
+        let started = async {
+            self.runs.create_group(&run, &cards, self.now()).await?;
+            self.save_group_ledger(&run.id, &input.per_card).await;
+            let mut rows = self.reviews.ac_rows(&run.id).await?;
+            for row in &mut rows {
+                if let Some(mark) = work.design.iter().find(|m| m.ac_id == row.ac_id) {
+                    row.design = mark.design;
+                    row.design_note.clone_from(&mark.note);
+                }
+            }
+            self.reviews.save_ac_rows(&run.id, &rows).await?;
+            for id in record_ids {
+                let held = self
+                    .sync
+                    .fetch_one(id)
+                    .await?
+                    .is_some_and(|t| t.held_here(self.sync.identity()));
+                if !held {
+                    return Err(RunError::InvalidState(
+                        "the claim moved while the group was starting",
+                    ));
+                }
+            }
+            let mut message = self.approved_plan_turn(&run, &work.plan).await?;
+            message.push_str("\n\n");
+            message.push_str(&flow_note(&input.tasks, 0, None));
+            let req = self.resume_request(&mut run, message).await?;
+            let summary = format!(
+                "Started: implement the approved plan.\n\nGroup: {}",
+                input
+                    .tasks
+                    .iter()
+                    .map(key_of)
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            );
+            self.spawn_turn(&mut run, req, Some(summary)).await
+        };
+        if let Err(e) = started.await {
+            self.discard_members(&restored, &work.branch, root.as_deref())
+                .await;
+            self.close_quietly(&run.id).await;
+            return Err(e);
+        }
+        self.load(&run.id).await
     }
 
     /// Klaim, worktree, dan giliran pertama grup untuk target yang sudah

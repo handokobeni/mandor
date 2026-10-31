@@ -986,13 +986,12 @@ async fn takeover<D: mandor_usecase::Deps>(
 ) -> Result<Value, RpcError> {
     let target = planned::target_of(Some(p.repo_id), p.workspace)?;
     let work = p.planned.map(planned::planned_of).transpose()?;
+    let carry = mandor_usecase::VmCarry {
+        draft: p.draft.unwrap_or(false),
+        review: p.review.map(planned::review_of).transpose()?,
+    };
     let run = runs
-        .takeover(
-            &p.record_id,
-            &target,
-            work.as_ref(),
-            p.draft.unwrap_or(false),
-        )
+        .takeover(&p.record_id, &target, work.as_ref(), &carry)
         .await
         .map_err(run_error)?;
     ok(&run_view(&run, None))

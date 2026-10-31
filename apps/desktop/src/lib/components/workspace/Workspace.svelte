@@ -605,7 +605,7 @@
               }}
             >
               {#if gateNow.state === 'blocked'}<Lock />{:else if gateNow.state === 'warn'}<TriangleAlert />{:else if gateNow.state === 'needs_confirmation'}<CircleQuestionMark />{:else if gateNow.state === 'review_needed'}<ScanSearch />{:else}<GitPullRequestArrow />{/if}
-              {gateButtonLabel(gateNow)}
+              {gateButtonLabel(gateNow, run.pr_url !== null)}
               {#if gateNow.state === 'review_needed'}<span class="gate-tag">Review needed</span>{/if}
               {#if gateNow.state === 'needs_confirmation'}<span class="gate-tag">Needs confirmation</span>{/if}
               {#if gateNow.state === 'blocked'}<span class="gate-tag" data-tone="failed">{failing.length} AC failed</span>{/if}

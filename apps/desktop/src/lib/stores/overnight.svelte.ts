@@ -276,7 +276,8 @@ export class OvernightStore {
       record_id: recordId,
       ...target,
       ...(back.planned ? { planned: back.planned } : {}),
-      ...(back.draft ? { draft: true } : {})
+      ...(back.draft ? { draft: true } : {}),
+      ...(back.review ? { review: back.review } : {})
     });
     return run.id;
   }

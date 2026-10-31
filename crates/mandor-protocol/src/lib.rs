@@ -331,6 +331,10 @@ fn group_bindings() -> Result<Vec<(&'static str, String)>, String> {
         one("DesignMarkDto.ts", DesignMarkDto::export_to_string(&cfg))?,
         one("PlannedWorkDto.ts", PlannedWorkDto::export_to_string(&cfg))?,
         one(
+            "CarriedReviewDto.ts",
+            CarriedReviewDto::export_to_string(&cfg),
+        )?,
+        one(
             "PrepareForVmParams.ts",
             PrepareForVmParams::export_to_string(&cfg),
         )?,

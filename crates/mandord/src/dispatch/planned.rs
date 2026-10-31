@@ -1,9 +1,13 @@
 //! Konversi DTO kartu Planned dan target antrean (plan 2026-10-30-001, U6).
 
-use mandor_domain::Design;
 use mandor_domain::planned::{DesignMark, PlannedWork};
-use mandor_protocol::{DesignMarkDto, PlannedWorkDto, RpcError, StartWorkspace};
-use mandor_usecase::StartTarget;
+use mandor_domain::{AcRow, Design, RowStatus, Verdict};
+use mandor_protocol::{
+    AcRowView, CarriedReviewDto, DesignMarkDto, PlannedWorkDto, RpcError, StartWorkspace,
+};
+use mandor_usecase::{CarriedReview, StartTarget};
+
+use crate::views::ac_row_view;
 
 use super::rejected;
 
@@ -47,6 +51,45 @@ pub(super) fn planned_of(d: PlannedWorkDto) -> Result<PlannedWork, RpcError> {
     })
 }
 
+/// Hasil review AC VM menjadi DTO.
+pub(super) fn review_dto(r: &CarriedReview) -> CarriedReviewDto {
+    CarriedReviewDto {
+        rows: r.rows.iter().map(ac_row_view).collect(),
+        snapshot: r.snapshot.clone(),
+    }
+}
+
+/// DTO menjadi hasil review AC; nilai yang tidak dikenal ditolak.
+pub(super) fn review_of(d: CarriedReviewDto) -> Result<CarriedReview, RpcError> {
+    let rows = d
+        .rows
+        .into_iter()
+        .map(ac_row_of)
+        .collect::<Result<_, _>>()?;
+    Ok(CarriedReview {
+        rows,
+        snapshot: d.snapshot,
+    })
+}
+
+fn ac_row_of(v: AcRowView) -> Result<AcRow, RpcError> {
+    let unknown = |what: &str, value: &str| rejected(format!("unknown {what} value: {value}"));
+    Ok(AcRow {
+        design: Design::parse(&v.design).ok_or_else(|| unknown("design", &v.design))?,
+        verdict: Verdict::parse(&v.verdict).ok_or_else(|| unknown("verdict", &v.verdict))?,
+        status: RowStatus::parse(&v.status).ok_or_else(|| unknown("status", &v.status))?,
+        ac_id: v.ac_id,
+        label: v.label,
+        text: v.text,
+        design_note: v.design_note,
+        evidence: v.evidence,
+        stale: v.stale,
+        reason: v.reason,
+        decided_by: v.decided_by,
+        card: v.card,
+    })
+}
+
 /// Target Start dari parameter: workspace bila diisi, selain itu satu repo.
 pub(super) fn target_of(
     repo_id: Option<String>,
@@ -80,6 +123,23 @@ pub(super) fn target_view(t: &StartTarget) -> (Option<String>, Option<StartWorks
 mod tests {
     #![allow(clippy::unwrap_used)]
     use super::*;
+
+    #[test]
+    fn hasil_review_bolak_balik_dan_verdict_tak_dikenal_ditolak() {
+        let mut row = AcRow::new("ac1", Some("AC-1"), "teks", RowStatus::Active);
+        row.verdict = Verdict::Pass;
+        row.evidence = Some("tampil".to_owned());
+        let r = CarriedReview {
+            rows: vec![row],
+            snapshot: [("web".to_owned(), "t1".to_owned())].into(),
+        };
+        let json = serde_json::to_string(&review_dto(&r)).unwrap();
+        let back: CarriedReviewDto = serde_json::from_str(&json).unwrap();
+        assert_eq!(review_of(back).unwrap(), r);
+        let mut bad = review_dto(&r);
+        bad.rows[0].verdict = "maybe".to_owned();
+        assert!(review_of(bad).is_err());
+    }
 
     #[test]
     fn paket_plan_bolak_balik_dan_design_tak_dikenal_ditolak() {

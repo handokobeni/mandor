@@ -460,6 +460,10 @@ pub struct TakeoverParams {
     #[serde(default)]
     #[ts(optional)]
     pub draft: Option<bool>,
+    /// Hasil review AC VM; usang bila kode laptop berbeda.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub review: Option<CarriedReviewDto>,
 }
 
 /// Status Design satu AC hasil tahap plan.
@@ -1161,6 +1165,17 @@ pub struct HandoffResult {
     /// PR VM masih draft; diteruskan ke `runs.takeover`.
     #[serde(default)]
     pub draft: bool,
+    /// Hasil review AC VM; diteruskan ke `runs.takeover`.
+    #[serde(default)]
+    pub review: Option<CarriedReviewDto>,
+}
+
+/// Hasil review AC run VM beserta snapshot kode saat review.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+pub struct CarriedReviewDto {
+    pub rows: Vec<AcRowView>,
+    /// Tree id per repo saat review terakhir dimulai.
+    pub snapshot: std::collections::BTreeMap<String, String>,
 }
 
 /// Satu kartu di antrean VM.

@@ -11,7 +11,7 @@ use common::{FakeClock, FakeLark, Station, ready_task, station, vm_station};
 use mandor_domain::planned::{DesignMark, PlannedWork};
 use mandor_domain::{Claim, Design, RunState, TaskStatus};
 use mandor_usecase::run_ports::{RepoInfo, RunPhase, RunRecord, WorkChanges, WorkspaceInfo};
-use mandor_usecase::{AcItem, StartTarget};
+use mandor_usecase::{AcItem, CarriedReview, StartTarget, VmCarry};
 use pretty_assertions::assert_eq;
 
 const NOW: i64 = 1_792_800_000_000;
@@ -88,7 +88,12 @@ async fn covers_ae11_kerja_malam_di_push_klaim_pindah_dan_laptop_melanjutkan() {
     laptop.svc.sync().poll(true, &[]).await.unwrap();
     let run = laptop
         .svc
-        .takeover("a", &StartTarget::Repo("repo1".to_owned()), None, false)
+        .takeover(
+            "a",
+            &StartTarget::Repo("repo1".to_owned()),
+            None,
+            &VmCarry::default(),
+        )
         .await
         .unwrap();
     assert_eq!(run.state, RunState::AwaitingDev);
@@ -115,10 +120,24 @@ async fn take_over_draft_pr_vm_lanjut_di_pr_yang_sama_lalu_send_to_review_dari_l
     r.state = RunState::AwaitingDev;
     r.draft_pending = Some(NOW);
     r.pr_url = Some(url.clone());
+    r.review_snapshot = [("repo1".to_owned(), "tree0".to_owned())].into();
     on_vm.runs.insert(r);
+    on_vm
+        .reviews
+        .ledgers
+        .lock()
+        .unwrap()
+        .insert("run-a".to_owned(), vec![passed("ac1")]);
     let to = laptop.svc.sync().identity().daemon_id.clone();
     let back = on_vm.svc.handoff("a", &to).await.unwrap();
-    assert!(back.draft, "VM menandai PR masih draft");
+    assert!(back.carry.draft, "VM menandai PR masih draft");
+    assert_eq!(
+        back.carry.review,
+        Some(CarriedReview {
+            rows: vec![passed("ac1")],
+            snapshot: [("repo1".to_owned(), "tree0".to_owned())].into(),
+        })
+    );
 
     laptop.svc.sync().poll(true, &[]).await.unwrap();
     laptop
@@ -132,7 +151,7 @@ async fn take_over_draft_pr_vm_lanjut_di_pr_yang_sama_lalu_send_to_review_dari_l
             "a",
             &StartTarget::Repo("repo1".to_owned()),
             None,
-            back.draft,
+            &back.carry,
         )
         .await
         .unwrap();
@@ -142,11 +161,48 @@ async fn take_over_draft_pr_vm_lanjut_di_pr_yang_sama_lalu_send_to_review_dari_l
         "perubahan laptop tetap di PR draft"
     );
     assert_eq!(run.pr_url.as_deref(), Some(url.as_str()));
+    let rows = laptop.reviews.ledgers.lock().unwrap()[&run.id].clone();
+    assert_eq!(
+        rows,
+        [passed("ac1")],
+        "hasil review VM ikut; kode sama, tidak usang"
+    );
 
     laptop.svc.send_to_review(&run.id).await.unwrap();
     assert_eq!(laptop.git.st().ready, std::slice::from_ref(&url));
     laptop.svc.sync().drain_outbox(10).await.unwrap();
     assert_eq!(lark.get("a").unwrap().status, TaskStatus::WaitingReview);
+}
+
+fn passed(ac: &str) -> mandor_domain::AcRow {
+    let mut row =
+        mandor_domain::AcRow::new(ac, Some("AC-1"), "teks", mandor_domain::RowStatus::Active);
+    row.verdict = mandor_domain::Verdict::Pass;
+    row.evidence = Some("tampil".to_owned());
+    row
+}
+
+#[tokio::test]
+async fn hasil_review_vm_usang_bila_kode_laptop_berbeda() {
+    let (_lark, _clock, laptop) = handed_to_laptop();
+    laptop.git.st().trees.insert(
+        PathBuf::from(format!("/wt/{BRANCH}")),
+        "tree-lain".to_owned(),
+    );
+    let carry = VmCarry {
+        draft: false,
+        review: Some(CarriedReview {
+            rows: vec![passed("ac1")],
+            snapshot: [("repo1".to_owned(), "tree0".to_owned())].into(),
+        }),
+    };
+    let run = laptop
+        .svc
+        .takeover("a", &StartTarget::Repo("repo1".to_owned()), None, &carry)
+        .await
+        .unwrap();
+    let rows = laptop.reviews.ledgers.lock().unwrap()[&run.id].clone();
+    assert!(rows[0].stale, "kode berubah setelah review VM: review lagi");
 }
 
 #[tokio::test]
@@ -275,7 +331,7 @@ async fn covers_ae9_take_over_workspace_memulihkan_folder_run_dan_semua_anggota(
     };
     let run = laptop
         .svc
-        .takeover("a", &target, None, false)
+        .takeover("a", &target, None, &VmCarry::default())
         .await
         .unwrap();
 
@@ -317,7 +373,7 @@ async fn covers_ae3_take_over_dengan_paket_kembali_ke_plan_dan_approve_mengirim_
             "a",
             &StartTarget::Repo("repo1".to_owned()),
             Some(&package()),
-            false,
+            &VmCarry::default(),
         )
         .await
         .unwrap();

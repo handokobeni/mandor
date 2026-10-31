@@ -155,7 +155,7 @@ mod ownership {
                 "rec1",
                 &mandor_usecase::StartTarget::Repo("repo1".to_owned()),
                 None,
-                false,
+                &mandor_usecase::VmCarry::default(),
             )
             .await
             .unwrap();

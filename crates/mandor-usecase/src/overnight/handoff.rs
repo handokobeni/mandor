@@ -11,8 +11,8 @@ use mandor_domain::planned::{PlannedState, PlannedWork};
 use super::OvernightStore;
 use crate::StartTarget;
 use crate::ports::{Clock, Deps};
-use crate::run::{RunError, RunService, target_of};
-use crate::run_ports::{ChatItem, GitPort, RunStore};
+use crate::run::{CarriedReview, RunError, RunService, VmCarry, target_of};
+use crate::run_ports::{ChatItem, GitPort, LedgerStore, RunRecord, RunStore};
 
 /// Hasil serah-terima untuk dipulihkan laptop.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -22,9 +22,8 @@ pub struct Handback {
     pub target: Option<StartTarget>,
     /// Plan kartu Planned yang belum dimulai.
     pub planned: Option<PlannedWork>,
-    /// PR VM masih draft: laptop melanjutkan di PR itu dan Send to review
-    /// menandainya siap.
-    pub draft: bool,
+    /// PR draft dan hasil review AC run VM.
+    pub carry: VmCarry,
 }
 
 impl<D: Deps> RunService<D> {
@@ -88,7 +87,24 @@ impl<D: Deps> RunService<D> {
             branch,
             target: Some(target_of(&run)),
             planned: None,
+            carry: self.carry_of(&run).await?,
+        })
+    }
+
+    /// PR draft dan hasil review AC run VM untuk laptop. Tanpa snapshot review
+    /// (belum pernah direview), hasil review tidak dibawa.
+    async fn carry_of(&self, run: &RunRecord) -> Result<VmCarry, RunError> {
+        let review = if run.review_snapshot.is_empty() {
+            None
+        } else {
+            Some(CarriedReview {
+                rows: self.reviews.ac_rows(&run.id).await?,
+                snapshot: run.review_snapshot.clone(),
+            })
+        };
+        Ok(VmCarry {
             draft: run.draft_pending.is_some(),
+            review,
         })
     }
 
@@ -111,11 +127,14 @@ impl<D: Deps> RunService<D> {
         let Some(run) = self.runs.latest_for(record_id).await? else {
             return Ok(None);
         };
-        Ok(run.branch.clone().map(|branch| Handback {
+        let Some(branch) = run.branch.clone() else {
+            return Ok(None);
+        };
+        Ok(Some(Handback {
             branch,
             target: Some(target_of(&run)),
             planned: None,
-            draft: run.draft_pending.is_some(),
+            carry: self.carry_of(&run).await?,
         }))
     }
 
@@ -157,7 +176,7 @@ impl<D: Deps> RunService<D> {
             branch: planned.work.branch.clone(),
             target: Some(item.target),
             planned: Some(planned.work),
-            draft: false,
+            carry: VmCarry::default(),
         })
     }
 }

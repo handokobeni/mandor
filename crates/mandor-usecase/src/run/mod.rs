@@ -7,6 +7,7 @@ pub use drain::{DRAIN_WINDOW_MS, DrainGate, DrainOutcome, WorkGuard};
 pub use group_gate::CardOutcome;
 mod members;
 mod ownership;
+pub use ownership::{CarriedReview, VmCarry};
 mod publish;
 pub use publish::PublishOutcome;
 mod planned;

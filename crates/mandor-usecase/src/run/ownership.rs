@@ -1,8 +1,9 @@
 //! Kepemilikan run: heartbeat klaim, ambil alih, dan pembersihan run yatim (KTD-8).
 
+use std::collections::BTreeMap;
 use std::sync::Arc;
 
-use mandor_domain::{ClaimLoss, RunState};
+use mandor_domain::{AcRow, ClaimLoss, RunState};
 
 use mandor_domain::planned::PlannedWork;
 
@@ -10,8 +11,28 @@ use super::{RunError, RunService, StartTarget};
 use crate::notify::notice;
 use crate::ports::Deps;
 use crate::review::DesignSources as _;
-use crate::run_ports::{ChatItem, GitPort, NoticeKind, Notifier, RunPhase, RunRecord, RunStore};
+use crate::run_ports::{
+    ChatItem, GitPort, LedgerStore, NoticeKind, Notifier, RunPhase, RunRecord, RunStore,
+};
 use crate::sync::Heartbeat;
+
+/// Hasil review AC run VM beserta snapshot kode saat review.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CarriedReview {
+    pub rows: Vec<AcRow>,
+    /// Tree id per repo saat review terakhir dimulai.
+    pub snapshot: BTreeMap<String, String>,
+}
+
+/// Yang dibawa dari run VM saat Take over ke laptop.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct VmCarry {
+    /// PR VM masih draft: laptop melanjutkan di PR itu dan Send to review
+    /// menandainya siap.
+    pub draft: bool,
+    /// Hasil review AC VM; usang di laptop bila kodenya berbeda.
+    pub review: Option<CarriedReview>,
+}
 
 impl<D: Deps> RunService<D> {
     /// Heartbeat klaim untuk semua run aktif. Run yang klaimnya hilang
@@ -130,9 +151,9 @@ impl<D: Deps> RunService<D> {
     /// "Ambil alih" task yang klaimnya tidak aktif 30 menit atau diserahkan
     /// VM: klaim dengan baca ulang, lalu run baru dari branch task. Run
     /// workspace memulihkan folder run dan worktree tiap anggota. Dengan paket
-    /// plan (KTD-12), run kembali menunggu persetujuan plan. Dengan `draft`,
-    /// PR draft VM dipakai lagi: tiap anggota mengenali PR-nya dari branch dan
-    /// run menunggu Send to review.
+    /// plan (KTD-12), run kembali menunggu persetujuan plan. `carry` membawa
+    /// PR draft VM (dipakai lagi; tiap anggota mengenali PR-nya dari branch dan
+    /// run menunggu Send to review) dan hasil review AC VM.
     ///
     /// # Errors
     /// Klaim masih aktif, kalah klaim, target tidak valid, atau git gagal.
@@ -141,7 +162,7 @@ impl<D: Deps> RunService<D> {
         record_id: &str,
         target: &StartTarget,
         planned: Option<&PlannedWork>,
-        draft: bool,
+        carry: &VmCarry,
     ) -> Result<RunRecord, RunError> {
         let _work = self.enter_work()?;
         self.sync.claim(record_id, true).await?;
@@ -152,8 +173,11 @@ impl<D: Deps> RunService<D> {
             .ok_or(RunError::InvalidState("no branch"))?;
         let (mut run, _) = self.restore_run(record_id, target, &branch).await?;
         run.pr_url = task.single_pr_url();
-        if draft {
+        if carry.draft {
             self.adopt_draft(&mut run, &branch).await?;
+        }
+        if let Some(review) = &carry.review {
+            run.review_snapshot.clone_from(&review.snapshot);
         }
         let mut missing = Vec::new();
         if let Some(p) = planned {
@@ -169,6 +193,10 @@ impl<D: Deps> RunService<D> {
         }
         let now = self.now();
         self.runs.create(&run, now).await?;
+        if let Some(review) = &carry.review {
+            self.reviews.save_ac_rows(&run.id, &review.rows).await?;
+            self.mark_stale_if_changed(&run).await;
+        }
         if let Some(p) = planned {
             self.seed_planned_ledger(&run.id, &task, &p.design).await?;
             if !missing.is_empty() {

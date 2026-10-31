@@ -20,7 +20,7 @@ execution: code
 - **Execution profile:** test-first lewat antarmuka publik (usecase dan store dengan fake yang ada); frontend dengan Vitest; uji langsung dengan kartu uji di Base salinan dan repo `mandor-smoke`.
 - **Authority hierarchy:** `CLAUDE.md` (standar `rust-engineering` mengikat) > Product Contract > Planning Contract > unit.
 - **Stop conditions:** berhenti dan tanya bila perilaku produk harus berubah, atau bila unit tidak bisa selesai tanpa melanggar `rust-engineering`.
-- **Tail ownership:** branch fitur, PR ke `main`, tanpa merge sendiri. Bagian laptop sudah dikirim (PR #12); bagian VM (U10, U12–U17) di PR #15. Satu plan grup (U18–U21) satu PR terpisah setelah PR #15.
+- **Tail ownership:** branch fitur, PR ke `main`, tanpa merge sendiri. Bagian laptop sudah dikirim (PR #12); bagian VM (U10, U12–U17) di PR #15. Satu plan grup (U18–U21) digabung ke PR #15 (keputusan pemilik produk 2026-10-31) agar uji langsungnya berjalan bersama.
 
 ---
 

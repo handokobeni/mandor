@@ -199,6 +199,10 @@ pub struct GroupCardView {
 pub struct GroupCandidatesParams {
     /// Kartu awal; kandidat diambil dari epic kartu ini.
     pub record_id: String,
+    /// Kartu di antrean VM (termasuk anggota grup), dibaca app dari daemon VM.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub queued: Option<Vec<String>>,
 }
 
 /// Satu kandidat grup.
@@ -464,6 +468,10 @@ pub struct TakeoverParams {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub review: Option<CarriedReviewDto>,
+    /// Kartu grup dari VM; run laptop menjadi run grup.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub cards: Option<Vec<CarriedCardDto>>,
 }
 
 /// Status Design satu AC hasil tahap plan.
@@ -505,6 +513,9 @@ pub struct VmHandoverView {
     /// Target satu repo; `None` bila workspace.
     pub repo_id: Option<String>,
     pub workspace: Option<StartWorkspace>,
+    /// Kartu grup urut pengerjaan; kosong untuk kartu tunggal (R24 plan grup).
+    #[serde(default)]
+    pub cards: Vec<String>,
 }
 
 /// Parameter `runs.send_to_vm`.
@@ -1168,6 +1179,34 @@ pub struct HandoffResult {
     /// Hasil review AC VM; diteruskan ke `runs.takeover`.
     #[serde(default)]
     pub review: Option<CarriedReviewDto>,
+    /// Kartu grup beserta state, commit, dan plan; diteruskan ke
+    /// `runs.takeover` (KTD-G15 plan grup).
+    #[serde(default)]
+    pub cards: Vec<CarriedCardDto>,
+}
+
+/// Satu kartu grup yang dibawa dari VM ke laptop.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+pub struct CarriedCardDto {
+    pub record_id: String,
+    /// `pending`, `active`, `done`, atau `removed_*`.
+    pub state: String,
+    pub changed_in_lark: bool,
+    pub kept_reason: Option<String>,
+    pub commits: Vec<CardCommitDto>,
+    pub plan: Option<String>,
+    pub fix_requested_by: Option<String>,
+    #[ts(type = "number | null")]
+    pub quiet_until_ms: Option<i64>,
+    pub in_fix: bool,
+    pub fix_replies: Vec<String>,
+}
+
+/// Commit lokal satu kartu grup di satu repo.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+pub struct CardCommitDto {
+    pub repo_id: String,
+    pub sha: String,
 }
 
 /// Hasil review AC run VM beserta snapshot kode saat review.
@@ -1201,6 +1240,10 @@ pub struct QueueItemView {
     pub planned_reason: Option<String>,
     /// Nama sumber desain VM yang dipilih (id bila sudah dihapus).
     pub design_sources: Vec<String>,
+    /// Kartu grup (`record_id`) urut pengerjaan; kosong untuk kartu tunggal.
+    pub group: Vec<String>,
+    /// Kunci kartu grup untuk tampilan (id bila tidak ada di cache).
+    pub group_keys: Vec<String>,
 }
 
 /// Kartu yang keluar dari antrean tanpa dikerjakan, beserta alasannya.
@@ -1243,6 +1286,10 @@ pub struct QueueAddParams {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub origin_daemon: Option<String>,
+    /// Kartu grup urut pengerjaan; `record_id` = kartu pertama (plan grup R20).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub group: Option<Vec<String>>,
 }
 
 /// Parameter `overnight.queue.reorder`.
@@ -1283,6 +1330,12 @@ pub struct ReportCardView {
     pub entered_waiting_fix: bool,
     /// Sumber desain yang gagal diperbarui saat kartu dimulai.
     pub design_notes: Vec<String>,
+    /// Keadaan kartu di grupnya: `committed`, `active`, `pending`, `removed`;
+    /// `None` untuk kartu tunggal.
+    pub group_card: Option<String>,
+    /// Kartu grup yang sudah di-commit tetapi berubah di Lark (R13): menunggu
+    /// Keep atau Revert.
+    pub changed_in_lark: bool,
 }
 
 /// Kartu Planned yang ditahan di antrean; plan dan klaimnya masih di VM.

@@ -1,10 +1,13 @@
 //! Konversi DTO kartu Planned dan target antrean (plan 2026-10-30-001, U6).
 
+use mandor_domain::group::CardState;
 use mandor_domain::planned::{DesignMark, PlannedWork};
 use mandor_domain::{AcRow, Design, RowStatus, Verdict};
 use mandor_protocol::{
-    AcRowView, CarriedReviewDto, DesignMarkDto, PlannedWorkDto, RpcError, StartWorkspace,
+    AcRowView, CardCommitDto, CarriedCardDto, CarriedReviewDto, DesignMarkDto, PlannedWorkDto,
+    RpcError, StartWorkspace,
 };
+use mandor_usecase::run_ports::{CardCommit, GroupCardRow};
 use mandor_usecase::{CarriedReview, StartTarget};
 
 use crate::views::ac_row_view;
@@ -90,6 +93,54 @@ fn ac_row_of(v: AcRowView) -> Result<AcRow, RpcError> {
     })
 }
 
+/// Kartu grup menjadi DTO serah-terima (KTD-G15 plan grup).
+pub(super) fn card_dto(c: &GroupCardRow) -> CarriedCardDto {
+    CarriedCardDto {
+        record_id: c.record_id.clone(),
+        state: c.state.as_str().to_owned(),
+        changed_in_lark: c.changed_in_lark,
+        kept_reason: c.kept_reason.clone(),
+        commits: c
+            .commits
+            .iter()
+            .map(|m| CardCommitDto {
+                repo_id: m.repo_id.clone(),
+                sha: m.sha.clone(),
+            })
+            .collect(),
+        plan: c.plan.clone(),
+        fix_requested_by: c.fix_requested_by.clone(),
+        quiet_until_ms: c.quiet_until_ms,
+        in_fix: c.in_fix,
+        fix_replies: c.fix_replies.clone(),
+    }
+}
+
+/// DTO menjadi kartu grup; state yang tidak dikenal ditolak.
+pub(super) fn card_of(d: CarriedCardDto) -> Result<GroupCardRow, RpcError> {
+    let state = CardState::parse(&d.state)
+        .ok_or_else(|| rejected(format!("unknown card state: {}", d.state)))?;
+    Ok(GroupCardRow {
+        record_id: d.record_id,
+        state,
+        changed_in_lark: d.changed_in_lark,
+        kept_reason: d.kept_reason,
+        commits: d
+            .commits
+            .into_iter()
+            .map(|m| CardCommit {
+                repo_id: m.repo_id,
+                sha: m.sha,
+            })
+            .collect(),
+        plan: d.plan,
+        fix_requested_by: d.fix_requested_by,
+        quiet_until_ms: d.quiet_until_ms,
+        in_fix: d.in_fix,
+        fix_replies: d.fix_replies,
+    })
+}
+
 /// Target Start dari parameter: workspace bila diisi, selain itu satu repo.
 pub(super) fn target_of(
     repo_id: Option<String>,
@@ -123,6 +174,24 @@ pub(super) fn target_view(t: &StartTarget) -> (Option<String>, Option<StartWorks
 mod tests {
     #![allow(clippy::unwrap_used)]
     use super::*;
+
+    #[test]
+    fn kartu_grup_bolak_balik_dan_state_tak_dikenal_ditolak() {
+        let mut c = GroupCardRow::pending("c1");
+        c.state = CardState::Done;
+        c.changed_in_lark = true;
+        c.commits = vec![CardCommit {
+            repo_id: "web".to_owned(),
+            sha: "abc".to_owned(),
+        }];
+        c.plan = Some("## Plan".to_owned());
+        let json = serde_json::to_string(&card_dto(&c)).unwrap();
+        let back: CarriedCardDto = serde_json::from_str(&json).unwrap();
+        assert_eq!(card_of(back).unwrap(), c);
+        let mut bad = card_dto(&c);
+        bad.state = "maybe".to_owned();
+        assert!(card_of(bad).is_err());
+    }
 
     #[test]
     fn hasil_review_bolak_balik_dan_verdict_tak_dikenal_ditolak() {

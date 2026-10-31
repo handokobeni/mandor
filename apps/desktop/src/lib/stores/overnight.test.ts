@@ -35,7 +35,9 @@ class FakeVm implements Rpc {
             held: false,
             planned_state: this.pending.has(id) ? 'handover_pending' : null,
             planned_reason: null,
-            design_sources: []
+            design_sources: [],
+            group: [],
+            group_keys: []
           })),
           dequeued: []
         } as T;
@@ -97,7 +99,9 @@ const held: ReportCardView = {
   ac_fail: 0,
   ac_cant_verify: 0,
   entered_waiting_fix: false,
-  design_notes: []
+  design_notes: [],
+  group_card: null,
+  changed_in_lark: false
 };
 
 async function attached(): Promise<[OvernightStore, FakeVm]> {

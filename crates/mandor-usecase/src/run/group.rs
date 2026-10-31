@@ -85,11 +85,17 @@ impl<D: Deps> RunService<D> {
         Ok(self.runs.cards(run_id).await?)
     }
 
-    /// Kandidat "Start together" untuk kartu `anchor` dari cache tugas (R1, R2).
+    /// Kandidat "Start together" untuk kartu `anchor` dari cache tugas (R1,
+    /// R2). `queued` = kartu di antrean VM (termasuk anggota grup), yang
+    /// dibaca app dari daemon VM (KTD-G17).
     ///
     /// # Errors
     /// Kartu tidak ada di cache atau penyimpanan gagal.
-    pub async fn group_candidates(&self, anchor: &str) -> Result<Vec<Candidate>, RunError> {
+    pub async fn group_candidates(
+        &self,
+        anchor: &str,
+        queued: &[String],
+    ) -> Result<Vec<Candidate>, RunError> {
         let tasks: Vec<Task> = self
             .sync
             .cache
@@ -109,7 +115,13 @@ impl<D: Deps> RunService<D> {
                 busy.push(t.record_id.clone());
             }
         }
-        let is_busy = |id: &str| busy.iter().any(|b| b == id).then_some(Unselectable::HasRun);
+        let is_busy = |id: &str| {
+            if queued.iter().any(|q| q == id) {
+                Some(Unselectable::OnVm)
+            } else {
+                busy.iter().any(|b| b == id).then_some(Unselectable::HasRun)
+            }
+        };
         Ok(group::candidates(
             &anchor_task,
             &tasks,

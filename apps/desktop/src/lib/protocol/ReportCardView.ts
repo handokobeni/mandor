@@ -19,4 +19,14 @@ hold_note: string | null, pr_url: string | null, ac_pass: number, ac_fail: numbe
 /**
  * Sumber desain yang gagal diperbarui saat kartu dimulai.
  */
-design_notes: Array<string>, };
+design_notes: Array<string>, 
+/**
+ * Keadaan kartu di grupnya: `committed`, `active`, `pending`, `removed`;
+ * `None` untuk kartu tunggal.
+ */
+group_card: string | null, 
+/**
+ * Kartu grup yang sudah di-commit tetapi berubah di Lark (R13): menunggu
+ * Keep atau Revert.
+ */
+changed_in_lark: boolean, };

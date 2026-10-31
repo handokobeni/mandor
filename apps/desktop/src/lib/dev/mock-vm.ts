@@ -22,7 +22,9 @@ let queue: QueueItemView[] = [
     held: false,
     planned_state: null,
     planned_reason: null,
-    design_sources: []
+    design_sources: [],
+    group: [],
+    group_keys: []
   },
   {
     record_id: 'recP',
@@ -36,7 +38,9 @@ let queue: QueueItemView[] = [
     held: false,
     planned_state: 'waiting',
     planned_reason: null,
-    design_sources: ['kelola-mock']
+    design_sources: ['kelola-mock'],
+    group: [],
+    group_keys: []
   },
   {
     record_id: 'recQ',
@@ -50,7 +54,9 @@ let queue: QueueItemView[] = [
     held: false,
     planned_state: 'handover_pending',
     planned_reason: null,
-    design_sources: []
+    design_sources: [],
+    group: [],
+    group_keys: []
   }
 ];
 const designSources = [{ id: 'ds1', name: 'kelola-mock', kind: 'folder', path: '/srv/design/kelola-mock', ready: true, status: 'Ready' }];
@@ -71,6 +77,8 @@ function rc(over: Partial<ReportCardView>): ReportCardView {
     ac_cant_verify: 0,
     entered_waiting_fix: false,
     design_notes: [],
+    group_card: null,
+    changed_in_lark: false,
     ...over
   };
 }
@@ -198,7 +206,9 @@ function handle(method: string, p: Record<string, unknown>): unknown {
           held: cards.some((c) => c.record_id === id),
           planned_state: p.planned ? 'handover_pending' : null,
           planned_reason: null,
-          design_sources: (p.design_sources as string[] | undefined) ?? []
+          design_sources: (p.design_sources as string[] | undefined) ?? [],
+          group: (p.group as string[] | undefined) ?? [],
+          group_keys: ((p.group as string[] | undefined) ?? []).map((id) => id.toUpperCase())
         }
       ];
       return {};

@@ -8,7 +8,7 @@ use std::sync::atomic::Ordering;
 
 use common::run_fakes::eventually;
 use common::{FakeClock, FakeLark, Station, ready_task, station};
-use mandor_domain::group::{CardDecision, CardState, RemovedReason};
+use mandor_domain::group::{CardDecision, CardState, RemovedReason, Unselectable};
 use mandor_domain::{AppField, Claim, GateDecision, Reply, RunState, TaskStatus, Verdict, WriteOp};
 use mandor_usecase::run::{CardOutcome, PublishOutcome};
 use mandor_usecase::run_ports::{GroupCardRow, NoticeKind, RunPhase, SessionRef, WorkChanges};
@@ -212,12 +212,21 @@ async fn kandidat_grup_dari_cache() {
     st.svc.sync().poll(true, &[]).await.unwrap();
     st.svc.start("c3", "repo1", None).await.unwrap();
 
-    let c = st.svc.group_candidates("c1").await.unwrap();
+    let c = st.svc.group_candidates("c1", &[]).await.unwrap();
     let got: Vec<(&str, bool)> = c
         .iter()
         .map(|c| (c.record_id.as_str(), c.blocked.is_none()))
         .collect();
     assert_eq!(got, [("c1", true), ("c2", true), ("c3", false)]);
+
+    // R2 (VM): kartu di antrean VM, termasuk anggota grup, tidak bisa dipilih.
+    let c = st
+        .svc
+        .group_candidates("c1", &["c2".to_owned()])
+        .await
+        .unwrap();
+    let c2 = c.iter().find(|c| c.record_id == "c2").unwrap();
+    assert_eq!(c2.blocked, Some(Unselectable::OnVm));
 }
 
 #[tokio::test]

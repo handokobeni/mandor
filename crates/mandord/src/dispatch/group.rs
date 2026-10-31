@@ -40,7 +40,7 @@ impl AppDispatch {
             method::GROUPS_CANDIDATES => {
                 let p: GroupCandidatesParams = params(v)?;
                 let list = runs
-                    .group_candidates(&p.record_id)
+                    .group_candidates(&p.record_id, &p.queued.unwrap_or_default())
                     .await
                     .map_err(run_error)?;
                 let views: Vec<GroupCandidateView> = list

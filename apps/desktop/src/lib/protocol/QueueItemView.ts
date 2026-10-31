@@ -28,4 +28,12 @@ planned_reason: string | null,
 /**
  * Nama sumber desain VM yang dipilih (id bila sudah dihapus).
  */
-design_sources: Array<string>, };
+design_sources: Array<string>, 
+/**
+ * Kartu grup (`record_id`) urut pengerjaan; kosong untuk kartu tunggal.
+ */
+group: Array<string>, 
+/**
+ * Kunci kartu grup untuk tampilan (id bila tidak ada di cache).
+ */
+group_keys: Array<string>, };

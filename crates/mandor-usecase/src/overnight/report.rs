@@ -77,6 +77,8 @@ pub struct ReportCard {
     pub design_notes: Vec<String>,
     /// Keadaan kartu di grupnya; `None` untuk kartu tunggal.
     pub group: Option<GroupCardStatus>,
+    /// Kartu grup ter-commit yang berubah di Lark dan belum diputuskan (R13).
+    pub changed_in_lark: bool,
 }
 
 /// Kartu Planned yang ditahan di antrean tanpa dikerjakan (R15).
@@ -151,15 +153,22 @@ impl<D: Deps> RunService<D> {
             let rows = self.reviews.ac_rows(&run.id).await?;
             let cards = self.runs.cards(&run.id).await?;
             // Run grup: satu baris per kartu dengan hasil grupnya (KTD-G16).
-            let entries: Vec<(String, Option<GroupCardStatus>)> = if cards.is_empty() {
-                vec![(run.record_id.clone(), None)]
+            let entries: Vec<(String, Option<GroupCardStatus>, bool)> = if cards.is_empty() {
+                vec![(run.record_id.clone(), None, false)]
             } else {
                 cards
                     .iter()
-                    .map(|c| (c.record_id.clone(), Some(GroupCardStatus::of(&c.state))))
+                    .map(|c| {
+                        let waiting = c.changed_in_lark && c.kept_reason.is_none();
+                        (
+                            c.record_id.clone(),
+                            Some(GroupCardStatus::of(&c.state)),
+                            waiting,
+                        )
+                    })
                     .collect()
             };
-            for (record_id, group) in entries {
+            for (record_id, group, changed_in_lark) in entries {
                 let count = |v: Verdict| {
                     let n = rows
                         .iter()
@@ -183,6 +192,7 @@ impl<D: Deps> RunService<D> {
                     entered_waiting_fix: run.entered_waiting_fix_ms.is_some(),
                     design_notes: run.design_notes.clone(),
                     group,
+                    changed_in_lark,
                 };
                 if card.outcome == CardOutcome::SentToReview && !card.entered_waiting_fix {
                     report.reviewed_without_fix += 1;

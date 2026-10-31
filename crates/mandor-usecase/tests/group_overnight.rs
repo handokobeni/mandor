@@ -11,7 +11,8 @@ use mandor_domain::group::{CardState, RemovedReason};
 use mandor_domain::{HoldReason, RunState, TaskStatus};
 use mandor_usecase::StartTarget;
 use mandor_usecase::overnight::{OvernightSettings, QueueRequest};
-use mandor_usecase::run_ports::RunRecord;
+use mandor_usecase::run_ports::{NoticeKind, RunRecord};
+use mandor_usecase::waiting_fix::DEFAULT_QUIET_SECS as QUIET;
 use pretty_assertions::assert_eq;
 
 const MIN: i64 = 60_000;
@@ -80,7 +81,12 @@ async fn tick(st: &Station) -> Option<String> {
 }
 
 fn group_run(st: &Station) -> RunRecord {
-    st.runs.only()
+    let grouped: Vec<String> = st.runs.cards.lock().unwrap().keys().cloned().collect();
+    st.runs
+        .all()
+        .into_iter()
+        .find(|r| grouped.contains(&r.id))
+        .unwrap()
 }
 
 fn card_states(st: &Station) -> Vec<CardState> {
@@ -271,4 +277,260 @@ async fn r2_antrean_grup_ditolak_bila_kartu_sudah_diantre_atau_kurang_dari_dua()
         "anggota grup: {err}"
     );
     assert_eq!(st.overnight.ids(), ["c2", "c1"]);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn r21_jam_lembur_habis_grup_berjeda_lalu_lanjut_siklus_berikutnya() {
+    let (lark, clock, st) = vm_with(&["c1", "c2"], wib(0, 20, 0)).await;
+    queue_group(&st, &["c1", "c2"]).await;
+    tick(&st).await;
+    at(&lark, &clock, wib(1, 6, 30));
+    edits(&st);
+    st.agent.last().done();
+    eventually(|| held(&st).is_some()).await;
+    assert_eq!(held(&st), Some(HoldReason::WindowEnded));
+    assert_eq!(card_states(&st), [CardState::Done, CardState::Pending]);
+    assert_eq!(st.overnight.ids(), ["c1"], "grup kembali di depan antrean");
+    assert!(
+        !st.notifier
+            .sent
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|n| n.kind == NoticeKind::NeedsAttention),
+        "jeda tidak memanggil dev"
+    );
+
+    at(&lark, &clock, wib(1, 7, 0));
+    assert_eq!(tick(&st).await, None, "di luar jam lembur");
+    at(&lark, &clock, wib(1, 19, 0));
+    assert_eq!(tick(&st).await.as_deref(), Some("c1"));
+    assert_eq!(turns(&st), 2, "lanjut dari kartu kedua");
+    assert_eq!(card_states(&st), [CardState::Done, CardState::Active]);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn r21_grup_start_now_di_luar_jam_tidak_berjeda_karena_jam() {
+    let (_lark, _clock, st) = vm_with(&["c1", "c2"], wib(1, 12, 0)).await;
+    queue_group(&st, &["c1", "c2"]).await;
+    st.svc.queue_start_now("c1").await.unwrap();
+    assert_eq!(tick(&st).await.as_deref(), Some("c1"));
+    edits(&st);
+    st.agent.last().done();
+    eventually(|| turns(&st) == 2).await;
+    assert_eq!(held(&st), None);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn r20_grup_memberi_jalan_ke_waiting_fix_lalu_lanjut_di_branch_yang_sama() {
+    let (lark, clock, st) = vm_with(&["c1", "c2"], wib(1, 12, 0)).await;
+    queue_group(&st, &["c1", "c2"]).await;
+    st.svc.queue_start_now("c1").await.unwrap();
+    tick(&st).await;
+    let branch = group_run(&st).branch.unwrap();
+    waiting_fix(&lark, &st, wib(1, 12, 0));
+    st.svc.sync().poll(true, &[]).await.unwrap();
+    assert!(
+        st.svc
+            .tick_waiting_fix(QUIET)
+            .await
+            .unwrap()
+            .started
+            .is_empty(),
+        "VM sibuk"
+    );
+    at(&lark, &clock, wib(1, 12, 0) + (QUIET + 60) * 1000);
+    edits(&st);
+    st.agent.last().done();
+    eventually(|| held(&st).is_some()).await;
+    assert_eq!(held(&st), Some(HoldReason::YieldToFix));
+    assert_eq!(st.overnight.ids(), ["c1"]);
+    assert_eq!(tick(&st).await, None, "perbaikan didahulukan");
+
+    // Perbaikan selesai.
+    let mut fix = st.runs.all().into_iter().find(|r| r.id == "run7").unwrap();
+    fix.state = RunState::InReviewLoop;
+    st.runs.insert(fix);
+    assert_eq!(tick(&st).await.as_deref(), Some("c1"), "Start now ikut");
+    assert_eq!(turns(&st), 2);
+    assert_eq!(group_run(&st).branch.unwrap(), branch);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn covers_ae7_batas_pemakaian_di_kartu_kedua_memarkir_grup_kartu_tunggal_tetap_jalan() {
+    let (lark, clock, st) = vm_with(&["c1", "c2", "s"], wib(0, 20, 0)).await;
+    st.svc
+        .set_overnight_settings(&OvernightSettings {
+            start: "19:00".to_owned(),
+            end: "06:00".to_owned(),
+            offset: "+07:00".to_owned(),
+            token_limit: Some(1_000),
+        })
+        .await
+        .unwrap();
+    queue_group(&st, &["c1", "c2"]).await;
+    st.svc
+        .queue_add("s", &StartTarget::Repo("repo1".to_owned()), None)
+        .await
+        .unwrap();
+    tick(&st).await;
+    edits(&st);
+    st.agent.last().done();
+    eventually(|| turns(&st) == 2).await;
+    st.agent
+        .last()
+        .emit(mandor_domain::AgentEvent::MessageUsage {
+            message_id: "m1".to_owned(),
+            usage: mandor_domain::Usage {
+                input_tokens: 900,
+                output_tokens: 200,
+                ..mandor_domain::Usage::default()
+            },
+        });
+    eventually(|| held(&st).is_some()).await;
+    assert_eq!(held(&st), Some(HoldReason::UsageLimit));
+    assert_eq!(card_states(&st), [CardState::Done, CardState::Active]);
+    assert_eq!(
+        st.overnight.ids(),
+        ["s"],
+        "grup tertahan tidak menahan antrean"
+    );
+
+    at(&lark, &clock, wib(1, 19, 0));
+    assert_eq!(tick(&st).await.as_deref(), Some("s"), "siklus berikutnya");
+}
+
+/// Grup dua kartu sampai kartu pertama berubah di Lark setelah di-commit dan
+/// gerbang menahan grup (R13).
+async fn changed_after_commit() -> (FakeLark, FakeClock, Station) {
+    let (lark, clock, st) = vm_with(&["c1", "c2"], wib(0, 20, 0)).await;
+    queue_group(&st, &["c1", "c2"]).await;
+    tick(&st).await;
+    edits(&st);
+    st.agent.last().done();
+    eventually(|| turns(&st) == 2).await;
+    lark.edit("c1", |t| {
+        t.status = TaskStatus::Unknown("Blocked".to_owned());
+    });
+    st.svc.sync().poll(true, &[]).await.unwrap();
+    edits(&st);
+    st.agent.last().done();
+    eventually(|| held(&st).is_some()).await;
+    (lark, clock, st)
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn r13_kartu_berubah_setelah_commit_menahan_grup_tanpa_push() {
+    let (_lark, _clock, st) = changed_after_commit().await;
+    assert_eq!(held(&st), Some(HoldReason::NeedsConfirmation));
+    assert!(
+        group_run(&st)
+            .hold
+            .unwrap()
+            .note
+            .unwrap()
+            .contains("changed in Lark")
+    );
+    assert!(st.git.st().pushes.is_empty());
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn r13_keep_dengan_alasan_mengantre_grup_lalu_pr_draft() {
+    let (lark, _clock, st) = changed_after_commit().await;
+    let run = group_run(&st);
+    st.svc
+        .gate_card_decision(
+            &run.id,
+            "c1",
+            &mandor_domain::group::CardDecision::Keep {
+                reason: "Status diubah PM tanpa sengaja".to_owned(),
+            },
+        )
+        .await
+        .unwrap();
+    assert_eq!(st.overnight.ids(), ["c1"], "grup diantre lagi di depan");
+    tick(&st).await;
+    eventually(|| group_run(&st).draft_pending.is_some()).await;
+    st.svc.send_to_review(&group_run(&st).id).await.unwrap();
+    st.svc.sync().drain_outbox(20).await.unwrap();
+    assert_eq!(
+        lark.get("c1").unwrap().status,
+        TaskStatus::Unknown("Blocked".to_owned()),
+        "kartu yang tetap disertakan tidak dipindah"
+    );
+    assert_eq!(lark.get("c2").unwrap().status, TaskStatus::WaitingReview);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn r13_revert_kartu_pertama_mengganti_kunci_antrean_lalu_pr_draft() {
+    let (_lark, _clock, st) = changed_after_commit().await;
+    let run = group_run(&st);
+    st.svc
+        .gate_card_decision(&run.id, "c1", &mandor_domain::group::CardDecision::Revert)
+        .await
+        .unwrap();
+    assert_eq!(group_run(&st).record_id, "c2", "kartu utama pindah");
+    assert_eq!(st.overnight.ids(), ["c2"]);
+    assert_eq!(tick(&st).await.as_deref(), Some("c2"));
+    eventually(|| group_run(&st).draft_pending.is_some()).await;
+    assert_eq!(st.git.st().reverts.len(), 1);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn r13_revert_konflik_menahan_grup_tanpa_antre() {
+    let (_lark, _clock, st) = changed_after_commit().await;
+    let run = group_run(&st);
+    let sha = st.runs.cards.lock().unwrap()[&run.id][0].commits[0]
+        .sha
+        .clone();
+    st.git.st().revert_conflicts = vec![sha];
+    st.svc
+        .gate_card_decision(&run.id, "c1", &mandor_domain::group::CardDecision::Revert)
+        .await
+        .unwrap();
+    assert_eq!(held(&st), Some(HoldReason::NeedsConfirmation));
+    assert!(
+        group_run(&st)
+            .hold
+            .unwrap()
+            .note
+            .unwrap()
+            .contains("revert conflict")
+    );
+    assert!(st.overnight.ids().is_empty());
+}
+
+fn waiting_fix(lark: &FakeLark, st: &Station, now: i64) {
+    let branch = "mandor/pgs-7-fix";
+    let mut t = ready_task("rec7", &["ou_me"]);
+    t.status = TaskStatus::WaitingFix;
+    t.branch = Some(branch.to_owned());
+    t.repo_id = Some("repo1".to_owned());
+    t.pr_url = Some("https://github.com/o/r/pull/7".to_owned());
+    t.claim = Some(mandor_domain::Claim {
+        open_id: "ou_me".to_owned(),
+        ts_ms: now,
+        nonce: "n~vm".to_owned(),
+    });
+    t.comment_cursor = Some(format!("{}:", now / 1000 - 3600));
+    t.last_modified_ms = now;
+    lark.put(t);
+    let wt = std::path::PathBuf::from(format!("/wt/{branch}"));
+    let mut r = RunRecord::new("run7".to_owned(), "repo1".to_owned(), "rec7".to_owned());
+    r.state = RunState::InReviewLoop;
+    r.branch = Some(branch.to_owned());
+    r.worktree = Some(wt.clone());
+    r.session_id = Some("sess7".to_owned());
+    r.session_started = true;
+    r.pr_url = Some("https://github.com/o/r/pull/7".to_owned());
+    st.runs.insert(r);
+    st.git.st().worktrees.insert(wt);
+    *lark.replies.lock().unwrap() = vec![mandor_domain::Reply {
+        record_id: "rec7".to_owned(),
+        comment_id: "c".to_owned(),
+        reply_id: "r1".to_owned(),
+        author: "ou_qa".to_owned(),
+        create_time: now / 1000 - 600,
+        text: "Tombol simpan error".to_owned(),
+    }];
 }

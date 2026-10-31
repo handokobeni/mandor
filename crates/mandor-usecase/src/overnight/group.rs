@@ -230,7 +230,11 @@ impl<D: Deps> RunService<D> {
 
     /// Grup yang berjeda kembali di posisi pertama antrean dengan kartu yang
     /// tersisa; tanda Start now ikut (KTD-G12).
-    async fn requeue_group(&self, run: &RunRecord, cards: &[GroupCardRow]) -> Result<(), RunError> {
+    pub(crate) async fn requeue_group(
+        &self,
+        run: &RunRecord,
+        cards: &[GroupCardRow],
+    ) -> Result<(), RunError> {
         let item = QueueItem {
             record_id: run.record_id.clone(),
             target: target_of(run),

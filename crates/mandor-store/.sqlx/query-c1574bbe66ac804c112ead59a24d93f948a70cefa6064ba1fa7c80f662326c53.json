@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "SELECT record_id, target_json, note, start_now, added_at_ms, design_json,\n                    planned_json, planned_state, origin_daemon, planned_reason\n             FROM overnight_queue ORDER BY position, added_at_ms",
+  "query": "SELECT record_id, target_json, note, start_now, added_at_ms, design_json,\n                    planned_json, planned_state, origin_daemon, planned_reason, group_json\n             FROM overnight_queue ORDER BY position, added_at_ms",
   "describe": {
     "columns": [
       {
@@ -112,6 +112,17 @@
             "name": "planned_reason"
           }
         }
+      },
+      {
+        "name": "group_json",
+        "ordinal": 10,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "overnight_queue",
+            "name": "group_json"
+          }
+        }
       }
     ],
     "parameters": {
@@ -127,8 +138,9 @@
       true,
       true,
       true,
+      true,
       true
     ]
   },
-  "hash": "3226a003d98038ff35d98e954097b48d310a88ea68fcb3c24363a9cb290afdba"
+  "hash": "c1574bbe66ac804c112ead59a24d93f948a70cefa6064ba1fa7c80f662326c53"
 }

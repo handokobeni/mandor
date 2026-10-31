@@ -45,7 +45,7 @@
 </script>
 
 <Dialog.Root open onOpenChange={(o) => !o && oncancel()}>
-  <Dialog.Content class="sm:max-w-[600px]">
+  <Dialog.Content class="sm:max-w-[600px] max-h-[90vh] overflow-y-auto">
     <Dialog.Header>
       <span class="mono muted">{taskKey} · {trigger}</span>
       <Dialog.Title class="text-[length:var(--text-md)]">Ready for a browser review?</Dialog.Title>

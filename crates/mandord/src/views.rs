@@ -43,6 +43,7 @@ pub fn run_view(run: &RunRecord, task: Option<&Task>) -> RunView {
         updated_at_ms: run.updated_at_ms,
         ac: None,
         cards: Vec::new(),
+        one_plan: run.one_plan.is_some(),
     }
 }
 

@@ -15,6 +15,10 @@ class FakeVm implements Rpc {
   fail = new Set<string>();
   /** Workspace daemon ini. */
   workspaces: { id: string; name: string; root: string; repo_ids: string[] }[] = [];
+  /** Anggota grup per item antrean (kunci = kartu pertama). */
+  groups: Record<string, string[]> = {};
+  /** Kartu grup yang dilaporkan `runs.prepare_for_vm`. */
+  handoverCards: string[] = [];
   /** Hasil `runs.handoff`. */
   handback: unknown = { branch: 'b', repo_id: 'repo1', workspace: null, planned: PLANNED };
   async request<T>(method: string, params?: unknown): Promise<T> {
@@ -35,18 +39,22 @@ class FakeVm implements Rpc {
             held: false,
             planned_state: this.pending.has(id) ? 'handover_pending' : null,
             planned_reason: null,
-            design_sources: []
+            design_sources: [],
+            group: this.groups[id] ?? [],
+            group_keys: (this.groups[id] ?? []).map((g) => g.toUpperCase())
           })),
           dequeued: []
         } as T;
       case 'overnight.queue.add': {
-        const p = params as { record_id: string; planned?: unknown };
-        this.queue.push(p.record_id);
+        const p = params as { record_id: string; planned?: unknown; group?: string[] };
+        const first = p.group?.[0] ?? p.record_id;
+        this.queue.push(first);
+        if (p.group) this.groups[first] = p.group;
         if (p.planned) this.pending.add(p.record_id);
         return {} as T;
       }
       case 'runs.prepare_for_vm':
-        return { planned: PLANNED, repo_id: 'repo1', workspace: null } as T;
+        return { planned: PLANNED, repo_id: 'repo1', workspace: null, cards: this.handoverCards } as T;
       case 'runs.handoff':
         return this.handback as T;
       case 'design_sources.list':
@@ -69,6 +77,8 @@ class FakeVm implements Rpc {
         return [] as T;
       case 'workspaces.list':
         return this.workspaces as T;
+      case 'runs.gate_card_decision':
+        return { outcome: (params as { decision: string }).decision === 'keep' ? 'kept' : 'reverted' } as T;
       case 'runs.takeover':
         return { id: 'run-laptop' } as T;
       default:
@@ -97,7 +107,9 @@ const held: ReportCardView = {
   ac_fail: 0,
   ac_cant_verify: 0,
   entered_waiting_fix: false,
-  design_notes: []
+  design_notes: [],
+  group_card: null,
+  changed_in_lark: false
 };
 
 async function attached(): Promise<[OvernightStore, FakeVm]> {
@@ -123,6 +135,20 @@ describe('antrean VM', () => {
     expect(store.queue?.items[0].record_id, 'tidak bisa naik dari posisi pertama').toBe('a');
     await store.remove('b');
     expect([...(store.queuedIds ?? [])]).toEqual(['a', 'd', 'c']);
+  });
+
+  it('Queue together: grup diantre sebagai satu item, semua kartunya dianggap di antrean', async () => {
+    const [store, vm] = await attached();
+    await store.addGroup(['g1', 'g2', 'g3'], { repo_id: 'repo1' }, 'mulai dari form', ['ds1']);
+    expect(vm.calls.find(([m]) => m === 'overnight.queue.add')?.[1]).toEqual({
+      record_id: 'g1',
+      repo_id: 'repo1',
+      note: 'mulai dari form',
+      group: ['g1', 'g2', 'g3'],
+      design_sources: ['ds1']
+    });
+    expect(store.queue?.items.map((i) => i.record_id)).toEqual(['a', 'b', 'c', 'g1']);
+    expect([...(store.queuedIds ?? [])]).toEqual(['a', 'b', 'c', 'g1', 'g2', 'g3']);
   });
 
   it('target workspace dikirim sebagai workspace', async () => {
@@ -200,6 +226,53 @@ describe('aksi kartu VM', () => {
     });
   });
 
+  it('Keep atau Revert kartu grup yang berubah di Lark dikirim ke daemon VM', async () => {
+    const [store, vm] = await attached();
+    expect(await store.decideCard('run-vm', 'b', 'keep', 'AC lama masih benar')).toBe('kept');
+    expect(vm.calls.find(([m]) => m === 'runs.gate_card_decision')?.[1]).toEqual({
+      run_id: 'run-vm',
+      record_id: 'b',
+      decision: 'keep',
+      reason: 'AC lama masih benar'
+    });
+    expect(await store.decideCard('run-vm', 'b', 'revert', null)).toBe('reverted');
+    expect(vm.methods().at(-1), 'antrean dan laporan dimuat ulang').not.toBe('runs.gate_card_decision');
+  });
+
+  it('Take over grup: kartu grup dari VM diteruskan ke laptop', async () => {
+    const [store, vm] = await attached();
+    const cards = [
+      { record_id: 'h', state: 'done', changed_in_lark: false, kept_reason: null, commits: [], plan: null, fix_requested_by: null, quiet_until_ms: null, in_fix: false, fix_replies: [] },
+      { record_id: 'i', state: 'pending', changed_in_lark: false, kept_reason: null, commits: [], plan: null, fix_requested_by: null, quiet_until_ms: null, in_fix: false, fix_replies: [] }
+    ];
+    vm.handback = { branch: 'b', repo_id: 'repo1', workspace: null, planned: null, draft: true, review: null, cards };
+    const laptop = new FakeVm();
+    await store.takeover('h', laptop, 'beni@laptop~laptop');
+    expect(laptop.calls.find(([m]) => m === 'runs.takeover')?.[1]).toEqual({
+      record_id: 'h',
+      repo_id: 'repo1',
+      draft: true,
+      cards
+    });
+  });
+
+  it('Take over grup satu plan: cuplikan AC plan grup ikut ke laptop', async () => {
+    const [store, vm] = await attached();
+    const cards = [
+      { record_id: 'h', state: 'done', changed_in_lark: false, kept_reason: null, commits: [], plan: null, fix_requested_by: null, quiet_until_ms: null, in_fix: false, fix_replies: [] }
+    ];
+    const one_plan = [{ card: 'i', ac_id: 'ac2', text: 'AC kartu 2' }];
+    vm.handback = { branch: 'b', repo_id: 'repo1', workspace: null, planned: null, draft: false, review: null, cards, one_plan };
+    const laptop = new FakeVm();
+    await store.takeover('h', laptop, 'beni@laptop~laptop');
+    expect(laptop.calls.find(([m]) => m === 'runs.takeover')?.[1]).toEqual({
+      record_id: 'h',
+      repo_id: 'repo1',
+      cards,
+      one_plan
+    });
+  });
+
   it('Take over workspace: workspace laptop dicari dari repo-nya, id boleh beda dengan VM', async () => {
     const [store, vm] = await attached();
     vm.handback = { branch: 'b', repo_id: null, workspace: { id: 'vm-ws', repo_ids: ['web', 'api'] }, planned: null };
@@ -260,6 +333,18 @@ describe('plan siang, antre ke VM', () => {
       design_sources: ['ds1'],
       planned: PLANNED,
       origin_daemon: 'beni@laptop~laptop'
+    });
+  });
+
+  it('grup Planned: VM mengantre semua kartu grup dengan plan kartu pertama', async () => {
+    const [store, vm] = await attached();
+    const laptop = new FakeVm();
+    laptop.handoverCards = ['p', 'q'];
+    await store.queuePlanned(laptop, req, () => undefined);
+    expect(vm.calls.find(([m]) => m === 'overnight.queue.add')?.[1]).toMatchObject({
+      record_id: 'p',
+      group: ['p', 'q'],
+      planned: PLANNED
     });
   });
 

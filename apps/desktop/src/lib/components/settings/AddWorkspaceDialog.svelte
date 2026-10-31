@@ -72,7 +72,7 @@
 </script>
 
 <Dialog.Root open onOpenChange={(o) => !o && !busy && oncancel()}>
-  <Dialog.Content class="sm:max-w-[560px]">
+  <Dialog.Content class="sm:max-w-[560px] max-h-[90vh] overflow-y-auto">
     {#if view === 'main'}
       <Dialog.Header>
         <Dialog.Title>Add a workspace</Dialog.Title>

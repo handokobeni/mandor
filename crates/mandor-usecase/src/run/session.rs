@@ -185,12 +185,9 @@ impl<D: Deps> RunService<D> {
                     let req = self.resume_request(&mut run, next.clone()).await?;
                     return self.spawn_turn_boxed(run, req, next).await;
                 }
-                // VM: kartu dikerjakan sampai PR atau tertahan dengan alasan (U4 plan VM).
-                // Run grup di VM menyusul di U10 plan run grup.
-                if self.is_vm()
-                    && run.phase == RunPhase::Implement
-                    && self.runs.cards(&run.id).await?.is_empty()
-                {
+                // VM: kartu (atau grup, U12 plan grup) dikerjakan sampai PR atau
+                // tertahan dengan alasan (U4 plan VM).
+                if self.is_vm() && run.phase == RunPhase::Implement {
                     return self.vm_after_turn(run, result).await;
                 }
                 run.state = RunState::AwaitingDev;
@@ -261,7 +258,7 @@ impl<D: Deps> RunService<D> {
             .map(|r| format!("{}: {}", r.display_label(), r.text))
             .collect();
         run.phase = RunPhase::Implement;
-        let message = if run.session_started {
+        let mut message = if run.session_started {
             self.prompts.approve_message(&followed)
         } else {
             // Run hasil Take over: sesi baru belum pernah melihat plan-nya.
@@ -269,6 +266,14 @@ impl<D: Deps> RunService<D> {
             let plan = run.plan.clone().unwrap_or_default();
             self.approved_plan_turn(&run, &plan).await?
         };
+        if run.one_plan.is_some() {
+            // Plan grup (R25): cuplikan AC saat disetujui, lalu kartu aktif saja.
+            run.one_plan = Some(self.one_plan_snapshot(run_id).await?);
+            if let Some(key) = self.active_key(run_id).await? {
+                message.push_str("\n\n");
+                message.push_str(&super::one_plan::scope_note(&key));
+            }
+        }
         let req = self.resume_request(&mut run, message).await?;
         self.spawn_turn(
             &mut run,

@@ -7,7 +7,7 @@ use std::sync::Arc;
 
 use mandor_domain::ac_ledger::mark_stale;
 use mandor_domain::group::{self, CardDecision, CardState, RemovedReason};
-use mandor_domain::{AcRow, AppField, RunState, Task, TaskStatus, WriteOp};
+use mandor_domain::{AcRow, AppField, HoldReason, RunState, Task, TaskStatus, WriteOp};
 
 use super::group::{group_cards_domain, key_of};
 use super::members::{GroupPrCard, PrHeading};
@@ -134,7 +134,9 @@ impl<D: Deps> RunService<D> {
     ) -> Result<CardOutcome, RunError> {
         let _work = self.enter_work()?;
         let mut run = self.load(run_id).await?;
-        if run.state != RunState::AwaitingDev {
+        // Grup VM tertahan diputuskan dari laporan Overnight (KTD-G18).
+        let vm_held = self.is_vm() && run.state == RunState::Held;
+        if run.state != RunState::AwaitingDev && !vm_held {
             return Err(RunError::InvalidState(run.state.as_str()));
         }
         let mut cards = self.group_of(run_id).await?;
@@ -156,9 +158,27 @@ impl<D: Deps> RunService<D> {
                 }
                 cards[idx].kept_reason = Some(reason.to_owned());
                 self.save_group(&mut run, &cards).await?;
+                if vm_held {
+                    self.requeue_group(&run, &cards).await?;
+                }
                 Ok(CardOutcome::Kept)
             }
-            CardDecision::Revert => self.revert_card(&mut run, &mut cards, idx).await,
+            CardDecision::Revert => {
+                let out = self.revert_card(&mut run, &mut cards, idx).await?;
+                if vm_held {
+                    match out {
+                        CardOutcome::RevertConflict => {
+                            let note = run.note.take();
+                            self.hold(&mut run, HoldReason::NeedsConfirmation, note)
+                                .await?;
+                        }
+                        CardOutcome::Reverted | CardOutcome::Kept => {
+                            self.requeue_group(&run, &cards).await?;
+                        }
+                    }
+                }
+                Ok(out)
+            }
         }
     }
 

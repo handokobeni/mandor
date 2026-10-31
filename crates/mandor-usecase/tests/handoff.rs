@@ -195,6 +195,8 @@ async fn hasil_review_vm_usang_bila_kode_laptop_berbeda() {
             rows: vec![passed("ac1")],
             snapshot: [("repo1".to_owned(), "tree0".to_owned())].into(),
         }),
+        cards: Vec::new(),
+        one_plan: None,
     };
     let run = laptop
         .svc
@@ -359,6 +361,7 @@ fn package() -> PlannedWork {
         }],
         laptop_design: vec!["ds1".to_owned(), "old-mock".to_owned()],
         repos: vec!["repo1".to_owned()],
+        group_acs: None,
     }
 }
 

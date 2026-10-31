@@ -106,6 +106,16 @@ pub enum HoldReason {
     NeedsConfirmation,
     /// Batas pemakaian siklus atau kuota langganan habis (R10).
     UsageLimit,
+    /// Kartu grup berubah di Lark sebelum gilirannya (R9 plan grup).
+    CardRemoved,
+    /// Jam lembur habis di antara kartu grup; dilanjutkan siklus berikutnya
+    /// (R21 plan grup).
+    WindowEnded,
+    /// Grup memberi jalan ke Waiting Fix kartu VM lain (R20 plan grup).
+    YieldToFix,
+    /// AC kartu grup tersisa berubah setelah plan grup disetujui; dev
+    /// menyetujui ulang di laptop (R25 plan grup).
+    PlanOutdated,
 }
 
 impl HoldReason {
@@ -117,7 +127,18 @@ impl HoldReason {
             Self::AcGate => "ac_gate",
             Self::NeedsConfirmation => "needs_confirmation",
             Self::UsageLimit => "usage_limit",
+            Self::CardRemoved => "card_removed",
+            Self::WindowEnded => "window_ended",
+            Self::YieldToFix => "yield_to_fix",
+            Self::PlanOutdated => "plan_outdated",
         }
+    }
+
+    /// Dev perlu bertindak. Jeda grup (`WindowEnded`, `YieldToFix`) berlanjut
+    /// sendiri sehingga tidak memanggil dev (KTD-G12 plan grup).
+    #[must_use]
+    pub fn needs_attention(self) -> bool {
+        !matches!(self, Self::WindowEnded | Self::YieldToFix)
     }
 
     /// Kebalikan [`HoldReason::as_str`]; nilai tak dikenal menjadi `None`.
@@ -128,6 +149,10 @@ impl HoldReason {
             "ac_gate" => Self::AcGate,
             "needs_confirmation" => Self::NeedsConfirmation,
             "usage_limit" => Self::UsageLimit,
+            "card_removed" => Self::CardRemoved,
+            "window_ended" => Self::WindowEnded,
+            "yield_to_fix" => Self::YieldToFix,
+            "plan_outdated" => Self::PlanOutdated,
             _ => return None,
         })
     }
@@ -320,9 +345,19 @@ mod tests {
             HoldReason::AcGate,
             HoldReason::NeedsConfirmation,
             HoldReason::UsageLimit,
+            HoldReason::CardRemoved,
+            HoldReason::WindowEnded,
+            HoldReason::YieldToFix,
+            HoldReason::PlanOutdated,
         ] {
             assert_eq!(HoldReason::parse(r.as_str()), Some(r));
         }
+        assert!(HoldReason::Stuck.needs_attention() && HoldReason::CardRemoved.needs_attention());
+        assert!(HoldReason::PlanOutdated.needs_attention());
+        assert!(
+            !HoldReason::WindowEnded.needs_attention() && !HoldReason::YieldToFix.needs_attention(),
+            "jeda grup tidak memanggil dev"
+        );
         assert_eq!(HoldReason::parse("x"), None);
         assert_eq!(RunState::parse("x"), None);
         assert!(RunState::WfQuiet.in_fix_loop());

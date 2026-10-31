@@ -82,6 +82,7 @@ async fn vm_handover(
         planned: planned::planned_dto(&out.work),
         repo_id,
         workspace,
+        cards: out.cards,
     })
 }
 
@@ -989,6 +990,13 @@ async fn takeover<D: mandor_usecase::Deps>(
     let carry = mandor_usecase::VmCarry {
         draft: p.draft.unwrap_or(false),
         review: p.review.map(planned::review_of).transpose()?,
+        cards: p
+            .cards
+            .unwrap_or_default()
+            .into_iter()
+            .map(planned::card_of)
+            .collect::<Result<_, _>>()?,
+        one_plan: p.one_plan.map(planned::snaps_of),
     };
     let run = runs
         .takeover(&p.record_id, &target, work.as_ref(), &carry)

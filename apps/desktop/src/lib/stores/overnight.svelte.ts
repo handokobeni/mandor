@@ -70,7 +70,7 @@ export class OvernightStore {
    */
   get queuedIds(): Set<string> | null {
     if (!this.rpc || !this.queue) return null;
-    return new Set(this.queue.items.map((i) => i.record_id));
+    return new Set(this.queue.items.flatMap((i) => ((i.group ?? []).length > 0 ? i.group : [i.record_id])));
   }
 
   get connected(): boolean {
@@ -156,6 +156,39 @@ export class OvernightStore {
   }
 
   /**
+   * Keep (dengan alasan) atau Revert kartu grup ter-commit yang berubah di
+   * Lark (R13, KTD-G18); daemon VM mengantre grup lagi sesudahnya.
+   */
+  async decideCard(runId: string, recordId: string, decision: 'keep' | 'revert', reason: string | null): Promise<string> {
+    const rpc = this.rpc;
+    if (!rpc) throw new Error('The VM is not connected');
+    const res = await rpc.request<{ outcome: string }>('runs.gate_card_decision', {
+      run_id: runId,
+      record_id: recordId,
+      decision,
+      reason
+    });
+    await this.refresh();
+    return res.outcome;
+  }
+
+  /**
+   * "Queue together" (R20): grup diantre sebagai satu item; kartu pertama
+   * menjadi kunci item dan sumber desain dipilih sekali per grup.
+   */
+  addGroup(recordIds: string[], target: QueueTarget, note: string | null = null, designSources: string[] = []): Promise<void> {
+    const design = designSources.length > 0 ? { design_sources: designSources } : {};
+    return this.call('overnight.queue.add', {
+      record_id: recordIds[0] ?? '',
+      repo_id: null,
+      note,
+      ...target,
+      group: recordIds,
+      ...design
+    });
+  }
+
+  /**
    * "Approve and queue for VM": (1) laptop commit dan push plan, (2) VM
    * mengantre kartu Planned, (3) laptop menyerahkan klaim dan menutup run.
    * Gagal di (1) atau (2) tidak mengubah run laptop; gagal di (3) meninggalkan
@@ -179,7 +212,9 @@ export class OvernightStore {
       ...req.target,
       design_sources: req.designSources,
       planned: handover.planned,
-      origin_daemon: req.laptopDaemonId
+      origin_daemon: req.laptopDaemonId,
+      // Grup Planned (R24): semua kartu grup diantre dengan plan kartu pertama.
+      ...((handover.cards ?? []).length > 0 ? { group: handover.cards } : {})
     });
     step('handing_over');
     try {
@@ -277,7 +312,11 @@ export class OvernightStore {
       ...target,
       ...(back.planned ? { planned: back.planned } : {}),
       ...(back.draft ? { draft: true } : {}),
-      ...(back.review ? { review: back.review } : {})
+      ...(back.review ? { review: back.review } : {}),
+      // Daemon VM versi lama tidak mengirim `cards`.
+      ...((back.cards ?? []).length > 0 ? { cards: back.cards } : {}),
+      // Grup satu plan (R25): laptop melanjutkan dengan plan grup yang sama.
+      ...(back.one_plan ? { one_plan: back.one_plan } : {})
     });
     return run.id;
   }

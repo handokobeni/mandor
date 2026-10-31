@@ -17,4 +17,8 @@ planned?: PlannedWorkDto,
 /**
  * Id daemon laptop yang menyerahkan kartu Planned.
  */
-origin_daemon?: string, };
+origin_daemon?: string, 
+/**
+ * Kartu grup urut pengerjaan; `record_id` = kartu pertama (plan grup R20).
+ */
+group?: Array<string>, };

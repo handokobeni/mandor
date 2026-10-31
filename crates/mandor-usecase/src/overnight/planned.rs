@@ -4,7 +4,9 @@
 use std::sync::Arc;
 
 use mandor_domain::gate::check_start;
-use mandor_domain::planned::{ClaimAction, PlannedState, PlannedWork, planned_claim_action};
+use mandor_domain::planned::{
+    ClaimAction, PlannedState, PlannedWork, group_claim_action, planned_claim_action,
+};
 use mandor_domain::{ClaimLoss, DaemonRole, TaskStatus};
 
 use super::{OvernightStore, PlannedEntry, QueueItem, resumable};
@@ -59,6 +61,9 @@ impl<D: Deps> RunService<D> {
                 "this card was taken over to the laptop",
             ));
         }
+        if self.queued_cards().await?.iter().any(|c| c == record_id) {
+            return Err(RunError::InvalidState("the card is already queued"));
+        }
         let active = self.runs.active_for(record_id).await?;
         if !req.design_sources.is_empty() {
             let check = self.design.prepare(&req.design_sources, false).await?;
@@ -96,6 +101,7 @@ impl<D: Deps> RunService<D> {
             added_at_ms: self.sync.clock.now_ms(),
             design_sources: req.design_sources.clone(),
             planned,
+            group: Vec::new(),
         };
         match self.overnight.enqueue(&item).await {
             Err(PortError::Conflict) => Err(RunError::InvalidState("the card is already queued")),
@@ -105,7 +111,7 @@ impl<D: Deps> RunService<D> {
 
     /// Kartu No plan: To Do yang lolos gerbang Start, atau run yang boleh
     /// dilanjutkan.
-    async fn check_no_plan(
+    pub(super) async fn check_no_plan(
         &self,
         record_id: &str,
         active: Option<mandor_domain::RunState>,
@@ -126,7 +132,7 @@ impl<D: Deps> RunService<D> {
     }
 
     /// Paket plan cocok dengan kartu dan VM (KTD-11, R11).
-    async fn check_planned(
+    pub(super) async fn check_planned(
         &self,
         record_id: &str,
         target: &StartTarget,
@@ -173,18 +179,40 @@ impl<D: Deps> RunService<D> {
             if !renew && p.state != PlannedState::HandoverPending {
                 continue;
             }
-            let id = item.record_id.as_str();
+            let Some(action) = self.item_claim_action(&item, p, now).await? else {
+                continue;
+            };
+            self.apply_claim_action(&item, p, action, renew, now)
+                .await?;
+        }
+        Ok(())
+    }
+
+    /// Tindakan klaim item Planned; untuk grup, gabungan semua kartunya
+    /// (KTD-G14). `None` bila kartu gagal dibaca (dicoba lagi nanti).
+    async fn item_claim_action(
+        &self,
+        item: &QueueItem,
+        p: &PlannedEntry,
+        now: i64,
+    ) -> Result<Option<ClaimAction>, RunError> {
+        let group = !item.group.is_empty();
+        let mut actions = Vec::new();
+        for id in item.cards() {
             let fresh = match self.sync.fetch_one(id).await {
                 Ok(Some(t)) => t,
                 Ok(None) => {
-                    self.overnight
-                        .dequeue(id, Some("the card was deleted in Lark"), now)
-                        .await?;
+                    let reason = if group {
+                        format!("{id} was deleted in Lark")
+                    } else {
+                        "the card was deleted in Lark".to_owned()
+                    };
+                    actions.push(ClaimAction::Drop(reason));
                     continue;
                 }
                 Err(e) => {
                     tracing::warn!(record_id = id, error = %e, "kartu Planned gagal dibaca");
-                    continue;
+                    return Ok(None);
                 }
             };
             let action = planned_claim_action(
@@ -195,28 +223,38 @@ impl<D: Deps> RunService<D> {
                 self.sync.identity(),
                 now,
             );
-            self.apply_claim_action(id, p, action, renew, now).await?;
+            let key = fresh.key.clone().unwrap_or_else(|| id.to_owned());
+            actions.push(match action {
+                ClaimAction::Hold(r) if group => ClaimAction::Hold(format!("{key}: {r}")),
+                ClaimAction::Drop(r) if group => ClaimAction::Drop(format!("{key}: {r}")),
+                other => other,
+            });
         }
-        Ok(())
+        Ok(Some(if group {
+            group_claim_action(&actions)
+        } else {
+            actions.into_iter().next().unwrap_or(ClaimAction::Leave)
+        }))
     }
 
     async fn apply_claim_action(
         &self,
-        id: &str,
+        item: &QueueItem,
         p: &PlannedEntry,
         action: ClaimAction,
         renew: bool,
         now: i64,
     ) -> Result<(), RunError> {
+        let id = item.record_id.as_str();
         match action {
-            ClaimAction::Renew if renew => self.renew_planned(id, now).await?,
+            ClaimAction::Renew if renew => self.renew_planned(item, now).await?,
             ClaimAction::Wait | ClaimAction::Leave | ClaimAction::Renew => {}
             ClaimAction::Promote => {
                 self.overnight
                     .set_planned_state(id, PlannedState::Waiting, None)
                     .await?;
                 if renew {
-                    self.renew_planned(id, now).await?;
+                    self.renew_planned(item, now).await?;
                 }
             }
             ClaimAction::Hold(reason) => {
@@ -238,17 +276,28 @@ impl<D: Deps> RunService<D> {
         Ok(())
     }
 
-    /// Heartbeat klaim item Planned; klaim yang hilang mengeluarkan item.
-    async fn renew_planned(&self, record_id: &str, now: i64) -> Result<(), RunError> {
-        match self.sync.heartbeat(record_id).await {
-            Ok(Heartbeat::Lost(loss)) => {
-                self.overnight
-                    .dequeue(record_id, Some(lost_reason(loss)), now)
-                    .await?;
-            }
-            Ok(_) => {}
-            Err(e) => {
-                tracing::warn!(record_id, error = %e, "heartbeat klaim kartu Planned gagal");
+    /// Heartbeat klaim item Planned (semua kartu grup). Klaim yang hilang
+    /// mengeluarkan kartu tunggal, atau menahan grup (plan tetap di VM).
+    async fn renew_planned(&self, item: &QueueItem, now: i64) -> Result<(), RunError> {
+        let group = !item.group.is_empty();
+        for record_id in item.cards() {
+            match self.sync.heartbeat(record_id).await {
+                Ok(Heartbeat::Lost(loss)) if group => {
+                    let reason = format!("{record_id}: {}", lost_reason(loss));
+                    self.overnight
+                        .set_planned_state(&item.record_id, PlannedState::Held, Some(&reason))
+                        .await?;
+                    return Ok(());
+                }
+                Ok(Heartbeat::Lost(loss)) => {
+                    self.overnight
+                        .dequeue(record_id, Some(lost_reason(loss)), now)
+                        .await?;
+                }
+                Ok(_) => {}
+                Err(e) => {
+                    tracing::warn!(record_id, error = %e, "heartbeat klaim kartu Planned gagal");
+                }
             }
         }
         Ok(())

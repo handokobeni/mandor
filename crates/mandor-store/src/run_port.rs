@@ -72,6 +72,20 @@ struct RunExtra {
     draft_pending: Option<i64>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     design_notes: Vec<String>,
+    /// `"now"` untuk grup VM yang dimulai dengan Start now.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    vm_start: Option<String>,
+    /// Grup satu plan dengan cuplikan AC saat disetujui (R25 plan grup).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    one_plan: Option<Vec<StoredAcSnap>>,
+}
+
+/// Bentuk simpan [`mandor_domain::group::AcSnap`].
+#[derive(Serialize, Deserialize)]
+struct StoredAcSnap {
+    card: String,
+    ac_id: String,
+    text: String,
 }
 
 /// Bentuk simpan [`RunWorkspace`].
@@ -242,6 +256,17 @@ fn extra_of(r: &RunRecord) -> Result<String, StoreError> {
         entered_waiting_fix_ms: r.entered_waiting_fix_ms,
         draft_pending: r.draft_pending,
         design_notes: r.design_notes.clone(),
+        vm_start: r.vm_start.is_now().then(|| "now".to_owned()),
+        one_plan: r.one_plan.as_ref().map(|snaps| {
+            snaps
+                .iter()
+                .map(|s| StoredAcSnap {
+                    card: s.card.clone(),
+                    ac_id: s.ac_id.clone(),
+                    text: s.text.clone(),
+                })
+                .collect()
+        }),
     })
     .map_err(StoreError::internal)
 }
@@ -342,6 +367,19 @@ fn to_record(row: Row) -> Result<RunRecord, StoreError> {
         entered_waiting_fix_ms: extra.entered_waiting_fix_ms,
         draft_pending: extra.draft_pending,
         design_notes: extra.design_notes,
+        vm_start: mandor_usecase::run_ports::VmStart::from_start_now(
+            extra.vm_start.as_deref() == Some("now"),
+        ),
+        one_plan: extra.one_plan.map(|snaps| {
+            snaps
+                .into_iter()
+                .map(|s| mandor_domain::group::AcSnap {
+                    card: s.card,
+                    ac_id: s.ac_id,
+                    text: s.text,
+                })
+                .collect()
+        }),
         created_at_ms: row.created_at_ms,
         updated_at_ms: row.updated_at_ms,
     })

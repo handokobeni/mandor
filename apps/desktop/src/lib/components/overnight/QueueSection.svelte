@@ -12,7 +12,8 @@
   import * as Command from '#lib/components/ui/command/index.ts';
   import * as Popover from '#lib/components/ui/popover/index.ts';
   import * as Select from '#lib/components/ui/select/index.ts';
-  import { canQueue, queueRowMode } from '#lib/overnight.ts';
+  import GroupCardPicker from '#lib/components/kanban/GroupCardPicker.svelte';
+  import { canQueue, queueAddLabel, queueGroupText, queueRowMode } from '#lib/overnight.ts';
   import type { QueueItemView } from '#lib/protocol/QueueItemView.ts';
   import type { Rpc } from '#lib/rpc.ts';
   import { board } from '#lib/stores/board.svelte.ts';
@@ -24,13 +25,15 @@
   let { laptop, laptopDaemonId }: { laptop: Rpc; laptopDaemonId: string | null } = $props();
 
   const items = $derived(overnight.queue?.items ?? []);
-  const queued = $derived(new Set(items.map((i) => i.record_id)));
+  const queued = $derived(overnight.queuedIds ?? new Set<string>());
   const candidates = $derived(board.cards.filter((c) => canQueue(c, queued)));
 
   let pick = $state('');
   let picking = $state(false);
   let target = $state('');
   let design = $state<string[]>([]);
+  /** Kartu "Queue together" urut pengerjaan; satu kartu = antre biasa. */
+  let order = $state<string[]>([]);
   let busy = $state<string | null>(null);
   let confirming = $state<string | null>(null);
 
@@ -56,8 +59,13 @@
     const t = targetOf(target);
     if (!pick || !t) return;
     const card = candidates.find((c) => c.record_id === pick);
-    await act(() => overnight.add(pick, t, null, design), `Queued ${card?.key ?? ''} for the VM`);
+    if (order.length > 1) {
+      await act(() => overnight.addGroup(order, t, null, design), `Queued ${order.length} cards together for the VM`);
+    } else {
+      await act(() => overnight.add(pick, t, null, design), `Queued ${card?.key ?? ''} for the VM`);
+    }
     pick = '';
+    order = [];
   }
 
 
@@ -118,10 +126,12 @@
       {:else}
         <ol class="queue">
           {#each items as item, i (item.record_id)}
+            {@const grp = queueGroupText(item)}
             <li>
               <span class="mono key">{item.key ?? item.record_id}</span>
-              <span class="title" title={item.title}>{item.title}</span>
+              <span class="title" title={item.title}>{item.title}{#if grp}<span class="muted">{` · ${grp.then}`}</span>{/if}</span>
               <span class="muted">{targetLabel(item.repo_id, item.workspace_id)}</span>
+              {#if grp}<span class="chip" title="Built one after another in one branch and one PR">Group of {grp.count}</span>{/if}
               {#if item.planned_state}
                 <span class="chip" data-tone="ok">Planned</span>
               {:else}
@@ -206,8 +216,21 @@
           </Select.Content>
         </Select.Root>
         <DesignSourcePicker sources={overnight.designSources} bind:selected={design} />
-        <Button size="sm" disabled={!pick || !target} onclick={add}>Add to queue</Button>
+        <Button size="sm" disabled={!pick || !target} onclick={add}>{queueAddLabel(order.length)}</Button>
       </div>
+      {#if pick}
+        {#key pick}
+          <div class="together">
+            <GroupCardPicker
+              rpc={laptop}
+              recordId={pick}
+              bind:order
+              heading="Queue together"
+              help="Other cards in this epic assigned to you. Checked cards run one after another on the VM in one branch and one PR, in this order."
+            />
+          </div>
+        {/key}
+      {/if}
       {#if overnight.queue && overnight.queue.dequeued.length > 0}
         <p class="field-help" style="margin:10px 0 4px">Removed from the queue this cycle:</p>
         <ul class="dequeued">
@@ -256,6 +279,10 @@
     flex-wrap: wrap;
     gap: 8px;
     align-items: center;
+  }
+  .together {
+    margin-top: 10px;
+    max-width: 640px;
   }
   .placeholder {
     color: var(--muted-foreground);

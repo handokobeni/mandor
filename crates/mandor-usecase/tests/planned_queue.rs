@@ -89,6 +89,7 @@ fn work() -> PlannedWork {
         }],
         laptop_design: vec![],
         repos: vec!["repo1".to_owned()],
+        group_acs: None,
     }
 }
 

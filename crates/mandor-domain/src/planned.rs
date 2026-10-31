@@ -27,6 +27,9 @@ pub struct PlannedWork {
     /// Repo run laptop: satu repo, atau anggota workspace. Kosong untuk paket
     /// dari laptop versi lama.
     pub repos: Vec<String>,
+    /// Grup satu plan: AC kartu saat plan grup disetujui (R25 plan grup,
+    /// KTD-G21); `None` untuk plan kartu pertama atau kartu tunggal.
+    pub group_acs: Option<Vec<crate::group::AcSnap>>,
 }
 
 impl PlannedWork {
@@ -89,6 +92,27 @@ impl PlannedState {
             _ => return None,
         })
     }
+}
+
+/// Tindakan heartbeat item grup Planned dari tindakan tiap kartunya (KTD-G14
+/// plan grup): kartu yang hilang atau berpindah menahan seluruh grup (plan
+/// tetap di VM untuk Take over), dan grup baru naik ke `Waiting` setelah
+/// semua klaim kartu dipegang VM.
+#[must_use]
+pub fn group_claim_action(actions: &[ClaimAction]) -> ClaimAction {
+    let held = actions.iter().find_map(|a| match a {
+        ClaimAction::Drop(r) | ClaimAction::Hold(r) => Some(r.clone()),
+        _ => None,
+    });
+    if let Some(reason) = held {
+        return ClaimAction::Hold(reason);
+    }
+    for pick in [ClaimAction::Leave, ClaimAction::Wait, ClaimAction::Promote] {
+        if actions.contains(&pick) {
+            return pick;
+        }
+    }
+    ClaimAction::Renew
 }
 
 /// Folder tempat skill plan dan brainstorm menulis dokumennya.
@@ -351,10 +375,33 @@ mod tests {
             }],
             laptop_design: Vec::new(),
             repos: Vec::new(),
+            group_acs: None,
         };
         assert!(!work.follows_design());
         work.design[0].design = Design::FollowDesign;
         assert!(work.follows_design());
+    }
+
+    #[test]
+    fn tindakan_klaim_grup_planned_dari_semua_kartu() {
+        use ClaimAction::{Drop, Hold, Leave, Promote, Renew, Wait};
+        assert_eq!(group_claim_action(&[Promote, Promote]), Promote);
+        assert_eq!(
+            group_claim_action(&[Promote, Wait]),
+            Wait,
+            "serah-terima belum lengkap"
+        );
+        assert_eq!(group_claim_action(&[Renew, Renew]), Renew);
+        assert_eq!(group_claim_action(&[Leave, Renew]), Leave);
+        assert_eq!(
+            group_claim_action(&[Renew, Drop("hilang".to_owned())]),
+            Hold("hilang".to_owned()),
+            "kartu hilang menahan grup, plan tetap di VM"
+        );
+        assert_eq!(
+            group_claim_action(&[Hold("a".to_owned()), Wait]),
+            Hold("a".to_owned())
+        );
     }
 
     #[test]
@@ -366,6 +413,7 @@ mod tests {
             design: Vec::new(),
             laptop_design: Vec::new(),
             repos: ids(&["web", "api"]),
+            group_acs: None,
         };
         assert!(work.same_repos(&ids(&["api", "web"])), "urutan diabaikan");
         assert!(!work.same_repos(&ids(&["web"])), "workspace ke satu repo");

@@ -29,6 +29,8 @@
   import PlanningPicker from './PlanningPicker.svelte';
   import ReviewPicker from './ReviewPicker.svelte';
   import GroupCardPicker from './GroupCardPicker.svelte';
+  import { Checkbox } from '#lib/components/ui/checkbox/index.ts';
+  import { groupStartParams, onePlanAvailable } from '#lib/group.ts';
   import { REVIEW_KEY, restoreReview, type ReviewChoice } from '#lib/planning.ts';
   import type { DesignSourceView } from '#lib/protocol/DesignSourceView.ts';
 
@@ -59,6 +61,8 @@
   let note = $state('');
   // Start together: kartu satu flow dalam urutan pengerjaan; satu kartu = Start biasa.
   let groupOrder = $state<string[]>([]);
+  /** "One plan for all cards" (R25 plan grup). */
+  let onePlan = $state(false);
   const grouped = $derived(action === 'start' && groupOrder.length > 1);
   let phase = $state<'form' | 'running' | 'done' | 'failed'>('form');
   let steps = $state<Step[]>([]);
@@ -158,7 +162,7 @@
       if (grouped) {
         const { record_id: _first, ...rest } = base;
         method = 'runs.start_group';
-        params = { ...rest, record_ids: groupOrder };
+        params = groupStartParams(rest, groupOrder, onePlan, planning.mode);
       }
       const run = await rpc.request<{ id: string }>(method, params);
       steps = stepsAt(defs, 'done');
@@ -182,7 +186,7 @@
 </script>
 
 <Dialog.Root open {onOpenChange}>
-  <Dialog.Content class="sm:max-w-[520px]" showCloseButton={phase !== 'running'}>
+  <Dialog.Content class="sm:max-w-[520px] max-h-[90vh] overflow-y-auto" showCloseButton={phase !== 'running'}>
     <Dialog.Header>
       <div class="flex items-center gap-2">
         <span class="mono muted">{key}</span>
@@ -277,6 +281,18 @@
         {#if action === 'start'}
           <GroupCardPicker {rpc} recordId={card.record_id} bind:order={groupOrder} />
           <PlanningPicker {skills} bind:choice={planning} />
+          {#if onePlanAvailable(groupOrder.length, planning.mode)}
+            <label class="flex items-start gap-2 text-sm">
+              <Checkbox bind:checked={onePlan} aria-label="One plan for all cards" />
+              <span>
+                <span class="font-medium">One plan for all cards</span>
+                <span class="muted block text-[length:var(--text-sm)]">
+                  The agent writes one plan covering the AC of every card and you approve it once. Cards are still built
+                  and committed one by one. If the AC of a card not built yet changes, the plan needs approval again.
+                </span>
+              </span>
+            </label>
+          {/if}
           <ReviewPicker {sources} {skills} {dropped} bind:choice={review} />
           <div class="grid gap-1.5">
             <Label for="start-note">Note to the agent <span class="muted font-normal">(optional)</span></Label>

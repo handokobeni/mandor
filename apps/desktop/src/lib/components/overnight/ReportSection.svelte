@@ -3,9 +3,11 @@
   import ArrowLeftRight from '@lucide/svelte/icons/arrow-left-right';
   import GitPullRequest from '@lucide/svelte/icons/git-pull-request';
   import Send from '@lucide/svelte/icons/send';
+  import Undo2 from '@lucide/svelte/icons/undo-2';
   import { Button } from '#lib/components/ui/button/index.ts';
+  import { Input } from '#lib/components/ui/input/index.ts';
   import { Textarea } from '#lib/components/ui/textarea/index.ts';
-  import { backInQueue, canTakeOverReport, holdLabel, reportGroups, usageText } from '#lib/overnight.ts';
+  import { backInQueue, canTakeOverReport, groupCardLabel, heldAction, holdLabel, leadRow, reportGroups, usageText } from '#lib/overnight.ts';
   import type { AcRowView } from '#lib/protocol/AcRowView.ts';
   import type { ReportCardView } from '#lib/protocol/ReportCardView.ts';
   import type { Rpc } from '#lib/rpc.ts';
@@ -24,6 +26,26 @@
   let gate = $state<Record<string, AcRowView[]>>({});
   let confirmed = $state<Record<string, string[]>>({});
   let reasons = $state<Record<string, string>>({});
+  /** Alasan Keep per kartu grup yang berubah di Lark. */
+  let keepReasons = $state<Record<string, string>>({});
+
+  /** Keep atau Revert kartu grup yang berubah di Lark (R13); VM mengantre grup lagi. */
+  async function decideCard(c: ReportCardView, decision: 'keep' | 'revert'): Promise<void> {
+    busy = c.run_id;
+    try {
+      const outcome = await overnight.decideCard(c.run_id, c.record_id, decision, decision === 'keep' ? (keepReasons[c.record_id] ?? '').trim() : null);
+      delete keepReasons[c.record_id];
+      if (outcome === 'revert_conflict') {
+        toast.warning(`${key(c)} could not be reverted cleanly`, { description: 'Take the group over to the laptop to resolve it.' });
+      } else {
+        toast.success(outcome === 'kept' ? `${key(c)} kept; the group is back in the queue` : `${key(c)} reverted; the group is back in the queue`);
+      }
+    } catch (err) {
+      toast.error('The VM refused', { description: err instanceof Error ? err.message : String(err) });
+    } finally {
+      busy = null;
+    }
+  }
 
   async function act(card: ReportCardView, f: () => Promise<void>, done: string): Promise<void> {
     busy = card.run_id;
@@ -116,13 +138,16 @@
     {/if}
     {#each groups as g (g.id)}
       <h3>{g.label} <span class="muted mono">{g.cards.length}</span></h3>
-      {#each g.cards as c (c.run_id)}
-        <div class="settings-card report-card">
+      {#each g.cards as c (c.run_id + c.record_id)}
+        {@const lead = leadRow(c, g.cards)}
+        {@const held = heldAction(c, g.cards)}
+        <div class="settings-card report-card" class:group-row={c.group_card !== null && !lead}>
           <div class="content">
             <div class="head">
               <span class="mono key">{key(c)}</span>
               <span class="title" title={c.title}>{c.title}</span>
-              {#if c.pr_url}
+              {#if c.group_card}<span class="chip" data-tone={c.group_card === 'committed' ? 'ok' : undefined}>{groupCardLabel(c.group_card)}</span>{/if}
+              {#if c.pr_url && lead}
                 <a class="pr-link" href={c.pr_url} target="_blank" rel="noopener noreferrer"><GitPullRequest class="icon-sm" aria-hidden="true" />PR</a>
               {/if}
               <span class="muted">AC {c.ac_pass} pass · {c.ac_fail} fail · {c.ac_cant_verify} can't verify</span>
@@ -130,7 +155,17 @@
             {#each c.design_notes as note (note)}
               <p class="hold"><span class="chip" data-tone="warning">Design</span> {note}</p>
             {/each}
-            {#if backInQueue(c, overnight.queuedIds)}
+            {#if c.changed_in_lark}
+              <p class="hold"><span class="chip" data-tone="warning">Changed in Lark</span> The card changed after it was committed. Keep it with a reason, or revert its commits.</p>
+              <div class="actions">
+                <Input class="h-8 w-60 max-w-full" placeholder="Reason to keep" aria-label="Reason to keep {key(c)}" bind:value={keepReasons[c.record_id]} />
+                <Button size="sm" variant="outline" disabled={busy === c.run_id || !(keepReasons[c.record_id] ?? '').trim()} onclick={() => decideCard(c, 'keep')}>Keep</Button>
+                <Button size="sm" variant="ghost" disabled={busy === c.run_id} onclick={() => decideCard(c, 'revert')}><Undo2 />Revert</Button>
+              </div>
+            {/if}
+            {#if !lead}
+              <!-- Baris kartu grup lain: aksi run ada di baris pertama grup. -->
+            {:else if backInQueue(c, overnight.queuedIds)}
               <p class="hold"><span class="chip" data-tone="ok">Back in the queue</span> The VM continues this card on the same branch.</p>
             {:else}
             {#if c.outcome === 'held'}
@@ -146,7 +181,7 @@
               {#if c.outcome === 'held' && c.hold_reason === 'ac_gate' && !gate[c.run_id]}
                 <Button size="sm" variant="outline" onclick={() => openGate(c)}>Decide AC…</Button>
               {/if}
-              {#if c.outcome === 'held' && c.hold_reason === 'needs_confirmation'}
+              {#if held === 'confirm'}
                 <Button size="sm" disabled={busy === c.run_id} onclick={() => act(c, () => overnight.decide(c.run_id, [], null), `${key(c)} pushed as a draft PR`)}>
                   Confirm and push
                 </Button>
@@ -158,7 +193,7 @@
               {/if}
             </div>
 
-            {#if c.outcome === 'held' && (c.hold_reason === 'stuck' || c.hold_reason === 'usage_limit')}
+            {#if held === 'answer'}
               <div class="answer">
                 <Textarea rows={2} placeholder="Answer the agent, then the card goes back to the queue" bind:value={answers[c.run_id]} />
                 <Button size="sm" disabled={busy === c.run_id} onclick={() => act(c, () => overnight.answer(c, answers[c.run_id] ?? ''), `${key(c)} is back in the queue`)}>
@@ -177,7 +212,7 @@
 
             {/if}
 
-            {#if gate[c.run_id] && c.outcome === 'held' && c.hold_reason === 'ac_gate' && !backInQueue(c, overnight.queuedIds)}
+            {#if lead && gate[c.run_id] && c.outcome === 'held' && c.hold_reason === 'ac_gate' && !backInQueue(c, overnight.queuedIds)}
               <div class="gate">
                 {#each gate[c.run_id] as row (row.ac_id)}
                   <label class="gate-row">
@@ -239,6 +274,9 @@
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+  }
+  .group-row {
+    margin-left: 20px;
   }
   .hold {
     margin: 6px 0 0;

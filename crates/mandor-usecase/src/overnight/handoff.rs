@@ -6,13 +6,14 @@
 use std::sync::Arc;
 
 use mandor_domain::RunState;
+use mandor_domain::group::CardState;
 use mandor_domain::planned::{PlannedState, PlannedWork};
 
 use super::OvernightStore;
 use crate::StartTarget;
 use crate::ports::{Clock, Deps};
 use crate::run::{CarriedReview, RunError, RunService, VmCarry, target_of};
-use crate::run_ports::{ChatItem, GitPort, LedgerStore, RunRecord, RunStore};
+use crate::run_ports::{ChatItem, GitPort, GroupCardRow, LedgerStore, RunRecord, RunStore};
 
 /// Hasil serah-terima untuk dipulihkan laptop.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -71,10 +72,23 @@ impl<D: Deps> RunService<D> {
                 self.git.push(&m.repo, &m.worktree, &branch).await?;
             }
         }
-        self.sync.hand_over_claim(record_id, to_daemon).await?;
+        // Grup pindah sebagai satu kesatuan (R22, KTD-G15): kartu lain dulu,
+        // kartu utama terakhir.
+        let mut ids: Vec<String> = self
+            .runs
+            .cards(&run.id)
+            .await?
+            .into_iter()
+            .filter(|c| !matches!(c.state, CardState::Removed(_)) && c.record_id != record_id)
+            .map(|c| c.record_id)
+            .collect();
+        ids.push(record_id.to_owned());
         let now = self.now();
-        self.overnight.set_laptop_only(record_id, now).await?;
-        self.overnight.dequeue(record_id, None, now).await?;
+        for id in &ids {
+            self.sync.hand_over_claim(id, to_daemon).await?;
+            self.overnight.set_laptop_only(id, now).await?;
+            self.overnight.dequeue(id, None, now).await?;
+        }
         self.runs
             .append(
                 &run.id,
@@ -105,6 +119,8 @@ impl<D: Deps> RunService<D> {
         Ok(VmCarry {
             draft: run.draft_pending.is_some(),
             review,
+            cards: self.runs.cards(&run.id).await?,
+            one_plan: run.one_plan.clone(),
         })
     }
 
@@ -168,6 +184,19 @@ impl<D: Deps> RunService<D> {
         if !task.held_here(self.sync.identity()) {
             return Err(RunError::InvalidState("the card is held by another daemon"));
         }
+        // Grup Planned: semua klaim pindah; laptop memulai lagi dari plan kartu
+        // pertama (R24).
+        let mut cards: Vec<GroupCardRow> = item
+            .group
+            .iter()
+            .map(|id| GroupCardRow::pending(id))
+            .collect();
+        if let Some(first) = cards.first_mut() {
+            first.state = CardState::Active;
+        }
+        for id in item.group.iter().filter(|id| *id != record_id) {
+            self.sync.hand_over_claim(id, to_daemon).await?;
+        }
         self.sync.hand_over_claim(record_id, to_daemon).await?;
         self.overnight
             .dequeue(record_id, None, self.sync.clock.now_ms())
@@ -176,7 +205,10 @@ impl<D: Deps> RunService<D> {
             branch: planned.work.branch.clone(),
             target: Some(item.target),
             planned: Some(planned.work),
-            carry: VmCarry::default(),
+            carry: VmCarry {
+                cards,
+                ..VmCarry::default()
+            },
         })
     }
 }

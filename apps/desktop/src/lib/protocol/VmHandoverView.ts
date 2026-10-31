@@ -9,4 +9,8 @@ export type VmHandoverView = { planned: PlannedWorkDto,
 /**
  * Target satu repo; `None` bila workspace.
  */
-repo_id: string | null, workspace: StartWorkspace | null, };
+repo_id: string | null, workspace: StartWorkspace | null, 
+/**
+ * Kartu grup urut pengerjaan; kosong untuk kartu tunggal (R24 plan grup).
+ */
+cards: Array<string>, };

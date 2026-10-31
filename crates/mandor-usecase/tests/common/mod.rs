@@ -534,13 +534,14 @@ impl mandor_usecase::run_ports::Prompts for PlainMessage {
     fn plan_message(
         &self,
         task: &Task,
-        _acs: &[String],
+        acs: &[String],
         dev_note: Option<&str>,
         skill: Option<&str>,
     ) -> String {
         format!(
-            "PLAN {}\n{}\nSKILL:{}",
+            "PLAN {}\n{}\n{}\nSKILL:{}",
             task.title,
+            acs.join("\n"),
             dev_note.unwrap_or(""),
             skill.unwrap_or("-")
         )

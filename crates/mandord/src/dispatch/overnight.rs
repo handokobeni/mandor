@@ -16,7 +16,9 @@ use mandor_usecase::overnight::{
 };
 use serde_json::{Value, json};
 
-use super::planned::{planned_dto, planned_of, review_dto, target_of, target_view};
+use super::planned::{
+    card_dto, planned_dto, planned_of, review_dto, snaps_dto, target_of, target_view,
+};
 use super::{AppDispatch, ok, params, rejected, run_error, store_error, sync_error};
 use crate::session::LarkSession;
 
@@ -65,6 +67,8 @@ impl AppDispatch {
                     planned: back.planned.as_ref().map(planned_dto),
                     draft: back.carry.draft,
                     review: back.carry.review.as_ref().map(review_dto),
+                    cards: back.carry.cards.iter().map(card_dto).collect(),
+                    one_plan: back.carry.one_plan.as_deref().map(snaps_dto),
                 })
             }
             other => self.overnight_queue_call(&s, other, v).await,
@@ -95,9 +99,11 @@ impl AppDispatch {
                     design_sources: p.design_sources.unwrap_or_default(),
                     planned,
                 };
-                runs.enqueue_card(&p.record_id, &req)
-                    .await
-                    .map_err(run_error)?;
+                match p.group.filter(|g| !g.is_empty()) {
+                    Some(group) => runs.enqueue_group(&group, &req).await,
+                    None => runs.enqueue_card(&p.record_id, &req).await,
+                }
+                .map_err(run_error)?;
                 s.poke.notify_one();
                 ok(&json!({}))
             }
@@ -157,8 +163,17 @@ impl AppDispatch {
                 c.record_id == item.record_id
                     && matches!(c.outcome, CardOutcome::Held(_) | CardOutcome::Failed)
             });
+            let mut keys = Vec::with_capacity(item.group.len());
+            for id in &item.group {
+                keys.push(
+                    cached_task(s, id)
+                        .await?
+                        .and_then(|t| t.key)
+                        .unwrap_or_else(|| id.clone()),
+                );
+            }
             view.items
-                .push(queue_item_view(item, task.as_ref(), held, &names));
+                .push(queue_item_view(item, task.as_ref(), held, &names, keys));
         }
         for d in &report.dequeued {
             view.dequeued.push(dequeued_view(
@@ -247,6 +262,7 @@ fn queue_item_view(
     task: Option<&Task>,
     held: bool,
     names: &HashMap<String, String>,
+    group_keys: Vec<String>,
 ) -> QueueItemView {
     let (repo_id, workspace_id) = match &item.target {
         StartTarget::Repo(r) => (Some(r.clone()), None),
@@ -269,6 +285,8 @@ fn queue_item_view(
             .iter()
             .map(|id| names.get(id).cloned().unwrap_or_else(|| id.clone()))
             .collect(),
+        group: item.group.clone(),
+        group_keys,
     }
 }
 
@@ -323,6 +341,8 @@ fn report_card_view(c: &ReportCard, task: Option<&Task>) -> ReportCardView {
         ac_cant_verify: c.ac_cant_verify,
         entered_waiting_fix: c.entered_waiting_fix,
         design_notes: c.design_notes.clone(),
+        group_card: c.group.map(|g| g.as_str().to_owned()),
+        changed_in_lark: c.changed_in_lark,
     }
 }
 
@@ -366,6 +386,8 @@ mod tests {
             ac_cant_verify: 1,
             entered_waiting_fix: false,
             design_notes: vec![],
+            group: None,
+            changed_in_lark: false,
         };
         let v = report_card_view(&card, Some(&task));
         assert_eq!(
@@ -392,9 +414,10 @@ mod tests {
             added_at_ms: 5,
             design_sources: vec!["ds1".to_owned(), "hilang".to_owned()],
             planned: None,
+            group: Vec::new(),
         };
         let names = HashMap::from([("ds1".to_owned(), "kelola-mock".to_owned())]);
-        let q = queue_item_view(&item, None, true, &names);
+        let q = queue_item_view(&item, None, true, &names, vec![]);
         assert_eq!(
             (q.repo_id, q.workspace_id.as_deref()),
             (None, Some("kelola"))

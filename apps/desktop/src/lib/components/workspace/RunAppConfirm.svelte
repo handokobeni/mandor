@@ -28,7 +28,7 @@
 </script>
 
 <Dialog.Root open onOpenChange={(o) => !o && oncancel()}>
-  <Dialog.Content class="sm:max-w-[620px]">
+  <Dialog.Content class="sm:max-w-[620px] max-h-[90vh] overflow-y-auto">
     <Dialog.Header>
       <span class="mono muted">{taskKey}</span>
       <Dialog.Title class="text-[length:var(--text-md)]">Run the app with the agent's changes?</Dialog.Title>

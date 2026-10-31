@@ -19,9 +19,41 @@ let queue: QueueItemView[] = [
     note: null,
     start_now: false,
     added_at_ms: Date.now() - 2 * HOUR,
-    held: false
+    held: false,
+    planned_state: null,
+    planned_reason: null,
+    design_sources: []
+  },
+  {
+    record_id: 'recP',
+    key: 'PGS-1426',
+    title: 'PO approval with reasons',
+    repo_id: 'pegasus-web',
+    workspace_id: null,
+    note: null,
+    start_now: false,
+    added_at_ms: Date.now() - HOUR,
+    held: false,
+    planned_state: 'waiting',
+    planned_reason: null,
+    design_sources: ['kelola-mock']
+  },
+  {
+    record_id: 'recQ',
+    key: 'PGS-1428',
+    title: 'Reject with a reason',
+    repo_id: 'pegasus-web',
+    workspace_id: null,
+    note: null,
+    start_now: false,
+    added_at_ms: Date.now() - HOUR / 2,
+    held: false,
+    planned_state: 'handover_pending',
+    planned_reason: null,
+    design_sources: []
   }
 ];
+const designSources = [{ id: 'ds1', name: 'kelola-mock', kind: 'folder', path: '/srv/design/kelola-mock', ready: true, status: 'Ready' }];
 
 function rc(over: Partial<ReportCardView>): ReportCardView {
   return {
@@ -38,6 +70,7 @@ function rc(over: Partial<ReportCardView>): ReportCardView {
     ac_fail: 0,
     ac_cant_verify: 0,
     entered_waiting_fix: false,
+    design_notes: [],
     ...over
   };
 }
@@ -87,8 +120,11 @@ function handle(method: string, p: Record<string, unknown>): unknown {
   switch (method) {
     case 'hello':
       return { daemon_version: '0.1.0-vm', protocol: '1.1' };
+    case 'design_sources.list':
+      return designSources;
     case 'status':
       return {
+        daemon_id: 'beni@vm~vm',
         version: '0.1.0-vm',
         uptime_ms: 0,
         repos: 1,
@@ -159,7 +195,10 @@ function handle(method: string, p: Record<string, unknown>): unknown {
           note: (p.note as string) ?? null,
           start_now: false,
           added_at_ms: Date.now(),
-          held: cards.some((c) => c.record_id === id)
+          held: cards.some((c) => c.record_id === id),
+          planned_state: p.planned ? 'handover_pending' : null,
+          planned_reason: null,
+          design_sources: (p.design_sources as string[] | undefined) ?? []
         }
       ];
       return {};
@@ -188,7 +227,10 @@ function handle(method: string, p: Record<string, unknown>): unknown {
         cache_read_tokens: 3_100_000,
         cards,
         dequeued: [],
-        reviewed_without_fix: cards.filter((c) => c.outcome === 'sent_to_review' && !c.entered_waiting_fix).length
+        reviewed_without_fix: cards.filter((c) => c.outcome === 'sent_to_review' && !c.entered_waiting_fix).length,
+        planned_held: [
+          { record_id: 'recH', key: 'PGS-1429', title: 'Audit entries for approvals', repo_id: 'pegasus-web', reason: 'Design source "kelola-mock" is not available: Path missing.' }
+        ]
       };
     case 'overnight.send_to_review':
       cards = cards.map((c) => (c.run_id === p.run_id ? { ...c, outcome: 'sent_to_review' } : c));
@@ -215,7 +257,8 @@ function handle(method: string, p: Record<string, unknown>): unknown {
       };
     case 'runs.handoff':
       cards = cards.filter((c) => c.record_id !== p.record_id);
-      return { branch: 'beni/pgs-1423' };
+      queue = queue.filter((q) => q.record_id !== p.record_id);
+      return { branch: 'beni/pgs-1423', repo_id: 'pegasus-web', workspace: null, planned: null };
     default:
       return {};
   }

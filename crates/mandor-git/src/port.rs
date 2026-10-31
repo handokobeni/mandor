@@ -175,6 +175,10 @@ impl GitPort for GitAdapter {
         })
     }
 
+    async fn untracked(&self, worktree: &Path) -> Result<Vec<String>, PortError> {
+        Ok(self.git.untracked_files(worktree).await?)
+    }
+
     async fn commit_all(
         &self,
         worktree: &Path,

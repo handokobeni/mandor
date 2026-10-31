@@ -7,10 +7,11 @@ use mandor_api::Dispatch;
 use mandor_protocol::{
     ApprovePlanParams, BoardView, CommentView, DirEntryView, DirListingView, DirQuery, DrainResult,
     ErrorCode, FileChangeView, FileDiffParams, LarkSettingsInput, LoginComplete, MessageView,
-    MessagesQuery, NoticeView, NotificationsRead, PeopleQuery, PersonView, PublishParams,
-    PublishResult, QuietPeriodSet, RecordRef, RepoAdd, RepoCandidateView, RepoRef, RepoUpdate,
-    RepoView, RpcError, RunRef, SendParams, SendResult, SkillView, StartFixParams, StartParams,
-    StartPlanning, StartProgressView, StatusResult, TakeoverParams, event, method,
+    MessagesQuery, NoticeView, NotificationsRead, PeopleQuery, PersonView, PrepareForVmParams,
+    PublishParams, PublishResult, QuietPeriodSet, RecordRef, RepoAdd, RepoCandidateView, RepoRef,
+    RepoUpdate, RepoView, RpcError, RunRef, SendParams, SendResult, SendToVmParams, SkillView,
+    StartFixParams, StartParams, StartPlanning, StartProgressView, StatusResult, TakeoverParams,
+    VmHandoverView, event, method,
 };
 use mandor_store::{NewRepo, RunsStore, StoreError};
 use mandor_usecase::run::{DrainOutcome, PublishOutcome};
@@ -32,9 +33,10 @@ use crate::views::{
 };
 
 mod app_run;
-mod design;
+pub(crate) mod design;
 mod group;
 mod overnight;
+mod planned;
 mod review;
 mod workspaces;
 
@@ -51,9 +53,37 @@ const RUN_METHODS: &[&str] = &[
     method::RUNS_CLOSE,
     method::RUNS_DISCARD_FILE,
     method::RUNS_APPROVE_PLAN,
+    method::RUNS_PREPARE_FOR_VM,
+    method::RUNS_SEND_TO_VM,
     method::RUNS_CONTINUE_TO_PLAN,
     method::CARD_RETRY,
 ];
+
+/// "Approve and queue for VM" di daemon laptop (plan 2026-10-30-001, KTD-1).
+async fn vm_handover(
+    runs: &Arc<mandor_usecase::RunService<crate::prod::Prod>>,
+    name: &str,
+    v: Value,
+) -> Result<Value, RpcError> {
+    if name == method::RUNS_SEND_TO_VM {
+        let p: SendToVmParams = params(v)?;
+        runs.send_to_vm(&p.run_id, &p.vm_daemon_id)
+            .await
+            .map_err(run_error)?;
+        return ok(&json!({}));
+    }
+    let p: PrepareForVmParams = params(v)?;
+    let out = runs
+        .prepare_for_vm(&p.run_id, &p.follow_design)
+        .await
+        .map_err(run_error)?;
+    let (repo_id, workspace) = planned::target_view(&out.target);
+    ok(&VmHandoverView {
+        planned: planned::planned_dto(&out.work),
+        repo_id,
+        workspace,
+    })
+}
 
 /// Kedalaman folder yang dipindai untuk saran repo (mis. `~/Work/tim/repo`).
 const DISCOVER_DEPTH: usize = 3;
@@ -845,13 +875,9 @@ impl AppDispatch {
                 s.poke.notify_one();
                 ok(&json!({}))
             }
-            method::RUNS_TAKEOVER => {
-                let p: TakeoverParams = params(v)?;
-                let run = runs
-                    .takeover(&p.record_id, &p.repo_id)
-                    .await
-                    .map_err(run_error)?;
-                ok(&run_view(&run, None))
+            method::RUNS_TAKEOVER => takeover(runs, params(v)?).await,
+            method::RUNS_PREPARE_FOR_VM | method::RUNS_SEND_TO_VM => {
+                vm_handover(runs, name, v).await
             }
             method::RUNS_DISCARD_FILE => {
                 let p: FileDiffParams = params(v)?;
@@ -950,6 +976,25 @@ impl AppDispatch {
             _ => ok(&self.app.settings_view().await),
         }
     }
+}
+
+/// `runs.takeover`: run laptop dari branch kartu, membawa paket plan atau PR
+/// draft VM bila ada.
+async fn takeover<D: mandor_usecase::Deps>(
+    runs: &Arc<mandor_usecase::RunService<D>>,
+    p: TakeoverParams,
+) -> Result<Value, RpcError> {
+    let target = planned::target_of(Some(p.repo_id), p.workspace)?;
+    let work = p.planned.map(planned::planned_of).transpose()?;
+    let carry = mandor_usecase::VmCarry {
+        draft: p.draft.unwrap_or(false),
+        review: p.review.map(planned::review_of).transpose()?,
+    };
+    let run = runs
+        .takeover(&p.record_id, &target, work.as_ref(), &carry)
+        .await
+        .map_err(run_error)?;
+    ok(&run_view(&run, None))
 }
 
 async fn approve<D: mandor_usecase::Deps>(

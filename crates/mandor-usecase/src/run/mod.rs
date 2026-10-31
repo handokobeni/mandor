@@ -7,9 +7,14 @@ pub use drain::{DRAIN_WINDOW_MS, DrainGate, DrainOutcome, WorkGuard};
 pub use group_gate::CardOutcome;
 mod members;
 mod ownership;
+pub use ownership::{CarriedReview, VmCarry};
 mod publish;
 pub use publish::PublishOutcome;
+mod planned;
 mod reconcile;
+mod send_to_vm;
+pub use send_to_vm::VmHandover;
+pub(crate) use send_to_vm::target_of;
 mod session;
 mod start;
 pub use start::{Planning, StartStep, StartTarget};
@@ -64,6 +69,7 @@ pub struct RunService<D: Deps> {
     pub(crate) reviews: D::Reviews,
     pub(crate) apps: D::Apps,
     pub(crate) overnight: D::Overnight,
+    pub(crate) design: D::Design,
     /// Waktu sinkron AC terakhir yang berhasil per run (dibangun ulang saat
     /// refresh berikutnya setelah restart).
     pub(crate) ledger_synced: Mutex<HashMap<String, i64>>,
@@ -100,6 +106,7 @@ pub struct RunPorts<D: Deps> {
     pub reviews: D::Reviews,
     pub apps: D::Apps,
     pub overnight: D::Overnight,
+    pub design: D::Design,
 }
 
 impl<D: Deps> std::fmt::Debug for RunPorts<D> {
@@ -123,6 +130,7 @@ impl<D: Deps> RunService<D> {
             reviews: ports.reviews,
             apps: ports.apps,
             overnight: ports.overnight,
+            design: ports.design,
             ledger_synced: Mutex::new(HashMap::new()),
             capabilities: crate::review::capability::empty(),
             replies: Mutex::new(Vec::new()),

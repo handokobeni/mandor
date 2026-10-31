@@ -54,6 +54,15 @@ describe('gerbang AC', () => {
     );
   });
 
+  it('label tombol push mengikuti ada tidaknya PR', () => {
+    const ready = gate([row('1', 'pass')], 'block', false);
+    expect(gateButtonLabel(ready)).toBe('Push & create PR');
+    expect(gateButtonLabel(ready, true)).toBe('Push to PR');
+    const review = gate([row('1', 'not_reviewed')], 'block', false);
+    expect(gateButtonLabel(review, true)).toBe('Push to PR');
+    expect(gateButtonLabel(gate([row('1', 'fail')], 'block', false), true)).toBe('Push blocked');
+  });
+
   it('mode peringatan dengan Fail tidak pernah Blocked', () => {
     const g = gate([row('1', 'fail'), row('2', 'cant_verify')], 'warn', false);
     expect(g.state).toBe('warn');

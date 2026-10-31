@@ -405,6 +405,7 @@ impl Deps for FakeDeps {
     type Reviews = run_fakes::FakeReviews;
     type Apps = run_fakes::FakeApps;
     type Overnight = run_fakes::FakeOvernight;
+    type Design = run_fakes::FakeDesign;
 }
 
 pub mod run_fakes;
@@ -463,6 +464,7 @@ pub struct Station {
     pub reviews: run_fakes::FakeReviews,
     pub apps: run_fakes::FakeApps,
     pub overnight: run_fakes::FakeOvernight,
+    pub design: run_fakes::FakeDesign,
 }
 
 pub fn station(lark: &FakeLark, clock: &FakeClock, me: &str) -> Station {
@@ -484,6 +486,7 @@ fn station_of(l: Laptop) -> Station {
     let reviews = run_fakes::FakeReviews::default();
     let apps = run_fakes::FakeApps::default();
     let overnight = run_fakes::FakeOvernight::default();
+    let design = run_fakes::FakeDesign::default();
     let ports = mandor_usecase::RunPorts::<FakeDeps> {
         git: git.clone(),
         agent: agent.clone(),
@@ -495,6 +498,7 @@ fn station_of(l: Laptop) -> Station {
         reviews: reviews.clone(),
         apps: apps.clone(),
         overnight: overnight.clone(),
+        design: design.clone(),
     };
     let svc = Arc::new(mandor_usecase::RunService::new(Arc::new(svc), ports));
     Station {
@@ -509,6 +513,7 @@ fn station_of(l: Laptop) -> Station {
         reviews,
         apps,
         overnight,
+        design,
     }
 }
 
@@ -549,6 +554,21 @@ impl mandor_usecase::run_ports::Prompts for PlainMessage {
         }
     }
 
+    fn approved_plan_message(
+        &self,
+        task: &Task,
+        acs: &[String],
+        plan: &str,
+        follow_design: &[String],
+    ) -> String {
+        format!(
+            "IMPLEMENT PLAN {}\nAC:{}\nPLAN:{plan}\nFOLLOW:{}",
+            task.title,
+            acs.join("|"),
+            follow_design.join("|")
+        )
+    }
+
     fn brainstorm_message(
         &self,
         task: &Task,
@@ -587,6 +607,11 @@ impl mandor_usecase::run_ports::Prompts for PlainMessage {
     fn findings_message(&self, rows: &[mandor_domain::AcRow]) -> String {
         let ids: Vec<&str> = rows.iter().map(|r| r.ac_id.as_str()).collect();
         format!("FINDINGS {}", ids.join("|"))
+    }
+
+    fn design_reference_message(&self, sources: &[mandor_usecase::review::DesignRoot]) -> String {
+        let names: Vec<&str> = sources.iter().map(|s| s.name.as_str()).collect();
+        format!("DESIGN REF {}", names.join(","))
     }
 
     fn design_message(&self, sources: &[mandor_usecase::review::DesignRoot]) -> String {

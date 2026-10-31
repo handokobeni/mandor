@@ -15,4 +15,8 @@ hold_reason: string | null,
 /**
  * Pertanyaan atau alasan tertahan.
  */
-hold_note: string | null, pr_url: string | null, ac_pass: number, ac_fail: number, ac_cant_verify: number, entered_waiting_fix: boolean, };
+hold_note: string | null, pr_url: string | null, ac_pass: number, ac_fail: number, ac_cant_verify: number, entered_waiting_fix: boolean, 
+/**
+ * Sumber desain yang gagal diperbarui saat kartu dimulai.
+ */
+design_notes: Array<string>, };

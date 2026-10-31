@@ -220,4 +220,6 @@ pub trait Deps: Send + Sync + 'static {
     type Apps: crate::run_ports::AppProcesses + crate::run_ports::AppRecords + 'static;
     /// Antrean, siklus, dan setelan lembur VM (KTD-57 plan VM).
     type Overnight: crate::overnight::OvernightStore + 'static;
+    /// Sumber desain milik daemon (plan 2026-10-30-001, KTD-8).
+    type Design: crate::review::DesignSources + 'static;
 }

@@ -2,6 +2,8 @@
 
 use std::future::Future;
 
+use mandor_domain::planned::{PlannedState, PlannedWork};
+
 use crate::StartTarget;
 use crate::ports::PortError;
 
@@ -16,6 +18,21 @@ pub struct QueueItem {
     /// Dev meminta "Start now".
     pub start_now: bool,
     pub added_at_ms: i64,
+    /// Sumber desain VM pilihan dev (id `design_sources`).
+    pub design_sources: Vec<String>,
+    /// Plan yang disetujui di laptop; `None` = No plan.
+    pub planned: Option<PlannedEntry>,
+}
+
+/// Bagian Planned item antrean (plan 2026-10-30-001, KTD-2).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PlannedEntry {
+    pub work: PlannedWork,
+    pub state: PlannedState,
+    /// Daemon laptop yang menyerahkan kartu.
+    pub origin_daemon: Option<String>,
+    /// Alasan item `Held`, untuk laporan pagi.
+    pub reason: Option<String>,
 }
 
 /// Kartu yang keluar dari antrean tanpa dikerjakan, untuk laporan pagi (R9).
@@ -89,6 +106,14 @@ pub trait OvernightStore: Send + Sync {
     ) -> impl Future<Output = Result<(), PortError>> + Send;
     /// Mengurutkan ulang antrean sesuai `record_ids`; kartu lain tetap di akhir.
     fn reorder(&self, record_ids: &[String]) -> impl Future<Output = Result<(), PortError>> + Send;
+    /// Mengubah status item Planned; `reason` mengganti alasan sebelumnya.
+    /// `Rejected` bila kartu tidak di antrean atau bukan item Planned.
+    fn set_planned_state(
+        &self,
+        record_id: &str,
+        state: PlannedState,
+        reason: Option<&str>,
+    ) -> impl Future<Output = Result<(), PortError>> + Send;
     /// Menandai "Start now"; `NotFound` bila kartu tidak di antrean.
     fn set_start_now(&self, record_id: &str) -> impl Future<Output = Result<(), PortError>> + Send;
     /// Kartu yang dikeluarkan dengan alasan sejak `since_ms`.

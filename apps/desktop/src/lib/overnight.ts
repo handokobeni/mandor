@@ -1,6 +1,8 @@
 // Logika tab Overnight dan badge kartu VM di board laptop (U10 plan VM).
 
 import type { CardView } from '#lib/protocol/CardView.ts';
+import type { DesignSourceView } from '#lib/protocol/DesignSourceView.ts';
+import type { QueueItemView } from '#lib/protocol/QueueItemView.ts';
 import type { LoginCheck } from '#lib/protocol/LoginCheck.ts';
 import type { OvernightReportView } from '#lib/protocol/OvernightReportView.ts';
 import type { OvernightSettingsView } from '#lib/protocol/OvernightSettingsView.ts';
@@ -142,4 +144,103 @@ export function formatTokens(n: number): string {
  */
 export function backInQueue(card: Pick<ReportCardView, 'record_id' | 'outcome'>, queued: Set<string> | null): boolean {
   return (card.outcome === 'held' || card.outcome === 'failed') && (queued?.has(card.record_id) ?? false);
+}
+
+/** Label pemilih sumber desain VM; id dipakai bila sumber sudah dihapus. */
+export function designPickerLabel(sources: Pick<DesignSourceView, 'id' | 'name'>[], selected: string[]): string {
+  if (selected.length === 0) return 'No design source';
+  const names = selected.map((id) => sources.find((s) => s.id === id)?.name ?? id);
+  return `Design: ${names.join(', ')}`;
+}
+
+/** Alasan tombol "Queue" untuk kartu Planned dinonaktifkan; `null` bila boleh (R11). */
+export function queueForVmBlocker(q: {
+  target: string | null;
+  follow: string[];
+  designSources: string[];
+  laptopRepos: string[];
+  targetRepos: string[];
+}): string | null {
+  if (!q.target) return 'Choose a repo on the VM';
+  if (!sameRepos(q.laptopRepos, q.targetRepos)) {
+    return `This plan covers ${q.laptopRepos.join(', ')}. Pick a VM target with the same repos.`;
+  }
+  if (q.follow.length > 0 && q.designSources.length === 0) return 'Some AC follow the design. Pick a design source on the VM.';
+  return null;
+}
+
+function sameRepos(a: string[], b: string[]): boolean {
+  const set = (v: string[]) => [...new Set(v)].sort().join('\n');
+  return set(a) === set(b);
+}
+
+interface VmTargets {
+  repos: { id: string }[];
+  workspaces: { id: string; repo_ids: string[] }[];
+}
+
+/**
+ * Target VM bawaan untuk run laptop: repo yang sama, atau workspace VM yang
+ * memuat semua repo run workspace (id workspace boleh berbeda). `''` bila
+ * tidak ada yang cocok, agar dev memilih sendiri.
+ */
+export function defaultVmTarget(laptopRepos: string[], workspaceId: string | null, vm: VmTargets): string {
+  if (laptopRepos.length > 1 || workspaceId) {
+    const fits = vm.workspaces.filter((w) => laptopRepos.every((r) => w.repo_ids.includes(r)));
+    const ws = fits.find((w) => w.id === workspaceId) ?? fits[0];
+    return ws ? `ws:${ws.id}` : '';
+  }
+  const repo = laptopRepos[0];
+  return repo && vm.repos.some((r) => r.id === repo) ? `repo:${repo}` : '';
+}
+
+/** Repo yang dikerjakan target VM: anggota workspace yang juga ada di run laptop. */
+export function vmTargetRepos(value: string, laptopRepos: string[], workspaces: VmTargets['workspaces']): string[] {
+  if (value.startsWith('repo:')) return [value.slice(5)];
+  const ws = workspaces.find((w) => `ws:${w.id}` === value);
+  return ws ? ws.repo_ids.filter((r) => laptopRepos.includes(r)) : [];
+}
+
+/** Teks progres "Approve and queue for VM". */
+export function queueStepLabel(step: 'pushing' | 'queuing' | 'handing_over'): string {
+  switch (step) {
+    case 'pushing':
+      return 'Pushing the branch…';
+    case 'queuing':
+      return 'Adding to the VM queue…';
+    case 'handing_over':
+      return 'Handing over the card…';
+  }
+}
+
+/**
+ * Aksi baris antrean: `pending` = klaim belum pindah (Retry atau Remove),
+ * `planned` = VM memegang kartu Planned (Take over, bukan Remove), `no_plan`
+ * = kartu biasa (Remove).
+ */
+export function queueRowMode(item: Pick<QueueItemView, 'planned_state'>): 'pending' | 'planned' | 'no_plan' {
+  if (item.planned_state === 'handover_pending') return 'pending';
+  return item.planned_state ? 'planned' : 'no_plan';
+}
+
+/** Tombol "Approve & queue for VM" tampil (R1): VM siap dan run bukan run grup. */
+export function showQueueForVm(vm: { statusLoaded: boolean; vmRole: boolean; larkReady: boolean }, grouped: boolean): boolean {
+  return vm.statusLoaded && vm.vmRole && vm.larkReady && !grouped;
+}
+
+/**
+ * Workspace laptop untuk Take over run workspace VM: yang memuat semua repo
+ * run (id boleh berbeda dengan VM).
+ *
+ * @throws Error bila tidak ada, dengan langkah perbaikannya.
+ */
+export function laptopWorkspaceFor<W extends { id: string; repo_ids: string[] }>(repoIds: string[], workspaces: W[]): W {
+  const ws = workspaces.find((w) => repoIds.every((r) => w.repo_ids.includes(r)));
+  if (!ws) throw new Error(`Add a workspace on this laptop with ${repoIds.join(', ')}, then take over again.`);
+  return ws;
+}
+
+/** Kartu laporan yang bisa di-Take over ke laptop: draft, tertahan, gagal, atau sudah masuk Waiting Fix. */
+export function canTakeOverReport(c: { outcome: string; entered_waiting_fix: boolean }): boolean {
+  return c.outcome === 'draft' || c.outcome === 'held' || c.outcome === 'failed' || c.entered_waiting_fix;
 }

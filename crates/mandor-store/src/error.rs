@@ -14,6 +14,11 @@ impl StoreError {
         Self::Internal(Box::new(e))
     }
 
+    /// Isi kolom yang tidak bisa dibaca.
+    pub(crate) fn corrupt(message: String) -> Self {
+        Self::Internal(message.into())
+    }
+
     /// Menerjemahkan error `sqlx`; `conflict` dipakai untuk pelanggaran unik.
     pub(crate) fn from_sqlx(e: sqlx::Error, conflict: &'static str) -> Self {
         match &e {

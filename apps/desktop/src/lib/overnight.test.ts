@@ -7,6 +7,14 @@ import {
   backInQueue,
   canActivate,
   canQueue,
+  designPickerLabel,
+  queueForVmBlocker,
+  canTakeOverReport,
+  defaultVmTarget,
+  vmTargetRepos,
+  queueRowMode,
+  queueStepLabel,
+  showQueueForVm,
   formatTokens,
   loginNotices,
   offsetOptions,
@@ -58,6 +66,7 @@ function rc(over: Partial<ReportCardView>): ReportCardView {
     ac_fail: 0,
     ac_cant_verify: 0,
     entered_waiting_fix: false,
+    design_notes: [],
     ...over
   };
 }
@@ -125,7 +134,8 @@ describe('laporan pagi', () => {
       rc({ record_id: 'e', outcome: 'failed' })
     ],
     dequeued: [{ record_id: 'f', key: 'PGS-6', title: 'x', reason: 'the card moved to In Progress in Lark', at_ms: 2 }],
-    reviewed_without_fix: 1
+    reviewed_without_fix: 1,
+    planned_held: []
   };
 
   it('kartu dikelompokkan per hasil, ac_gate terpisah dari parkir lain', () => {
@@ -178,5 +188,88 @@ describe('kartu laporan yang sudah diantre ulang', () => {
     expect(backInQueue(card, new Set())).toBe(false);
     expect(backInQueue(card, null), 'link VM terputus: tidak diketahui').toBe(false);
     expect(backInQueue({ ...card, outcome: 'draft' } as ReportCardView, new Set(['r1']))).toBe(false);
+  });
+});
+
+describe('antre kartu Planned ke VM', () => {
+  const src = (id: string, name: string) => ({ id, name, kind: 'folder', path: `/d/${name}`, ready: true, status: 'Ready' });
+
+  it('label pemilih desain memakai nama, atau id bila sumber sudah dihapus', () => {
+    const sources = [src('d1', 'kelola-mock'), src('d2', 'pegasus-mock')];
+    expect(designPickerLabel(sources, [])).toBe('No design source');
+    expect(designPickerLabel(sources, ['d1', 'x'])).toBe('Design: kelola-mock, x');
+  });
+
+  it('Follow design wajib punya sumber desain VM; target juga wajib', () => {
+    const one = { laptopRepos: ['api'], targetRepos: ['api'] };
+    expect(queueForVmBlocker({ target: null, follow: [], designSources: [], ...one })).toBe('Choose a repo on the VM');
+    expect(queueForVmBlocker({ target: 'repo:api', follow: ['ac2'], designSources: [], ...one })).toBe(
+      'Some AC follow the design. Pick a design source on the VM.'
+    );
+    expect(queueForVmBlocker({ target: 'repo:api', follow: ['ac2'], designSources: ['d1'], ...one })).toBeNull();
+    expect(queueForVmBlocker({ target: 'repo:api', follow: [], designSources: [], ...one })).toBeNull();
+  });
+
+  it('plan workspace tidak boleh diantre ke satu repo atau repo lain', () => {
+    const q = { target: 'repo:web', follow: [], designSources: [], laptopRepos: ['web', 'api'] };
+    expect(queueForVmBlocker({ ...q, targetRepos: ['web'] })).toBe(
+      'This plan covers web, api. Pick a VM target with the same repos.'
+    );
+    expect(queueForVmBlocker({ ...q, target: 'ws:x', targetRepos: ['api', 'web'] })).toBeNull();
+    expect(queueForVmBlocker({ ...q, laptopRepos: ['web'], target: 'ws:x', targetRepos: ['web', 'api'] })).toBe(
+      'This plan covers web. Pick a VM target with the same repos.'
+    );
+  });
+
+  it('Take over dari laporan: draft, tertahan, gagal, atau Waiting Fix', () => {
+    const c = (outcome: string, entered_waiting_fix = false) => ({ outcome, entered_waiting_fix });
+    expect(canTakeOverReport(c('draft'))).toBe(true);
+    expect(canTakeOverReport(c('held'))).toBe(true);
+    expect(canTakeOverReport(c('failed'))).toBe(true);
+    expect(canTakeOverReport(c('waiting_review', true))).toBe(true);
+    expect(canTakeOverReport(c('waiting_review'))).toBe(false);
+  });
+
+  it('target VM bawaan mengikuti repo run laptop', () => {
+    const vm = {
+      repos: [{ id: 'web' }, { id: 'api' }],
+      workspaces: [
+        { id: 'lain', repo_ids: ['web'] },
+        { id: 'smoke', repo_ids: ['api', 'web', 'docs'] }
+      ]
+    };
+    expect(defaultVmTarget(['web'], null, vm)).toBe('repo:web');
+    expect(defaultVmTarget(['tidak-ada'], null, vm)).toBe('');
+    expect(defaultVmTarget(['web', 'api'], 'work-smoke', vm)).toBe('ws:smoke');
+    expect(defaultVmTarget(['web', 'api'], 'lain', vm)).toBe('ws:smoke');
+    expect(defaultVmTarget(['web', 'gone'], 'x', vm)).toBe('');
+    expect(vmTargetRepos('repo:web', ['web', 'api'], vm.workspaces)).toEqual(['web']);
+    expect(vmTargetRepos('ws:smoke', ['web', 'api'], vm.workspaces)).toEqual(['api', 'web']);
+    expect(vmTargetRepos('ws:smoke', ['web'], vm.workspaces)).toEqual(['web']);
+    expect(vmTargetRepos('ws:gone', ['web'], vm.workspaces)).toEqual([]);
+  });
+
+  it('teks langkah serah-terima', () => {
+    expect(queueStepLabel('pushing')).toBe('Pushing the branch…');
+    expect(queueStepLabel('queuing')).toBe('Adding to the VM queue…');
+    expect(queueStepLabel('handing_over')).toBe('Handing over the card…');
+  });
+});
+
+describe('tampilan kartu Planned', () => {
+  it('baris antrean: serah-terima tertunda, Planned, atau No plan', () => {
+    expect(queueRowMode({ planned_state: 'handover_pending' })).toBe('pending');
+    expect(queueRowMode({ planned_state: 'waiting' })).toBe('planned');
+    expect(queueRowMode({ planned_state: 'held' })).toBe('planned');
+    expect(queueRowMode({ planned_state: null })).toBe('no_plan');
+  });
+
+  it('tombol antre ke VM tersembunyi untuk run grup dan saat VM belum siap', () => {
+    const ready = { statusLoaded: true, vmRole: true, larkReady: true };
+    expect(showQueueForVm(ready, false)).toBe(true);
+    expect(showQueueForVm(ready, true)).toBe(false);
+    expect(showQueueForVm({ ...ready, statusLoaded: false }, false)).toBe(false);
+    expect(showQueueForVm({ ...ready, vmRole: false }, false)).toBe(false);
+    expect(showQueueForVm({ ...ready, larkReady: false }, false)).toBe(false);
   });
 });

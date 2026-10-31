@@ -12,6 +12,48 @@ pub struct DesignRoot {
     pub path: PathBuf,
 }
 
+/// Sumber desain pilihan yang sudah disiapkan adapter (plan 2026-10-30-001,
+/// KTD-8).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct DesignCheck {
+    /// Sumber yang siap dipakai, sesuai urutan pilihan.
+    pub roots: Vec<DesignRoot>,
+    /// Sumber yang hilang atau tidak layak: `(nama, alasan)`.
+    pub unavailable: Vec<(String, String)>,
+    /// Sumber yang tetap dipakai tetapi gagal diperbarui: `(nama, alasan)`.
+    pub stale: Vec<(String, String)>,
+}
+
+impl DesignCheck {
+    /// Alasan penolakan untuk sumber pertama yang tidak tersedia (R13).
+    #[must_use]
+    pub fn refusal(&self) -> Option<String> {
+        self.unavailable
+            .first()
+            .map(|(name, why)| format!("Design source \"{name}\" is not available: {why}"))
+    }
+
+    /// Catatan laporan pagi untuk sumber yang tidak diperbarui (R12).
+    #[must_use]
+    pub fn notes(&self) -> Vec<String> {
+        self.stale
+            .iter()
+            .map(|(name, why)| format!("Design {name} not updated: {why}"))
+            .collect()
+    }
+}
+
+/// Sumber desain milik daemon ini.
+pub trait DesignSources: Send + Sync {
+    /// Menyiapkan sumber `ids`. `refresh`: folder yang berupa repo git
+    /// diperbarui (fast-forward saja) sebelum diperiksa.
+    fn prepare(
+        &self,
+        ids: &[String],
+        refresh: bool,
+    ) -> impl std::future::Future<Output = Result<DesignCheck, crate::ports::PortError>> + Send;
+}
+
 /// Hasil pemeriksaan berkas oleh adapter.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct PathProbe {

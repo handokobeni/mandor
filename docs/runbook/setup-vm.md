@@ -154,6 +154,29 @@ user developer (`handoko_ben`) dari SSH-in-browser, lalu cek `ssh lembur whoami`
    menyalakan app run sendiri sebelum review dan menghentikan app kartu
    sebelumnya (kartu lembur dikerjakan satu per satu).
 
+4. **Settings → Overnight VM → Design sources on the VM** (opsional):
+   daftarkan folder desain prototype yang ada di VM. Clone repo desain sebagai
+   user developer (bukan user agent) di direktori grup, mis.:
+
+   ```bash
+   # Sebagai handoko_ben di VM: milik developer, bisa dibaca grup, tidak bisa ditulis agent.
+   install -d -m 2750 /srv/mandor/handoko_ben/design
+   git clone https://github.com/<org>/kelola-mock.git /srv/mandor/handoko_ben/design/kelola-mock
+   chmod -R g-w /srv/mandor/handoko_ben/design/kelola-mock
+   ```
+
+   Sebelum kartu dimulai, daemon VM memperbarui folder yang berupa repo git
+   (fetch lalu fast-forward saja, dengan token `gh` daemon dan konfigurasi git
+   yang diperketat). Folder yang `.git`-nya bukan milik user developer tidak
+   di-pull. Pull yang gagal tidak menghentikan kartu; laporan pagi mencatatnya.
+5. **Plan siang, lembur malam**: di panel plan yang menunggu persetujuan,
+   **Approve & queue for VM** memilih repo dan sumber desain di VM. Laptop
+   mem-push branch kartu, VM mengantre kartu, lalu klaim pindah ke VM dan run
+   laptop ditutup. Baris antrean **Claim not moved** berarti langkah terakhir
+   gagal: **Retry handing over** atau **Remove from VM queue**. Kartu Planned
+   yang masih menunggu bisa ditarik kembali dengan **Take over to laptop**;
+   plannya kembali menunggu persetujuan di laptop.
+
 ## 8. Developer: login
 
 ```bash

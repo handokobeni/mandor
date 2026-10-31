@@ -13,7 +13,13 @@
   import type { Rpc } from '#lib/rpc.ts';
   import DesignSourceDialog from './DesignSourceDialog.svelte';
 
-  let { rpc }: { rpc: Rpc } = $props();
+  interface Props {
+    rpc: Rpc;
+    /** Daftar milik daemon VM (Settings › VM): judul dan penjelasan sendiri. */
+    vm?: boolean;
+    onchange?: () => void;
+  }
+  let { rpc, vm = false, onchange }: Props = $props();
 
   let sources = $state<DesignSourceView[] | null>(null);
   let editing = $state<DesignSourceView | 'new' | null>(null);
@@ -34,6 +40,7 @@
     try {
       await rpc.request('design_sources.remove', { id: s.id });
       await load();
+      onchange?.();
       toast.success('Design source removed', { description: s.name });
     } catch (err) {
       toast.error('Could not remove it', { description: err instanceof Error ? err.message : String(err) });
@@ -41,13 +48,21 @@
   }
 </script>
 
-<section class="flex items-end gap-3" style="max-width:none">
+<section class="flex items-end gap-3" style={vm ? undefined : 'max-width:none'}>
   <div class="flex-1">
-    <h1>Design sources</h1>
-    <p class="lede">
-      Global list of designs the agent checks the AC against during planning and review. Pick them per task when you
-      start it. Figma files, prototype URLs, and image folders come in a later release.
-    </p>
+    {#if vm}
+      <h2>Design sources on the VM</h2>
+      <p class="lede">
+        Folders on the VM, not on this laptop. Pick them when you queue a card for the VM. A folder that is a git repo is
+        updated (fast-forward only) before each card starts.
+      </p>
+    {:else}
+      <h1>Design sources</h1>
+      <p class="lede">
+        Global list of designs the agent checks the AC against during planning and review. Pick them per task when you
+        start it. Figma files, prototype URLs, and image folders come in a later release.
+      </p>
+    {/if}
   </div>
   {#if sources && sources.length > 0}
     <Button variant="secondary" size="sm" onclick={() => (editing = 'new')}><Plus />Add source</Button>
@@ -95,6 +110,7 @@
     onsaved={async (s) => {
       editing = null;
       await load();
+      onchange?.();
       toast.success('Design source saved', { description: s.name });
     }}
   />

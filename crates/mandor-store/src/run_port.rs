@@ -70,6 +70,8 @@ struct RunExtra {
     entered_waiting_fix_ms: Option<i64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     draft_pending: Option<i64>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    design_notes: Vec<String>,
 }
 
 /// Bentuk simpan [`RunWorkspace`].
@@ -239,6 +241,7 @@ fn extra_of(r: &RunRecord) -> Result<String, StoreError> {
         hold_note: r.hold.as_ref().and_then(|h| h.note.clone()),
         entered_waiting_fix_ms: r.entered_waiting_fix_ms,
         draft_pending: r.draft_pending,
+        design_notes: r.design_notes.clone(),
     })
     .map_err(StoreError::internal)
 }
@@ -338,6 +341,7 @@ fn to_record(row: Row) -> Result<RunRecord, StoreError> {
             }),
         entered_waiting_fix_ms: extra.entered_waiting_fix_ms,
         draft_pending: extra.draft_pending,
+        design_notes: extra.design_notes,
         created_at_ms: row.created_at_ms,
         updated_at_ms: row.updated_at_ms,
     })
@@ -469,6 +473,20 @@ impl RunStore for RunsStore {
 
     async fn get(&self, id: &str) -> Result<Option<RunRecord>, PortError> {
         Ok(self.fetch(id).await?)
+    }
+
+    async fn latest_for(&self, record_id: &str) -> Result<Option<RunRecord>, PortError> {
+        let id = sqlx::query_scalar!(
+            "SELECT id FROM runs WHERE record_id = ? ORDER BY created_at_ms DESC LIMIT 1",
+            record_id
+        )
+        .fetch_optional(&self.store.pool)
+        .await
+        .map_err(StoreError::internal)?;
+        match id {
+            Some(id) => Ok(self.fetch(&id).await?),
+            None => Ok(None),
+        }
     }
 
     async fn active_for(&self, record_id: &str) -> Result<Option<RunRecord>, PortError> {

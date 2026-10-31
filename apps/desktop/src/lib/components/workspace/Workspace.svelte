@@ -11,6 +11,7 @@
   import GitPullRequestArrow from '@lucide/svelte/icons/git-pull-request-arrow';
   import Info from '@lucide/svelte/icons/info';
   import ListChecks from '@lucide/svelte/icons/list-checks';
+  import Send from '@lucide/svelte/icons/send';
   import LoaderCircle from '@lucide/svelte/icons/loader-circle';
   import MessageSquareText from '@lucide/svelte/icons/message-square-text';
   import MessagesSquare from '@lucide/svelte/icons/messages-square';
@@ -61,6 +62,9 @@
   import type { PublishParams } from '#lib/protocol/PublishParams.ts';
   import type { PublishResult } from '#lib/protocol/PublishResult.ts';
   import { LedgerStore } from '#lib/stores/ledger.svelte.ts';
+  import { showQueueForVm } from '#lib/overnight.ts';
+  import { overnight } from '#lib/stores/overnight.svelte.ts';
+  import QueueForVm from './QueueForVm.svelte';
   import { appRun } from '#lib/stores/app-run.svelte.ts';
   import { runs } from '#lib/stores/runs.svelte.ts';
   import { snapshots } from '#lib/app-run.ts';
@@ -218,6 +222,9 @@
   function continueToPlan(): void {
     void act(() => rpc.request('runs.continue_to_plan', { run_id: run.id }), 'The agent is writing the plan');
   }
+
+  // VM terhubung, berperan VM, dan sudah login Lark: kartu bisa diantre.
+  const vmQueue = $derived(showQueueForVm(overnight, grouped));
 
   // AC yang ditandai Follow design di tab Plan; dikirim saat approve.
   let follow = $state<string[]>([]);
@@ -550,12 +557,38 @@
     {:else if brainstorming && run.state === 'awaiting_dev'}
       <Button size="sm" disabled={busy} onclick={continueToPlan}><ClipboardList />Continue to plan</Button>
     {:else if planning && run.state === 'awaiting_dev'}
+      {#if vmQueue}
+        <QueueForVm
+          {rpc}
+          runId={run.id}
+          recordId={run.record_id}
+          repoIds={run.repos.map((r) => r.repo_id)}
+          workspaceId={run.workspace_id}
+          {follow}
+          laptopSources={ledger.ledger?.design_sources ?? []}
+          disabled={busy || !run.plan}
+          ondone={() => {
+            follow = [];
+            void runs.load();
+          }}
+        />
+      {/if}
       <Button size="sm" disabled={busy || !run.plan} onclick={approvePlan}><ListChecks />Approve plan &amp; implement</Button>
     {:else if nextAction}
       <Button size="sm" disabled={busy} onclick={() => void groupStep()}>
         {#if nextAction === 'next'}<SkipForward />Next card{:else if nextAction === 'finish'}<CircleCheck />Finish card{:else}<Play />Continue with {nextKey}{/if}
       </Button>
     {:else if run.state === 'awaiting_dev'}
+      {#if run.draft}
+        <!-- PR draft dari VM yang di-Take over: perubahan baru tetap di PR itu. -->
+        <Button
+          size="sm"
+          variant="outline"
+          disabled={busy}
+          title="Mark the draft PR ready and move the card to Waiting Review"
+          onclick={() => act(() => rpc.request('overnight.send_to_review', { run_id: run.id }).then(() => runs.load()), 'Sent to review')}
+        ><Send />Send to review</Button>
+      {/if}
       {#if files !== null && files.length === 0}<span class="muted" style="font-size:12px">No changes to push yet</span>{/if}
       <Popover.Root bind:open={blockedOpen}>
         <Popover.Trigger>
@@ -572,7 +605,7 @@
               }}
             >
               {#if gateNow.state === 'blocked'}<Lock />{:else if gateNow.state === 'warn'}<TriangleAlert />{:else if gateNow.state === 'needs_confirmation'}<CircleQuestionMark />{:else if gateNow.state === 'review_needed'}<ScanSearch />{:else}<GitPullRequestArrow />{/if}
-              {gateButtonLabel(gateNow)}
+              {gateButtonLabel(gateNow, run.pr_url !== null)}
               {#if gateNow.state === 'review_needed'}<span class="gate-tag">Review needed</span>{/if}
               {#if gateNow.state === 'needs_confirmation'}<span class="gate-tag">Needs confirmation</span>{/if}
               {#if gateNow.state === 'blocked'}<span class="gate-tag" data-tone="failed">{failing.length} AC failed</span>{/if}

@@ -163,7 +163,15 @@ async fn drain_idle_menolak_review_takeover_plan_dan_fix() {
         RunError::Draining
     );
     assert_eq!(
-        st.svc.takeover("rec1", "repo1").await.unwrap_err(),
+        st.svc
+            .takeover(
+                "rec1",
+                &mandor_usecase::StartTarget::Repo("repo1".to_owned()),
+                None,
+                &mandor_usecase::VmCarry::default(),
+            )
+            .await
+            .unwrap_err(),
         RunError::Draining
     );
     assert_eq!(

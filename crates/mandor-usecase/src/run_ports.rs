@@ -126,6 +126,11 @@ pub trait GitPort: Send + Sync {
         worktree: &Path,
         branch: &str,
     ) -> impl Future<Output = Result<WorkChanges, PortError>> + Send;
+    /// Berkas baru yang belum dilacak dan tidak diabaikan.
+    fn untracked(
+        &self,
+        worktree: &Path,
+    ) -> impl Future<Output = Result<Vec<String>, PortError>> + Send;
     /// Mengembalikan satu berkas yang berubah ke isinya di base branch.
     fn discard_file(
         &self,
@@ -382,6 +387,9 @@ pub struct RunRecord {
     pub entered_waiting_fix_ms: Option<i64>,
     /// PR draft VM menunggu "Send to review" sejak waktu ini (KTD-68 plan VM).
     pub draft_pending: Option<i64>,
+    /// Sumber desain yang gagal diperbarui saat kartu VM dimulai (R12 plan
+    /// 2026-10-30-001); untuk laporan pagi.
+    pub design_notes: Vec<String>,
     /// Diisi store saat membaca; diabaikan saat menyimpan.
     pub created_at_ms: i64,
     /// Diisi store saat membaca; diabaikan saat menyimpan.
@@ -429,6 +437,7 @@ impl RunRecord {
             reviewer_skill: None,
             hold: None,
             entered_waiting_fix_ms: None,
+            design_notes: Vec::new(),
             draft_pending: None,
             created_at_ms: 0,
             updated_at_ms: 0,
@@ -572,6 +581,11 @@ pub trait RunStore: Send + Sync {
         record_id: &str,
     ) -> impl Future<Output = Result<Option<RunRecord>, PortError>> + Send;
     fn list_active(&self) -> impl Future<Output = Result<Vec<RunRecord>, PortError>> + Send;
+    /// Run terbaru kartu, termasuk yang sudah ditutup.
+    fn latest_for(
+        &self,
+        record_id: &str,
+    ) -> impl Future<Output = Result<Option<RunRecord>, PortError>> + Send;
     /// Menyimpan run bila generasi di penyimpanan masih `expected_generation`;
     /// selain itu `PortError::Conflict`.
     fn save(
@@ -704,6 +718,15 @@ pub trait Prompts: Send + Sync {
     /// Pesan setelah dev menyetujui plan: kerjakan plan itu. `follow_design`:
     /// teks AC (dengan label) yang mengikuti desain, bukan AC (R8a).
     fn approve_message(&self, follow_design: &[String]) -> String;
+    /// Pesan pertama sesi baru yang mengimplementasikan plan yang disetujui di
+    /// sesi lain: tugas, AC, plan, dan AC Follow design sebagai data.
+    fn approved_plan_message(
+        &self,
+        task: &Task,
+        acs: &[String],
+        plan: &str,
+        follow_design: &[String],
+    ) -> String;
     /// Pesan giliran brainstorm: baca kode, tanyakan hal yang belum jelas satu
     /// per satu, lalu ringkas requirements yang disepakati.
     fn brainstorm_message(
@@ -720,6 +743,8 @@ pub trait Prompts: Send + Sync {
     /// Tambahan pesan brainstorm/plan bila run punya sumber desain: baca
     /// sumber dan isi kolom Design per AC lewat tool ledger.
     fn design_message(&self, sources: &[crate::review::DesignRoot]) -> String;
+    /// Sumber desain untuk giliran implementasi: acuan tampilan saja.
+    fn design_reference_message(&self, sources: &[crate::review::DesignRoot]) -> String;
     /// Pesan pertama sesi reviewer: AC sebagai data, fakta kesiapan, dan
     /// instruksi melapor lewat `ac_set_verdict` (KTD-38).
     fn review_message(&self, brief: &ReviewBrief<'_>) -> String;

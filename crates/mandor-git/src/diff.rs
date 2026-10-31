@@ -266,6 +266,26 @@ impl Git {
         Ok(format!("[Diff terlalu besar; ringkasan:]\n{}", stat.stdout))
     }
 
+    /// Berkas baru yang belum dilacak dan tidak diabaikan `.gitignore`.
+    ///
+    /// # Errors
+    /// [`GitError`] bila `git ls-files` gagal.
+    pub async fn untracked_files(&self, worktree: &Path) -> Result<Vec<String>, GitError> {
+        let out = self
+            .ok(
+                "ls-files",
+                self.git(worktree)
+                    .args(["ls-files", "--others", "--exclude-standard", "-z"]),
+            )
+            .await?;
+        Ok(out
+            .stdout
+            .split('\0')
+            .filter(|p| !p.is_empty())
+            .map(str::to_owned)
+            .collect())
+    }
+
     /// `true` bila worktree punya perubahan yang belum di-commit.
     ///
     /// # Errors

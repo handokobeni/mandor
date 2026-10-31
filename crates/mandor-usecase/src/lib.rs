@@ -16,5 +16,8 @@ pub use ports::{
     AcItem, CachedTask, Clock, Deps, EpicItem, Ids, LarkTasks, Outbox, PortError, QueuedWrite,
     SprintItem, TaskCache,
 };
-pub use run::{Planning, RunError, RunPorts, RunService, SendOutcome, StartStep, StartTarget};
+pub use run::{
+    CarriedReview, Planning, RunError, RunPorts, RunService, SendOutcome, StartStep, StartTarget,
+    VmCarry, VmHandover,
+};
 pub use sync::{DrainReport, Heartbeat, PollReport, SyncError, SyncService, TaskDetails};

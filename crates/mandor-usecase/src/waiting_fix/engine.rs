@@ -343,7 +343,7 @@ impl<D: Deps> RunService<D> {
                 task.record_id.clone(),
             );
             r.branch = Some(branch);
-            r.pr_url.clone_from(&task.pr_url);
+            r.pr_url = task.single_pr_url();
             r.state = RunState::WfAwaitingComment;
             self.runs.create(&r, self.now()).await?;
             r

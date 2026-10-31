@@ -182,7 +182,7 @@ export function gate(rows: AcRowView[], mode: string, reviewing: boolean): Gate 
 }
 
 /** Label tombol Push & PR per state gerbang. */
-export function gateButtonLabel(g: Gate): string {
+export function gateButtonLabel(g: Gate, hasPr = false): string {
   switch (g.state) {
     case 'reviewing':
       return 'Reviewing AC…';
@@ -191,7 +191,7 @@ export function gateButtonLabel(g: Gate): string {
     case 'warn':
       return `Push with ${g.warnings} warning${g.warnings === 1 ? '' : 's'}`;
     default:
-      return 'Push & create PR';
+      return hasPr ? 'Push to PR' : 'Push & create PR';
   }
 }
 

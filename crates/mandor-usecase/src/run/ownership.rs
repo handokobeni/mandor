@@ -1,14 +1,38 @@
 //! Kepemilikan run: heartbeat klaim, ambil alih, dan pembersihan run yatim (KTD-8).
 
+use std::collections::BTreeMap;
 use std::sync::Arc;
 
-use mandor_domain::{ClaimLoss, RunState};
+use mandor_domain::{AcRow, ClaimLoss, RunState};
 
-use super::{RunError, RunService};
+use mandor_domain::planned::PlannedWork;
+
+use super::{RunError, RunService, StartTarget};
 use crate::notify::notice;
-use crate::ports::{Deps, Ids};
-use crate::run_ports::{GitPort, NoticeKind, Notifier, Repos, RunRecord, RunStore};
+use crate::ports::Deps;
+use crate::review::DesignSources as _;
+use crate::run_ports::{
+    ChatItem, GitPort, LedgerStore, NoticeKind, Notifier, RunPhase, RunRecord, RunStore,
+};
 use crate::sync::Heartbeat;
+
+/// Hasil review AC run VM beserta snapshot kode saat review.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CarriedReview {
+    pub rows: Vec<AcRow>,
+    /// Tree id per repo saat review terakhir dimulai.
+    pub snapshot: BTreeMap<String, String>,
+}
+
+/// Yang dibawa dari run VM saat Take over ke laptop.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct VmCarry {
+    /// PR VM masih draft: laptop melanjutkan di PR itu dan Send to review
+    /// menandainya siap.
+    pub draft: bool,
+    /// Hasil review AC VM; usang di laptop bila kodenya berbeda.
+    pub review: Option<CarriedReview>,
+}
 
 impl<D: Deps> RunService<D> {
     /// Heartbeat klaim untuk semua run aktif. Run yang klaimnya hilang
@@ -40,6 +64,10 @@ impl<D: Deps> RunService<D> {
                     tracing::warn!(record_id = %run.record_id, error = %e, "heartbeat klaim gagal");
                 }
             }
+        }
+        // Kartu Planned di antrean VM belum punya run (KTD-5).
+        if self.is_vm() {
+            self.tend_planned(true).await?;
         }
         Ok(orphaned)
     }
@@ -120,37 +148,87 @@ impl<D: Deps> RunService<D> {
         Ok(())
     }
 
-    /// "Ambil alih" task yang klaimnya tidak aktif 30 menit: klaim dengan baca
-    /// ulang, lalu run baru dari branch task (worktree dipulihkan).
+    /// "Ambil alih" task yang klaimnya tidak aktif 30 menit atau diserahkan
+    /// VM: klaim dengan baca ulang, lalu run baru dari branch task. Run
+    /// workspace memulihkan folder run dan worktree tiap anggota. Dengan paket
+    /// plan (KTD-12), run kembali menunggu persetujuan plan. `carry` membawa
+    /// PR draft VM (dipakai lagi; tiap anggota mengenali PR-nya dari branch dan
+    /// run menunggu Send to review) dan hasil review AC VM.
     ///
     /// # Errors
-    /// Klaim masih aktif, kalah klaim, atau git gagal.
+    /// Klaim masih aktif, kalah klaim, target tidak valid, atau git gagal.
     pub async fn takeover(
         self: &Arc<Self>,
         record_id: &str,
-        repo_id: &str,
+        target: &StartTarget,
+        planned: Option<&PlannedWork>,
+        carry: &VmCarry,
     ) -> Result<RunRecord, RunError> {
         let _work = self.enter_work()?;
         self.sync.claim(record_id, true).await?;
         let task = self.task_of(record_id).await?;
-        let repo = self
-            .repos
-            .repo(repo_id)
-            .await?
-            .ok_or(RunError::NotFound("repo"))?;
-        let branch = task
-            .branch
-            .clone()
+        let branch = planned
+            .map(|p| p.branch.clone())
+            .or_else(|| task.branch.clone())
             .ok_or(RunError::InvalidState("no branch"))?;
-        let worktree = self.git.restore_worktree(&repo, &branch, None).await?;
-        let mut run = RunRecord::new(self.sync.ids.nonce(), repo.id.clone(), record_id.to_owned());
-        run.state = RunState::AwaitingDev;
-        run.branch = Some(branch);
-        run.worktree = Some(worktree);
-        run.session_id = Some(self.sync.ids.nonce());
-        run.pr_url.clone_from(&task.pr_url);
-        self.runs.create(&run, self.now()).await?;
+        let (mut run, _) = self.restore_run(record_id, target, &branch).await?;
+        run.pr_url = task.single_pr_url();
+        if carry.draft {
+            self.adopt_draft(&mut run, &branch).await?;
+        }
+        if let Some(review) = &carry.review {
+            run.review_snapshot.clone_from(&review.snapshot);
+        }
+        let mut missing = Vec::new();
+        if let Some(p) = planned {
+            let check = self.design.prepare(&p.laptop_design, false).await?;
+            missing = check
+                .unavailable
+                .into_iter()
+                .map(|(name, _)| name)
+                .collect();
+            run.phase = RunPhase::Plan;
+            run.plan = Some(p.plan.clone());
+            run.design = check.roots;
+        }
+        let now = self.now();
+        self.runs.create(&run, now).await?;
+        if let Some(review) = &carry.review {
+            self.reviews.save_ac_rows(&run.id, &review.rows).await?;
+            self.mark_stale_if_changed(&run).await;
+        }
+        if let Some(p) = planned {
+            self.seed_planned_ledger(&run.id, &task, &p.design).await?;
+            if !missing.is_empty() {
+                let note = format!(
+                    "Design sources no longer on this laptop: {}",
+                    missing.join(", ")
+                );
+                self.runs
+                    .append(&run.id, &ChatItem::System(note), now)
+                    .await?;
+            }
+        }
         Ok(run)
+    }
+
+    /// PR draft VM per anggota ditemukan dari branch; run menunggu Send to
+    /// review dan publish berikutnya tetap di PR yang sama.
+    async fn adopt_draft(&self, run: &mut RunRecord, branch: &str) -> Result<(), RunError> {
+        for (index, m) in self.members(run).await?.iter().enumerate() {
+            if let Some(pr) = self.git.find_pr(&m.repo, branch).await? {
+                let url = Some(pr.url);
+                if index == 0 {
+                    run.pr_url = url;
+                } else if let Some(extra) = run.extra.get_mut(index - 1) {
+                    extra.pr_url = url;
+                }
+            }
+        }
+        run.draft_pending = Some(self.now());
+        run.note =
+            Some("Draft PR from the VM. Send it to review when the change looks right.".to_owned());
+        Ok(())
     }
 
     /// "Discard changes" satu berkas: hanya berkas yang memang berubah, dan

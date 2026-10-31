@@ -1,15 +1,30 @@
 //! "Take over to laptop" di daemon VM (U5 plan VM, KTD-63): kerja malam
 //! di-push ke branch kartu tanpa PR, klaim pindah ke daemon laptop, dan kartu
-//! tidak bisa kembali ke antrean VM.
+//! tidak bisa kembali ke antrean VM. Kartu Planned yang belum dimulai kembali
+//! bersama plan-nya dan boleh diantre lagi (plan 2026-10-30-001, KTD-6).
 
 use std::sync::Arc;
 
 use mandor_domain::RunState;
+use mandor_domain::planned::{PlannedState, PlannedWork};
 
 use super::OvernightStore;
-use crate::ports::Deps;
-use crate::run::{RunError, RunService};
-use crate::run_ports::{ChatItem, GitPort, RunStore};
+use crate::StartTarget;
+use crate::ports::{Clock, Deps};
+use crate::run::{CarriedReview, RunError, RunService, VmCarry, target_of};
+use crate::run_ports::{ChatItem, GitPort, LedgerStore, RunRecord, RunStore};
+
+/// Hasil serah-terima untuk dipulihkan laptop.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Handback {
+    pub branch: String,
+    /// Repo atau workspace kartu di VM.
+    pub target: Option<StartTarget>,
+    /// Plan kartu Planned yang belum dimulai.
+    pub planned: Option<PlannedWork>,
+    /// PR draft dan hasil review AC run VM.
+    pub carry: VmCarry,
+}
 
 impl<D: Deps> RunService<D> {
     /// Serah-terima kartu VM ke daemon laptop `to_daemon`. Mengembalikan branch
@@ -22,15 +37,16 @@ impl<D: Deps> RunService<D> {
         self: &Arc<Self>,
         record_id: &str,
         to_daemon: &str,
-    ) -> Result<String, RunError> {
+    ) -> Result<Handback, RunError> {
         if !self.is_vm() {
             return Err(RunError::InvalidState("handoff runs on the VM daemon"));
         }
-        let run = self
-            .runs
-            .active_for(record_id)
-            .await?
-            .ok_or(RunError::NotFound("run"))?;
+        let Some(run) = self.runs.active_for(record_id).await? else {
+            if let Some(back) = self.handed_back(record_id, to_daemon).await? {
+                return Ok(back);
+            }
+            return self.hand_back_planned(record_id, to_daemon).await;
+        };
         if matches!(run.state, RunState::Preparing | RunState::Publishing) {
             return Err(RunError::InvalidState(run.state.as_str()));
         }
@@ -67,6 +83,100 @@ impl<D: Deps> RunService<D> {
             )
             .await?;
         self.close_run(&run.id).await?;
-        Ok(branch)
+        Ok(Handback {
+            branch,
+            target: Some(target_of(&run)),
+            planned: None,
+            carry: self.carry_of(&run).await?,
+        })
+    }
+
+    /// PR draft dan hasil review AC run VM untuk laptop. Tanpa snapshot review
+    /// (belum pernah direview), hasil review tidak dibawa.
+    async fn carry_of(&self, run: &RunRecord) -> Result<VmCarry, RunError> {
+        let review = if run.review_snapshot.is_empty() {
+            None
+        } else {
+            Some(CarriedReview {
+                rows: self.reviews.ac_rows(&run.id).await?,
+                snapshot: run.review_snapshot.clone(),
+            })
+        };
+        Ok(VmCarry {
+            draft: run.draft_pending.is_some(),
+            review,
+        })
+    }
+
+    /// Serah-terima yang sudah selesai ke `to_daemon` diulang tanpa efek, agar
+    /// Take over bisa dicoba lagi bila langkah laptop gagal.
+    async fn handed_back(
+        &self,
+        record_id: &str,
+        to_daemon: &str,
+    ) -> Result<Option<Handback>, RunError> {
+        if !self.overnight.laptop_only(record_id).await? {
+            return Ok(None);
+        }
+        let task = self.task_of(record_id).await?;
+        if task.claim.as_ref().and_then(|c| c.daemon_id()) != Some(to_daemon) {
+            return Err(RunError::InvalidState(
+                "the card was already handed to another daemon",
+            ));
+        }
+        let Some(run) = self.runs.latest_for(record_id).await? else {
+            return Ok(None);
+        };
+        let Some(branch) = run.branch.clone() else {
+            return Ok(None);
+        };
+        Ok(Some(Handback {
+            branch,
+            target: Some(target_of(&run)),
+            planned: None,
+            carry: self.carry_of(&run).await?,
+        }))
+    }
+
+    /// Kartu Planned di antrean tanpa run: keluar dari antrean, klaim ke
+    /// laptop, dan plan dikembalikan. Kartu tidak ditandai "hanya laptop".
+    async fn hand_back_planned(
+        &self,
+        record_id: &str,
+        to_daemon: &str,
+    ) -> Result<Handback, RunError> {
+        let item = self
+            .overnight
+            .queue()
+            .await?
+            .into_iter()
+            .find(|i| i.record_id == record_id)
+            .ok_or(RunError::NotFound("run"))?;
+        let planned = item.planned.ok_or(RunError::NotFound("run"))?;
+        match planned.state {
+            PlannedState::Starting => {
+                return Err(RunError::InvalidState("the VM is starting this card"));
+            }
+            PlannedState::HandoverPending => {
+                return Err(RunError::InvalidState(
+                    "the card was not handed over to the VM yet; remove it from the queue",
+                ));
+            }
+            PlannedState::Waiting | PlannedState::Held => {}
+        }
+        let task = self.task_of(record_id).await?;
+        if !task.held_here(self.sync.identity()) {
+            return Err(RunError::InvalidState("the card is held by another daemon"));
+        }
+        self.sync.hand_over_claim(record_id, to_daemon).await?;
+        self.overnight
+            .dequeue(record_id, None, self.sync.clock.now_ms())
+            .await?;
+        Ok(Handback {
+            branch: planned.work.branch.clone(),
+            target: Some(item.target),
+            planned: Some(planned.work),
+            carry: VmCarry::default(),
+        })
     }
 }

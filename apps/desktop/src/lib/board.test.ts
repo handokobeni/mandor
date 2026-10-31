@@ -66,6 +66,7 @@ function run(id: string, state: string, extra: Partial<RunView> = {}): RunView {
     note: null,
     queued: [],
     automatic: false,
+    draft: false,
     quiet_until_ms: null,
     started_at_ms: 0,
     updated_at_ms: 0,

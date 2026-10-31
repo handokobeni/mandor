@@ -19,6 +19,7 @@ mod app;
 mod apps;
 mod config;
 mod connect;
+mod design_port;
 mod discovery;
 mod dispatch;
 mod hook;

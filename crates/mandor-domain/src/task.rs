@@ -33,6 +33,22 @@ pub struct Task {
 }
 
 impl Task {
+    /// Link PR task bila hanya satu. Kartu workspace menyimpan satu link per
+    /// repo, satu per baris; link itu tidak bisa dipasangkan ke anggota run
+    /// tanpa tahu repo GitHub-nya, jadi tiap anggota mencari PR-nya dari
+    /// branch.
+    #[must_use]
+    pub fn single_pr_url(&self) -> Option<String> {
+        let mut urls = self
+            .pr_url
+            .as_deref()?
+            .lines()
+            .map(str::trim)
+            .filter(|l| !l.is_empty());
+        let first = urls.next()?;
+        urls.next().is_none().then(|| first.to_owned())
+    }
+
     /// Record kosong dengan ID tertentu (berguna untuk test dan fake).
     #[must_use]
     pub fn new(record_id: &str, status: TaskStatus) -> Self {
@@ -280,6 +296,26 @@ pub fn needs_comment_poll<'a>(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn link_pr_task_hanya_dipakai_bila_satu() {
+        let mut t = Task::new("rec1", TaskStatus::WaitingFix);
+        assert_eq!(t.single_pr_url(), None);
+        t.pr_url = Some(" https://github.com/o/web/pull/2 \n".to_owned());
+        assert_eq!(
+            t.single_pr_url().as_deref(),
+            Some("https://github.com/o/web/pull/2")
+        );
+        t.pr_url =
+            Some("https://github.com/o/web/pull/2\nhttps://github.com/o/api/pull/1".to_owned());
+        assert_eq!(
+            t.single_pr_url(),
+            None,
+            "kartu workspace: satu link per repo"
+        );
+        t.pr_url = Some("  \n".to_owned());
+        assert_eq!(t.single_pr_url(), None);
+    }
 
     fn mine(status: TaskStatus) -> Task {
         let mut t = Task::new("rec1", status);

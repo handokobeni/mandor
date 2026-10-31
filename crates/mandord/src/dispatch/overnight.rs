@@ -2,18 +2,22 @@
 //! gerbang AC, Send to review, dan serah-terima.
 
 use mandor_domain::Task;
+use std::collections::HashMap;
+
 use mandor_protocol::{
-    DequeuedView, ErrorCode, HandoffParams, HandoffResult, OvernightQueueView, OvernightReportView,
-    OvernightSettingsView, QueueAddParams, QueueItemView, QueueReorderParams, RecordRef,
-    ReportCardView, RpcError, RunRef, method,
+    DequeuedView, ErrorCode, HandoffParams, HandoffResult, HeldPlannedView, OvernightQueueView,
+    OvernightReportView, OvernightSettingsView, QueueAddParams, QueueItemView, QueueReorderParams,
+    RecordRef, ReportCardView, RpcError, RunRef, method,
 };
 use mandor_usecase::StartTarget;
 use mandor_usecase::overnight::{
-    CardOutcome, Dequeued, OvernightReport, OvernightSettings, QueueItem, ReportCard,
+    CardOutcome, Dequeued, HeldPlanned, OvernightReport, OvernightSettings, QueueItem,
+    QueueRequest, ReportCard,
 };
 use serde_json::{Value, json};
 
-use super::{AppDispatch, ok, params, rejected, run_error, sync_error};
+use super::planned::{planned_dto, planned_of, review_dto, target_of, target_view};
+use super::{AppDispatch, ok, params, rejected, run_error, store_error, sync_error};
 use crate::session::LarkSession;
 
 impl AppDispatch {
@@ -47,13 +51,21 @@ impl AppDispatch {
             }
             method::RUNS_HANDOFF => {
                 let p: HandoffParams = params(v)?;
-                let branch = s
+                let back = s
                     .runs
                     .handoff(&p.record_id, &p.to_daemon_id)
                     .await
                     .map_err(run_error)?;
                 s.poke.notify_one();
-                ok(&HandoffResult { branch })
+                let (repo_id, workspace) = back.target.as_ref().map_or((None, None), target_view);
+                ok(&HandoffResult {
+                    branch: back.branch,
+                    repo_id,
+                    workspace,
+                    planned: back.planned.as_ref().map(planned_dto),
+                    draft: back.carry.draft,
+                    review: back.carry.review.as_ref().map(review_dto),
+                })
             }
             other => self.overnight_queue_call(&s, other, v).await,
         }
@@ -67,40 +79,23 @@ impl AppDispatch {
     ) -> Result<Value, RpcError> {
         let runs = &s.runs;
         match name {
-            method::OVERNIGHT_QUEUE_LIST => {
-                let items = runs.overnight_queue().await.map_err(run_error)?;
-                let report = runs.overnight_report().await.map_err(run_error)?;
-                let mut view = OvernightQueueView {
-                    items: Vec::new(),
-                    dequeued: Vec::new(),
-                };
-                for item in &items {
-                    let task = cached_task(s, &item.record_id).await?;
-                    let held = report.cards.iter().any(|c| {
-                        c.record_id == item.record_id
-                            && matches!(c.outcome, CardOutcome::Held(_) | CardOutcome::Failed)
-                    });
-                    view.items.push(queue_item_view(item, task.as_ref(), held));
-                }
-                for d in &report.dequeued {
-                    view.dequeued.push(dequeued_view(
-                        d,
-                        cached_task(s, &d.record_id).await?.as_ref(),
-                    ));
-                }
-                ok(&view)
-            }
+            method::OVERNIGHT_QUEUE_LIST => self.queue_list(s).await,
             method::OVERNIGHT_QUEUE_ADD => {
                 let p: QueueAddParams = params(v)?;
-                let target = match (p.workspace, p.repo_id) {
-                    (Some(w), _) => StartTarget::Workspace {
-                        id: w.id,
-                        repo_ids: w.repo_ids,
-                    },
-                    (None, Some(repo)) => StartTarget::Repo(repo),
-                    (None, None) => return Err(rejected("choose a repo or workspace")),
+                let planned = match (p.planned, p.origin_daemon) {
+                    (Some(w), Some(origin)) => Some((planned_of(w)?, origin)),
+                    (Some(_), None) => {
+                        return Err(rejected("a planned card needs the laptop daemon id"));
+                    }
+                    (None, _) => None,
                 };
-                runs.queue_add(&p.record_id, &target, p.note.as_deref())
+                let req = QueueRequest {
+                    target: target_of(p.repo_id, p.workspace)?,
+                    note: p.note,
+                    design_sources: p.design_sources.unwrap_or_default(),
+                    planned,
+                };
+                runs.enqueue_card(&p.record_id, &req)
                     .await
                     .map_err(run_error)?;
                 s.poke.notify_one();
@@ -137,29 +132,105 @@ impl AppDispatch {
                 s.poke.notify_one();
                 ok(&json!({}))
             }
-            method::OVERNIGHT_REPORT => {
-                let report = runs.overnight_report().await.map_err(run_error)?;
-                let mut cards = Vec::new();
-                for c in &report.cards {
-                    cards.push(report_card_view(
-                        c,
-                        cached_task(s, &c.record_id).await?.as_ref(),
-                    ));
-                }
-                let mut dequeued = Vec::new();
-                for d in &report.dequeued {
-                    dequeued.push(dequeued_view(
-                        d,
-                        cached_task(s, &d.record_id).await?.as_ref(),
-                    ));
-                }
-                ok(&report_view(&report, cards, dequeued))
-            }
+            method::OVERNIGHT_REPORT => self.report(s).await,
             other => Err(RpcError::new(
                 ErrorCode::MethodNotFound,
                 format!("unknown method: {other}"),
             )),
         }
+    }
+}
+
+impl AppDispatch {
+    async fn queue_list(&self, s: &LarkSession) -> Result<Value, RpcError> {
+        let runs = &s.runs;
+        let items = runs.overnight_queue().await.map_err(run_error)?;
+        let report = runs.overnight_report().await.map_err(run_error)?;
+        let mut view = OvernightQueueView {
+            items: Vec::new(),
+            dequeued: Vec::new(),
+        };
+        let names = self.design_names().await?;
+        for item in &items {
+            let task = cached_task(s, &item.record_id).await?;
+            let held = report.cards.iter().any(|c| {
+                c.record_id == item.record_id
+                    && matches!(c.outcome, CardOutcome::Held(_) | CardOutcome::Failed)
+            });
+            view.items
+                .push(queue_item_view(item, task.as_ref(), held, &names));
+        }
+        for d in &report.dequeued {
+            view.dequeued.push(dequeued_view(
+                d,
+                cached_task(s, &d.record_id).await?.as_ref(),
+            ));
+        }
+        ok(&view)
+    }
+
+    async fn report(&self, s: &LarkSession) -> Result<Value, RpcError> {
+        let runs = &s.runs;
+        let report = runs.overnight_report().await.map_err(run_error)?;
+        let mut cards = Vec::new();
+        for c in &report.cards {
+            cards.push(report_card_view(
+                c,
+                cached_task(s, &c.record_id).await?.as_ref(),
+            ));
+        }
+        let mut dequeued = Vec::new();
+        for d in &report.dequeued {
+            dequeued.push(dequeued_view(
+                d,
+                cached_task(s, &d.record_id).await?.as_ref(),
+            ));
+        }
+        let queue = runs.overnight_queue().await.map_err(run_error)?;
+        let mut planned_held = Vec::new();
+        for h in &report.planned_held {
+            planned_held.push(held_planned_view(
+                h,
+                cached_task(s, &h.record_id).await?.as_ref(),
+                items_target(&queue, h),
+            ));
+        }
+        ok(&report_view(&report, cards, dequeued, planned_held))
+    }
+
+    /// Nama sumber desain daemon per id.
+    async fn design_names(&self) -> Result<HashMap<String, String>, RpcError> {
+        Ok(self
+            .app
+            .store
+            .design_sources()
+            .await
+            .map_err(store_error)?
+            .into_iter()
+            .map(|r| (r.id, r.name))
+            .collect())
+    }
+}
+
+/// Repo item antrean untuk kartu Planned yang ditahan.
+fn items_target(queue: &[QueueItem], h: &HeldPlanned) -> Option<String> {
+    queue
+        .iter()
+        .find(|i| i.record_id == h.record_id)
+        .and_then(|i| target_view(&i.target).0)
+}
+
+fn held_planned_view(
+    h: &HeldPlanned,
+    task: Option<&Task>,
+    repo_id: Option<String>,
+) -> HeldPlannedView {
+    HeldPlannedView {
+        record_id: h.record_id.clone(),
+        key: task.and_then(|t| t.key.clone()),
+        title: task.map(|t| t.title.clone()).unwrap_or_default(),
+        repo_id,
+        reason: h.reason.clone(),
     }
 }
 
@@ -171,7 +242,12 @@ async fn cached_task(s: &LarkSession, record_id: &str) -> Result<Option<Task>, R
         .map(|c| c.task))
 }
 
-fn queue_item_view(item: &QueueItem, task: Option<&Task>, held: bool) -> QueueItemView {
+fn queue_item_view(
+    item: &QueueItem,
+    task: Option<&Task>,
+    held: bool,
+    names: &HashMap<String, String>,
+) -> QueueItemView {
     let (repo_id, workspace_id) = match &item.target {
         StartTarget::Repo(r) => (Some(r.clone()), None),
         StartTarget::Workspace { id, .. } => (None, Some(id.clone())),
@@ -186,6 +262,13 @@ fn queue_item_view(item: &QueueItem, task: Option<&Task>, held: bool) -> QueueIt
         start_now: item.start_now,
         added_at_ms: item.added_at_ms,
         held,
+        planned_state: item.planned.as_ref().map(|p| p.state.as_str().to_owned()),
+        planned_reason: item.planned.as_ref().and_then(|p| p.reason.clone()),
+        design_sources: item
+            .design_sources
+            .iter()
+            .map(|id| names.get(id).cloned().unwrap_or_else(|| id.clone()))
+            .collect(),
     }
 }
 
@@ -239,6 +322,7 @@ fn report_card_view(c: &ReportCard, task: Option<&Task>) -> ReportCardView {
         ac_fail: c.ac_fail,
         ac_cant_verify: c.ac_cant_verify,
         entered_waiting_fix: c.entered_waiting_fix,
+        design_notes: c.design_notes.clone(),
     }
 }
 
@@ -246,6 +330,7 @@ fn report_view(
     r: &OvernightReport,
     cards: Vec<ReportCardView>,
     dequeued: Vec<DequeuedView>,
+    planned_held: Vec<HeldPlannedView>,
 ) -> OvernightReportView {
     OvernightReportView {
         cycle_start_ms: r.cycle_start_ms,
@@ -255,6 +340,7 @@ fn report_view(
         cards,
         dequeued,
         reviewed_without_fix: r.reviewed_without_fix,
+        planned_held,
     }
 }
 
@@ -279,6 +365,7 @@ mod tests {
             ac_fail: 0,
             ac_cant_verify: 1,
             entered_waiting_fix: false,
+            design_notes: vec![],
         };
         let v = report_card_view(&card, Some(&task));
         assert_eq!(
@@ -303,12 +390,17 @@ mod tests {
             note: None,
             start_now: true,
             added_at_ms: 5,
+            design_sources: vec!["ds1".to_owned(), "hilang".to_owned()],
+            planned: None,
         };
-        let q = queue_item_view(&item, None, true);
+        let names = HashMap::from([("ds1".to_owned(), "kelola-mock".to_owned())]);
+        let q = queue_item_view(&item, None, true, &names);
         assert_eq!(
             (q.repo_id, q.workspace_id.as_deref()),
             (None, Some("kelola"))
         );
         assert!(q.held && q.start_now);
+        assert_eq!(q.design_sources, ["kelola-mock", "hilang"]);
+        assert_eq!(q.planned_state, None);
     }
 }

@@ -36,6 +36,7 @@ impl Deps for Prod {
     type Repos = ReposStore;
     type Prompts = ClaudePrompts;
     type Overnight = mandor_store::OvernightsStore;
+    type Design = crate::design_port::DesignStore;
 }
 
 pub fn now_ms() -> i64 {
@@ -246,6 +247,10 @@ impl RunStore for BroadcastRuns {
 
     async fn list_active(&self) -> Result<Vec<RunRecord>, PortError> {
         self.inner.list_active().await
+    }
+
+    async fn latest_for(&self, record_id: &str) -> Result<Option<RunRecord>, PortError> {
+        self.inner.latest_for(record_id).await
     }
 
     async fn save(&self, run: &RunRecord, expected: i64, now_ms: i64) -> Result<(), PortError> {

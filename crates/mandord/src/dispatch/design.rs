@@ -43,7 +43,7 @@ pub(super) async fn probe(path: &Path) -> PathProbe {
         .unwrap_or_default()
 }
 
-async fn check(path: &str) -> SourceCheck {
+pub(crate) async fn check(path: &str) -> SourceCheck {
     let path = PathBuf::from(path);
     if !path.is_absolute() {
         return SourceCheck::Missing;
@@ -51,7 +51,7 @@ async fn check(path: &str) -> SourceCheck {
     check_source(&path, &probe(&path).await)
 }
 
-fn folder_path(row: &DesignSourceRow) -> String {
+pub(crate) fn folder_path(row: &DesignSourceRow) -> String {
     serde_json::from_str::<FolderConfig>(&row.config_json)
         .map(|c| c.path)
         .unwrap_or_default()

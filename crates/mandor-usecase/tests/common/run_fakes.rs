@@ -32,6 +32,8 @@ pub struct GitState {
     /// Diff branch per worktree; default `+diff pr`.
     pub branch_diffs: HashMap<PathBuf, String>,
     pub changes: HashMap<PathBuf, WorkChanges>,
+    /// Berkas baru yang belum dilacak per worktree.
+    pub untracked: HashMap<PathBuf, Vec<String>>,
     pub commits: Vec<(PathBuf, String)>,
     pub pushes: Vec<String>,
     pub prs: HashMap<String, String>,
@@ -172,6 +174,16 @@ impl GitPort for FakeGit {
         }
         st.reverts.push(sha.to_owned());
         Ok(true)
+    }
+    async fn untracked(&self, wt: &Path) -> Result<Vec<String>, PortError> {
+        Ok(self
+            .state
+            .lock()
+            .unwrap()
+            .untracked
+            .get(wt)
+            .cloned()
+            .unwrap_or_default())
     }
     async fn push(&self, _r: &RepoInfo, wt: &Path, branch: &str) -> Result<(), PortError> {
         let mut st = self.state.lock().unwrap();
@@ -582,6 +594,17 @@ impl FakeRuns {
     pub fn insert(&self, r: RunRecord) {
         self.rows.lock().unwrap().insert(r.id.clone(), (r, false));
     }
+    pub fn system_messages(&self) -> Vec<String> {
+        self.chat
+            .lock()
+            .unwrap()
+            .iter()
+            .filter_map(|(_, c)| match c {
+                ChatItem::System(m) => Some(m.clone()),
+                _ => None,
+            })
+            .collect()
+    }
     pub fn dev_messages(&self) -> Vec<String> {
         self.chat
             .lock()
@@ -679,6 +702,16 @@ impl RunStore for FakeRuns {
             .find(|(r, c)| !c && r.record_id == record_id)
             .map(|(r, _)| r.clone()))
     }
+    async fn latest_for(&self, record_id: &str) -> Result<Option<RunRecord>, PortError> {
+        Ok(self
+            .rows
+            .lock()
+            .unwrap()
+            .values()
+            .filter(|(r, _)| r.record_id == record_id)
+            .map(|(r, _)| r.clone())
+            .max_by(|a, b| a.id.cmp(&b.id)))
+    }
     async fn list_active(&self) -> Result<Vec<RunRecord>, PortError> {
         Ok(self
             .rows
@@ -753,6 +786,9 @@ impl FakeRepos {
     }
     pub fn add_workspace(&self, w: WorkspaceInfo) {
         self.workspaces.lock().unwrap().push(w);
+    }
+    pub fn remove(&self, id: &str) {
+        self.repos.lock().unwrap().retain(|r| r.id != id);
     }
 }
 
@@ -1068,6 +1104,24 @@ impl mandor_usecase::overnight::OvernightStore for FakeOvernight {
         });
         Ok(())
     }
+    async fn set_planned_state(
+        &self,
+        record_id: &str,
+        state: mandor_domain::planned::PlannedState,
+        reason: Option<&str>,
+    ) -> Result<(), PortError> {
+        let mut q = self.queue.lock().unwrap();
+        let p = q
+            .iter_mut()
+            .find(|i| i.record_id == record_id)
+            .and_then(|i| i.planned.as_mut())
+            .ok_or_else(|| {
+                PortError::Rejected("the card is not a planned queue item".to_owned())
+            })?;
+        p.state = state;
+        p.reason = reason.map(str::to_owned);
+        Ok(())
+    }
     async fn set_start_now(&self, record_id: &str) -> Result<(), PortError> {
         let mut q = self.queue.lock().unwrap();
         let item = q
@@ -1155,5 +1209,58 @@ impl mandor_usecase::overnight::OvernightStore for FakeOvernight {
         e.cache_read_tokens += u.cache_read_tokens;
         e.cache_write_tokens += u.cache_write_tokens;
         Ok(())
+    }
+}
+
+/// Sumber desain daemon palsu: id → nama, dengan sumber yang hilang dan yang
+/// gagal diperbarui.
+#[derive(Clone, Default)]
+pub struct FakeDesign {
+    pub sources: Arc<Mutex<HashMap<String, String>>>,
+    pub missing: Arc<Mutex<HashSet<String>>>,
+    pub stale: Arc<Mutex<HashMap<String, String>>>,
+    /// Id yang diminta diperbarui.
+    pub refreshed: Arc<Mutex<Vec<String>>>,
+}
+
+impl FakeDesign {
+    pub fn add(&self, id: &str, name: &str) {
+        self.sources
+            .lock()
+            .unwrap()
+            .insert(id.to_owned(), name.to_owned());
+    }
+}
+
+impl mandor_usecase::review::DesignSources for FakeDesign {
+    async fn prepare(
+        &self,
+        ids: &[String],
+        refresh: bool,
+    ) -> Result<mandor_usecase::review::DesignCheck, PortError> {
+        let mut out = mandor_usecase::review::DesignCheck::default();
+        for id in ids {
+            let Some(name) = self.sources.lock().unwrap().get(id).cloned() else {
+                out.unavailable
+                    .push((id.clone(), "it was removed from the VM".to_owned()));
+                continue;
+            };
+            if self.missing.lock().unwrap().contains(id) {
+                out.unavailable.push((name, "Path missing".to_owned()));
+                continue;
+            }
+            if refresh {
+                self.refreshed.lock().unwrap().push(id.clone());
+                if let Some(why) = self.stale.lock().unwrap().get(id) {
+                    out.stale.push((name.clone(), why.clone()));
+                }
+            }
+            out.roots.push(mandor_usecase::review::DesignRoot {
+                id: id.clone(),
+                path: PathBuf::from(format!("/design/{name}")),
+                name,
+            });
+        }
+        Ok(out)
     }
 }

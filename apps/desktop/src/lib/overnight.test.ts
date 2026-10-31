@@ -287,6 +287,7 @@ describe('laporan grup', () => {
     const rows = [r('needs_confirmation'), r('needs_confirmation', true, 'b')];
     expect(heldAction(rows[0], rows), 'kartu ter-commit berubah di Lark: putuskan di barisnya').toBeNull();
     expect(heldAction({ ...r('stuck'), outcome: 'draft' }, [])).toBeNull();
+    expect(heldAction(r('plan_outdated'), [r('plan_outdated')]), 'plan grup usang: hanya Take over').toBeNull();
   });
 
   it('label keadaan kartu grup', () => {
@@ -300,6 +301,7 @@ describe('laporan grup', () => {
     expect(holdLabel('card_removed')).toBe('Card changed in Lark');
     expect(holdLabel('window_ended')).toBe('Paused at the end of the window');
     expect(holdLabel('yield_to_fix')).toBe('Paused for a Waiting Fix');
+    expect(holdLabel('plan_outdated')).toBe('Group plan outdated');
   });
 });
 

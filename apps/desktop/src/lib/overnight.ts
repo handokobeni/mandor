@@ -129,7 +129,8 @@ const HOLD_LABEL: Record<string, string> = {
   usage_limit: 'Usage limit reached',
   card_removed: 'Card changed in Lark',
   window_ended: 'Paused at the end of the window',
-  yield_to_fix: 'Paused for a Waiting Fix'
+  yield_to_fix: 'Paused for a Waiting Fix',
+  plan_outdated: 'Group plan outdated'
 };
 
 export function holdLabel(reason: string | null): string {

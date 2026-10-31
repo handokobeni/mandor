@@ -175,6 +175,9 @@ pub struct RunView {
     pub ac: Option<AcSummaryView>,
     /// Kartu run grup, urut posisi; kosong untuk run tunggal.
     pub cards: Vec<GroupCardView>,
+    /// Run grup dengan satu plan untuk semua kartu (R25 plan grup).
+    #[serde(default)]
+    pub one_plan: bool,
 }
 
 /// Satu kartu run grup.
@@ -234,6 +237,10 @@ pub struct StartGroupParams {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub reviewer_skill: Option<String>,
+    /// "One plan for all cards" (R25 plan grup); hanya dengan planning `plan`.
+    #[serde(default)]
+    #[ts(optional)]
+    pub one_plan: Option<bool>,
 }
 
 /// Parameter aksi pada satu kartu run grup.

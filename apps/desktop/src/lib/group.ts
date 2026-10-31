@@ -3,6 +3,7 @@
 import type { AcRowView } from './protocol/AcRowView.ts';
 import type { GroupCandidateView } from './protocol/GroupCandidateView.ts';
 import type { GroupCandidatesParams } from './protocol/GroupCandidatesParams.ts';
+import type { PlanningMode } from './planning.ts';
 import type { GroupCardView } from './protocol/GroupCardView.ts';
 
 export interface Progress {
@@ -100,6 +101,21 @@ export function changedCards(cards: GroupCardView[]): GroupCardView[] {
  */
 export function candidatesParams(recordId: string, queued: Set<string> | null): GroupCandidatesParams {
   return queued ? { record_id: recordId, queued: [...queued] } : { record_id: recordId };
+}
+
+/** "One plan for all cards" (R25): hanya untuk grup ≥ 2 kartu dengan pilihan Plan. */
+export function onePlanAvailable(cards: number, mode: PlanningMode): boolean {
+  return cards > 1 && mode === 'plan';
+}
+
+/** Parameter `runs.start_group`; `one_plan` hanya bila dipilih dan tersedia. */
+export function groupStartParams<R extends object>(
+  rest: R,
+  order: string[],
+  onePlan: boolean,
+  mode: PlanningMode
+): R & { record_ids: string[]; one_plan?: true } {
+  return { ...rest, record_ids: order, ...(onePlan && onePlanAvailable(order.length, mode) ? { one_plan: true as const } : {}) };
 }
 
 export function initialOrder(candidates: GroupCandidateView[]): string[] {

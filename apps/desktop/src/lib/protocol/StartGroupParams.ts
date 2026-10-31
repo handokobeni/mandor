@@ -9,4 +9,8 @@ export type StartGroupParams = { record_ids: Array<string>,
 /**
  * Repo untuk grup satu repo; diabaikan bila `workspace` diisi.
  */
-repo_id: string, note: string | null, workspace?: StartWorkspace, planning?: StartPlanning, design_sources?: Array<string>, reviewer_skill?: string, };
+repo_id: string, note: string | null, workspace?: StartWorkspace, planning?: StartPlanning, design_sources?: Array<string>, reviewer_skill?: string, 
+/**
+ * "One plan for all cards" (R25 plan grup); hanya dengan planning `plan`.
+ */
+one_plan?: boolean, };

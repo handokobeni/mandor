@@ -503,9 +503,13 @@
   {:else if brainstorming && run.state === 'awaiting_dev'}
     <span class="muted">Answer the agent in chat. Continue to plan when the requirements are clear.</span>
   {:else if planning && working}
-    <span class="muted">Agent is reading the code and writing a plan. It does not change any file.</span>
+    <span class="muted">{run.one_plan ? 'Agent is writing one plan for all cards in the group.' : 'Agent is reading the code and writing a plan.'} It does not change any file.</span>
   {:else if planning && run.state === 'awaiting_dev'}
-    <span class="muted">Plan ready. Read it in the Plan tab, reply in chat to revise it, or approve to start coding.</span>
+    {#if run.one_plan}
+      <span class="muted">Group plan ready for all {run.cards.length} cards. Read it in the Plan tab, reply in chat to revise it, or approve to build the cards one by one.</span>
+    {:else}
+      <span class="muted">Plan ready. Read it in the Plan tab, reply in chat to revise it, or approve to start coding.</span>
+    {/if}
   {:else if run.state === 'wf_running'}
     <span class="muted">Applying review feedback. Mandor pushes and moves Lark back to Waiting Review when done.</span>
   {:else if reviewing}

@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import {
   candidatesParams,
+  groupStartParams,
+  onePlanAvailable,
   changedCards,
   groupAction,
   headerCard,
@@ -108,6 +110,22 @@ describe('pemilihan kartu', () => {
     order = toggleCard(order, '1401');
     expect(order).toEqual(['1403', '1402', '1401']);
     expect(moveCard(order, '1403', -1)).toEqual(order);
+  });
+});
+
+describe('satu plan untuk grup', () => {
+  it('pilihan One plan for all cards hanya untuk ≥ 2 kartu dengan Plan', () => {
+    expect(onePlanAvailable(2, 'plan')).toBe(true);
+    expect(onePlanAvailable(1, 'plan')).toBe(false);
+    expect(onePlanAvailable(3, 'brainstorm')).toBe(false);
+    expect(onePlanAvailable(3, 'skip')).toBe(false);
+  });
+
+  it('parameter start_group mengirim one_plan hanya bila dipilih dan tersedia', () => {
+    const rest = { repo_id: 'r', note: null };
+    expect(groupStartParams(rest, ['a', 'b'], true, 'plan')).toEqual({ repo_id: 'r', note: null, record_ids: ['a', 'b'], one_plan: true });
+    expect(groupStartParams(rest, ['a', 'b'], false, 'plan')).toEqual({ repo_id: 'r', note: null, record_ids: ['a', 'b'] });
+    expect(groupStartParams(rest, ['a', 'b'], true, 'brainstorm')).toEqual({ repo_id: 'r', note: null, record_ids: ['a', 'b'] });
   });
 });
 

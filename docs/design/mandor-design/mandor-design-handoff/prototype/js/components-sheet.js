@@ -432,11 +432,19 @@
       rrow('PGS-1402', 'Committed', 'warning', 'Changed in Lark after it was committed', '<input class="input" style="width:160px;height:26px" placeholder="Reason to keep"><button class="btn btn-outline btn-xs">Keep</button><button class="btn btn-ghost btn-xs">' + ic('undo-2') + 'Revert</button>') +
       rrow('PGS-1403', 'Not started', null, 'Waits for the decision on PGS-1402') + '</div>';
     var stuck = '<div class="card" style="width:640px;padding:12px">' + rrow('PGS-1402', 'Stuck', 'warning', 'The turn ended without code changes: "Which endpoint lists archived jobs?"', '<button class="btn btn-outline btn-xs">' + ic('laptop') + 'Take over to laptop</button>') + '</div>';
+    var onePlan = '<div class="card" style="width:520px;padding:12px;display:grid;gap:6px">' +
+      '<div class="field-help">Planning: <b>Plan</b> · Start together: PGS-1401, PGS-1402, PGS-1403</div>' +
+      '<label style="display:flex;gap:8px;align-items:flex-start"><input type="checkbox" class="checkbox" checked><span><b>One plan for all cards</b><span class="muted" style="display:block;font-size:12px">The agent writes one plan covering the AC of every card and you approve it once. Cards are still built and committed one by one. If the AC of a card not built yet changes, the plan needs approval again.</span></span></label></div>';
+    var planBar = '<div class="card" style="width:640px;padding:10px 12px;display:flex;gap:8px;align-items:center"><span class="muted" style="flex:1">Group plan ready for all 3 cards. Read it in the Plan tab, reply in chat to revise it, or approve to build the cards one by one.</span><button class="btn btn-outline btn-sm">' + ic('moon-star') + 'Approve &amp; queue for VM</button><button class="btn btn-sm">' + ic('list-checks') + 'Approve plan &amp; implement</button></div>';
+    var outdated = '<div class="card" style="width:640px;padding:12px">' + rrow('PGS-1401', 'Committed', 'ok', 'Group plan outdated: the AC of PGS-1403 changed after the group plan was approved.', '<button class="btn btn-outline btn-xs">' + ic('laptop') + 'Take over to laptop</button>') + '</div>';
     return sec('groupvm', 'Grouped cards on the VM', 'Queue cards of one epic together; the VM builds them one after another in one branch and one PR, pauses between cards at the end of the window, and reports each card in the morning.',
       spec('QueueSection / Queue together', together, 'block') +
       spec('VM queue rows / group, Planned and continuing', queue, 'block') +
       spec('Morning report / group per card, changed in Lark', report, 'block') +
-      spec('Morning report / group card stuck', stuck, 'block'));
+      spec('Morning report / group card stuck', stuck, 'block') +
+      spec('StartTaskDialog / One plan for all cards', onePlan, 'block') +
+      spec('Workspace action bar / group plan ready', planBar, 'block') +
+      spec('Morning report / group plan outdated', outdated, 'block'));
   }
 
   var BUILDERS = { groupvm: groupvm, planvm: planvm, plangaps: plangaps, r2board: r2board, logs: logs, acchips: acchips, acrow: acrow, acsummary: acsummary, gatebtn: gatebtn, runapp: runapp, readiness: readiness, sources: sources, theme: theme, type: type, button: button, badge: badge, form: form, tabs: tabs, alert: alert, card: card, overlay: overlay, menu: menu, feedback: feedback,

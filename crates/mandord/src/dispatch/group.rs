@@ -11,7 +11,7 @@ use mandor_protocol::{
 };
 use mandor_usecase::run::CardOutcome;
 use mandor_usecase::run_ports::RunRecord;
-use mandor_usecase::{StartStep, StartTarget};
+use mandor_usecase::{Planning, StartStep, StartTarget};
 use serde_json::{Value, json};
 
 use super::{AppDispatch, ok, params, planning_of, run_error};
@@ -124,21 +124,37 @@ impl AppDispatch {
             None => StartTarget::Repo(p.repo_id.clone()),
         };
         let planning = planning_of(p.planning.as_ref())?;
+        let mode = group_start(&planning, p.one_plan.unwrap_or(false))?;
         let design = self
             .design_roots(p.design_sources.as_deref().unwrap_or_default())
             .await?;
-        let run = s
-            .runs
-            .start_group(
-                &p.record_ids,
-                &target,
-                p.note.as_deref(),
-                &planning,
-                &design,
-                progress,
-            )
-            .await
-            .map_err(run_error)?;
+        let started = match mode {
+            GroupStart::OnePlan { skill } => {
+                s.runs
+                    .start_one_plan_group(
+                        &p.record_ids,
+                        &target,
+                        p.note.as_deref(),
+                        skill,
+                        &design,
+                        progress,
+                    )
+                    .await
+            }
+            GroupStart::PerCard => {
+                s.runs
+                    .start_group(
+                        &p.record_ids,
+                        &target,
+                        p.note.as_deref(),
+                        &planning,
+                        &design,
+                        progress,
+                    )
+                    .await
+            }
+        };
+        let run = started.map_err(run_error)?;
         if let Some(skill) = p.reviewer_skill.as_deref().filter(|k| !k.trim().is_empty()) {
             s.runs
                 .set_reviewer_skill(&run.id, Some(skill))
@@ -147,6 +163,29 @@ impl AppDispatch {
         }
         s.poke.notify_one();
         ok(&run_view(&run, None))
+    }
+}
+
+/// Cara grup dimulai: plan per kartu, atau satu plan untuk semua kartu (R25).
+#[derive(Debug, PartialEq, Eq)]
+enum GroupStart {
+    PerCard,
+    OnePlan { skill: Option<String> },
+}
+
+/// Mode "One plan for all cards" hanya sah dengan planning `plan`.
+fn group_start(planning: &Planning, one_plan: bool) -> Result<GroupStart, RpcError> {
+    if !one_plan {
+        return Ok(GroupStart::PerCard);
+    }
+    match planning {
+        Planning::Plan { skill } => Ok(GroupStart::OnePlan {
+            skill: skill.clone(),
+        }),
+        _ => Err(RpcError::new(
+            ErrorCode::InvalidParams,
+            "one plan for all cards needs the Plan choice",
+        )),
     }
 }
 
@@ -192,6 +231,26 @@ pub(super) async fn group_views(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn satu_plan_grup_hanya_dengan_pilihan_plan() {
+        let plan = Planning::Plan {
+            skill: Some("ce-plan".to_owned()),
+        };
+        assert_eq!(group_start(&plan, false).ok(), Some(GroupStart::PerCard));
+        assert_eq!(
+            group_start(&plan, true).ok(),
+            Some(GroupStart::OnePlan {
+                skill: Some("ce-plan".to_owned())
+            })
+        );
+        assert!(group_start(&Planning::Skip, true).is_err());
+        let brainstorm = Planning::Brainstorm {
+            brainstorm: None,
+            plan: None,
+        };
+        assert!(group_start(&brainstorm, true).is_err());
+    }
 
     #[test]
     fn keputusan_kartu_dari_parameter() {

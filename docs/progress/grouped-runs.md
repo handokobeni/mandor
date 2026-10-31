@@ -52,3 +52,17 @@ Temuan untuk tindak lanjut (tidak menahan DoD):
 - `AcRowView` membawa `card` berupa `record_id`, bukan kunci kartu; UI memetakan ke kunci lewat `RunView.cards` (menghindari pembacaan cache per baris di `ledger.get`).
 - Test daemon sungguhan untuk method grup hanya bisa memeriksa tanpa sesi Lark (dikenal dan butuh sesi, beda dari method tak dikenal); tampilan papan grup diuji di unit test `views.rs`.
 - `StartGroupDialog` tidak dibuat terpisah: "Start together" menjadi bagian dialog Start (`GroupCardPicker`) agar pilihan repo, workspace, planning, dan review tidak diduplikasi. Keputusan kartu berubah memakai `ChangedCardsDialog` baru, bukan `GateDialogs`.
+
+### Data uji U17 dan U21 (dibuat 2026-10-31)
+
+Base salinan `Sv1NbPJh5aD7SesHvtGlmga8g2f`, repo `mandor-smoke`, desain `mandor-smoke-design` (commit `5115f21`, satu folder per grup). Tabel Epic di Base salinan tabel sinkron (tidak bisa ditambah), jadi tiap grup memakai epic lama yang semua kartunya sudah Delivered.
+
+| Grup | Epic | Kartu | Desain | Skenario |
+|---|---|---|---|---|
+| A | E-PGS5 | PGS-1546, PGS-1547, PGS-1548 | `pengeluaran/` | F2/AE6 |
+| B | E-PGS10 | PGS-1549, PGS-1550, PGS-1551 | `belanja/` | AE4 (VM) + Take over grup draft |
+| C | E-PGS12 | PGS-1552, PGS-1553 | `kurs/` | F5/AE9 |
+| D | E-PGS15 | PGS-1554, PGS-1555 | `cicilan/` | AE7 |
+| E | E-PGS16 | PGS-1556, PGS-1557 | `ongkir/` | R21 |
+| F | E-PGS17 | PGS-1558, PGS-1559, PGS-1560 | `diskon/` | AE10, AE11 (laptop) |
+| G | E-PGS19 | PGS-1561, PGS-1562 | `berat/` | F6 (VM) |

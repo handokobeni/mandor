@@ -13,6 +13,10 @@ class FakeVm implements Rpc {
   pending = new Set<string>();
   /** Method yang gagal. */
   fail = new Set<string>();
+  /** Workspace daemon ini. */
+  workspaces: { id: string; name: string; root: string; repo_ids: string[] }[] = [];
+  /** Hasil `runs.handoff`. */
+  handback: unknown = { branch: 'b', repo_id: 'repo1', workspace: null, planned: PLANNED };
   async request<T>(method: string, params?: unknown): Promise<T> {
     this.calls.push([method, params]);
     if (this.fail.has(method)) throw new Error(`${method} refused`);
@@ -44,7 +48,7 @@ class FakeVm implements Rpc {
       case 'runs.prepare_for_vm':
         return { planned: PLANNED, repo_id: 'repo1', workspace: null } as T;
       case 'runs.handoff':
-        return { branch: 'b', repo_id: 'repo1', workspace: null, planned: PLANNED } as T;
+        return this.handback as T;
       case 'design_sources.list':
         return [{ id: 'ds1', name: 'kelola-mock', kind: 'folder', path: '/d', ready: true, status: 'Ready' }] as T;
       case 'overnight.queue.remove':
@@ -62,8 +66,9 @@ class FakeVm implements Rpc {
           logins: [{ service: 'gh', state: 'expired', fix: 'Run gh auth login' }]
         } as T;
       case 'repos.list':
-      case 'workspaces.list':
         return [] as T;
+      case 'workspaces.list':
+        return this.workspaces as T;
       case 'runs.takeover':
         return { id: 'run-laptop' } as T;
       default:
@@ -179,6 +184,33 @@ describe('aksi kartu VM', () => {
     expect(laptop.methods()).toEqual(['runs.takeover']);
     expect(laptop.calls[0][1]).toEqual({ record_id: 'h', repo_id: 'repo1', planned: PLANNED });
     expect(runId).toBe('run-laptop');
+  });
+
+  it('Take over workspace: workspace laptop dicari dari repo-nya, id boleh beda dengan VM', async () => {
+    const [store, vm] = await attached();
+    vm.handback = { branch: 'b', repo_id: null, workspace: { id: 'vm-ws', repo_ids: ['web', 'api'] }, planned: null };
+    const laptop = new FakeVm();
+    laptop.workspaces = [
+      { id: 'lain', name: 'lain', root: '/l', repo_ids: ['web'] },
+      { id: 'lap-ws', name: 'lap-ws', root: '/w', repo_ids: ['api', 'web', 'docs'] }
+    ];
+    await store.takeover('h', laptop, 'beni@laptop~laptop');
+    expect(laptop.calls.find(([m]) => m === 'runs.takeover')?.[1]).toEqual({
+      record_id: 'h',
+      repo_id: 'web',
+      workspace: { id: 'lap-ws', repo_ids: ['web', 'api'] }
+    });
+  });
+
+  it('Take over workspace ditolak sebelum serah-terima bila laptop tak punya workspace yang cocok', async () => {
+    const [store, vm] = await attached();
+    vm.handback = { branch: 'b', repo_id: null, workspace: { id: 'vm-ws', repo_ids: ['web', 'api'] }, planned: null };
+    const laptop = new FakeVm();
+    await expect(store.takeover('h', laptop, 'beni@laptop~laptop', { workspace: { id: 'vm-ws', repo_ids: ['web', 'api'] } })).rejects.toThrow(
+      'Add a workspace on this laptop with web, api, then take over again.'
+    );
+    expect(vm.methods()).not.toContain('runs.handoff');
+    expect(laptop.methods()).not.toContain('runs.takeover');
   });
 });
 

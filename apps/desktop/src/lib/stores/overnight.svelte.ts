@@ -2,6 +2,7 @@
 // kartu VM. Semua dibaca dari link VM; board tetap dari link laptop.
 
 import { publishParams } from '#lib/ac-review.ts';
+import { laptopWorkspaceFor } from '#lib/overnight.ts';
 import type { AcLedgerView } from '#lib/protocol/AcLedgerView.ts';
 import type { DesignSourceView } from '#lib/protocol/DesignSourceView.ts';
 import type { HandoffResult } from '#lib/protocol/HandoffResult.ts';
@@ -249,16 +250,31 @@ export class OvernightStore {
    * daemon laptop, lalu laptop memulihkan branch kartu. Mengembalikan id run
    * laptop.
    */
-  async takeover(recordId: string, laptop: Rpc, laptopDaemonId: string): Promise<string> {
+  /**
+   * `known`: target VM yang sudah diketahui sebelum serah-terima, agar run
+   * workspace tanpa workspace laptop yang cocok ditolak sebelum klaim pindah.
+   */
+  async takeover(
+    recordId: string,
+    laptop: Rpc,
+    laptopDaemonId: string,
+    known?: { workspace?: { id: string; repo_ids: string[] } | null }
+  ): Promise<string> {
     const vm = this.rpc;
     if (!vm) throw new Error('The VM is not connected');
+    const laptopWorkspaces = () => laptop.request<WorkspaceView[]>('workspaces.list');
+    if (known?.workspace) laptopWorkspaceFor(known.workspace.repo_ids, await laptopWorkspaces());
     const back = await vm.request<HandoffResult>('runs.handoff', { record_id: recordId, to_daemon_id: laptopDaemonId });
     await this.refresh();
-    // Target laptop: id yang sama dengan target VM.
+    // Workspace laptop dicari dari repo-nya; id workspace laptop dan VM boleh beda.
+    let target: { repo_id: string; workspace?: { id: string; repo_ids: string[] } } = { repo_id: back.repo_id ?? '' };
+    if (back.workspace) {
+      const ws = laptopWorkspaceFor(back.workspace.repo_ids, await laptopWorkspaces());
+      target = { repo_id: back.workspace.repo_ids[0] ?? '', workspace: { id: ws.id, repo_ids: back.workspace.repo_ids } };
+    }
     const run = await laptop.request<{ id: string }>('runs.takeover', {
       record_id: recordId,
-      repo_id: back.repo_id ?? back.workspace?.repo_ids[0] ?? '',
-      ...(back.workspace ? { workspace: back.workspace } : {}),
+      ...target,
       ...(back.planned ? { planned: back.planned } : {})
     });
     return run.id;

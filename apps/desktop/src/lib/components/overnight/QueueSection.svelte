@@ -69,7 +69,8 @@
     }
     busy = item.record_id;
     try {
-      const runId = await overnight.takeover(item.record_id, laptop, laptopDaemonId);
+      const workspace = overnight.workspaces.find((w) => w.id === item.workspace_id) ?? null;
+      const runId = await overnight.takeover(item.record_id, laptop, laptopDaemonId, { workspace });
       await runs.load();
       nav.run(runId);
       toast.success(`${item.key ?? item.record_id} is back on this laptop, waiting for plan approval`);

@@ -227,3 +227,15 @@ export function queueRowMode(item: Pick<QueueItemView, 'planned_state'>): 'pendi
 export function showQueueForVm(vm: { statusLoaded: boolean; vmRole: boolean; larkReady: boolean }, grouped: boolean): boolean {
   return vm.statusLoaded && vm.vmRole && vm.larkReady && !grouped;
 }
+
+/**
+ * Workspace laptop untuk Take over run workspace VM: yang memuat semua repo
+ * run (id boleh berbeda dengan VM).
+ *
+ * @throws Error bila tidak ada, dengan langkah perbaikannya.
+ */
+export function laptopWorkspaceFor<W extends { id: string; repo_ids: string[] }>(repoIds: string[], workspaces: W[]): W {
+  const ws = workspaces.find((w) => repoIds.every((r) => w.repo_ids.includes(r)));
+  if (!ws) throw new Error(`Add a workspace on this laptop with ${repoIds.join(', ')}, then take over again.`);
+  return ws;
+}

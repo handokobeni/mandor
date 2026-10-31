@@ -7,6 +7,7 @@
 
 use crate::gate::{GateRejection, check_start};
 use crate::kanban::TaskStatus;
+use crate::run::HoldReason;
 use crate::task::Task;
 
 /// Keadaan satu kartu di run grup.
@@ -279,9 +280,59 @@ pub fn pr_title(keys: &[&str], epic: Option<&str>, first_title: &str) -> String 
     }
 }
 
+/// Keadaan daemon VM saat satu kartu grup selesai.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PauseInput {
+    /// Jam lembur sedang berjalan.
+    pub in_window: bool,
+    /// Grup dimulai dengan "Start now".
+    pub start_now: bool,
+    /// Ada Waiting Fix kartu VM lain yang siap dikerjakan.
+    pub fix_ready: bool,
+}
+
+/// Grup VM berjeda sebelum kartu berikutnya (R20, R21, KTD-G12)? Di luar jam,
+/// grup biasa menunggu siklus berikutnya; grup Start now tetap jalan kecuali
+/// ada Waiting Fix yang harus didahulukan.
+#[must_use]
+pub fn vm_pause(s: &PauseInput) -> Option<HoldReason> {
+    if !s.in_window && !s.start_now {
+        Some(HoldReason::WindowEnded)
+    } else if s.fix_ready {
+        Some(HoldReason::YieldToFix)
+    } else {
+        None
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn jeda_grup_vm_sebelum_kartu_berikutnya() {
+        let at = |in_window, start_now, fix_ready| {
+            vm_pause(&PauseInput {
+                in_window,
+                start_now,
+                fix_ready,
+            })
+        };
+        assert_eq!(at(true, false, false), None, "lanjut");
+        assert_eq!(at(false, false, false), Some(HoldReason::WindowEnded));
+        assert_eq!(
+            at(false, true, false),
+            None,
+            "Start now tidak berhenti karena jam"
+        );
+        assert_eq!(at(true, false, true), Some(HoldReason::YieldToFix));
+        assert_eq!(at(false, true, true), Some(HoldReason::YieldToFix));
+        assert_eq!(
+            at(false, false, true),
+            Some(HoldReason::WindowEnded),
+            "di luar jam grup menunggu siklus berikutnya"
+        );
+    }
 
     fn task(id: &str, key: &str, status: TaskStatus, pic: &str, epic: &str) -> Task {
         let mut t = Task::new(id, status);

@@ -96,6 +96,7 @@ impl<D: Deps> RunService<D> {
             added_at_ms: self.sync.clock.now_ms(),
             design_sources: req.design_sources.clone(),
             planned,
+            group: Vec::new(),
         };
         match self.overnight.enqueue(&item).await {
             Err(PortError::Conflict) => Err(RunError::InvalidState("the card is already queued")),

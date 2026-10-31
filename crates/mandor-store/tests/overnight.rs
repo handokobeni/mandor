@@ -25,6 +25,7 @@ fn item(id: &str, at: i64) -> QueueItem {
         added_at_ms: at,
         design_sources: Vec::new(),
         planned: None,
+        group: Vec::new(),
     }
 }
 
@@ -101,6 +102,24 @@ async fn antrean_tambah_urut_ulang_dan_keluarkan() {
     assert_eq!(out.len(), 1, "hanya yang punya alasan dicatat");
     assert_eq!(out[0].record_id, "c");
     assert!(s.dequeued_since(12).await.unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn item_grup_bolak_balik_dan_sisip_di_depan() {
+    let (s, _d) = open().await;
+    s.enqueue(&item("a", 1)).await.unwrap();
+    let mut g = item("g1", 2);
+    g.group = vec!["g1".to_owned(), "g2".to_owned(), "g3".to_owned()];
+    s.enqueue(&g).await.unwrap();
+    let q = s.queue().await.unwrap();
+    assert_eq!(q[1], g, "urutan kartu grup tetap");
+    assert!(q[0].group.is_empty(), "item tanpa grup = kartu tunggal");
+
+    s.dequeue("g1", None, 3).await.unwrap();
+    s.enqueue(&item("b", 4)).await.unwrap();
+    s.enqueue_front(&g).await.unwrap();
+    assert_eq!(ids(&s.queue().await.unwrap()), ["g1", "a", "b"]);
+    assert_eq!(s.enqueue_front(&g).await.unwrap_err(), PortError::Conflict);
 }
 
 #[tokio::test]

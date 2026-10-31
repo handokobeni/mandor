@@ -392,6 +392,7 @@ mod tests {
             added_at_ms: 5,
             design_sources: vec!["ds1".to_owned(), "hilang".to_owned()],
             planned: None,
+            group: Vec::new(),
         };
         let names = HashMap::from([("ds1".to_owned(), "kelola-mock".to_owned())]);
         let q = queue_item_view(&item, None, true, &names);

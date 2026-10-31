@@ -152,6 +152,13 @@ fn to_u64(v: i64) -> u64 {
 }
 
 /// Adapter penyimpanan lembur.
+/// Posisi penyisipan item antrean.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Position {
+    Back,
+    Front,
+}
+
 #[derive(Debug, Clone)]
 pub struct OvernightsStore {
     store: Store,
@@ -162,45 +169,9 @@ impl OvernightsStore {
     pub fn new(store: Store) -> Self {
         Self { store }
     }
-}
 
-impl OvernightStore for OvernightsStore {
-    async fn queue(&self) -> Result<Vec<QueueItem>, PortError> {
-        let rows = sqlx::query!(
-            "SELECT record_id, target_json, note, start_now, added_at_ms, design_json,
-                    planned_json, planned_state, origin_daemon, planned_reason
-             FROM overnight_queue ORDER BY position, added_at_ms"
-        )
-        .fetch_all(&self.store.pool)
-        .await
-        .map_err(StoreError::internal)?;
-        let mut out = Vec::with_capacity(rows.len());
-        for r in rows {
-            let target: TargetJson =
-                serde_json::from_str(&r.target_json).map_err(StoreError::internal)?;
-            let design_sources: Vec<String> = match r.design_json {
-                Some(j) => serde_json::from_str(&j).map_err(StoreError::internal)?,
-                None => Vec::new(),
-            };
-            out.push(QueueItem {
-                record_id: r.record_id,
-                target: target.into(),
-                note: r.note,
-                start_now: r.start_now != 0,
-                added_at_ms: r.added_at_ms,
-                design_sources,
-                planned: planned_entry(
-                    r.planned_json,
-                    r.planned_state.as_deref(),
-                    r.origin_daemon,
-                    r.planned_reason,
-                )?,
-            });
-        }
-        Ok(out)
-    }
-
-    async fn enqueue(&self, item: &QueueItem) -> Result<(), PortError> {
+    /// Menyisipkan item di akhir atau awal antrean.
+    async fn insert(&self, item: &QueueItem, at: Position) -> Result<(), PortError> {
         let target =
             serde_json::to_string(&TargetJson::from(&item.target)).map_err(StoreError::internal)?;
         let start_now = i64::from(item.start_now);
@@ -221,12 +192,22 @@ impl OvernightStore for OvernightsStore {
             .as_ref()
             .and_then(|p| p.origin_daemon.as_deref());
         let reason = item.planned.as_ref().and_then(|p| p.reason.as_deref());
+        let group = if item.group.is_empty() {
+            None
+        } else {
+            Some(serde_json::to_string(&item.group).map_err(StoreError::internal)?)
+        };
+        let front = i64::from(at == Position::Front);
         sqlx::query!(
             "INSERT INTO overnight_queue (record_id, position, target_json, note, start_now,
-                added_at_ms, design_json, planned_json, planned_state, origin_daemon, planned_reason)
-             VALUES (?, (SELECT COALESCE(MAX(position), 0) + 1 FROM overnight_queue),
-                ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                added_at_ms, design_json, planned_json, planned_state, origin_daemon, planned_reason,
+                group_json)
+             VALUES (?, CASE WHEN ? = 1
+                    THEN (SELECT COALESCE(MIN(position), 1) - 1 FROM overnight_queue)
+                    ELSE (SELECT COALESCE(MAX(position), 0) + 1 FROM overnight_queue) END,
+                ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             item.record_id,
+            front,
             target,
             item.note,
             start_now,
@@ -235,12 +216,63 @@ impl OvernightStore for OvernightsStore {
             planned,
             state,
             origin,
-            reason
+            reason,
+            group
         )
         .execute(&self.store.pool)
         .await
         .map_err(|e| StoreError::from_sqlx(e, QUEUED))?;
         Ok(())
+    }
+}
+
+impl OvernightStore for OvernightsStore {
+    async fn queue(&self) -> Result<Vec<QueueItem>, PortError> {
+        let rows = sqlx::query!(
+            "SELECT record_id, target_json, note, start_now, added_at_ms, design_json,
+                    planned_json, planned_state, origin_daemon, planned_reason, group_json
+             FROM overnight_queue ORDER BY position, added_at_ms"
+        )
+        .fetch_all(&self.store.pool)
+        .await
+        .map_err(StoreError::internal)?;
+        let mut out = Vec::with_capacity(rows.len());
+        for r in rows {
+            let target: TargetJson =
+                serde_json::from_str(&r.target_json).map_err(StoreError::internal)?;
+            let design_sources: Vec<String> = match r.design_json {
+                Some(j) => serde_json::from_str(&j).map_err(StoreError::internal)?,
+                None => Vec::new(),
+            };
+            let group: Vec<String> = match r.group_json {
+                Some(j) => serde_json::from_str(&j).map_err(StoreError::internal)?,
+                None => Vec::new(),
+            };
+            out.push(QueueItem {
+                record_id: r.record_id,
+                target: target.into(),
+                note: r.note,
+                start_now: r.start_now != 0,
+                added_at_ms: r.added_at_ms,
+                design_sources,
+                planned: planned_entry(
+                    r.planned_json,
+                    r.planned_state.as_deref(),
+                    r.origin_daemon,
+                    r.planned_reason,
+                )?,
+                group,
+            });
+        }
+        Ok(out)
+    }
+
+    async fn enqueue(&self, item: &QueueItem) -> Result<(), PortError> {
+        self.insert(item, Position::Back).await
+    }
+
+    async fn enqueue_front(&self, item: &QueueItem) -> Result<(), PortError> {
+        self.insert(item, Position::Front).await
     }
 
     async fn dequeue(

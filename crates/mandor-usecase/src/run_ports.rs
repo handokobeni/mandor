@@ -415,6 +415,10 @@ pub struct RunRecord {
     /// Cara grup VM dimulai; grup "Start now" tidak berjeda karena jam lembur
     /// (R21 plan grup, KTD-G12).
     pub vm_start: VmStart,
+    /// Grup dengan satu plan untuk semua kartu (R25 plan grup, KTD-G19):
+    /// `Some` berisi AC kartu saat plan grup terakhir disetujui (kosong
+    /// sebelum disetujui); `None` = plan per kartu atau run tunggal.
+    pub one_plan: Option<Vec<mandor_domain::group::AcSnap>>,
     /// Diisi store saat membaca; diabaikan saat menyimpan.
     pub created_at_ms: i64,
     /// Diisi store saat membaca; diabaikan saat menyimpan.
@@ -465,6 +469,7 @@ impl RunRecord {
             design_notes: Vec::new(),
             draft_pending: None,
             vm_start: VmStart::Window,
+            one_plan: None,
             created_at_ms: 0,
             updated_at_ms: 0,
         }

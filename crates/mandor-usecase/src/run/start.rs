@@ -89,6 +89,8 @@ pub(crate) struct Plan {
     pub(super) design_notes: Vec<String>,
     /// Cara grup VM dimulai (KTD-G12 plan grup).
     pub(super) vm_start: crate::run_ports::VmStart,
+    /// Grup dengan satu plan untuk semua kartu (R25 plan grup).
+    pub(super) whole_group: bool,
 }
 
 /// Langkah Start yang dilaporkan ke client (dialog Start).
@@ -250,6 +252,7 @@ impl<D: Deps> RunService<D> {
             design: Vec::new(),
             design_notes: Vec::new(),
             vm_start: crate::run_ports::VmStart::Window,
+            whole_group: false,
         })
     }
 

@@ -113,6 +113,9 @@ pub enum HoldReason {
     WindowEnded,
     /// Grup memberi jalan ke Waiting Fix kartu VM lain (R20 plan grup).
     YieldToFix,
+    /// AC kartu grup tersisa berubah setelah plan grup disetujui; dev
+    /// menyetujui ulang di laptop (R25 plan grup).
+    PlanOutdated,
 }
 
 impl HoldReason {
@@ -127,6 +130,7 @@ impl HoldReason {
             Self::CardRemoved => "card_removed",
             Self::WindowEnded => "window_ended",
             Self::YieldToFix => "yield_to_fix",
+            Self::PlanOutdated => "plan_outdated",
         }
     }
 
@@ -148,6 +152,7 @@ impl HoldReason {
             "card_removed" => Self::CardRemoved,
             "window_ended" => Self::WindowEnded,
             "yield_to_fix" => Self::YieldToFix,
+            "plan_outdated" => Self::PlanOutdated,
             _ => return None,
         })
     }
@@ -343,10 +348,12 @@ mod tests {
             HoldReason::CardRemoved,
             HoldReason::WindowEnded,
             HoldReason::YieldToFix,
+            HoldReason::PlanOutdated,
         ] {
             assert_eq!(HoldReason::parse(r.as_str()), Some(r));
         }
         assert!(HoldReason::Stuck.needs_attention() && HoldReason::CardRemoved.needs_attention());
+        assert!(HoldReason::PlanOutdated.needs_attention());
         assert!(
             !HoldReason::WindowEnded.needs_attention() && !HoldReason::YieldToFix.needs_attention(),
             "jeda grup tidak memanggil dev"

@@ -20,7 +20,7 @@ use crate::run_ports::{
 use crate::{Planning, StartStep, StartTarget};
 
 /// AC aktif sebuah kartu dalam bentuk pesan agent.
-fn ac_lines(items: &[AcItem]) -> Vec<String> {
+pub(super) fn ac_lines(items: &[AcItem]) -> Vec<String> {
     items
         .iter()
         .filter(|ac| !ac.dropped)
@@ -313,7 +313,7 @@ impl<D: Deps> RunService<D> {
     }
 
     /// Task dan AC tiap kartu, urut sesuai `record_ids`.
-    async fn load_group(&self, record_ids: &[String]) -> Result<GroupInput, RunError> {
+    pub(super) async fn load_group(&self, record_ids: &[String]) -> Result<GroupInput, RunError> {
         let mut tasks = Vec::with_capacity(record_ids.len());
         let mut per_card = Vec::with_capacity(record_ids.len());
         for id in record_ids {
@@ -424,7 +424,12 @@ impl<D: Deps> RunService<D> {
         if let Planning::Plan { skill } = planning {
             run.plan_skill.clone_from(skill);
         }
-        let message = self.card_message(&mut run, &input, 0, dev_note, planning);
+        let message = match planning {
+            Planning::Plan { skill } if plan.whole_group => {
+                self.one_plan_message(&mut run, &input, dev_note, skill.as_deref())
+            }
+            _ => self.card_message(&mut run, &input, 0, dev_note, planning),
+        };
         let session = SessionRef::New(run.session_id.clone().unwrap_or_default());
         progress(StartStep::StartingAgent);
         let summary = format!(
@@ -484,7 +489,10 @@ impl<D: Deps> RunService<D> {
         let task = self.task_of(&cards[idx].record_id).await?;
         cards[idx].commits = self.commit_card(run, key_of(&task)).await?;
         cards[idx].state = CardState::Done;
-        cards[idx].plan = run.plan.take();
+        // Grup satu plan: plan milik seluruh grup dan tetap di run (KTD-G19).
+        if run.one_plan.is_none() {
+            cards[idx].plan = run.plan.take();
+        }
         Ok(())
     }
 
@@ -631,6 +639,12 @@ impl<D: Deps> RunService<D> {
             .collect();
         let input = self.load_group(&active).await?;
         let index = active.iter().position(|a| *a == id).unwrap_or_default();
+        let changed = Self::outdated_cards(run, cards, &input);
+        if !changed.is_empty() {
+            return self
+                .plan_outdated_turn(run, cards, next, &input, &changed)
+                .await;
+        }
         let planning = if run.group_plan {
             Planning::Plan {
                 skill: run.plan_skill.clone(),
@@ -640,7 +654,11 @@ impl<D: Deps> RunService<D> {
         };
         run.note = None;
         run.phase = RunPhase::Implement;
-        let message = self.card_message(run, &input, index, dev_note, &planning);
+        let mut message = self.card_message(run, &input, index, dev_note, &planning);
+        if run.one_plan.is_some() {
+            message.push_str("\n\n");
+            message.push_str(&super::one_plan::scope_note(key_of(&input.tasks[index])));
+        }
         self.save_group(run, cards).await?;
         let req = self.resume_request(run, message).await?;
         let summary = format!("Next card: {}", key_of(&input.tasks[index]));
@@ -751,9 +769,9 @@ fn new_primary(run: &RunRecord, cards: &[GroupCardRow]) -> Option<String> {
 }
 
 /// Task dan AC kartu grup.
-struct GroupInput {
-    tasks: Vec<Task>,
-    per_card: Vec<(String, Vec<AcItem>)>,
+pub(super) struct GroupInput {
+    pub(super) tasks: Vec<Task>,
+    pub(super) per_card: Vec<(String, Vec<AcItem>)>,
 }
 
 /// Run baru untuk worktree yang sudah disiapkan (repo utama pertama).

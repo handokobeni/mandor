@@ -280,6 +280,46 @@ pub fn pr_title(keys: &[&str], epic: Option<&str>, first_title: &str) -> String 
     }
 }
 
+/// AC satu kartu grup seperti saat plan grup disetujui (R25, KTD-G20).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AcSnap {
+    pub card: String,
+    pub ac_id: String,
+    pub text: String,
+}
+
+/// Kartu `remaining` (belum selesai) yang AC-nya berubah sejak plan grup
+/// disetujui (R25, KTD-G20): AC baru, teks berubah, atau AC hilang. `current`
+/// = AC kartu `remaining` sekarang; cuplikan kartu lain (sudah selesai)
+/// diabaikan. Urutan mengikuti `current` lalu cuplikan, tanpa duplikat.
+#[must_use]
+pub fn plan_outdated(approved: &[AcSnap], current: &[AcSnap], remaining: &[&str]) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    let mut flag = |card: &str| {
+        if !out.iter().any(|c| c == card) {
+            out.push(card.to_owned());
+        }
+    };
+    for now in current {
+        let same = approved
+            .iter()
+            .any(|a| a.card == now.card && a.ac_id == now.ac_id && a.text == now.text);
+        if !same {
+            flag(&now.card);
+        }
+    }
+    for a in approved {
+        let gone = remaining.contains(&a.card.as_str())
+            && !current
+                .iter()
+                .any(|c| c.card == a.card && c.ac_id == a.ac_id);
+        if gone {
+            flag(&a.card);
+        }
+    }
+    out
+}
+
 /// Keadaan daemon VM saat satu kartu grup selesai.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct PauseInput {
@@ -308,6 +348,50 @@ pub fn vm_pause(s: &PauseInput) -> Option<HoldReason> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn snap(card: &str, ac: &str, text: &str) -> AcSnap {
+        AcSnap {
+            card: card.to_owned(),
+            ac_id: ac.to_owned(),
+            text: text.to_owned(),
+        }
+    }
+
+    #[test]
+    fn plan_grup_usang_bila_ac_kartu_tersisa_berubah() {
+        let approved = [snap("c2", "a2", "Lama"), snap("c3", "a3", "Tetap")];
+        let same = [snap("c2", "a2", "Lama"), snap("c3", "a3", "Tetap")];
+        let rest = ["c2", "c3"];
+        assert!(plan_outdated(&approved, &same, &rest).is_empty());
+
+        let edited = [snap("c2", "a2", "Baru"), snap("c3", "a3", "Tetap")];
+        assert_eq!(
+            plan_outdated(&approved, &edited, &rest),
+            ["c2"],
+            "teks berubah"
+        );
+
+        let added = [
+            snap("c2", "a2", "Lama"),
+            snap("c3", "a3", "Tetap"),
+            snap("c3", "a4", "Tambahan"),
+        ];
+        assert_eq!(plan_outdated(&approved, &added, &rest), ["c3"], "AC baru");
+
+        let removed = [snap("c3", "a3", "Tetap")];
+        assert_eq!(
+            plan_outdated(&approved, &removed, &rest),
+            ["c2"],
+            "satu-satunya AC kartu c2 dihapus"
+        );
+    }
+
+    #[test]
+    fn kartu_selesai_tidak_dibaca_ulang_jadi_tidak_membatalkan_plan() {
+        let approved = [snap("c1", "a1", "Lama"), snap("c2", "a2", "Tetap")];
+        let current = [snap("c2", "a2", "Tetap")];
+        assert!(plan_outdated(&approved, &current, &["c2"]).is_empty());
+    }
 
     #[test]
     fn jeda_grup_vm_sebelum_kartu_berikutnya() {

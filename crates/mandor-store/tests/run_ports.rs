@@ -71,6 +71,12 @@ async fn run_bolak_balik_konflik_generasi_dan_pid_bisa_dikosongkan() {
         name: "kelola-mock".to_owned(),
         path: "/design/kelola-mock".into(),
     }];
+    // Plan grup satu plan dan cuplikan AC saat disetujui (R25 plan grup).
+    r.one_plan = Some(vec![mandor_domain::group::AcSnap {
+        card: "rec2".to_owned(),
+        ac_id: "ac2".to_owned(),
+        text: "AC kartu 2".to_owned(),
+    }]);
     runs.save(&r, 0, 2).await.unwrap();
     // Waktu dibuat dan diubah diisi oleh store.
     (r.created_at_ms, r.updated_at_ms) = (1, 2);

@@ -1213,3 +1213,153 @@ async fn deskripsi_pr_memperingatkan_selama_ada_kartu_waiting_fix() {
     let body = st.git.st().bodies.get(&url).cloned().unwrap();
     assert!(!body.contains("Do not merge"), "{body}");
 }
+
+// ---- Satu plan untuk grup (R25, U18) ----
+
+async fn one_plan(st: &Station, cards: &[&str]) -> mandor_usecase::run_ports::RunRecord {
+    st.svc
+        .start_one_plan_group(
+            &ids(cards),
+            &StartTarget::Repo("repo1".to_owned()),
+            None,
+            None,
+            &[],
+            |_| {},
+        )
+        .await
+        .unwrap()
+}
+
+/// Grup satu plan yang plannya sudah disetujui dan kartu pertama selesai
+/// dikerjakan (belum Next card).
+async fn one_plan_approved(lark: &FakeLark, clock: &FakeClock) -> (Station, String) {
+    let st = station(lark, clock, "ou_me");
+    let run = one_plan(&st, &["c1", "c2", "c3"]).await;
+    st.svc.sync().drain_outbox(20).await.unwrap();
+    st.agent
+        .last()
+        .finish("Plan grup: PGS-1401, PGS-1402, PGS-1403");
+    eventually(|| st.runs.only().state == RunState::AwaitingDev).await;
+    st.svc.approve_plan(&run.id, &[]).await.unwrap();
+    st.agent.last().done();
+    eventually(|| st.runs.only().state == RunState::AwaitingDev).await;
+    (st, run.id)
+}
+
+fn set_ac(lark: &FakeLark, ac: &str, text: &str) {
+    lark.acs.lock().unwrap().insert(
+        ac.to_owned(),
+        AcItem {
+            record_id: ac.to_owned(),
+            label: Some(ac.to_uppercase()),
+            text: text.to_owned(),
+            ..Default::default()
+        },
+    );
+}
+
+#[tokio::test]
+async fn covers_ae10_satu_plan_dengan_ac_semua_kartu_dan_satu_persetujuan() {
+    let (lark, clock) = setup();
+    let st = station(&lark, &clock, "ou_me");
+    let run = one_plan(&st, &["c1", "c2", "c3"]).await;
+    assert_eq!(run.phase, RunPhase::Plan);
+    let req = st.agent.last().req;
+    assert!(req.plan_mode);
+    for ac in ["AC kartu 1", "AC kartu 2", "AC kartu 3"] {
+        assert!(req.message.contains(ac), "plan grup memuat {ac}");
+    }
+    assert!(req.message.contains("one section per card"));
+
+    st.svc.sync().drain_outbox(20).await.unwrap();
+    st.agent.last().finish("Plan grup");
+    eventually(|| st.runs.only().state == RunState::AwaitingDev).await;
+    st.svc.approve_plan(&run.id, &[]).await.unwrap();
+    let msg = st.agent.last().req.message;
+    assert!(
+        msg.contains("PGS-1401"),
+        "hanya bagian kartu pertama: {msg}"
+    );
+    st.agent.last().done();
+    eventually(|| st.runs.only().state == RunState::AwaitingDev).await;
+
+    dirty(&st, "+fn daftar(){}");
+    st.svc.next_card(&run.id).await.unwrap();
+    let r = st.runs.only();
+    assert_eq!(r.phase, RunPhase::Implement, "tanpa giliran plan per kartu");
+    assert_eq!(r.plan.as_deref(), Some("Plan grup"), "plan tetap di run");
+    let req = st.agent.last().req;
+    assert!(!req.plan_mode);
+    assert!(req.message.contains("Kartu job"));
+    assert!(req.message.contains("approved group plan"));
+    let cards = st.svc.group_cards(&run.id).await.unwrap();
+    assert_eq!(cards[0].state, CardState::Done);
+    assert_eq!(cards[0].commits.len(), 1);
+}
+
+#[tokio::test]
+async fn covers_ae11_ac_kartu_tersisa_berubah_plan_direvisi_dan_disetujui_ulang() {
+    let (lark, clock) = setup();
+    let (st, run_id) = one_plan_approved(&lark, &clock).await;
+    set_ac(&lark, "ac3", "AC kartu 3 baru: ekspor CSV");
+
+    st.svc.next_card(&run_id).await.unwrap();
+    let r = st.runs.only();
+    assert_eq!(
+        r.phase,
+        RunPhase::Plan,
+        "plan grup menunggu persetujuan ulang"
+    );
+    let req = st.agent.last().req;
+    assert!(req.plan_mode);
+    assert!(req.message.contains("AC kartu 3 baru: ekspor CSV"));
+    assert!(req.message.contains("PGS-1403"));
+    let cards = st.svc.group_cards(&run_id).await.unwrap();
+    assert_eq!(
+        card_states(&cards),
+        [
+            ("c1", &CardState::Done),
+            ("c2", &CardState::Active),
+            ("c3", &CardState::Pending)
+        ]
+    );
+
+    st.agent.last().finish("Plan grup revisi");
+    eventually(|| st.runs.only().state == RunState::AwaitingDev).await;
+    st.svc.approve_plan(&run_id, &[]).await.unwrap();
+    assert!(st.agent.last().req.message.contains("PGS-1402"));
+    st.agent.last().done();
+    eventually(|| st.runs.only().state == RunState::AwaitingDev).await;
+
+    st.svc.next_card(&run_id).await.unwrap();
+    assert_eq!(
+        st.runs.only().phase,
+        RunPhase::Implement,
+        "cuplikan diperbarui saat disetujui ulang"
+    );
+}
+
+#[tokio::test]
+async fn ac_kartu_selesai_berubah_tidak_merevisi_plan_grup() {
+    let (lark, clock) = setup();
+    let (st, run_id) = one_plan_approved(&lark, &clock).await;
+    st.svc.next_card(&run_id).await.unwrap();
+    st.agent.last().done();
+    eventually(|| st.runs.only().state == RunState::AwaitingDev).await;
+    set_ac(&lark, "ac1", "AC kartu 1 diubah");
+
+    st.svc.next_card(&run_id).await.unwrap();
+    assert_eq!(st.runs.only().phase, RunPhase::Implement);
+    assert!(!st.agent.last().req.plan_mode);
+}
+
+#[tokio::test]
+async fn ac_kartu_tersisa_dihapus_merevisi_plan_grup() {
+    let (lark, clock) = setup();
+    let (st, run_id) = one_plan_approved(&lark, &clock).await;
+    lark.edit("c3", |t| t.ac_ids.clear());
+    st.svc.sync().poll(true, &[]).await.unwrap();
+
+    st.svc.next_card(&run_id).await.unwrap();
+    assert_eq!(st.runs.only().phase, RunPhase::Plan);
+}

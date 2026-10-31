@@ -50,6 +50,15 @@ Setelah giliran kartu selesai (state **Waiting for you**), panel **Group** di wo
 - Selama ada kartu Waiting Fix, deskripsi PR memuat **Do not merge: <kartu> is in Waiting Fix**. Mandor tidak memblokir merge di GitHub.
 - Bila PR grup sudah merged, perbaikan kartu itu pindah ke run lanjutan dari branch default (PR baru) dan tidak di-push ke branch grup.
 
+## 5a. Satu plan untuk seluruh grup
+
+Di dialog Start, bila memilih dua kartu atau lebih dengan Planning **Plan**, centang **One plan for all cards**:
+
+- Agent membuat satu plan yang mencakup AC semua kartu, satu bagian per kartu. Anda menyetujuinya sekali.
+- Kartu tetap dikerjakan dan di-commit satu per satu mengikuti bagiannya, tanpa giliran plan per kartu. Aturan lain (berhenti saat tersangkut, kartu dikeluarkan, Keep/Revert, Waiting Fix, laporan) tetap per kartu.
+- Sebelum setiap kartu dimulai, Mandor membaca ulang AC kartu yang belum selesai. Bila ada AC yang ditambah, diubah, atau dihapus, agent merevisi plan untuk kartu yang tersisa dan Anda menyetujuinya ulang. Perubahan AC pada kartu yang sudah di-commit tidak membatalkan plan; gerbang AC yang menanganinya.
+- **Approve & queue for VM** juga bisa dipakai untuk plan grup sebelum kartu pertama dikerjakan. VM mengerjakan semua kartu dari plan itu. Bila AC berubah di VM, grup diparkir **Group plan outdated**; ambil alih ke laptop, lalu **Continue** untuk revisi plan.
+
 ## 6. Grup di VM lembur
 
 Grup bisa dikerjakan VM lembur (lihat `docs/runbook/setup-vm.md`) sebagai satu item antrean.
@@ -94,5 +103,13 @@ Di Base salinan dengan repo `handokobeni/mandor-smoke` di VM dan sumber desain `
 5. **AE7**: pasang batas token kecil sehingga grup berhenti di kartu kedua; cek laporan.
 6. **R21**: jam lembur berakhir di tengah grup; cek baris "Continues" dan lanjut siklus berikutnya.
 7. **Take over grup**: ambil alih grup dengan PR draft ke laptop, lalu Send to review dari laptop.
+
+Catat hasil di `docs/progress/grouped-runs.md`.
+
+## 9. Uji langsung satu plan grup (U21)
+
+1. **AE10**: Start together 3 kartu dengan One plan for all cards. Cek satu plan dengan bagian per kartu, satu persetujuan, dan commit per kartu tanpa giliran plan.
+2. **AE11 laptop**: setelah kartu pertama di-commit, ubah AC kartu ketiga di Lark; tekan Next card. Cek plan direvisi dan menunggu persetujuan ulang.
+3. **F6 VM**: plan grup lalu Approve & queue for VM sampai PR draft.
 
 Catat hasil di `docs/progress/grouped-runs.md`.

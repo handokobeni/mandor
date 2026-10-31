@@ -386,3 +386,242 @@ async fn take_over_grup_planned_di_antrean_kembali_menunggu_persetujuan_plan() {
         assert_eq!(claim_daemon(&lark, id), Some(laptop_daemon(&laptop)));
     }
 }
+
+// ---- Satu plan untuk grup di VM (R24, R25, U19) ----
+
+/// Grup laptop satu plan dengan plan grup menunggu persetujuan.
+async fn one_plan_ready(laptop: &Station) -> RunRecord {
+    let run = laptop
+        .svc
+        .start_one_plan_group(&ids(&["c1", "c2"]), &repo1(), None, None, &[], |_| {})
+        .await
+        .unwrap();
+    laptop.svc.sync().drain_outbox(50).await.unwrap();
+    laptop.agent.last().finish(PLAN);
+    eventually(|| laptop.runs.all()[0].state == RunState::AwaitingDev).await;
+    laptop
+        .runs
+        .all()
+        .into_iter()
+        .find(|r| r.id == run.id)
+        .unwrap()
+}
+
+/// Grup satu plan dikirim ke VM dan kartu pertama mulai malam hari.
+async fn one_plan_on_vm(lark: &FakeLark, clock: &FakeClock, laptop: &Station, vm: &Station) {
+    let run = one_plan_ready(laptop).await;
+    let back = laptop.svc.prepare_for_vm(&run.id, &[]).await.unwrap();
+    enqueue(vm, laptop, &back, &[]).await;
+    laptop
+        .svc
+        .send_to_vm(&run.id, &vm_daemon(vm))
+        .await
+        .unwrap();
+    laptop.svc.sync().drain_outbox(50).await.unwrap();
+    vm.svc.sync().poll(true, &[]).await.unwrap();
+    at(lark, clock, wib(0, 20, 0));
+    vm.svc.overnight_tick().await.unwrap();
+    vm.svc.sync().drain_outbox(50).await.unwrap();
+}
+
+fn vm_dirty(vm: &Station) {
+    let wt = vm.runs.only().worktree.unwrap();
+    vm.git.set_changes(
+        &wt,
+        WorkChanges {
+            dirty: true,
+            unpushed: 0,
+            files: vec!["src/job.rs".to_owned()],
+            diff: "+job".to_owned(),
+        },
+    );
+}
+
+fn vm_cards(vm: &Station) -> Vec<CardState> {
+    let id = vm.runs.only().id;
+    vm.runs.cards.lock().unwrap()[&id]
+        .iter()
+        .map(|c| c.state.clone())
+        .collect()
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn f6_grup_satu_plan_dikerjakan_vm_tanpa_giliran_plan() {
+    let (lark, clock, laptop, vm) = pair(wib(0, 14, 0)).await;
+    let run = one_plan_ready(&laptop).await;
+    let back = laptop.svc.prepare_for_vm(&run.id, &[]).await.unwrap();
+    let snaps = back.work.group_acs.clone().expect("cuplikan plan grup");
+    let cards: Vec<&str> = snaps.iter().map(|s| s.card.as_str()).collect();
+    assert_eq!(cards, ["c1", "c2"]);
+
+    enqueue(&vm, &laptop, &back, &[]).await;
+    laptop
+        .svc
+        .send_to_vm(&run.id, &vm_daemon(&vm))
+        .await
+        .unwrap();
+    laptop.svc.sync().drain_outbox(50).await.unwrap();
+    vm.svc.sync().poll(true, &[]).await.unwrap();
+    at(&lark, &clock, wib(0, 20, 0));
+    vm.svc.overnight_tick().await.unwrap();
+    vm.svc.sync().drain_outbox(50).await.unwrap();
+    let vm_run = vm.runs.only();
+    assert!(vm_run.one_plan.is_some());
+    let first = vm.agent.last().req.message;
+    assert!(first.contains(PLAN) && first.contains("section for PGS-1401"));
+
+    vm_dirty(&vm);
+    vm.agent.last().done();
+    eventually(|| vm.agent.count() == 2).await;
+    let req = vm.agent.last().req;
+    assert!(!req.plan_mode);
+    assert!(req.message.contains("section for PGS-1402"));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn covers_ae11_vm_ac_kartu_berikutnya_berubah_grup_diparkir_plan_outdated() {
+    let (lark, clock, laptop, vm) = pair(wib(0, 14, 0)).await;
+    one_plan_on_vm(&lark, &clock, &laptop, &vm).await;
+    lark.acs.lock().unwrap().insert(
+        "ac2".to_owned(),
+        AcItem {
+            record_id: "ac2".to_owned(),
+            label: Some("AC-2".to_owned()),
+            text: "AC kartu 2 diubah".to_owned(),
+            ..Default::default()
+        },
+    );
+
+    vm_dirty(&vm);
+    vm.agent.last().done();
+    eventually(|| vm.runs.only().state == RunState::Held).await;
+    let r = vm.runs.only();
+    assert_eq!(
+        r.hold.map(|h| h.reason),
+        Some(mandor_domain::HoldReason::PlanOutdated)
+    );
+    assert_eq!(vm_cards(&vm), [CardState::Done, CardState::Pending]);
+    assert_eq!(vm.agent.count(), 1, "kartu kedua tidak dimulai");
+    assert!(
+        vm.overnight.ids().is_empty(),
+        "tidak diantre ulang otomatis"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn grup_planned_satu_plan_dengan_ac_berubah_sebelum_mulai_ditahan() {
+    let (lark, clock, laptop, vm) = pair(wib(0, 14, 0)).await;
+    let run = one_plan_ready(&laptop).await;
+    let back = laptop.svc.prepare_for_vm(&run.id, &[]).await.unwrap();
+    enqueue(&vm, &laptop, &back, &[]).await;
+    laptop
+        .svc
+        .send_to_vm(&run.id, &vm_daemon(&vm))
+        .await
+        .unwrap();
+    laptop.svc.sync().drain_outbox(50).await.unwrap();
+    lark.acs.lock().unwrap().insert(
+        "ac2".to_owned(),
+        AcItem {
+            record_id: "ac2".to_owned(),
+            label: Some("AC-2".to_owned()),
+            text: "AC kartu 2 diubah sore".to_owned(),
+            ..Default::default()
+        },
+    );
+    vm.svc.sync().poll(true, &[]).await.unwrap();
+    at(&lark, &clock, wib(0, 20, 0));
+    vm.svc.overnight_tick().await.unwrap();
+    let r = vm.runs.only();
+    assert_eq!(r.state, RunState::Held);
+    assert_eq!(
+        r.hold.map(|h| h.reason),
+        Some(mandor_domain::HoldReason::PlanOutdated)
+    );
+    assert_eq!(vm.agent.count(), 0, "tidak ada giliran agent");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn take_over_grup_plan_outdated_laptop_merevisi_plan() {
+    let (lark, clock, laptop, vm) = pair(wib(0, 14, 0)).await;
+    one_plan_on_vm(&lark, &clock, &laptop, &vm).await;
+    lark.acs.lock().unwrap().insert(
+        "ac2".to_owned(),
+        AcItem {
+            record_id: "ac2".to_owned(),
+            label: Some("AC-2".to_owned()),
+            text: "AC kartu 2 diubah".to_owned(),
+            ..Default::default()
+        },
+    );
+    vm_dirty(&vm);
+    vm.agent.last().done();
+    eventually(|| vm.runs.only().state == RunState::Held).await;
+
+    let handback = vm.svc.handoff("c1", &laptop_daemon(&laptop)).await.unwrap();
+    assert!(handback.carry.one_plan.is_some(), "plan grup ikut");
+    vm.svc.sync().drain_outbox(50).await.unwrap();
+    laptop.svc.sync().poll(true, &[]).await.unwrap();
+    let back_run = laptop
+        .svc
+        .takeover(
+            "c1",
+            &handback.target.clone().unwrap(),
+            handback.planned.as_ref(),
+            &handback.carry,
+        )
+        .await
+        .unwrap();
+    assert!(back_run.one_plan.is_some());
+    laptop.svc.continue_group(&back_run.id).await.unwrap();
+    let r = laptop
+        .runs
+        .all()
+        .into_iter()
+        .find(|r| r.id == back_run.id)
+        .unwrap();
+    assert_eq!(r.phase, RunPhase::Plan, "plan grup direvisi di laptop");
+    assert!(
+        laptop
+            .agent
+            .last()
+            .req
+            .message
+            .contains("AC kartu 2 diubah")
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn take_over_grup_planned_satu_plan_di_antrean_tetap_satu_plan() {
+    let (_lark, _clock, laptop, vm) = pair(wib(0, 14, 0)).await;
+    let run = one_plan_ready(&laptop).await;
+    let back = laptop.svc.prepare_for_vm(&run.id, &[]).await.unwrap();
+    enqueue(&vm, &laptop, &back, &[]).await;
+    laptop
+        .svc
+        .send_to_vm(&run.id, &vm_daemon(&vm))
+        .await
+        .unwrap();
+    laptop.svc.sync().drain_outbox(50).await.unwrap();
+    vm.svc.sync().poll(true, &[]).await.unwrap();
+    vm.svc.overnight_tick().await.unwrap();
+
+    let handback = vm.svc.handoff("c1", &laptop_daemon(&laptop)).await.unwrap();
+    vm.svc.sync().drain_outbox(50).await.unwrap();
+    laptop.svc.sync().poll(true, &[]).await.unwrap();
+    let back_run = laptop
+        .svc
+        .takeover(
+            "c1",
+            &handback.target.clone().unwrap(),
+            handback.planned.as_ref(),
+            &handback.carry,
+        )
+        .await
+        .unwrap();
+    assert_eq!(back_run.phase, RunPhase::Plan);
+    assert!(
+        back_run.one_plan.is_some(),
+        "kembali sebagai grup satu plan"
+    );
+}

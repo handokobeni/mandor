@@ -65,6 +65,17 @@ struct PlannedJson {
     /// Tidak ada pada baris dari versi sebelum daftar repo dibawa.
     #[serde(default)]
     repos: Vec<String>,
+    /// Grup satu plan (R25 plan grup); tidak ada pada paket lain.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    group_acs: Option<Vec<AcSnapJson>>,
+}
+
+/// Bentuk simpan [`mandor_domain::group::AcSnap`].
+#[derive(Serialize, Deserialize)]
+struct AcSnapJson {
+    card: String,
+    ac_id: String,
+    text: String,
 }
 
 impl From<&PlannedWork> for PlannedJson {
@@ -83,6 +94,15 @@ impl From<&PlannedWork> for PlannedJson {
                 .collect(),
             laptop_design: w.laptop_design.clone(),
             repos: w.repos.clone(),
+            group_acs: w.group_acs.as_ref().map(|v| {
+                v.iter()
+                    .map(|a| AcSnapJson {
+                        card: a.card.clone(),
+                        ac_id: a.ac_id.clone(),
+                        text: a.text.clone(),
+                    })
+                    .collect()
+            }),
         }
     }
 }
@@ -107,6 +127,15 @@ impl TryFrom<PlannedJson> for PlannedWork {
             design,
             laptop_design: j.laptop_design,
             repos: j.repos,
+            group_acs: j.group_acs.map(|v| {
+                v.into_iter()
+                    .map(|a| mandor_domain::group::AcSnap {
+                        card: a.card,
+                        ac_id: a.ac_id,
+                        text: a.text,
+                    })
+                    .collect()
+            }),
         })
     }
 }

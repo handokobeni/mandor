@@ -120,6 +120,7 @@ impl<D: Deps> RunService<D> {
             draft: run.draft_pending.is_some(),
             review,
             cards: self.runs.cards(&run.id).await?,
+            one_plan: run.one_plan.clone(),
         })
     }
 

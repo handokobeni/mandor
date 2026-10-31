@@ -27,6 +27,9 @@ pub struct PlannedWork {
     /// Repo run laptop: satu repo, atau anggota workspace. Kosong untuk paket
     /// dari laptop versi lama.
     pub repos: Vec<String>,
+    /// Grup satu plan: AC kartu saat plan grup disetujui (R25 plan grup,
+    /// KTD-G21); `None` untuk plan kartu pertama atau kartu tunggal.
+    pub group_acs: Option<Vec<crate::group::AcSnap>>,
 }
 
 impl PlannedWork {
@@ -372,6 +375,7 @@ mod tests {
             }],
             laptop_design: Vec::new(),
             repos: Vec::new(),
+            group_acs: None,
         };
         assert!(!work.follows_design());
         work.design[0].design = Design::FollowDesign;
@@ -409,6 +413,7 @@ mod tests {
             design: Vec::new(),
             laptop_design: Vec::new(),
             repos: ids(&["web", "api"]),
+            group_acs: None,
         };
         assert!(work.same_repos(&ids(&["api", "web"])), "urutan diabaikan");
         assert!(!work.same_repos(&ids(&["web"])), "workspace ke satu repo");

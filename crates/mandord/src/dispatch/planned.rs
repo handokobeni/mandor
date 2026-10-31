@@ -1,11 +1,11 @@
 //! Konversi DTO kartu Planned dan target antrean (plan 2026-10-30-001, U6).
 
-use mandor_domain::group::CardState;
+use mandor_domain::group::{AcSnap, CardState};
 use mandor_domain::planned::{DesignMark, PlannedWork};
 use mandor_domain::{AcRow, Design, RowStatus, Verdict};
 use mandor_protocol::{
-    AcRowView, CardCommitDto, CarriedCardDto, CarriedReviewDto, DesignMarkDto, PlannedWorkDto,
-    RpcError, StartWorkspace,
+    AcRowView, AcSnapDto, CardCommitDto, CarriedCardDto, CarriedReviewDto, DesignMarkDto,
+    PlannedWorkDto, RpcError, StartWorkspace,
 };
 use mandor_usecase::run_ports::{CardCommit, GroupCardRow};
 use mandor_usecase::{CarriedReview, StartTarget};
@@ -30,7 +30,30 @@ pub(super) fn planned_dto(w: &PlannedWork) -> PlannedWorkDto {
             .collect(),
         laptop_design: w.laptop_design.clone(),
         repos: w.repos.clone(),
+        group_acs: w.group_acs.as_deref().map(snaps_dto),
     }
+}
+
+/// Cuplikan AC plan grup menjadi DTO.
+pub(super) fn snaps_dto(v: &[AcSnap]) -> Vec<AcSnapDto> {
+    v.iter()
+        .map(|a| AcSnapDto {
+            card: a.card.clone(),
+            ac_id: a.ac_id.clone(),
+            text: a.text.clone(),
+        })
+        .collect()
+}
+
+/// DTO menjadi cuplikan AC plan grup.
+pub(super) fn snaps_of(v: Vec<AcSnapDto>) -> Vec<AcSnap> {
+    v.into_iter()
+        .map(|a| AcSnap {
+            card: a.card,
+            ac_id: a.ac_id,
+            text: a.text,
+        })
+        .collect()
 }
 
 /// DTO menjadi paket plan; nilai Design yang tidak dikenal ditolak.
@@ -51,6 +74,7 @@ pub(super) fn planned_of(d: PlannedWorkDto) -> Result<PlannedWork, RpcError> {
         design,
         laptop_design: d.laptop_design,
         repos: d.repos,
+        group_acs: d.group_acs.map(snaps_of),
     })
 }
 
@@ -222,6 +246,11 @@ mod tests {
             }],
             laptop_design: vec!["ds1".to_owned()],
             repos: vec!["web".to_owned(), "api".to_owned()],
+            group_acs: Some(vec![AcSnap {
+                card: "c2".to_owned(),
+                ac_id: "ac2".to_owned(),
+                text: "AC kartu 2".to_owned(),
+            }]),
         };
         let dto = planned_dto(&w);
         let json = serde_json::to_string(&dto).unwrap();

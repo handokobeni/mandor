@@ -37,6 +37,9 @@ pub struct VmCarry {
     /// Kartu grup beserta state, commit, dan plan-nya (KTD-G15 plan grup);
     /// kosong untuk kartu tunggal.
     pub cards: Vec<GroupCardRow>,
+    /// Grup satu plan: cuplikan AC saat plan grup terakhir disetujui (R25,
+    /// KTD-G21); `None` untuk plan per kartu atau kartu tunggal.
+    pub one_plan: Option<Vec<mandor_domain::group::AcSnap>>,
 }
 
 impl<D: Deps> RunService<D> {
@@ -209,8 +212,13 @@ impl<D: Deps> RunService<D> {
         if carry.cards.is_empty() {
             self.runs.create(&run, now).await?;
         } else {
-            // Kartu grup yang tersisa di laptop menunggu persetujuan plan (R6).
-            run.group_plan = true;
+            // Kartu grup yang tersisa di laptop menunggu persetujuan plan (R6),
+            // per kartu atau sekali untuk plan grup (R25).
+            run.one_plan = carry
+                .one_plan
+                .clone()
+                .or_else(|| planned.and_then(|p| p.group_acs.clone()));
+            run.group_plan = run.one_plan.is_none();
             self.runs.create_group(&run, &carry.cards, now).await?;
         }
         if let Some(review) = &carry.review {

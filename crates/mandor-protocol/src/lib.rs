@@ -336,6 +336,7 @@ fn group_bindings() -> Result<Vec<(&'static str, String)>, String> {
         )?,
         one("CarriedCardDto.ts", CarriedCardDto::export_to_string(&cfg))?,
         one("CardCommitDto.ts", CardCommitDto::export_to_string(&cfg))?,
+        one("AcSnapDto.ts", AcSnapDto::export_to_string(&cfg))?,
         one(
             "PrepareForVmParams.ts",
             PrepareForVmParams::export_to_string(&cfg),

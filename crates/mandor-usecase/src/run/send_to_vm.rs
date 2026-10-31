@@ -117,6 +117,11 @@ impl<D: Deps> RunService<D> {
             self.git.push(&m.repo, &m.worktree, &branch).await?;
         }
         self.reviews.save_ac_rows(run_id, &rows).await?;
+        // Grup satu plan: plan grup disetujui saat diantre (R24, R25).
+        let group_acs = match run.one_plan {
+            Some(_) => Some(self.one_plan_snapshot(run_id).await?),
+            None => None,
+        };
 
         Ok(VmHandover {
             work: PlannedWork {
@@ -132,6 +137,7 @@ impl<D: Deps> RunService<D> {
                     .collect(),
                 laptop_design: run.design.iter().map(|d| d.id.clone()).collect(),
                 repos: target.repo_ids(),
+                group_acs,
             },
             target,
             cards,

@@ -256,6 +256,23 @@ describe('aksi kartu VM', () => {
     });
   });
 
+  it('Take over grup satu plan: cuplikan AC plan grup ikut ke laptop', async () => {
+    const [store, vm] = await attached();
+    const cards = [
+      { record_id: 'h', state: 'done', changed_in_lark: false, kept_reason: null, commits: [], plan: null, fix_requested_by: null, quiet_until_ms: null, in_fix: false, fix_replies: [] }
+    ];
+    const one_plan = [{ card: 'i', ac_id: 'ac2', text: 'AC kartu 2' }];
+    vm.handback = { branch: 'b', repo_id: 'repo1', workspace: null, planned: null, draft: false, review: null, cards, one_plan };
+    const laptop = new FakeVm();
+    await store.takeover('h', laptop, 'beni@laptop~laptop');
+    expect(laptop.calls.find(([m]) => m === 'runs.takeover')?.[1]).toEqual({
+      record_id: 'h',
+      repo_id: 'repo1',
+      cards,
+      one_plan
+    });
+  });
+
   it('Take over workspace: workspace laptop dicari dari repo-nya, id boleh beda dengan VM', async () => {
     const [store, vm] = await attached();
     vm.handback = { branch: 'b', repo_id: null, workspace: { id: 'vm-ws', repo_ids: ['web', 'api'] }, planned: null };

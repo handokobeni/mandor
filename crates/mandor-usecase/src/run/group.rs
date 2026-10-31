@@ -227,11 +227,17 @@ impl<D: Deps> RunService<D> {
         run.design = design.0.to_vec();
         run.design_notes = design.1.to_vec();
         run.vm_start = crate::run_ports::VmStart::from_start_now(start_now);
+        // Grup satu plan (R25): plan grup berlaku bila AC belum berubah sejak
+        // disetujui di laptop.
+        run.one_plan.clone_from(&work.group_acs);
         let mut cards: Vec<GroupCardRow> = record_ids
             .iter()
             .map(|id| GroupCardRow::pending(id))
             .collect();
-        cards[0].state = CardState::Active;
+        let outdated = Self::outdated_cards(&run, &cards, &input);
+        if outdated.is_empty() {
+            cards[0].state = CardState::Active;
+        }
         let root = run.workspace.as_ref().map(|w| w.root.clone());
         let started = async {
             self.runs.create_group(&run, &cards, self.now()).await?;
@@ -249,9 +255,24 @@ impl<D: Deps> RunService<D> {
                     ));
                 }
             }
+            if !outdated.is_empty() {
+                let note = format!(
+                    "The acceptance criteria of {} changed after the group plan was approved. \
+                     Take the group over to the laptop to approve a revised plan.",
+                    self.keys_of(&outdated).await.join(", ")
+                );
+                let mut held = run.clone();
+                return self
+                    .hold(&mut held, HoldReason::PlanOutdated, Some(note))
+                    .await;
+            }
             let mut message = self.approved_plan_turn(&run, &work.plan).await?;
             message.push_str("\n\n");
             message.push_str(&flow_note(&input.tasks, 0, None));
+            if run.one_plan.is_some() {
+                message.push_str("\n\n");
+                message.push_str(&super::one_plan::scope_note(key_of(&input.tasks[0])));
+            }
             let req = self.resume_request(&mut run, message).await?;
             let summary = format!(
                 "Started: implement the approved plan.\n\nGroup: {}",
@@ -689,6 +710,15 @@ impl<D: Deps> RunService<D> {
         if let Err(e) = self.sync.release_claim(record_id).await {
             tracing::warn!(record_id, error = %e, "gagal melepas klaim kartu grup");
         }
+    }
+
+    /// Kunci kartu-kartu dari cache, atau ID record.
+    pub(super) async fn keys_of(&self, record_ids: &[String]) -> Vec<String> {
+        let mut out = Vec::with_capacity(record_ids.len());
+        for id in record_ids {
+            out.push(self.key_or_id(id).await);
+        }
+        out
     }
 
     /// Kunci kartu dari cache, atau ID record.

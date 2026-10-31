@@ -472,6 +472,10 @@ pub struct TakeoverParams {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub cards: Option<Vec<CarriedCardDto>>,
+    /// Grup satu plan dari VM: cuplikan AC plan grup terakhir (R25).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub one_plan: Option<Vec<AcSnapDto>>,
 }
 
 /// Status Design satu AC hasil tahap plan.
@@ -495,6 +499,18 @@ pub struct PlannedWorkDto {
     /// dengan repo berbeda; kosong dari laptop versi lama.
     #[serde(default)]
     pub repos: Vec<String>,
+    /// Grup satu plan: AC kartu saat plan grup disetujui (R25 plan grup).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub group_acs: Option<Vec<AcSnapDto>>,
+}
+
+/// AC satu kartu grup seperti saat plan grup disetujui.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+pub struct AcSnapDto {
+    pub card: String,
+    pub ac_id: String,
+    pub text: String,
 }
 
 /// Parameter `runs.prepare_for_vm`.
@@ -1183,6 +1199,10 @@ pub struct HandoffResult {
     /// `runs.takeover` (KTD-G15 plan grup).
     #[serde(default)]
     pub cards: Vec<CarriedCardDto>,
+    /// Grup satu plan: cuplikan AC plan grup terakhir; diteruskan ke
+    /// `runs.takeover` (R25 plan grup).
+    #[serde(default)]
+    pub one_plan: Option<Vec<AcSnapDto>>,
 }
 
 /// Satu kartu grup yang dibawa dari VM ke laptop.

@@ -16,7 +16,9 @@ use mandor_usecase::overnight::{
 };
 use serde_json::{Value, json};
 
-use super::planned::{card_dto, planned_dto, planned_of, review_dto, target_of, target_view};
+use super::planned::{
+    card_dto, planned_dto, planned_of, review_dto, snaps_dto, target_of, target_view,
+};
 use super::{AppDispatch, ok, params, rejected, run_error, store_error, sync_error};
 use crate::session::LarkSession;
 
@@ -66,6 +68,7 @@ impl AppDispatch {
                     draft: back.carry.draft,
                     review: back.carry.review.as_ref().map(review_dto),
                     cards: back.carry.cards.iter().map(card_dto).collect(),
+                    one_plan: back.carry.one_plan.as_deref().map(snaps_dto),
                 })
             }
             other => self.overnight_queue_call(&s, other, v).await,

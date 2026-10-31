@@ -62,7 +62,7 @@ export function groupAction(run: {
 
 const STATE_LABELS: Record<string, string> = {
   pending: 'Waiting',
-  active: 'Working',
+  active: 'Current',
   done: 'Done',
   removed_changed: 'Removed: changed in Lark',
   removed_by_dev: 'Removed',

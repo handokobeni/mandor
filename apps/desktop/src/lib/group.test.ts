@@ -153,6 +153,7 @@ describe('teks kartu', () => {
   it('label state dan kartu yang menunggu keputusan', () => {
     expect(stateLabel('removed_reverted')).toBe('Reverted');
     expect(stateLabel('pending')).toBe('Waiting');
+    expect(stateLabel('active'), 'kartu giliran, juga saat plan menunggu persetujuan').toBe('Current');
     const cards = [
       card('1', 'done', { changed_in_lark: true }),
       card('2', 'done', { changed_in_lark: true, kept_reason: 'QA' }),

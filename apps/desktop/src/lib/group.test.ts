@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  candidatesParams,
   changedCards,
   groupAction,
   headerCard,
@@ -107,6 +108,16 @@ describe('pemilihan kartu', () => {
     order = toggleCard(order, '1401');
     expect(order).toEqual(['1403', '1402', '1401']);
     expect(moveCard(order, '1403', -1)).toEqual(order);
+  });
+});
+
+describe('kandidat grup', () => {
+  it('kartu di antrean VM dikirim agar tidak bisa dipilih', () => {
+    expect(candidatesParams('a', new Set(['b', 'c']))).toEqual({ record_id: 'a', queued: ['b', 'c'] });
+  });
+
+  it('VM tidak tersambung: tanpa daftar antrean', () => {
+    expect(candidatesParams('a', null)).toEqual({ record_id: 'a' });
   });
 });
 

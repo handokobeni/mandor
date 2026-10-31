@@ -6,7 +6,9 @@
   import ArrowUp from '@lucide/svelte/icons/arrow-up';
   import { Button } from '#lib/components/ui/button/index.ts';
   import { Checkbox } from '#lib/components/ui/checkbox/index.ts';
-  import { cardKey, initialOrder, moveCard, toggleCard } from '#lib/group.ts';
+  import { untrack } from 'svelte';
+  import { candidatesParams, cardKey, initialOrder, moveCard, toggleCard } from '#lib/group.ts';
+  import { overnight } from '#lib/stores/overnight.svelte.ts';
   import type { GroupCandidateView } from '#lib/protocol/GroupCandidateView.ts';
   import type { Rpc } from '#lib/rpc.ts';
 
@@ -15,13 +17,27 @@
     recordId: string;
     /** Kartu terpilih dalam urutan pengerjaan; satu kartu = Start biasa. */
     order: string[];
+    /** Judul pemilih; "Queue together" di tab Overnight (R20). */
+    heading?: string;
+    /** Penjelasan di bawah judul. */
+    help?: string;
   }
-  let { rpc, recordId, order = $bindable() }: Props = $props();
+  let {
+    rpc,
+    recordId,
+    order = $bindable(),
+    heading = 'Start together',
+    help = 'Other cards in this epic assigned to you. Checked cards are built one after another in one branch and one PR, in this order.'
+  }: Props = $props();
 
   let candidates = $state<GroupCandidateView[] | null>(null);
   $effect(() => {
     rpc
-      .request<GroupCandidateView[]>('groups.candidates', { record_id: recordId })
+      .request<GroupCandidateView[]>(
+        'groups.candidates',
+        // Antrean dibaca sekali; refresh antrean tidak mengulang pilihan dev.
+        candidatesParams(recordId, untrack(() => overnight.queuedIds))
+      )
       .then((list) => {
         candidates = list;
         // Awalnya hanya kartu ini; dev mencentang kartu lain untuk Start together.
@@ -43,12 +59,9 @@
 
 {#if selectable.length > 1}
   <div class="grid gap-1.5">
-    <span class="text-sm font-medium">Start together <span class="muted font-normal">(optional)</span></span>
-    <p class="muted text-[length:var(--text-sm)]">
-      Other cards in this epic assigned to you. Checked cards are built one after another in one branch and one PR, in
-      this order.
-    </p>
-    <div class="repo-pick scroll-area" role="group" aria-label="Cards to start together">
+    <span class="text-sm font-medium">{heading} <span class="muted font-normal">(optional)</span></span>
+    <p class="muted text-[length:var(--text-sm)]">{help}</p>
+    <div class="repo-pick scroll-area" role="group" aria-label="Cards to {heading.toLowerCase()}">
       {#each ordered as c, i (c.record_id)}
         <div class="pick-row">
           <Checkbox checked onCheckedChange={() => (order = toggleCard(order, c.record_id))} aria-label="Include {cardKey(c)}" />

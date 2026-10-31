@@ -57,6 +57,22 @@ let queue: QueueItemView[] = [
     design_sources: [],
     group: [],
     group_keys: []
+  },
+  {
+    record_id: 'recG1',
+    key: 'PGS-1401',
+    title: 'Job list',
+    repo_id: 'pegasus-web',
+    workspace_id: null,
+    note: null,
+    start_now: false,
+    added_at_ms: Date.now() - HOUR / 4,
+    held: false,
+    planned_state: 'waiting',
+    planned_reason: null,
+    design_sources: ['kelola-mock'],
+    group: ['recG1', 'recG2', 'recG3'],
+    group_keys: ['PGS-1401', 'PGS-1402', 'PGS-1403']
   }
 ];
 const designSources = [{ id: 'ds1', name: 'kelola-mock', kind: 'folder', path: '/srv/design/kelola-mock', ready: true, status: 'Ready' }];
@@ -121,7 +137,11 @@ let cards: ReportCardView[] = [
     outcome: 'sent_to_review',
     pr_url: 'https://github.com/talentlytica/pegasus-web/pull/409',
     ac_pass: 5
-  })
+  }),
+  // Grup VM tertahan karena kartu ter-commit berubah di Lark (R13, KTD-G18).
+  rc({ record_id: 'recK1', key: 'PGS-1431', title: 'Position list', run_id: 'vmg', outcome: 'held', hold_reason: 'card_removed', hold_note: 'PGS-1432 changed in Lark after it was committed', group_card: 'committed', ac_pass: 5 }),
+  rc({ record_id: 'recK2', key: 'PGS-1432', title: 'Create a position', run_id: 'vmg', outcome: 'held', hold_reason: 'card_removed', group_card: 'committed', changed_in_lark: true, ac_pass: 3 }),
+  rc({ record_id: 'recK3', key: 'PGS-1433', title: 'Edit a position', run_id: 'vmg', outcome: 'held', hold_reason: 'card_removed', group_card: 'pending' })
 ];
 
 function handle(method: string, p: Record<string, unknown>): unknown {
@@ -250,6 +270,9 @@ function handle(method: string, p: Record<string, unknown>): unknown {
         c.run_id === p.run_id ? { ...c, outcome: 'draft', hold_reason: null, hold_note: null } : c
       );
       return {};
+    case 'runs.gate_card_decision':
+      cards = cards.map((c) => (c.run_id === p.run_id && c.record_id === p.record_id ? { ...c, changed_in_lark: false } : c));
+      return { outcome: p.decision === 'keep' ? 'kept' : 'reverted' };
     case 'ledger.get':
       return {
         run_id: p.run_id,
@@ -268,7 +291,7 @@ function handle(method: string, p: Record<string, unknown>): unknown {
     case 'runs.handoff':
       cards = cards.filter((c) => c.record_id !== p.record_id);
       queue = queue.filter((q) => q.record_id !== p.record_id);
-      return { branch: 'beni/pgs-1423', repo_id: 'pegasus-web', workspace: null, planned: null };
+      return { branch: 'beni/pgs-1423', repo_id: 'pegasus-web', workspace: null, planned: null, draft: false, review: null, cards: [] };
     default:
       return {};
   }

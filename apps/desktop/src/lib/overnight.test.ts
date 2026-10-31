@@ -13,6 +13,11 @@ import {
   defaultVmTarget,
   vmTargetRepos,
   queueRowMode,
+  queueGroupText,
+  groupCardLabel,
+  holdLabel,
+  leadRow,
+  queueAddLabel,
   queueStepLabel,
   showQueueForVm,
   formatTokens,
@@ -258,6 +263,44 @@ describe('antre kartu Planned ke VM', () => {
   });
 });
 
+describe('laporan grup', () => {
+  const row = (record_id: string, run_id: string) => ({ record_id, run_id });
+
+  it('aksi run hanya di baris pertama tiap run; kartu tunggal selalu baris pertama', () => {
+    const cards = [row('a', 'r1'), row('b', 'r1'), row('c', 'r2')];
+    expect(cards.map((c) => leadRow(c, cards))).toEqual([true, false, true]);
+  });
+
+  it('label keadaan kartu grup', () => {
+    expect(groupCardLabel('committed')).toBe('Committed');
+    expect(groupCardLabel('active')).toBe('In progress');
+    expect(groupCardLabel('pending')).toBe('Not started');
+    expect(groupCardLabel('removed')).toBe('Removed');
+  });
+
+  it('alasan grup tertahan atau berjeda', () => {
+    expect(holdLabel('card_removed')).toBe('Card changed in Lark');
+    expect(holdLabel('window_ended')).toBe('Paused at the end of the window');
+    expect(holdLabel('yield_to_fix')).toBe('Paused for a Waiting Fix');
+  });
+});
+
+describe('antrean grup', () => {
+  it('baris grup: jumlah kartu dan kartu sesudahnya; kartu tunggal tanpa teks grup', () => {
+    expect(queueGroupText({ record_id: 'a', group: ['a', 'b', 'c'], group_keys: ['PGS-1', 'PGS-2', 'PGS-3'] })).toEqual({
+      count: 3,
+      then: 'then PGS-2, PGS-3'
+    });
+    expect(queueGroupText({ record_id: 'a', group: [], group_keys: [] })).toBeNull();
+  });
+
+  it('tombol tambah: Add to queue untuk satu kartu, Queue N cards together untuk grup', () => {
+    expect(queueAddLabel(0)).toBe('Add to queue');
+    expect(queueAddLabel(1)).toBe('Add to queue');
+    expect(queueAddLabel(3)).toBe('Queue 3 cards together');
+  });
+});
+
 describe('tampilan kartu Planned', () => {
   it('baris antrean: serah-terima tertunda, Planned, atau No plan', () => {
     expect(queueRowMode({ planned_state: 'handover_pending' })).toBe('pending');
@@ -266,12 +309,15 @@ describe('tampilan kartu Planned', () => {
     expect(queueRowMode({ planned_state: null })).toBe('no_plan');
   });
 
-  it('tombol antre ke VM tersembunyi untuk run grup dan saat VM belum siap', () => {
+  it('tombol antre ke VM: kartu tunggal, atau grup selama kartu pertama masih di-plan (R24); tersembunyi saat VM belum siap', () => {
     const ready = { statusLoaded: true, vmRole: true, larkReady: true };
-    expect(showQueueForVm(ready, false)).toBe(true);
-    expect(showQueueForVm(ready, true)).toBe(false);
-    expect(showQueueForVm({ ...ready, statusLoaded: false }, false)).toBe(false);
-    expect(showQueueForVm({ ...ready, vmRole: false }, false)).toBe(false);
-    expect(showQueueForVm({ ...ready, larkReady: false }, false)).toBe(false);
+    const firstPlanning = [{ state: 'active' }, { state: 'pending' }];
+    expect(showQueueForVm(ready, [])).toBe(true);
+    expect(showQueueForVm(ready, firstPlanning)).toBe(true);
+    expect(showQueueForVm(ready, [{ state: 'done' }, { state: 'active' }]), 'kartu pertama sudah selesai').toBe(false);
+    expect(showQueueForVm(ready, [{ state: 'removed_by_dev' }, { state: 'active' }])).toBe(false);
+    expect(showQueueForVm({ ...ready, statusLoaded: false }, [])).toBe(false);
+    expect(showQueueForVm({ ...ready, vmRole: false }, firstPlanning)).toBe(false);
+    expect(showQueueForVm({ ...ready, larkReady: false }, [])).toBe(false);
   });
 });

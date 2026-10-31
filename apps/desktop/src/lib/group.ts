@@ -2,6 +2,7 @@
 // pemilihan dan urutan kartu, serta pengelompokan buku AC per kartu.
 import type { AcRowView } from './protocol/AcRowView.ts';
 import type { GroupCandidateView } from './protocol/GroupCandidateView.ts';
+import type { GroupCandidatesParams } from './protocol/GroupCandidatesParams.ts';
 import type { GroupCardView } from './protocol/GroupCardView.ts';
 
 export interface Progress {
@@ -93,6 +94,14 @@ export function changedCards(cards: GroupCardView[]): GroupCardView[] {
 }
 
 /** Urutan awal: semua kandidat yang bisa dipilih, urut kandidat. */
+/**
+ * Parameter `groups.candidates`; `queued` = kartu di antrean VM sehingga
+ * tidak bisa dipilih (KTD-G17). `null` bila VM tidak tersambung.
+ */
+export function candidatesParams(recordId: string, queued: Set<string> | null): GroupCandidatesParams {
+  return queued ? { record_id: recordId, queued: [...queued] } : { record_id: recordId };
+}
+
 export function initialOrder(candidates: GroupCandidateView[]): string[] {
   return candidates.filter((c) => !c.blocked).map((c) => c.record_id);
 }

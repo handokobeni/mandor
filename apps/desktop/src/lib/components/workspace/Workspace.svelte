@@ -224,7 +224,7 @@
   }
 
   // VM terhubung, berperan VM, dan sudah login Lark: kartu bisa diantre.
-  const vmQueue = $derived(showQueueForVm(overnight, grouped));
+  const vmQueue = $derived(showQueueForVm(overnight, run.cards));
 
   // AC yang ditandai Follow design di tab Plan; dikirim saat approve.
   let follow = $state<string[]>([]);

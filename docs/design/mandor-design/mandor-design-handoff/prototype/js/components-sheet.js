@@ -17,7 +17,7 @@
     ['shadcn', [['button', 'Button'], ['badge', 'Badge, Kbd, Avatar'], ['form', 'Form controls'], ['tabs', 'Tabs, Toggle group'], ['alert', 'Alert'], ['card', 'Card'], ['overlay', 'Dialog, Alert Dialog'], ['menu', 'Dropdown, Command, Tooltip'], ['feedback', 'Sonner, Skeleton, Spinner']]],
     ['Mandor', [['runstatus', 'RunStatusBadge'], ['flags', 'CardFlagBadge'], ['taskcard', 'TaskCard'], ['agentrow', 'AgentRow'], ['chat', 'ChatMessage'], ['tools', 'ToolCallGroup'], ['diff', 'DiffViewer'], ['composer', 'Composer'], ['steps', 'StepProgress'], ['comment', 'CommentItem'], ['empty', 'Empty state'], ['stepper', 'Stepper'], ['notif', 'NotificationCenter'], ['tray', 'TrayMenu, tray icon']]],
     ['Release 2', [['acchips', 'DesignChip, VerdictChip'], ['acrow', 'ACLedgerRow'], ['acsummary', 'ACReviewSummary'], ['gatebtn', 'GateButton'], ['runapp', 'RunAppControl'], ['readiness', 'ReadinessItem'], ['sources', 'DesignSourceItem'], ['plangaps', 'PlanTab design gaps'], ['r2board', 'Board, sidebar, title bar'], ['logs', 'AppLogs drawer']]],
-    ['Release 3', [['planvm', 'Plan by day, queue for VM']]],
+    ['Release 3', [['planvm', 'Plan by day, queue for VM'], ['groupvm', 'Grouped cards on the VM']]],
     ['Reserved', [['reserved', 'Slots for later releases']]]
   ];
 
@@ -405,7 +405,41 @@
       spec('Settings › VM / design sources, empty', vmEmpty, 'block'));
   }
 
-  var BUILDERS = { planvm: planvm, plangaps: plangaps, r2board: r2board, logs: logs, acchips: acchips, acrow: acrow, acsummary: acsummary, gatebtn: gatebtn, runapp: runapp, readiness: readiness, sources: sources, theme: theme, type: type, button: button, badge: badge, form: form, tabs: tabs, alert: alert, card: card, overlay: overlay, menu: menu, feedback: feedback,
+  /* ---------- grouped cards on the VM (plan 2026-10-23-004, U16) ---------- */
+  function groupvm() {
+    function pick(key, title, opts) {
+      return '<label style="display:flex;gap:8px;align-items:center;padding:3px 0' + (opts.off ? ';opacity:.55' : '') + '"><input type="checkbox" class="checkbox"' + (opts.on ? ' checked' : '') + (opts.off ? ' disabled' : '') + '><span class="mono">' + key + '</span><span class="truncate" style="flex:1;min-width:0">' + esc(title) + '</span>' + (opts.off ? '<span class="muted" style="font-size:12px">' + opts.off + '</span>' : '') + '</label>';
+    }
+    var together = '<div class="card" style="width:640px;padding:12px;display:grid;gap:8px">' +
+      '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap"><select class="input select" style="width:260px"><option>PGS-1401 · Job list</option></select><select class="input select" style="width:150px"><option>kelola-api</option></select><button class="btn btn-outline btn-sm">' + ic('palette') + 'Design: kelola-mock</button></div>' +
+      '<div><b style="font-size:13px">Queue together</b> <span class="muted">(optional)</span><div class="field-help">Other cards in this epic assigned to you. Checked cards run one after another on the VM in one branch and one PR.</div></div>' +
+      pick('1. PGS-1401', 'Job list', { on: true }) + pick('2. PGS-1402', 'Create a job', { on: true }) + pick('PGS-1403', 'Edit a job', {}) + pick('PGS-1404', 'Job detail', { off: 'Queued for VM' }) +
+      '<div style="display:flex;justify-content:flex-end"><button class="btn btn-sm">' + ic('list-plus') + 'Queue 2 cards together</button></div></div>';
+    function qrow(key, badge, extra, actions) {
+      return '<div class="card" style="width:640px;padding:10px 12px;display:flex;gap:10px;align-items:center"><span class="mono">' + key + '</span>' + badge +
+        '<div style="flex:1;min-width:0"><div class="truncate">' + extra + '</div></div>' + actions + '</div>';
+    }
+    var moves = '<button class="btn btn-ghost btn-xs btn-icon" aria-label="Move up">' + ic('arrow-up') + '</button><button class="btn btn-ghost btn-xs btn-icon" aria-label="Move down">' + ic('arrow-down') + '</button><button class="btn btn-outline btn-xs">Start now</button>';
+    var groupBadge = '<span class="badge badge-outline">' + ic('layers') + 'Group of 3</span>';
+    var queue = '<div style="display:grid;gap:6px">' +
+      qrow('PGS-1401', groupBadge + '<span class="badge">' + ic('list-checks') + 'Planned</span>', 'Job list <span class="muted">· then PGS-1402, PGS-1403</span>', moves + '<button class="btn btn-outline btn-xs">' + ic('laptop') + 'Take over to laptop</button>') +
+      qrow('PGS-1402', '<span class="badge badge-outline">' + ic('layers') + 'Group of 2</span><span class="badge badge-warning">Continues</span>', 'Create a job <span class="muted">· then PGS-1403 · paused at the end of the window</span>', moves + '<button class="btn btn-ghost btn-xs btn-icon" aria-label="Remove">' + ic('x') + '</button>') + '</div>';
+    function rrow(key, state, tone, note, actions) {
+      return '<div style="display:flex;gap:10px;align-items:center;padding:6px 0;border-bottom:1px solid var(--border)"><span class="mono" style="width:76px">' + key + '</span><span class="badge"' + (tone ? ' data-tone="' + tone + '"' : '') + '>' + state + '</span><span class="muted" style="flex:1;min-width:0;font-size:12px">' + note + '</span>' + (actions || '') + '</div>';
+    }
+    var report = '<div class="card" style="width:640px;padding:12px"><div style="display:flex;gap:8px;align-items:center;margin-bottom:6px"><b>Group PGS-1401</b><span class="muted">· 2 of 3 committed · draft PR #41</span></div>' +
+      rrow('PGS-1401', 'Committed', 'ok', 'AC 5 pass') +
+      rrow('PGS-1402', 'Committed', 'warning', 'Changed in Lark after it was committed', '<input class="input" style="width:160px;height:26px" placeholder="Reason to keep"><button class="btn btn-outline btn-xs">Keep</button><button class="btn btn-ghost btn-xs">' + ic('undo-2') + 'Revert</button>') +
+      rrow('PGS-1403', 'Not started', null, 'Waits for the decision on PGS-1402') + '</div>';
+    var stuck = '<div class="card" style="width:640px;padding:12px">' + rrow('PGS-1402', 'Stuck', 'warning', 'The turn ended without code changes: "Which endpoint lists archived jobs?"', '<button class="btn btn-outline btn-xs">' + ic('laptop') + 'Take over to laptop</button>') + '</div>';
+    return sec('groupvm', 'Grouped cards on the VM', 'Queue cards of one epic together; the VM builds them one after another in one branch and one PR, pauses between cards at the end of the window, and reports each card in the morning.',
+      spec('QueueSection / Queue together', together, 'block') +
+      spec('VM queue rows / group, Planned and continuing', queue, 'block') +
+      spec('Morning report / group per card, changed in Lark', report, 'block') +
+      spec('Morning report / group card stuck', stuck, 'block'));
+  }
+
+  var BUILDERS = { groupvm: groupvm, planvm: planvm, plangaps: plangaps, r2board: r2board, logs: logs, acchips: acchips, acrow: acrow, acsummary: acsummary, gatebtn: gatebtn, runapp: runapp, readiness: readiness, sources: sources, theme: theme, type: type, button: button, badge: badge, form: form, tabs: tabs, alert: alert, card: card, overlay: overlay, menu: menu, feedback: feedback,
     runstatus: runstatus, flags: flags, taskcard: taskcard, agentrow: agentrow, chat: chat, tools: tools, diff: diff, composer: composer, steps: steps, comment: comment, empty: empty, reserved: reserved, stepper: stepper, notif: notif, tray: tray };
 
   function sheet(p) {

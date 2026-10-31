@@ -611,12 +611,15 @@ function handle(method: string, params: Record<string, unknown>): unknown {
     case 'runs.start':
     case 'runs.takeover':
       return RUNS[0];
-    case 'groups.candidates':
+    case 'groups.candidates': {
+      // Kartu di antrean VM tidak bisa dipilih (KTD-G17).
+      const queued = (params as { queued?: string[] }).queued ?? [];
       return [
         { record_id: 'recA', key: 'PGS-1410', title: 'Bulk approve overtime requests', blocked: null },
         { record_id: 'recF', key: 'PGS-1412', title: 'Overtime approval history', blocked: null },
         { record_id: 'recH', key: 'PGS-1413', title: 'Overtime export', blocked: 'Task already has an active run' }
-      ];
+      ].map((c) => (c.blocked === null && queued.includes(c.record_id) ? { ...c, blocked: 'Queued for VM' } : c));
+    }
     case 'runs.start_group':
       return GROUP;
     case 'runs.next_card':

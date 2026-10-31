@@ -343,3 +343,46 @@ async fn klaim_kartu_kedua_diambil_daemon_lain_menahan_item() {
     assert_eq!(queue_state(&vm), Some(PlannedState::Held));
     assert_eq!(lark.get("c2").unwrap().status, TaskStatus::InProgress);
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn take_over_grup_planned_di_antrean_kembali_menunggu_persetujuan_plan() {
+    let (lark, _clock, laptop, vm) = pair(wib(0, 14, 0)).await;
+    let run = plan_ready(&laptop).await;
+    let back = laptop.svc.prepare_for_vm(&run.id, &[]).await.unwrap();
+    enqueue(&vm, &laptop, &back, &[]).await;
+    laptop
+        .svc
+        .send_to_vm(&run.id, &vm_daemon(&vm))
+        .await
+        .unwrap();
+    laptop.svc.sync().drain_outbox(50).await.unwrap();
+    vm.svc.sync().poll(true, &[]).await.unwrap();
+    vm.svc.overnight_tick().await.unwrap();
+    assert_eq!(queue_state(&vm), Some(PlannedState::Waiting));
+
+    let handback = vm.svc.handoff("c1", &laptop_daemon(&laptop)).await.unwrap();
+    assert!(vm.overnight.ids().is_empty());
+    vm.svc.sync().drain_outbox(50).await.unwrap();
+    laptop.svc.sync().poll(true, &[]).await.unwrap();
+    let back_run = laptop
+        .svc
+        .takeover(
+            "c1",
+            &handback.target.clone().unwrap(),
+            handback.planned.as_ref(),
+            &handback.carry,
+        )
+        .await
+        .unwrap();
+    assert_eq!(back_run.phase, RunPhase::Plan);
+    assert_eq!(back_run.plan.as_deref(), Some(PLAN));
+    let cards: Vec<CardState> = laptop.runs.cards.lock().unwrap()[&back_run.id]
+        .iter()
+        .map(|c| c.state.clone())
+        .collect();
+    assert_eq!(cards, [CardState::Active, CardState::Pending]);
+    laptop.svc.sync().drain_outbox(50).await.unwrap();
+    for id in ["c1", "c2"] {
+        assert_eq!(claim_daemon(&lark, id), Some(laptop_daemon(&laptop)));
+    }
+}

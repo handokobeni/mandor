@@ -989,6 +989,7 @@ async fn takeover<D: mandor_usecase::Deps>(
     let carry = mandor_usecase::VmCarry {
         draft: p.draft.unwrap_or(false),
         review: p.review.map(planned::review_of).transpose()?,
+        cards: Vec::new(),
     };
     let run = runs
         .takeover(&p.record_id, &target, work.as_ref(), &carry)

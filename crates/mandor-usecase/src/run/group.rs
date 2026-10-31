@@ -5,7 +5,7 @@
 use std::sync::Arc;
 
 use mandor_domain::group::{self, Candidate, CardState, Unselectable};
-use mandor_domain::planned::PlannedWork;
+use mandor_domain::planned::{DesignMark, PlannedWork};
 use mandor_domain::{AcRow, AppField, HoldReason, RunState, Task, TaskStatus, WriteOp};
 
 use super::members::{COMMIT_DIFF_MAX, group_name};
@@ -168,6 +168,30 @@ impl<D: Deps> RunService<D> {
             .await
     }
 
+    /// Buku AC grup dari AC semua kartu berlabel kartunya, dengan tanda Design
+    /// dari paket plan (KTD-G14, KTD-G15 plan grup).
+    pub(crate) async fn seed_group_ledger(
+        &self,
+        run_id: &str,
+        record_ids: &[String],
+        marks: &[DesignMark],
+    ) -> Result<(), RunError> {
+        let input = self.load_group(record_ids).await?;
+        self.save_group_ledger(run_id, &input.per_card).await;
+        if marks.is_empty() {
+            return Ok(());
+        }
+        let mut rows = self.reviews.ac_rows(run_id).await?;
+        for row in &mut rows {
+            if let Some(mark) = marks.iter().find(|m| m.ac_id == row.ac_id) {
+                row.design = mark.design;
+                row.design_note.clone_from(&mark.note);
+            }
+        }
+        self.reviews.save_ac_rows(run_id, &rows).await?;
+        Ok(())
+    }
+
     /// Grup Planned di VM (R24, KTD-G14 plan grup): worktree dari branch grup,
     /// run grup dengan kartu pertama aktif membawa plan yang disetujui, buku
     /// AC semua kartu dengan tanda Design dari laptop, lalu giliran
@@ -199,15 +223,8 @@ impl<D: Deps> RunService<D> {
         let root = run.workspace.as_ref().map(|w| w.root.clone());
         let started = async {
             self.runs.create_group(&run, &cards, self.now()).await?;
-            self.save_group_ledger(&run.id, &input.per_card).await;
-            let mut rows = self.reviews.ac_rows(&run.id).await?;
-            for row in &mut rows {
-                if let Some(mark) = work.design.iter().find(|m| m.ac_id == row.ac_id) {
-                    row.design = mark.design;
-                    row.design_note.clone_from(&mark.note);
-                }
-            }
-            self.reviews.save_ac_rows(&run.id, &rows).await?;
+            self.seed_group_ledger(&run.id, record_ids, &work.design)
+                .await?;
             for id in record_ids {
                 let held = self
                     .sync

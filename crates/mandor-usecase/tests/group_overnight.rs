@@ -534,3 +534,127 @@ fn waiting_fix(lark: &FakeLark, st: &Station, now: i64) {
         text: "Tombol simpan error".to_owned(),
     }];
 }
+
+// --- U14: Take over grup ke laptop sebagai satu kesatuan (R22, KTD-G15) ---
+
+async fn take_over(
+    lark: &FakeLark,
+    clock: &FakeClock,
+    vm: &Station,
+) -> (Station, mandor_usecase::overnight::Handback, String) {
+    let laptop = common::station(lark, clock, "ou_me");
+    laptop.svc.sync().poll(true, &[]).await.unwrap();
+    let to = laptop.svc.sync().identity().daemon_id.clone();
+    let key = group_run(vm).record_id;
+    let back = vm.svc.handoff(&key, &to).await.unwrap();
+    laptop.svc.sync().poll(true, &[]).await.unwrap();
+    (laptop, back, key)
+}
+
+fn laptop_cards(laptop: &Station) -> Vec<CardState> {
+    let run = laptop
+        .runs
+        .all()
+        .into_iter()
+        .find(|r| !laptop.runs.rows.lock().unwrap()[&r.id].1)
+        .unwrap();
+    laptop.runs.cards.lock().unwrap()[&run.id]
+        .iter()
+        .map(|c| c.state.clone())
+        .collect()
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn take_over_grup_tertahan_di_kartu_kedua_menjadi_run_grup_laptop() {
+    let (lark, clock, vm) = vm_with(&["c1", "c2", "c3"], wib(0, 20, 0)).await;
+    queue_group(&vm, &["c1", "c2", "c3"]).await;
+    tick(&vm).await;
+    edits(&vm);
+    vm.agent.last().done();
+    eventually(|| turns(&vm) == 2).await;
+    vm.agent.last().finish("Tabel atau kartu?");
+    eventually(|| held(&vm).is_some()).await;
+
+    let (laptop, back, key) = take_over(&lark, &clock, &vm).await;
+    assert_eq!(back.carry.cards.len(), 3);
+    let run = laptop
+        .svc
+        .takeover(&key, &back.target.clone().unwrap(), None, &back.carry)
+        .await
+        .unwrap();
+    assert_eq!(run.state, RunState::AwaitingDev);
+    assert_eq!(
+        laptop_cards(&laptop),
+        [CardState::Done, CardState::Active, CardState::Pending]
+    );
+    assert!(
+        run.group_plan,
+        "kartu sisa di laptop menunggu persetujuan plan (R6)"
+    );
+    laptop.svc.sync().drain_outbox(50).await.unwrap();
+    let me = laptop.svc.sync().identity().daemon_id.clone();
+    for id in ["c1", "c2", "c3"] {
+        assert_eq!(
+            lark.get(id).unwrap().claim.unwrap().daemon_id(),
+            Some(me.as_str()),
+            "klaim {id} pindah ke laptop"
+        );
+    }
+    vm.svc.sync().poll(true, &[]).await.unwrap();
+    let err = vm
+        .svc
+        .queue_add("c3", &StartTarget::Repo("repo1".to_owned()), None)
+        .await
+        .unwrap_err();
+    assert!(format!("{err}").contains("taken over"), "{err}");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn take_over_grup_pr_draft_lalu_send_to_review_dari_laptop() {
+    let (lark, clock, vm) = vm_with(&["c1", "c2"], wib(0, 20, 0)).await;
+    queue_group(&vm, &["c1", "c2"]).await;
+    tick(&vm).await;
+    for n in 1..=2 {
+        edits(&vm);
+        vm.agent.last().done();
+        if n == 1 {
+            eventually(|| turns(&vm) == 2).await;
+        }
+    }
+    eventually(|| group_run(&vm).draft_pending.is_some()).await;
+    vm.svc.sync().drain_outbox(50).await.unwrap();
+    let pr = vm.git.st().created_prs[0].clone();
+    let (laptop, back, key) = take_over(&lark, &clock, &vm).await;
+    assert!(back.carry.draft);
+    let url = "https://github.com/o/r/pull/1".to_owned();
+    laptop
+        .git
+        .st()
+        .prs
+        .insert(format!("repo1:{}", pr.0), url.clone());
+    let run = laptop
+        .svc
+        .takeover(&key, &back.target.clone().unwrap(), None, &back.carry)
+        .await
+        .unwrap();
+    assert_eq!(laptop_cards(&laptop), [CardState::Done, CardState::Done]);
+    assert_eq!(run.pr_url.as_deref(), Some(url.as_str()));
+    laptop.svc.send_to_review(&run.id).await.unwrap();
+    laptop.svc.sync().drain_outbox(50).await.unwrap();
+    for id in ["c1", "c2"] {
+        assert_eq!(lark.get(id).unwrap().status, TaskStatus::WaitingReview);
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn handoff_grup_diulang_mengembalikan_hasil_yang_sama() {
+    let (lark, clock, vm) = vm_with(&["c1", "c2"], wib(0, 20, 0)).await;
+    queue_group(&vm, &["c1", "c2"]).await;
+    tick(&vm).await;
+    vm.agent.last().finish("Tanya?");
+    eventually(|| held(&vm).is_some()).await;
+    let (laptop, first, _) = take_over(&lark, &clock, &vm).await;
+    let to = laptop.svc.sync().identity().daemon_id.clone();
+    let again = vm.svc.handoff("c1", &to).await.unwrap();
+    assert_eq!(again, first);
+}

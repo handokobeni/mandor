@@ -195,6 +195,7 @@ async fn hasil_review_vm_usang_bila_kode_laptop_berbeda() {
             rows: vec![passed("ac1")],
             snapshot: [("repo1".to_owned(), "tree0".to_owned())].into(),
         }),
+        cards: Vec::new(),
     };
     let run = laptop
         .svc

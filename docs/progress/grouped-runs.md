@@ -79,3 +79,11 @@ Temuan:
 - Push & create PR pertama hanya menjalankan review AC; walau kelima AC Pass, push baru terjadi pada tekanan kedua. Perlu dicek apakah ini mode gerbang atau bug.
 - App laptop tetap tersambung ke daemon lama setelah `target/debug/mandord` dibangun ulang; daemon harus dihentikan agar app menjalankan build baru. Uji pertama sempat berjalan per kartu karena `one_plan` diabaikan daemon lama.
 - Label kartu grup aktif diganti dari "Working" menjadi "Current" (commit `0696258`) karena menyesatkan saat plan menunggu persetujuan.
+
+### Uji langsung U17 di VM (2026-11-02)
+
+Biner VM `764c64f0…` terpasang, service aktif.
+
+| Skenario | Hasil |
+|---|---|
+| F2/AE6 | Lolos. Grup H (PGS-1563–1565) diantre dari tab Overnight dengan Queue together lalu Start now: klaim ketiga kartu pindah ke VM, kartu dikerjakan berurutan tanpa persetujuan plan, commit `PGS-1563/1564/1565: …`, review AC sekali (5 Pass), PR draft https://github.com/handokobeni/mandor-smoke/pull/25 dan kartu tetap In Progress. Laporan pagi: satu baris per kartu "Committed", aksi hanya di baris pertama. Send to review: PR siap di-review, ketiga kartu Waiting Review dengan `mandor_pr` sama. Catatan: selama draft, `mandor_pr` hanya tercatat di kartu pertama; kartu lain mendapatkannya saat Send to review. |

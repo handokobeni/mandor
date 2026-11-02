@@ -66,6 +66,7 @@ Base salinan `Sv1NbPJh5aD7SesHvtGlmga8g2f`, repo `mandor-smoke`, desain `mandor-
 | E | E-PGS16 | PGS-1556, PGS-1557 | `ongkir/` | R21 |
 | F | E-PGS17 | PGS-1558, PGS-1559, PGS-1560 | `diskon/` | AE10, AE11 (laptop) |
 | G | E-PGS19 | PGS-1561, PGS-1562 | `berat/` | F6 (VM) |
+| H | E-PGS21 | PGS-1563, PGS-1564, PGS-1565 | — | F2/AE6 (pengganti grup A, yang terlanjur dimulai di laptop dengan Skip planning) |
 
 ### Uji langsung U21 di laptop (2026-11-02)
 

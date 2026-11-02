@@ -23,7 +23,7 @@ Plan: `docs/plans/2026-10-23-004-feat-grouped-card-runs-plan.md`. Branch `feat/g
 | U18 | selesai | Branch `feat/group-one-plan`, digabung ke PR #15. Domain `group::plan_outdated` dan `AcSnap` (AC baru, teks berubah, AC hilang pada kartu yang belum selesai), `HoldReason::PlanOutdated`. `RunRecord.one_plan` (cuplikan AC saat plan grup disetujui; disimpan di JSON tambahan run, jadi tidak perlu migrasi 0010 seperti tertulis di plan). `start_one_plan_group`: satu giliran plan berisi AC semua kartu berlabel kunci; `approve_plan` menyimpan cuplikan dan membatasi giliran ke kartu aktif; `advance` tanpa giliran plan per kartu, memeriksa cuplikan sebelum setiap kartu dan memulai giliran revisi (laptop) bila usang; plan tetap di run. 4 test (`group_flow.rs`: AE10, AE11 laptop, AC kartu selesai, AC dihapus) + 2 test domain. |
 | U19 | selesai | `PlannedWork.group_acs` (cuplikan AC plan grup, dibawa `prepare_for_vm` saat grup satu plan diantre; JSON antrean dan `PlannedWorkDto`). VM `start_group_from_plan` memakai plan grup untuk semua kartu (pesan dibatasi ke bagian kartu), dan menahan grup `PlanOutdated` tanpa giliran agent bila AC berubah sebelum mulai; `advance` di VM memarkir `PlanOutdated` tanpa antre ulang. `VmCarry.one_plan` / `HandoffResult.one_plan` / `TakeoverParams.one_plan` (`AcSnapDto`): Take over mengembalikan grup satu plan ke laptop, Continue memicu revisi plan. Store app meneruskan `one_plan`. 5 test `planned_group.rs` (F6 VM, AE11 VM, Planned usang sebelum mulai, Take over plan outdated, Take over Planned di antrean) + 1 test Vitest. |
 | U20 | selesai | `StartGroupParams.one_plan` (dispatch `group_start`: hanya sah dengan Planning Plan, selain itu ditolak), `RunView.one_plan`, `AcSnapDto`; TS diregenerasi. App: pilihan "One plan for all cards" di dialog Start (≥ 2 kartu dan Planning Plan, `onePlanAvailable`/`groupStartParams`), teks action bar plan grup, label laporan "Group plan outdated" (aksi hanya Take over). Prototype: tiga spesifikasi di "Grouped cards on the VM" (diperbarui setelah kode app, bukan sebelumnya). Dialog Start tidak bisa dibuka di `/?mock` karena kartu To Do mock tidak lolos readiness; dicek lewat test dan type check. 2 test Vitest baru + label, 1 test dispatch. |
-| U21 | sebagian | Runbook `grouped-runs.md` bagian 5a dan 9. Uji langsung (AE10, AE11 laptop, F6 VM) belum berjalan: butuh login Lark sesi dan biner VM baru (sama dengan U17). |
+| U21 | sebagian | Runbook `grouped-runs.md` bagian 5a dan 9. AE10 dan AE11 laptop lolos 2026-11-02 (lihat di bawah); F6 VM menunggu biner VM baru (sama dengan U17). |
 | U11 | selesai | Runbook `docs/runbook/grouped-runs.md` dan tautan di README. Uji langsung 2026-10-24 dengan installer dari PR #12 (run 39990794811) di Base salinan, kartu PGS-1513–PGS-1516 (epic E-PGS62), repo `mandor-smoke`; hasil di bawah. |
 
 ### Uji langsung U11 (2026-10-24)
@@ -66,3 +66,15 @@ Base salinan `Sv1NbPJh5aD7SesHvtGlmga8g2f`, repo `mandor-smoke`, desain `mandor-
 | E | E-PGS16 | PGS-1556, PGS-1557 | `ongkir/` | R21 |
 | F | E-PGS17 | PGS-1558, PGS-1559, PGS-1560 | `diskon/` | AE10, AE11 (laptop) |
 | G | E-PGS19 | PGS-1561, PGS-1562 | `berat/` | F6 (VM) |
+
+### Uji langsung U21 di laptop (2026-11-02)
+
+| Skenario | Hasil |
+|---|---|
+| AE10 | Lolos. PGS-1558–1560 (grup F) dengan One plan for all cards: satu giliran plan grup ("Group plan ready for all 3 cards"), design gaps dihitung dari 4 AC semua kartu, satu persetujuan; implementasi kartu pertama hanya bagian PGS-1558; commit `PGS-1558/1559/1560: …` tanpa giliran plan per kartu. PR https://github.com/handokobeni/mandor-smoke/pull/24, kelima AC Pass, ketiga kartu Waiting Review dengan `mandor_pr` sama. |
+| AE11 (laptop) | Lolos. Setelah PGS-1558 selesai, AC baru ditambahkan ke PGS-1560 lalu Refresh dan Next card: PGS-1558 Done dan di-commit, PGS-1559 Current, run kembali ke fase plan dengan revisi untuk kartu tersisa ("What changed from the approved plan: New AC-8974"). Setelah disetujui ulang, cuplikan memuat 3 AC kartu tersisa dan Next card berikutnya langsung mengerjakan PGS-1560 tanpa revisi. |
+
+Temuan:
+- Push & create PR pertama hanya menjalankan review AC; walau kelima AC Pass, push baru terjadi pada tekanan kedua. Perlu dicek apakah ini mode gerbang atau bug.
+- App laptop tetap tersambung ke daemon lama setelah `target/debug/mandord` dibangun ulang; daemon harus dihentikan agar app menjalankan build baru. Uji pertama sempat berjalan per kartu karena `one_plan` diabaikan daemon lama.
+- Label kartu grup aktif diganti dari "Working" menjadi "Current" (commit `0696258`) karena menyesatkan saat plan menunggu persetujuan.

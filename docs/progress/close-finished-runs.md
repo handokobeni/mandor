@@ -20,3 +20,9 @@ Plan: `docs/plans/2026-11-03-001-feat-close-finished-runs-plan.md`. Branch `feat
 | Menutup 17 run butuh lebih dari satu menit (melepas klaim di Lark kena rate limit, ~3–5 detik per run) sehingga app melaporkan failed to fetch | `runs.close_finished` menjawab langsung (`CloseFinishedStarted { count }`) dan daemon menutup di latar belakang (`start_close_finished`, satu penutupan sekaligus, lewat `TaskTracker`); hasil datang sebagai notifikasi `runs_closed`; app menampilkan "Closing…" lalu toast ringkasan. Penutupan otomatis juga di latar belakang agar loop sinkron tidak tertahan. |
 
 Uji B (sebelum perbaikan latar belakang): 17 run uji Delivered ditutup dan 17 folder worktree terhapus; PGS-1512, PGS-1537, PGS-1544, PGS-1546+2 dilewati "Unpushed changes" dan worktree-nya tetap; run kelola-v2 (kartu In Progress/To Do) tidak disentuh. Uji A: Settings › Storage menampilkan PGS-1401 (845 MB) paling atas.
+
+### Uji langsung setelah perbaikan latar belakang (2026-11-03)
+
+| Skenario | Hasil |
+|---|---|
+| AE3 (otomatis) | Lolos. Kartu uji PGS-1572 dikerjakan di laptop sampai PR https://github.com/handokobeni/mandor-smoke/pull/33 (worktree bersih), setelan otomatis dinyalakan, kartu dipindah ke Delivered 16:44:28; 16:44:40 daemon memulai penutupan otomatis (1 run), 16:44:42 run tertutup, worktree terhapus, notifikasi `runs_closed` "Closed 1 finished run, freed 66.4 KB". |

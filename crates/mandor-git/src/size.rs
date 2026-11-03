@@ -11,10 +11,10 @@ pub const SIZE_TIMEOUT: Duration = Duration::from_secs(60);
 
 /// Jumlah ukuran berkas di bawah `root` tanpa mengikuti symlink, dijalankan
 /// di thread blocking dan dibatasi `timeout`. Entri yang tidak terbaca
-/// dilewati.
+/// dilewati; folder yang sudah hilang tidak memakan ruang, jadi berukuran 0.
 ///
 /// # Errors
-/// `root` tidak ada, atau pengukuran melewati batas waktu.
+/// `root` tidak terbaca, atau pengukuran melewati batas waktu.
 pub async fn dir_size(root: &Path, timeout: Duration) -> Result<u64, GitError> {
     let root = root.to_path_buf();
     let task = tokio::task::spawn_blocking(move || walk(&root));
@@ -28,7 +28,11 @@ pub async fn dir_size(root: &Path, timeout: Duration) -> Result<u64, GitError> {
 }
 
 fn walk(root: &Path) -> Result<u64, GitError> {
-    let meta = std::fs::symlink_metadata(root).map_err(|e| GitError::Io(e.to_string()))?;
+    let meta = match std::fs::symlink_metadata(root) {
+        Ok(meta) => meta,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(0),
+        Err(e) => return Err(GitError::Io(e.to_string())),
+    };
     if !meta.is_dir() {
         return Ok(meta.len());
     }
@@ -71,12 +75,13 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn folder_tidak_ada_gagal() {
+    async fn folder_yang_sudah_hilang_berukuran_nol() {
         let dir = tempfile::tempdir().unwrap();
-        assert!(
+        assert_eq!(
             dir_size(&dir.path().join("hilang"), SIZE_TIMEOUT)
                 .await
-                .is_err()
+                .unwrap(),
+            0
         );
     }
 }

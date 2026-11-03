@@ -33,6 +33,7 @@ use crate::views::{
 };
 
 mod app_run;
+mod cleanup;
 pub(crate) mod design;
 mod group;
 mod overnight;
@@ -822,6 +823,7 @@ impl AppDispatch {
             other if Self::is_app_method(other) => self.app_call(other, v).await,
             other if Self::is_review_method(other) => self.review_call(other, v).await,
             other if Self::is_group_method(other) => self.group_call(other, v).await,
+            other if Self::is_cleanup_method(other) => self.cleanup_call(other, v).await,
             other if Self::is_overnight_method(other) => self.overnight_call(other, v).await,
             other => self.run_action(other, v).await,
         }

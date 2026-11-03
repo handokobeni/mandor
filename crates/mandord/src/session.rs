@@ -35,6 +35,9 @@ const TEAM_EVERY: Duration = Duration::from_secs(60);
 const HEARTBEAT_EVERY: Duration = Duration::from_secs(5 * 60);
 /// Penjadwal lembur daemon VM (U2 plan VM).
 const OVERNIGHT_EVERY: Duration = Duration::from_secs(30);
+/// Pemeriksaan run kartu selesai; usecase membatasi penutupan otomatis
+/// paling sering sekali per 10 menit (plan `2026-11-03-001`, KTD-C4).
+const CLEANUP_EVERY: Duration = Duration::from_secs(60);
 const OUTBOX_BATCH: u32 = 20;
 const LOGIN_ENV_TIMEOUT: Duration = Duration::from_secs(10);
 
@@ -289,6 +292,7 @@ struct Schedule {
     heartbeat: Due,
     team: Due,
     overnight: Due,
+    cleanup: Due,
 }
 
 impl Schedule {
@@ -301,6 +305,7 @@ impl Schedule {
             heartbeat: Due::new(HEARTBEAT_EVERY),
             team: Due::new(TEAM_EVERY),
             overnight: Due::new(OVERNIGHT_EVERY),
+            cleanup: Due::new(CLEANUP_EVERY),
         }
     }
 
@@ -316,15 +321,7 @@ impl Schedule {
             }
         }
         if comments_needed && self.comments.take(now) {
-            let report = warn_err(
-                s.runs
-                    .tick_waiting_fix(s.quiet_secs.load(Ordering::Relaxed))
-                    .await,
-                "mesin Waiting Fix gagal",
-            );
-            if let Some(r) = report.filter(|r| !r.started.is_empty()) {
-                tracing::info!(started = ?r.started, "perbaikan Waiting Fix dimulai");
-            }
+            fix_once(s).await;
         }
         if (self.team.take(now) || poked)
             && warn_err(s.sync.poll_team().await, "papan Team gagal diambil") == Some(true)
@@ -337,10 +334,39 @@ impl Schedule {
         if self.heartbeat.take(now) {
             warn_err(s.runs.heartbeat_all().await, "heartbeat klaim gagal");
         }
+        if self.cleanup.take(now) {
+            cleanup_once(s).await;
+        }
         if s.sync.role() == mandor_domain::DaemonRole::Vm && (poked || self.overnight.take(now)) {
             overnight_once(s).await;
         }
         drain(s).await;
+    }
+}
+
+/// Satu putaran mesin Waiting Fix.
+async fn fix_once(s: &LarkSession) {
+    let report = warn_err(
+        s.runs
+            .tick_waiting_fix(s.quiet_secs.load(Ordering::Relaxed))
+            .await,
+        "mesin Waiting Fix gagal",
+    );
+    if let Some(r) = report.filter(|r| !r.started.is_empty()) {
+        tracing::info!(started = ?r.started, "perbaikan Waiting Fix dimulai");
+    }
+}
+
+/// Penutupan otomatis run kartu selesai bila dinyalakan (plan
+/// `2026-11-03-001`, R6).
+async fn cleanup_once(s: &LarkSession) {
+    let report = warn_err(
+        s.runs.auto_close_finished().await,
+        "penutupan run selesai gagal",
+    );
+    if let Some(r) = report.flatten().filter(|r| !r.closed.is_empty()) {
+        tracing::info!(closed = ?r.closed, freed_bytes = r.freed_bytes, "run kartu selesai ditutup otomatis");
+        crate::prod::emit(&s.events, event::BOARD_UPDATED, serde_json::json!({}));
     }
 }
 

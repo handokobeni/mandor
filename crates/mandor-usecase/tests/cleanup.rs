@@ -256,3 +256,14 @@ async fn covers_ae7_daftar_storage_semua_run_terbuka_urut_ukuran() {
     assert_eq!(rows[0].state, RunState::AwaitingDev);
     assert_eq!(rows[1].card_status, [TaskStatus::Delivered]);
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn id_run_yang_tidak_dikenal_diabaikan() {
+    let (_lark, _clock, st) = setup(&["c1"]);
+    let report = st
+        .svc
+        .close_finished(&["tidak-ada".to_owned()])
+        .await
+        .unwrap();
+    assert!(report.closed.is_empty() && report.skipped.is_empty());
+}

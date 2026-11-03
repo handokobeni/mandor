@@ -77,7 +77,7 @@
   <div class="settings-card">
     <div class="content">
       <p class="summary">
-        Worktrees: <b>{rows ? formatBytes(total) : '…'}</b>
+        All worktrees: <b>{rows ? formatBytes(total) : '…'}</b>
         {#if store.closable.length > 0}· {store.closable.length} finished {store.closable.length === 1 ? 'run' : 'runs'} can free <b>{formatBytes(freeable)}</b>{/if}
       </p>
       <div class="row-setting">

@@ -271,6 +271,16 @@ fn extra_of(r: &RunRecord) -> Result<String, StoreError> {
     .map_err(StoreError::internal)
 }
 
+/// Kunci setelan penutupan run selesai (plan `2026-11-03-001`, KTD-C4).
+const CLEANUP_KEY: &str = "cleanup";
+
+/// Bentuk simpan setelan penutupan run selesai.
+#[derive(Serialize, Deserialize)]
+struct StoredCleanup {
+    #[serde(default)]
+    auto_close: bool,
+}
+
 /// Adapter run untuk usecase.
 #[derive(Debug, Clone)]
 pub struct RunsStore {
@@ -550,6 +560,31 @@ impl RunStore for RunsStore {
             Some(id) => Ok(self.fetch(&id).await?),
             None => Ok(None),
         }
+    }
+
+    async fn cleanup_settings(&self) -> mandor_usecase::run_ports::CleanupSettings {
+        let auto_close = match self.store.setting(CLEANUP_KEY).await {
+            Ok(Some(raw)) => {
+                serde_json::from_str::<StoredCleanup>(&raw).is_ok_and(|s| s.auto_close)
+            }
+            Ok(None) => false,
+            Err(e) => {
+                tracing::warn!(error = %e, "setelan pembersihan tidak terbaca; memakai bawaan");
+                false
+            }
+        };
+        mandor_usecase::run_ports::CleanupSettings { auto_close }
+    }
+
+    async fn set_cleanup_settings(
+        &self,
+        s: &mandor_usecase::run_ports::CleanupSettings,
+    ) -> Result<(), PortError> {
+        let raw = serde_json::to_string(&StoredCleanup {
+            auto_close: s.auto_close,
+        })
+        .map_err(|e| PortError::Storage(e.to_string()))?;
+        Ok(self.store.set_setting(CLEANUP_KEY, &raw).await?)
     }
 
     async fn list_active(&self) -> Result<Vec<RunRecord>, PortError> {

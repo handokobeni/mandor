@@ -249,6 +249,17 @@ impl RunStore for BroadcastRuns {
         self.inner.list_active().await
     }
 
+    async fn cleanup_settings(&self) -> mandor_usecase::run_ports::CleanupSettings {
+        self.inner.cleanup_settings().await
+    }
+
+    async fn set_cleanup_settings(
+        &self,
+        s: &mandor_usecase::run_ports::CleanupSettings,
+    ) -> Result<(), PortError> {
+        self.inner.set_cleanup_settings(s).await
+    }
+
     async fn latest_for(&self, record_id: &str) -> Result<Option<RunRecord>, PortError> {
         self.inner.latest_for(record_id).await
     }

@@ -407,6 +407,14 @@ function larkStatus(): unknown {
   return { configured, logged_in: loggedIn, open_id: loggedIn ? 'ou_7f3a91' : null, name: loggedIn ? 'Beni Handoko' : null, reauth_required: false };
 }
 
+/** Run kartu selesai tiruan (plan 2026-11-03-001). */
+let mockFinished: { run_id: string; keys: string[]; title: string; bytes: number | null }[] = [
+  { run_id: 'm-f1', keys: ['PGS-1558', 'PGS-1559', 'PGS-1560'], title: 'Kalkulator diskon', bytes: 412_000 },
+  { run_id: 'm-f2', keys: ['PGS-1563'], title: 'Daftar tamu', bytes: 180_000 },
+  { run_id: 'm-f3', keys: ['PGS-1366'], title: 'Export payroll report', bytes: 640_000_000 }
+];
+let mockAutoClose = false;
+
 function handle(method: string, params: Record<string, unknown>): unknown {
   switch (method) {
     case 'hello':
@@ -612,6 +620,28 @@ function handle(method: string, params: Record<string, unknown>): unknown {
     case 'runs.start':
     case 'runs.takeover':
       return RUNS[0];
+    case 'runs.finished':
+      return {
+        closable: mockFinished,
+        skipped: [{ run: { run_id: 'm-skip', keys: ['PGS-1404'], title: 'Edit a job', bytes: 29_100_000 }, reason: 'unpushed_changes' }]
+      };
+    case 'runs.close_finished': {
+      const ids = (params as { run_ids: string[] }).run_ids;
+      const freed = mockFinished.filter((r) => ids.includes(r.run_id)).reduce((n, r) => n + (r.bytes ?? 0), 0);
+      mockFinished = mockFinished.filter((r) => !ids.includes(r.run_id));
+      return { closed: ids, skipped: [], freed_bytes: freed, summary: `Closed ${ids.length} finished runs, freed ${(freed / 1e9).toFixed(1)} GB` };
+    }
+    case 'runs.storage':
+      return [
+        { run_id: '1', keys: ['PGS-1401'], title: 'Job list', run_state: 'awaiting_dev', card_status: ['In Progress'], bytes: 1_001_000_000, updated_at_ms: Date.now() - 86_400_000 },
+        { run_id: 'm-skip', keys: ['PGS-1404'], title: 'Edit a job', run_state: 'awaiting_dev', card_status: ['Waiting Deploy'], bytes: 29_100_000, updated_at_ms: Date.now() - 3_600_000 },
+        ...mockFinished.map((r) => ({ run_id: r.run_id, keys: r.keys, title: r.title, run_state: 'in_review_loop', card_status: ['Delivered'], bytes: r.bytes, updated_at_ms: Date.now() }))
+      ];
+    case 'settings.cleanup.get':
+      return { auto_close: mockAutoClose };
+    case 'settings.cleanup.set':
+      mockAutoClose = (params as { auto_close: boolean }).auto_close;
+      return {};
     case 'groups.candidates': {
       // Kartu di antrean VM tidak bisa dipilih (KTD-G17).
       const queued = (params as { queued?: string[] }).queued ?? [];

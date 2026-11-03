@@ -17,7 +17,7 @@
     ['shadcn', [['button', 'Button'], ['badge', 'Badge, Kbd, Avatar'], ['form', 'Form controls'], ['tabs', 'Tabs, Toggle group'], ['alert', 'Alert'], ['card', 'Card'], ['overlay', 'Dialog, Alert Dialog'], ['menu', 'Dropdown, Command, Tooltip'], ['feedback', 'Sonner, Skeleton, Spinner']]],
     ['Mandor', [['runstatus', 'RunStatusBadge'], ['flags', 'CardFlagBadge'], ['taskcard', 'TaskCard'], ['agentrow', 'AgentRow'], ['chat', 'ChatMessage'], ['tools', 'ToolCallGroup'], ['diff', 'DiffViewer'], ['composer', 'Composer'], ['steps', 'StepProgress'], ['comment', 'CommentItem'], ['empty', 'Empty state'], ['stepper', 'Stepper'], ['notif', 'NotificationCenter'], ['tray', 'TrayMenu, tray icon']]],
     ['Release 2', [['acchips', 'DesignChip, VerdictChip'], ['acrow', 'ACLedgerRow'], ['acsummary', 'ACReviewSummary'], ['gatebtn', 'GateButton'], ['runapp', 'RunAppControl'], ['readiness', 'ReadinessItem'], ['sources', 'DesignSourceItem'], ['plangaps', 'PlanTab design gaps'], ['r2board', 'Board, sidebar, title bar'], ['logs', 'AppLogs drawer']]],
-    ['Release 3', [['planvm', 'Plan by day, queue for VM'], ['groupvm', 'Grouped cards on the VM']]],
+    ['Release 3', [['planvm', 'Plan by day, queue for VM'], ['groupvm', 'Grouped cards on the VM'], ['cleanup', 'Close finished runs']]],
     ['Reserved', [['reserved', 'Slots for later releases']]]
   ];
 
@@ -447,7 +447,31 @@
       spec('Morning report / group plan outdated', outdated, 'block'));
   }
 
-  var BUILDERS = { groupvm: groupvm, planvm: planvm, plangaps: plangaps, r2board: r2board, logs: logs, acchips: acchips, acrow: acrow, acsummary: acsummary, gatebtn: gatebtn, runapp: runapp, readiness: readiness, sources: sources, theme: theme, type: type, button: button, badge: badge, form: form, tabs: tabs, alert: alert, card: card, overlay: overlay, menu: menu, feedback: feedback,
+  /* ---------- close finished runs (plan 2026-11-03-001) ---------- */
+  function cleanup() {
+    var head = '<div class="card" style="width:300px;padding:10px 12px;display:flex;gap:8px;align-items:center"><b>Done</b><span class="muted mono">12</span><span style="margin-left:auto"></span><button class="btn btn-outline btn-xs">' + ic('trash-2') + 'Close 3 finished runs</button><button class="btn btn-ghost btn-xs btn-icon" aria-label="Collapse Done column">' + ic('chevrons-right-left') + '</button></div>';
+    function line(key, title, size, extra) {
+      return '<div style="display:flex;gap:10px;align-items:center;padding:6px 0;border-bottom:1px solid var(--border)"><span class="mono" style="width:76px">' + key + '</span><span class="truncate" style="flex:1;min-width:0">' + esc(title) + '</span>' + (extra || '') + '<span class="mono muted">' + size + '</span></div>';
+    }
+    var dialog = '<div class="dialog-static" style="max-width:520px;padding:16px"><h3 style="margin:0 0 4px">Close 3 finished runs</h3><p class="muted" style="margin:0 0 10px">These cards are Delivered or Waiting Deploy. Their worktrees are deleted; branches and PRs stay on GitHub.</p>' +
+      line('PGS-1401', 'Job list', '1.0 GB') + line('PGS-1558', 'Kalkulator diskon', '412 KB') + line('PGS-1563', 'Daftar tamu', '180 KB') +
+      '<p class="muted" style="margin:12px 0 4px">Skipped</p>' + line('PGS-1404', 'Edit a job', '29.1 MB', '<span class="badge badge-warning">Unpushed changes</span>') +
+      '<div style="display:flex;justify-content:flex-end;gap:8px;margin-top:12px"><button class="btn btn-ghost btn-sm">Cancel</button><button class="btn btn-sm">' + ic('trash-2') + 'Close 3 runs · free 1.0 GB</button></div></div>';
+    var storage = '<div class="card" style="width:640px;padding:14px"><div style="display:flex;justify-content:space-between;align-items:center"><b>Storage</b><span class="muted">Worktrees: <b>1.1 GB</b> · 3 finished runs can free <b>1.0 GB</b></span></div>' +
+      '<label style="display:flex;gap:8px;align-items:flex-start;margin:10px 0"><input type="checkbox" class="switch" role="switch"><span><b>Close finished runs automatically</b><span class="muted" style="display:block;font-size:12px">After each Lark sync, at most every 10 minutes. Runs with unpushed changes are never closed.</span></span></label>' +
+      '<button class="btn btn-outline btn-sm">' + ic('trash-2') + 'Close 3 finished runs</button>' +
+      '<p class="muted" style="margin:12px 0 4px">Open runs, largest first</p>' +
+      line('PGS-1401', 'Job list · Awaiting dev · In Progress', '1.0 GB', '<button class="btn btn-ghost btn-xs">Open</button><button class="btn btn-ghost btn-xs">Close run</button>') +
+      line('PGS-1404', 'Edit a job · Awaiting dev · In Progress', '29.1 MB', '<button class="btn btn-ghost btn-xs">Open</button><button class="btn btn-ghost btn-xs">Close run</button>') + '</div>';
+    var toast = '<div class="card" style="width:320px;padding:10px 12px">' + ic('circle-check') + ' Closed 3 finished runs, freed 1.0 GB</div>';
+    return sec('cleanup', 'Close finished runs', 'Runs whose cards are Delivered or Waiting Deploy can be closed in one go to delete their worktrees. Runs with unpushed changes are skipped.',
+      spec('Board / Done column header', head) +
+      spec('CloseFinishedDialog', dialog, 'block') +
+      spec('Settings › Storage', storage, 'block') +
+      spec('Sonner / result', toast));
+  }
+
+  var BUILDERS = { cleanup: cleanup, groupvm: groupvm, planvm: planvm, plangaps: plangaps, r2board: r2board, logs: logs, acchips: acchips, acrow: acrow, acsummary: acsummary, gatebtn: gatebtn, runapp: runapp, readiness: readiness, sources: sources, theme: theme, type: type, button: button, badge: badge, form: form, tabs: tabs, alert: alert, card: card, overlay: overlay, menu: menu, feedback: feedback,
     runstatus: runstatus, flags: flags, taskcard: taskcard, agentrow: agentrow, chat: chat, tools: tools, diff: diff, composer: composer, steps: steps, comment: comment, empty: empty, reserved: reserved, stepper: stepper, notif: notif, tray: tray };
 
   function sheet(p) {

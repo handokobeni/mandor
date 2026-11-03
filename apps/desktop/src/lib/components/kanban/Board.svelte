@@ -21,6 +21,10 @@
   import * as ToggleGroup from '#lib/components/ui/toggle-group/index.ts';
   import type { CardView } from '#lib/protocol/CardView.ts';
   import { board } from '#lib/stores/board.svelte.ts';
+  import Trash2 from '@lucide/svelte/icons/trash-2';
+  import { closeLabel } from '#lib/cleanup.ts';
+  import CloseFinishedDialog from '#lib/components/cleanup/CloseFinishedDialog.svelte';
+  import { cleanup } from '#lib/stores/cleanup.svelte.ts';
   import { lark } from '#lib/stores/lark.svelte.ts';
   import { nav } from '#lib/stores/nav.svelte.ts';
 
@@ -35,6 +39,8 @@
   let { onstart, onopen, ontakeover, onretry, onclose, onrefresh }: Props = $props();
 
   let doneCollapsed = $state(true);
+  /** Dialog "Close finished runs" (plan 2026-11-03-001, R4). */
+  let closingFinished = $state(false);
   let now = $state(Date.now());
 
   $effect(() => {
@@ -217,6 +223,18 @@
         <div class="col-head">
           <h2>{col.label}</h2>
           <span class="count">{col.cards.length}</span>
+          {#if col.id === 'done' && closeLabel(cleanup.closable.length)}
+            {@const label = closeLabel(cleanup.closable.length)}
+            {#if collapsed}
+              <Button variant="outline" size="icon-xs" aria-label={label} title={label} onclick={() => (closingFinished = true)}>
+                <Trash2 />
+              </Button>
+            {:else}
+              <Button variant="outline" size="xs" class="ml-auto" onclick={() => (closingFinished = true)}>
+                <Trash2 />{label}
+              </Button>
+            {/if}
+          {/if}
           {#if col.id === 'done'}
             <Button
               variant="ghost"
@@ -246,3 +264,5 @@
     {/each}
   {/if}
 </div>
+
+<CloseFinishedDialog store={cleanup} bind:open={closingFinished} />

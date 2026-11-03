@@ -72,6 +72,7 @@ function run(id: string, state: string, extra: Partial<RunView> = {}): RunView {
     updated_at_ms: 0,
     ac: null,
     cards: [],
+    one_plan: false,
     ...extra
   };
 }

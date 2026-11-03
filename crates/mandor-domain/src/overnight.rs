@@ -141,6 +141,12 @@ pub struct CycleReport {
     pub held_other: Vec<String>,
     pub dequeued: Vec<String>,
     pub failed: Vec<String>,
+    /// Kartu grup yang diparkir bersama grupnya (R23 plan grup).
+    pub held_group: Vec<String>,
+    /// Kartu grup yang berjeda dan lanjut siklus berikutnya (R21 plan grup).
+    pub continuing: Vec<String>,
+    /// Progres per grup: kunci kartu dan keadaannya, urut pengerjaan.
+    pub groups: Vec<Vec<(String, String)>>,
     /// Token terhitung siklus dan batasnya.
     pub used: u64,
     pub limit: Option<u64>,
@@ -153,7 +159,12 @@ pub const OVERNIGHT_LINK: &str = "mandor://overnight";
 #[must_use]
 pub fn report_text(r: &CycleReport) -> String {
     let mut out = String::from("Mandor overnight report\n");
-    let ran = r.drafts.len() + r.held_ac_gate.len() + r.held_other.len() + r.failed.len();
+    let ran = r.drafts.len()
+        + r.held_ac_gate.len()
+        + r.held_other.len()
+        + r.failed.len()
+        + r.held_group.len()
+        + r.continuing.len();
     if ran == 0 && r.dequeued.is_empty() {
         out.push_str("No cards ran this cycle.\n");
     } else {
@@ -166,11 +177,22 @@ pub fn report_text(r: &CycleReport) -> String {
         ] {
             let _ = writeln!(out, "{label}: {}", cards.len());
         }
+        if !r.held_group.is_empty() {
+            let _ = writeln!(out, "Parked (group): {}", r.held_group.len());
+        }
+        if !r.continuing.is_empty() {
+            let _ = writeln!(out, "Continues next cycle: {}", r.continuing.join(", "));
+        }
+        for group in &r.groups {
+            let cards: Vec<String> = group.iter().map(|(k, s)| format!("{k} {s}")).collect();
+            let _ = writeln!(out, "Group: {}", cards.join(", "));
+        }
         let decide: Vec<&str> = r
             .drafts
             .iter()
             .chain(&r.held_ac_gate)
             .chain(&r.held_other)
+            .chain(&r.held_group)
             .map(String::as_str)
             .collect();
         if !decide.is_empty() {
@@ -322,6 +344,7 @@ mod tests {
             failed: vec![],
             used: 1200,
             limit: Some(5000),
+            ..CycleReport::default()
         };
         let t = report_text(&r);
         assert!(t.contains("Draft PRs ready: 1"));
@@ -332,6 +355,34 @@ mod tests {
         assert!(t.ends_with("Open: mandor://overnight"));
         let empty = report_text(&CycleReport::default());
         assert!(empty.contains("No cards ran this cycle."));
+    }
+
+    #[test]
+    fn teks_laporan_grup_per_kartu() {
+        let r = CycleReport {
+            held_group: vec!["PGS-1401".to_owned(), "PGS-1402".to_owned()],
+            continuing: vec!["PGS-1405".to_owned()],
+            groups: vec![vec![
+                ("PGS-1401".to_owned(), "committed".to_owned()),
+                ("PGS-1402".to_owned(), "parked: usage_limit".to_owned()),
+                ("PGS-1403".to_owned(), "not started".to_owned()),
+            ]],
+            ..CycleReport::default()
+        };
+        let t = report_text(&r);
+        assert!(t.contains("Parked (group): 2"), "{t}");
+        assert!(t.contains("Continues next cycle: PGS-1405"), "{t}");
+        assert!(
+            t.contains(
+                "Group: PGS-1401 committed, PGS-1402 parked: usage_limit, PGS-1403 not started"
+            ),
+            "{t}"
+        );
+        assert!(t.contains("Needs your decision: PGS-1401, PGS-1402"), "{t}");
+        assert!(
+            !report_text(&CycleReport::default()).contains("Group:"),
+            "tanpa grup, teks lama tidak berubah"
+        );
     }
 
     fn state<'a>() -> TickState<'a> {

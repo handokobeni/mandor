@@ -1,10 +1,13 @@
 //! Konversi DTO kartu Planned dan target antrean (plan 2026-10-30-001, U6).
 
+use mandor_domain::group::{AcSnap, CardState};
 use mandor_domain::planned::{DesignMark, PlannedWork};
 use mandor_domain::{AcRow, Design, RowStatus, Verdict};
 use mandor_protocol::{
-    AcRowView, CarriedReviewDto, DesignMarkDto, PlannedWorkDto, RpcError, StartWorkspace,
+    AcRowView, AcSnapDto, CardCommitDto, CarriedCardDto, CarriedReviewDto, DesignMarkDto,
+    PlannedWorkDto, RpcError, StartWorkspace,
 };
+use mandor_usecase::run_ports::{CardCommit, GroupCardRow};
 use mandor_usecase::{CarriedReview, StartTarget};
 
 use crate::views::ac_row_view;
@@ -27,7 +30,30 @@ pub(super) fn planned_dto(w: &PlannedWork) -> PlannedWorkDto {
             .collect(),
         laptop_design: w.laptop_design.clone(),
         repos: w.repos.clone(),
+        group_acs: w.group_acs.as_deref().map(snaps_dto),
     }
+}
+
+/// Cuplikan AC plan grup menjadi DTO.
+pub(super) fn snaps_dto(v: &[AcSnap]) -> Vec<AcSnapDto> {
+    v.iter()
+        .map(|a| AcSnapDto {
+            card: a.card.clone(),
+            ac_id: a.ac_id.clone(),
+            text: a.text.clone(),
+        })
+        .collect()
+}
+
+/// DTO menjadi cuplikan AC plan grup.
+pub(super) fn snaps_of(v: Vec<AcSnapDto>) -> Vec<AcSnap> {
+    v.into_iter()
+        .map(|a| AcSnap {
+            card: a.card,
+            ac_id: a.ac_id,
+            text: a.text,
+        })
+        .collect()
 }
 
 /// DTO menjadi paket plan; nilai Design yang tidak dikenal ditolak.
@@ -48,6 +74,7 @@ pub(super) fn planned_of(d: PlannedWorkDto) -> Result<PlannedWork, RpcError> {
         design,
         laptop_design: d.laptop_design,
         repos: d.repos,
+        group_acs: d.group_acs.map(snaps_of),
     })
 }
 
@@ -90,6 +117,54 @@ fn ac_row_of(v: AcRowView) -> Result<AcRow, RpcError> {
     })
 }
 
+/// Kartu grup menjadi DTO serah-terima (KTD-G15 plan grup).
+pub(super) fn card_dto(c: &GroupCardRow) -> CarriedCardDto {
+    CarriedCardDto {
+        record_id: c.record_id.clone(),
+        state: c.state.as_str().to_owned(),
+        changed_in_lark: c.changed_in_lark,
+        kept_reason: c.kept_reason.clone(),
+        commits: c
+            .commits
+            .iter()
+            .map(|m| CardCommitDto {
+                repo_id: m.repo_id.clone(),
+                sha: m.sha.clone(),
+            })
+            .collect(),
+        plan: c.plan.clone(),
+        fix_requested_by: c.fix_requested_by.clone(),
+        quiet_until_ms: c.quiet_until_ms,
+        in_fix: c.in_fix,
+        fix_replies: c.fix_replies.clone(),
+    }
+}
+
+/// DTO menjadi kartu grup; state yang tidak dikenal ditolak.
+pub(super) fn card_of(d: CarriedCardDto) -> Result<GroupCardRow, RpcError> {
+    let state = CardState::parse(&d.state)
+        .ok_or_else(|| rejected(format!("unknown card state: {}", d.state)))?;
+    Ok(GroupCardRow {
+        record_id: d.record_id,
+        state,
+        changed_in_lark: d.changed_in_lark,
+        kept_reason: d.kept_reason,
+        commits: d
+            .commits
+            .into_iter()
+            .map(|m| CardCommit {
+                repo_id: m.repo_id,
+                sha: m.sha,
+            })
+            .collect(),
+        plan: d.plan,
+        fix_requested_by: d.fix_requested_by,
+        quiet_until_ms: d.quiet_until_ms,
+        in_fix: d.in_fix,
+        fix_replies: d.fix_replies,
+    })
+}
+
 /// Target Start dari parameter: workspace bila diisi, selain itu satu repo.
 pub(super) fn target_of(
     repo_id: Option<String>,
@@ -125,6 +200,24 @@ mod tests {
     use super::*;
 
     #[test]
+    fn kartu_grup_bolak_balik_dan_state_tak_dikenal_ditolak() {
+        let mut c = GroupCardRow::pending("c1");
+        c.state = CardState::Done;
+        c.changed_in_lark = true;
+        c.commits = vec![CardCommit {
+            repo_id: "web".to_owned(),
+            sha: "abc".to_owned(),
+        }];
+        c.plan = Some("## Plan".to_owned());
+        let json = serde_json::to_string(&card_dto(&c)).unwrap();
+        let back: CarriedCardDto = serde_json::from_str(&json).unwrap();
+        assert_eq!(card_of(back).unwrap(), c);
+        let mut bad = card_dto(&c);
+        bad.state = "maybe".to_owned();
+        assert!(card_of(bad).is_err());
+    }
+
+    #[test]
     fn hasil_review_bolak_balik_dan_verdict_tak_dikenal_ditolak() {
         let mut row = AcRow::new("ac1", Some("AC-1"), "teks", RowStatus::Active);
         row.verdict = Verdict::Pass;
@@ -153,6 +246,11 @@ mod tests {
             }],
             laptop_design: vec!["ds1".to_owned()],
             repos: vec!["web".to_owned(), "api".to_owned()],
+            group_acs: Some(vec![AcSnap {
+                card: "c2".to_owned(),
+                ac_id: "ac2".to_owned(),
+                text: "AC kartu 2".to_owned(),
+            }]),
         };
         let dto = planned_dto(&w);
         let json = serde_json::to_string(&dto).unwrap();

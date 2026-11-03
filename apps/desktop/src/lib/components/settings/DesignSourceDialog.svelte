@@ -50,7 +50,7 @@
 </script>
 
 <Dialog.Root open onOpenChange={(o) => !o && oncancel()}>
-  <Dialog.Content class="sm:max-w-[560px]">
+  <Dialog.Content class="sm:max-w-[560px] max-h-[90vh] overflow-y-auto">
     {#if view === 'main'}
       <Dialog.Header>
         <Dialog.Title class="text-[length:var(--text-md)]">{source ? 'Edit design source' : 'Add a design source'}</Dialog.Title>

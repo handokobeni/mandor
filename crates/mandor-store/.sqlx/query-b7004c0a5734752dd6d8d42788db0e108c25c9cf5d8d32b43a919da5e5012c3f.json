@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO overnight_queue (record_id, position, target_json, note, start_now,\n                added_at_ms, design_json, planned_json, planned_state, origin_daemon, planned_reason,\n                group_json)\n             VALUES (?, CASE WHEN ? = 1\n                    THEN (SELECT COALESCE(MIN(position), 1) - 1 FROM overnight_queue)\n                    ELSE (SELECT COALESCE(MAX(position), 0) + 1 FROM overnight_queue) END,\n                ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 12
+    },
+    "nullable": []
+  },
+  "hash": "b7004c0a5734752dd6d8d42788db0e108c25c9cf5d8d32b43a919da5e5012c3f"
+}

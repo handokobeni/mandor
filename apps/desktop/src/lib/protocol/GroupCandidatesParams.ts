@@ -7,4 +7,8 @@ export type GroupCandidatesParams = {
 /**
  * Kartu awal; kandidat diambil dari epic kartu ini.
  */
-record_id: string, };
+record_id: string, 
+/**
+ * Kartu di antrean VM (termasuk anggota grup), dibaca app dari daemon VM.
+ */
+queued?: Array<string>, };

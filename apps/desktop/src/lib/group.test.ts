@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import {
+  candidatesParams,
+  groupFooter,
+  groupStartParams,
+  onePlanAvailable,
   changedCards,
   groupAction,
   headerCard,
@@ -110,6 +114,44 @@ describe('pemilihan kartu', () => {
   });
 });
 
+describe('teks bantuan pemilih grup', () => {
+  it('laptop: Next card; VM: berlanjut otomatis tanpa Next card', () => {
+    expect(groupFooter(3, 'laptop')).toBe(
+      '3 cards: Mandor claims all of them and moves them to In Progress. After each card, press Next card to commit it and start the next one.'
+    );
+    const vm = groupFooter(2, 'vm');
+    expect(vm).toContain('2 cards');
+    expect(vm).toContain('commits each card and starts the next one on its own');
+    expect(vm).not.toContain('Next card');
+  });
+});
+
+describe('satu plan untuk grup', () => {
+  it('pilihan One plan for all cards hanya untuk ≥ 2 kartu dengan Plan', () => {
+    expect(onePlanAvailable(2, 'plan')).toBe(true);
+    expect(onePlanAvailable(1, 'plan')).toBe(false);
+    expect(onePlanAvailable(3, 'brainstorm')).toBe(false);
+    expect(onePlanAvailable(3, 'skip')).toBe(false);
+  });
+
+  it('parameter start_group mengirim one_plan hanya bila dipilih dan tersedia', () => {
+    const rest = { repo_id: 'r', note: null };
+    expect(groupStartParams(rest, ['a', 'b'], true, 'plan')).toEqual({ repo_id: 'r', note: null, record_ids: ['a', 'b'], one_plan: true });
+    expect(groupStartParams(rest, ['a', 'b'], false, 'plan')).toEqual({ repo_id: 'r', note: null, record_ids: ['a', 'b'] });
+    expect(groupStartParams(rest, ['a', 'b'], true, 'brainstorm')).toEqual({ repo_id: 'r', note: null, record_ids: ['a', 'b'] });
+  });
+});
+
+describe('kandidat grup', () => {
+  it('kartu di antrean VM dikirim agar tidak bisa dipilih', () => {
+    expect(candidatesParams('a', new Set(['b', 'c']))).toEqual({ record_id: 'a', queued: ['b', 'c'] });
+  });
+
+  it('VM tidak tersambung: tanpa daftar antrean', () => {
+    expect(candidatesParams('a', null)).toEqual({ record_id: 'a' });
+  });
+});
+
 describe('judul workspace grup', () => {
   it('kartu aktif, atau kartu utama bila tidak ada yang aktif', () => {
     const run = { key: 'PGS-1', title: 'Utama', record_id: '1' };
@@ -124,6 +166,7 @@ describe('teks kartu', () => {
   it('label state dan kartu yang menunggu keputusan', () => {
     expect(stateLabel('removed_reverted')).toBe('Reverted');
     expect(stateLabel('pending')).toBe('Waiting');
+    expect(stateLabel('active'), 'kartu giliran, juga saat plan menunggu persetujuan').toBe('Current');
     const cards = [
       card('1', 'done', { changed_in_lark: true }),
       card('2', 'done', { changed_in_lark: true, kept_reason: 'QA' }),

@@ -176,6 +176,10 @@ user developer (`handoko_ben`) dari SSH-in-browser, lalu cek `ssh lembur whoami`
    gagal: **Retry handing over** atau **Remove from VM queue**. Kartu Planned
    yang masih menunggu bisa ditarik kembali dengan **Take over to laptop**;
    plannya kembali menunggu persetujuan di laptop.
+6. **Grup kartu**: beberapa kartu satu epic bisa diantre sebagai satu item
+   (**Queue together**) atau dikirim setelah plan kartu pertama di laptop.
+   VM mengerjakannya berurutan di satu branch dan satu PR draft. Lihat
+   `docs/runbook/grouped-runs.md` bagian 6.
 
 ## 8. Developer: login
 

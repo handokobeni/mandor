@@ -86,11 +86,51 @@ export function reportGroups(report: OvernightReportView): ReportGroup[] {
   );
 }
 
+/**
+ * Baris pertama sebuah run di laporan; satu run grup punya satu baris per
+ * kartu (KTD-G16), dan aksi run (Send to review, Take over, jawaban) hanya
+ * tampil sekali.
+ */
+export function leadRow<C extends { run_id: string }>(c: C, list: C[]): boolean {
+  return list.find((x) => x.run_id === c.run_id) === c;
+}
+
+type HeldRow = { run_id: string; outcome: string; hold_reason: string | null; changed_in_lark: boolean };
+
+/**
+ * Aksi untuk run tertahan di laporan: `answer` (jawab agent atau antre lagi,
+ * termasuk grup yang kartu berikutnya dikeluarkan), `confirm` (Confirm and
+ * push), atau `null`. Selama kartu grup menunggu Keep/Revert (R13), keputusan
+ * ada di baris kartunya.
+ */
+export function heldAction<C extends HeldRow>(c: C, list: C[]): 'answer' | 'confirm' | null {
+  if (c.outcome !== 'held') return null;
+  if (list.some((x) => x.run_id === c.run_id && x.changed_in_lark)) return null;
+  if (c.hold_reason === 'stuck' || c.hold_reason === 'usage_limit' || c.hold_reason === 'card_removed') return 'answer';
+  return c.hold_reason === 'needs_confirmation' ? 'confirm' : null;
+}
+
+const GROUP_CARD_LABEL: Record<string, string> = {
+  committed: 'Committed',
+  active: 'In progress',
+  pending: 'Not started',
+  removed: 'Removed'
+};
+
+/** Keadaan kartu di grupnya pada laporan pagi. */
+export function groupCardLabel(state: string): string {
+  return GROUP_CARD_LABEL[state] ?? state;
+}
+
 const HOLD_LABEL: Record<string, string> = {
   stuck: 'Agent needs an answer',
   ac_gate: 'AC gate',
   needs_confirmation: 'Sensitive files changed',
-  usage_limit: 'Usage limit reached'
+  usage_limit: 'Usage limit reached',
+  card_removed: 'Card changed in Lark',
+  window_ended: 'Paused at the end of the window',
+  yield_to_fix: 'Paused for a Waiting Fix',
+  plan_outdated: 'Group plan outdated'
 };
 
 export function holdLabel(reason: string | null): string {
@@ -223,9 +263,30 @@ export function queueRowMode(item: Pick<QueueItemView, 'planned_state'>): 'pendi
   return item.planned_state ? 'planned' : 'no_plan';
 }
 
-/** Tombol "Approve & queue for VM" tampil (R1): VM siap dan run bukan run grup. */
-export function showQueueForVm(vm: { statusLoaded: boolean; vmRole: boolean; larkReady: boolean }, grouped: boolean): boolean {
-  return vm.statusLoaded && vm.vmRole && vm.larkReady && !grouped;
+/** Teks baris antrean grup (KTD-G10): jumlah kartu dan urutan sesudah kartu pertama. */
+export function queueGroupText(
+  item: Pick<QueueItemView, 'record_id' | 'group' | 'group_keys'>
+): { count: number; then: string } | null {
+  const keys = item.group_keys ?? [];
+  if (keys.length < 2) return null;
+  return { count: keys.length, then: `then ${keys.slice(1).join(', ')}` };
+}
+
+/** Label tombol tambah di tab Overnight; lebih dari satu kartu = "Queue together" (R20). */
+export function queueAddLabel(cards: number): string {
+  return cards > 1 ? `Queue ${cards} cards together` : 'Add to queue';
+}
+
+/**
+ * Tombol "Approve & queue for VM" tampil (R1): VM siap, dan run kartu
+ * tunggal atau run grup yang kartu pertamanya masih di-plan (R24, KTD-G14).
+ */
+export function showQueueForVm(
+  vm: { statusLoaded: boolean; vmRole: boolean; larkReady: boolean },
+  cards: { state: string }[]
+): boolean {
+  const firstPlanning = cards.every((c) => c.state === 'active' || c.state === 'pending');
+  return vm.statusLoaded && vm.vmRole && vm.larkReady && firstPlanning;
 }
 
 /**

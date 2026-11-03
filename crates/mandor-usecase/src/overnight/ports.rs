@@ -22,6 +22,21 @@ pub struct QueueItem {
     pub design_sources: Vec<String>,
     /// Plan yang disetujui di laptop; `None` = No plan.
     pub planned: Option<PlannedEntry>,
+    /// Kartu grup urut pengerjaan (plan 2026-10-23-004, KTD-G10); kosong =
+    /// kartu tunggal.
+    pub group: Vec<String>,
+}
+
+impl QueueItem {
+    /// Kartu yang dipegang item ini: semua kartu grup, atau kartu tunggalnya.
+    #[must_use]
+    pub fn cards(&self) -> Vec<&str> {
+        if self.group.is_empty() {
+            vec![self.record_id.as_str()]
+        } else {
+            self.group.iter().map(String::as_str).collect()
+        }
+    }
 }
 
 /// Bagian Planned item antrean (plan 2026-10-30-001, KTD-2).
@@ -96,6 +111,10 @@ pub trait OvernightStore: Send + Sync {
     fn queue(&self) -> impl Future<Output = Result<Vec<QueueItem>, PortError>> + Send;
     /// Menambah kartu di akhir antrean; `Conflict` bila sudah ada.
     fn enqueue(&self, item: &QueueItem) -> impl Future<Output = Result<(), PortError>> + Send;
+    /// Menambah kartu di posisi pertama antrean (grup yang berjeda, KTD-G12);
+    /// `Conflict` bila sudah ada.
+    fn enqueue_front(&self, item: &QueueItem)
+    -> impl Future<Output = Result<(), PortError>> + Send;
     /// Mengeluarkan kartu. `reason` dicatat untuk laporan pagi; `None` berarti
     /// kartu mulai dikerjakan atau dikeluarkan dev.
     fn dequeue(

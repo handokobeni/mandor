@@ -1072,6 +1072,17 @@ impl mandor_usecase::overnight::OvernightStore for FakeOvernight {
         q.push(item.clone());
         Ok(())
     }
+    async fn enqueue_front(
+        &self,
+        item: &mandor_usecase::overnight::QueueItem,
+    ) -> Result<(), PortError> {
+        let mut q = self.queue.lock().unwrap();
+        if q.iter().any(|i| i.record_id == item.record_id) {
+            return Err(PortError::Conflict);
+        }
+        q.insert(0, item.clone());
+        Ok(())
+    }
     async fn dequeue(
         &self,
         record_id: &str,
@@ -1262,5 +1273,18 @@ impl mandor_usecase::review::DesignSources for FakeDesign {
             });
         }
         Ok(out)
+    }
+
+    async fn ids_named(&self, names: &[String]) -> Result<Vec<String>, PortError> {
+        let sources = self.sources.lock().unwrap();
+        Ok(names
+            .iter()
+            .filter_map(|n| {
+                sources
+                    .iter()
+                    .find(|(_, name)| *name == n)
+                    .map(|(id, _)| id.clone())
+            })
+            .collect())
     }
 }

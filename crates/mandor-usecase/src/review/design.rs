@@ -52,6 +52,13 @@ pub trait DesignSources: Send + Sync {
         ids: &[String],
         refresh: bool,
     ) -> impl std::future::Future<Output = Result<DesignCheck, crate::ports::PortError>> + Send;
+
+    /// Id sumber milik daemon ini yang bernama `names`, urut seperti `names`;
+    /// nama tanpa sumber dilewati (Take over dari VM, id berbeda antar daemon).
+    fn ids_named(
+        &self,
+        names: &[String],
+    ) -> impl std::future::Future<Output = Result<Vec<String>, crate::ports::PortError>> + Send;
 }
 
 /// Hasil pemeriksaan berkas oleh adapter.

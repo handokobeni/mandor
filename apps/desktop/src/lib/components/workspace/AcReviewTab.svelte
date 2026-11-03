@@ -20,6 +20,7 @@
     moveFocus,
     noDesignSource,
     removedRows,
+    reviewMeta,
     toggleSelection,
     VERDICT_META
   } from '#lib/ac-review.ts';
@@ -175,7 +176,7 @@
                 ? ' · browser used'
                 : ' · no browser'}
             {:else}
-              No review yet
+              {reviewMeta(ledger.rows)}
             {/if}
           </span>
           <span class="right">

@@ -15,12 +15,12 @@ execution: code
 
 - **Objective:** Kartu-kartu satu flow milik satu developer di dalam satu epic dikerjakan sebagai satu run grup: satu branch, berurutan per kartu, satu PR (per repo). Grup bisa dimulai dari app laptop atau diantrekan ke VM lembur sehingga satu flow selesai semalaman.
 - **Product authority:** brainstorm dengan pemilik produk dan keputusannya atas dua ronde review dokumen (coherence, feasibility, product-lens, adversarial), 2026-10-23. Melengkapi plan mode VM (`docs/plans/2026-10-23-002-feat-vm-overnight-mode-plan.md`) dan mengubah aturan Rilis 1 "satu kartu = satu run = satu branch = satu PR per repo" untuk run grup saja.
-- **Open blockers:** tidak ada untuk bagian laptop (U1–U9, U11). U10 (VM) menunggu implementasi plan mode VM.
-- **Product Contract preservation:** Product Contract unchanged sejak review ronde kedua.
+- **Open blockers:** tidak ada. Bagian laptop (U1–U9, U11) sudah di-merge (PR #12); plan VM dan plan siang lalu antre ke VM sudah di-merge (PR #13, #14), jadi U10 dan U12–U17 bisa dikerjakan.
+- **Product Contract preservation:** changed 2026-10-31 (keputusan pemilik produk saat merinci U10): R24, F5, dan AE9 baru (grup di-plan kartu pertamanya di laptop lalu diantre ke VM); R22 diperluas dengan Take over PR draft grup dan hasil review AC, mengikuti R22 plan VM yang diperbarui. Diperjelas di Planning Contract (bukan perubahan R): kartu grup di VM yang berakhir tanpa perubahan kode dianggap buntu (KTD-G11), dan keputusan R13 di VM diambil dari laporan Overnight (KTD-G18). Changed 2026-10-31 (keputusan pemilik produk setelah PR #15): R25, F6, AE10, dan AE11 baru; R5, R6, dan R24 diperluas. "One plan for all cards" menjadi pilihan saat Start together: satu plan mencakup AC semua kartu, disetujui sekali, lalu pengerjaan tetap per kartu. Bila AC kartu yang belum selesai berubah setelah plan disetujui, plan grup harus disetujui ulang.
 - **Execution profile:** test-first lewat antarmuka publik (usecase dan store dengan fake yang ada); frontend dengan Vitest; uji langsung dengan kartu uji di Base salinan dan repo `mandor-smoke`.
 - **Authority hierarchy:** `CLAUDE.md` (standar `rust-engineering` mengikat) > Product Contract > Planning Contract > unit.
-- **Stop conditions:** berhenti dan tanya bila perilaku produk harus berubah, bila unit tidak bisa selesai tanpa melanggar `rust-engineering`, atau bila U10 dicapai sebelum plan VM terimplementasi.
-- **Tail ownership:** branch fitur, PR ke `main`, tanpa merge sendiri. Bagian laptop boleh dikirim sebagai PR pertama; U10 menyusul.
+- **Stop conditions:** berhenti dan tanya bila perilaku produk harus berubah, atau bila unit tidak bisa selesai tanpa melanggar `rust-engineering`.
+- **Tail ownership:** branch fitur, PR ke `main`, tanpa merge sendiri. Bagian laptop sudah dikirim (PR #12); bagian VM (U10, U12–U17) di PR #15. Satu plan grup (U18–U21) digabung ke PR #15 (keputusan pemilik produk 2026-10-31) agar uji langsungnya berjalan bersama.
 
 ---
 
@@ -51,8 +51,8 @@ Antrean VM lembur sudah mengerjakan kartu berurutan, tetapi tetap satu PR per ka
 
 **Menjalankan grup**
 
-- R5. Kartu dikerjakan berurutan di satu branch grup: plan, implementasi, dan commit per kartu, lalu kartu berikutnya.
-- R6. Di laptop, plan setiap kartu menunggu persetujuan dev seperti run biasa. Di VM, plan tidak menunggu persetujuan (aturan VM).
+- R5. Kartu dikerjakan berurutan di satu branch grup: plan, implementasi, dan commit per kartu, lalu kartu berikutnya. Dengan "One plan for all cards" (R25), plan dibuat sekali untuk seluruh grup; implementasi dan commit tetap per kartu.
+- R6. Di laptop, plan setiap kartu menunggu persetujuan dev seperti run biasa; dengan R25, plan grup disetujui sekali. Di VM, plan tidak menunggu persetujuan (aturan VM).
 - R7. Saat grup dimulai, semua kartu grup diklaim dan pindah ke In Progress di Lark.
 - R8. Bila satu kartu tersangkut (agent bertanya, batas biaya, atau batas pemakaian VM), grup berhenti di kartu itu. Kartu yang sudah selesai tetap di branch. Setelah masalahnya beres, grup melanjutkan dari kartu itu di branch yang sama.
 - R9. Sebelum memulai setiap kartu, Mandor memeriksa ulang kartu itu di Lark. Kartu yang dipindah ke status lain atau berganti PIC dikeluarkan dari grup: klaimnya dilepas (hanya bila klaim itu masih milik dev ini), statusnya tidak diubah dan dev tidak diminta mengubahnya, dan grup berhenti seperti R8 karena kartu berikutnya mungkin bergantung padanya. Di laptop dev memilih melanjutkan tanpa kartu itu atau menghentikan grup; di VM grup diparkir dengan alasan "card removed". Perubahan status, PIC, atau klaim pada kartu grup yang sedang tidak dikerjakan tidak menghentikan grup seketika: kartu itu ditandai, lalu ditangani R9 sebelum gilirannya (bila belum dimulai) atau R13 di gerbang (bila sudah di-commit). Hanya kehilangan klaim pada kartu yang sedang dikerjakan yang menghentikan grup seperti R8.
@@ -66,7 +66,7 @@ Antrean VM lembur sudah mengerjakan kartu berurutan, tetapi tetap satu PR per ka
   - Revert menjalankan review AC seluruh grup pada kode setelah revert (di VM sebagai item antrean grup).
   - Revert yang konflik tidak diterapkan: grup ditahan dengan alasan "revert conflict", dan dev memilih tetap menyertakan kartu itu dengan alasan atau mengambil alih grup ke laptop.
   - Kartu yang tetap disertakan tetap ikut buku AC, deskripsi PR (R16), dan Waiting Fix (R17), tetapi Mandor tidak memindahkan statusnya (R14, R17); deskripsi PR mencatat status dan PIC-nya saat itu.
-- R14. Di laptop, PR dibuat lalu semua kartu aktif pindah ke Waiting Review bersama. Dari VM, PR dibuat draft dan semua kartu tetap In Progress; satu "Send to review" pada grup menandai PR siap di-review dan memindahkan semua kartu aktif ke Waiting Review bersama.
+- R14. Di laptop, PR dibuat lalu semua kartu aktif pindah ke Waiting Review bersama. Dari VM, PR dibuat draft dan semua kartu tetap In Progress; satu "Send to review" pada grup menandai PR siap di-review dan memindahkan semua kartu aktif ke Waiting Review bersama, kecuali kartu yang tetap disertakan setelah berubah di Lark (R13).
 - R15. Grup dengan target workspace membuat satu PR per repo anggota yang berubah; semua kartu grup membawa tautan PR yang sama.
 - R16. Deskripsi PR mencantumkan setiap kartu grup beserta ringkasan AC dan verdict-nya per kartu, serta kartu yang dikeluarkan.
 
@@ -80,14 +80,21 @@ Antrean VM lembur sudah mengerjakan kartu berurutan, tetapi tetap satu PR per ka
 
 - R20. Dari tab Overnight, dev bisa mengantrekan grup sebagai satu item antrean. Grup memakai aturan VM yang sama: satu item sekaligus per developer, pagar lembur, dan batas pemakaian per siklus. Kartu grup yang diantrekan tampil "Queued for VM" di board laptop dan tidak bisa dimulai atau diantrekan sendiri. Bila ada Waiting Fix kartu VM lain yang siap, grup mengalah di antara kartu: setelah kartu yang sedang dikerjakan selesai, perbaikan itu dikerjakan dulu, lalu grup lanjut di branch-nya.
 - R21. Bila jam lembur berakhir di tengah grup, kartu yang sedang dikerjakan diselesaikan, lalu grup berhenti dengan alasan "window ended", tetap di depan antrean, dan otomatis dilanjutkan dari kartu berikutnya di awal siklus berikutnya tanpa perlu diantrekan ulang. Grup yang dimulai dengan "Start now" di luar jam lembur berjalan sampai selesai atau tersangkut, tanpa berhenti karena jam.
-- R22. Grup yang diparkir (R8, R9, R12, R13) tercatat di laporan pagi dengan progres per kartu; item antrean berikutnya tetap berjalan. Grup diparkir dijawab dan diantrekan ulang, atau diambil alih ke laptop ("Take over to laptop"), sebagai satu kesatuan: klaim semua kartu grup dan branch grup berpindah bersama, dan kartu tersisa mengikuti R6 untuk laptop.
+- R22. Grup yang diparkir (R8, R9, R12, R13) tercatat di laporan pagi dengan progres per kartu; item antrean berikutnya tetap berjalan. Grup diparkir dijawab dan diantrekan ulang, atau diambil alih ke laptop ("Take over to laptop"), sebagai satu kesatuan: klaim semua kartu grup dan branch grup berpindah bersama, dan kartu tersisa mengikuti R6 untuk laptop. Grup yang selesai sebagai PR draft juga bisa diambil alih: laptop melanjutkan di PR draft grup yang sama, hasil review AC VM ikut (usang bila kode laptop berbeda), dan "Send to review" grup dilakukan dari laptop.
 - R23. Laporan pagi dan ringkasan siklus menghitung hasil grup per kartu: kartu selesai dihitung mencapai PR draft hanya setelah PR grup dibuat; kartu lain dihitung diparkir dengan alasan grup.
+- R24. Grup yang dimulai di laptop dengan plan bisa diantrekan ke VM selama plan kartu pertama menunggu persetujuan ("Approve & queue for VM"), seperti kartu tunggal Planned (plan `2026-10-30-001`): branch grup di-push, klaim semua kartu pindah ke VM, run laptop ditutup, dan VM memulai kartu pertama dari plan yang disetujui lalu mengerjakan kartu sisanya tanpa persetujuan plan (R6). Sumber desain VM dipilih sekali untuk seluruh grup; plan kartu pertama yang punya AC Follow design wajib punya minimal satu sumber desain VM. Grup Planned yang masih menunggu di antrean bisa diambil alih ke laptop dan kembali menunggu persetujuan plan kartu pertama. Grup yang sudah lewat kartu pertama tidak bisa dikirim ke VM. Dengan R25, yang dikirim adalah plan grup: VM mengerjakan semua kartu mengikuti plan itu tanpa giliran plan.
+
+**Satu plan untuk grup**
+
+- R25. Saat Start together, dev bisa memilih "One plan for all cards". Agent membuat satu plan untuk seluruh grup yang mencakup AC semua kartu, dengan satu bagian per kartu, dan dev menyetujuinya sekali (design gaps dan Follow design dihitung untuk AC semua kartu). Setelah itu kartu dikerjakan berurutan mengikuti bagiannya tanpa giliran plan per kartu; commit, R8–R13, Waiting Fix, laporan, dan Take over tetap per kartu. Sebelum memulai setiap kartu, Mandor membaca ulang AC kartu yang belum selesai. Bila ada AC yang ditambah, diubah, atau dihapus, plan grup tidak berlaku lagi: di laptop agent merevisi plan untuk kartu yang tersisa dan dev menyetujuinya ulang sebelum kartu berikutnya dimulai; di VM grup diparkir dengan alasan "plan outdated" sampai dev mengambil alih ke laptop dan menyetujui ulang. Kartu yang sudah di-commit tidak membatalkan plan bila AC-nya berubah; perubahan itu ditangani gerbang AC (R12). Tanpa pilihan ini, perilaku plan per kartu tidak berubah.
 
 ### Key Flows
 
 - F1. **Siang, laptop:** dev membuka PGS-1401, menekan "Start together", menerima 1401–1404, lalu mulai. Agent membuat plan 1401; dev menyetujui; agent mengerjakan dan commit; lanjut ke 1402 sampai 1404. Setelah 1404, gerbang Push & PR menampilkan AC keempat kartu; dev mengirim PR; keempat kartu pindah ke Waiting Review.
 - F2. **Lembur, VM:** dev mengantrekan grup 1401–1404 di tab Overnight. Malam hari VM mengerjakan keempat kartu berurutan tanpa persetujuan plan, lalu membuat satu PR draft; kartu tetap In Progress. Pagi hari dev membaca laporan, melihat PR, lalu menekan "Send to review" pada grup; keempat kartu pindah ke Waiting Review.
 - F3. **Tersangkut:** agent bertanya di kartu 1403. Grup berhenti; 1401–1402 sudah di branch. Dev menjawab; grup melanjutkan dari 1403.
+- F5. **Plan siang, lembur VM:** dev memulai grup 1401–1404 di laptop dengan plan, menyetujui plan 1401 lewat "Approve & queue for VM". Malam hari VM mengerjakan 1401 dari plan itu, lalu 1402–1404 tanpa persetujuan plan, dan membuat satu PR draft.
+- F6. **Satu plan untuk grup:** dev memilih "Start together" untuk 1401–1404 dengan "One plan for all cards". Agent membuat satu plan dengan bagian 1401–1404; dev menyetujuinya sekali (atau memilih "Approve & queue for VM"). Kartu dikerjakan dan di-commit berurutan tanpa giliran plan lagi. Saat 1403 belum dimulai, PO menambah satu AC di 1403; sebelum 1403 dimulai, agent merevisi plan dan dev menyetujuinya ulang.
 - F4. **Waiting Fix:** QA memindahkan 1402 ke Waiting Fix dengan komentar. Perbaikan masuk ke PR grup dan review AC mencakup keempat kartu; 1402 kembali ke Waiting Review; 1401, 1403, dan 1404 tidak berubah status.
 
 ### Acceptance Examples
@@ -98,8 +105,13 @@ Antrean VM lembur sudah mengerjakan kartu berurutan, tetapi tetap satu PR per ka
 - AE4. **Covers R9.** Given grup berjalan di VM dan kartu ketiga dipindah ke Blocked oleh orang lain, when kartu kedua selesai, then kartu ketiga dikeluarkan dengan klaim dilepas, grup diparkir dengan alasan "card removed", dan kartu keempat belum dikerjakan.
 - AE5. **Covers R17, R18.** Given PR grup terbuka dan keempat kartu Waiting Review, when QA memindahkan 1402 ke Waiting Fix dengan komentar tepercaya, then perbaikan di-commit ke branch grup, review AC mencakup keempat kartu, hanya 1402 yang berubah status, dan 1402 kembali ke Waiting Review setelah selesai.
 - AE6. **Covers R14.** Given grup selesai di VM dengan PR draft, when dev menekan "Send to review" pada grup, then PR siap di-review dan keempat kartu pindah dari In Progress ke Waiting Review bersama.
-- AE7. **Covers R20, R22.** Given grup dan satu kartu tunggal di antrean VM, when grup berhenti di kartu kedua karena batas biaya, then grup diparkir, laporan pagi menampilkan progres per kartu (kartu pertama sudah di-commit, kartu kedua tertahan) dan menghitung keduanya diparkir dengan alasan grup karena PR grup belum dibuat, dan kartu tunggal tetap dikerjakan.
+- AE7. **Covers R20, R22.** Given grup dan satu kartu tunggal di antrean VM, when grup berhenti di kartu kedua karena batas pemakaian siklus VM, then grup diparkir, laporan pagi menampilkan progres per kartu (kartu pertama sudah di-commit, kartu kedua tertahan) dan menghitung keduanya diparkir dengan alasan grup karena PR grup belum dibuat, dan kartu tunggal tetap dikerjakan.
 - AE8. **Covers R13.** Given kartu 1401 sudah di-commit lalu dipindah ke Blocked sebelum gerbang Push & PR, when kartu terakhir selesai, then 1401 tampil "changed in Lark, code already in the branch", review AC dan PR tidak berjalan sebelum dev memilih revert atau tetap menyertakannya, dan bila revert konflik grup ditahan dengan alasan "revert conflict".
+
+- AE9. **Covers R24.** Given grup 1401–1404 di laptop dengan plan 1401 menunggu persetujuan, when dev memilih "Approve & queue for VM" dengan satu sumber desain VM, then branch grup ada di remote, klaim keempat kartu menyebut daemon VM, run laptop tertutup, antrean VM menampilkan satu item grup Planned, dan malam itu VM memulai 1401 tanpa giliran plan dengan pesan pertama berisi plan yang disetujui.
+
+- AE10. **Covers R25.** Given grup 1401–1404 di laptop dimulai dengan "One plan for all cards", when agent selesai membuat plan, then hanya ada satu persetujuan plan yang menampilkan AC keempat kartu, dan setelah disetujui 1401–1404 dikerjakan dan di-commit berurutan tanpa giliran plan per kartu.
+- AE11. **Covers R25.** Given plan grup 1401–1404 sudah disetujui dan 1401 sudah di-commit, when AC 1403 diubah di Lark sebelum 1403 dimulai, then di laptop run kembali menunggu persetujuan plan revisi sebelum kartu berikutnya dimulai, dan di VM grup diparkir "plan outdated" tanpa memulai kartu berikutnya; perubahan AC 1401 yang sudah di-commit tidak memicu ini.
 
 ### Success Criteria
 
@@ -118,11 +130,12 @@ Antrean VM lembur sudah mengerjakan kartu berurutan, tetapi tetap satu PR per ka
 
 - Branch dasar dari PR orang lain (stacked PR) untuk flow yang bergantung pada pekerjaan rekan.
 - Mengeluarkan kartu dari grup setelah PR dibuat (memecah PR).
+- Mengirim grup laptop ke VM setelah kartu pertama selesai (serah-terima di tengah grup).
 - Pemeriksaan AC di tengah grup (saat ini satu review di akhir; satu AC yang tidak bisa diverifikasi memarkir seluruh grup setelah semua kartu dikerjakan).
 
 ### Dependencies / Assumptions
 
-- Plan mode VM (`docs/plans/2026-10-23-002-feat-vm-overnight-mode-plan.md`) menyediakan antrean, siklus, pagar lembur, "Send to review", "Take over to laptop", dan laporan pagi. R20–R23 dan klausa VM di R2, R6, R8, R9, R13, R14 mengikuti rilis plan VM; bagian lain bisa dikirim lebih dulu.
+- Plan mode VM (`docs/plans/2026-10-23-002-feat-vm-overnight-mode-plan.md`) menyediakan antrean, siklus, pagar lembur, "Send to review", "Take over to laptop", dan laporan pagi. R20–R24 plan ini adalah requirement grup baru yang memperluas requirement plan VM: antrean (R6 plan VM), batas siklus (R10), Take over (R22), Send to review (R23), dan laporan pagi (R24); klausa VM di R2, R6, R8, R9, R13, R14 juga bergantung padanya.
 - R19 membutuhkan deteksi status merged PR grup, yang belum ada di Mandor (hari ini status PR hanya diperiksa untuk kartu tanpa tautan PR).
 - Field `Epic` di Sprint Tasks adalah link dua arah ke tabel "Epic Pegasus"; tidak ada field dependensi antar kartu (Base salinan, 2026-10-23).
 - Klaim semua kartu sejak awal (R7) membuat kartu terakhir tampil In Progress berjam-jam sebelum dikerjakan; diterima pemilik produk agar rekan tim tidak mengambil kartu di tengah flow. Klaim tanpa heartbeat menjadi basi setelah 30 menit (Rilis 1), jadi perlindungan ini melemah bila daemon laptop mati lama; grup di VM tidak terpengaruh.
@@ -142,7 +155,19 @@ Antrean VM lembur sudah mengerjakan kartu berurutan, tetapi tetap satu PR per ka
 - **KTD-G7. PR grup.** Judul `<KEY-awal>–<KEY-akhir>: <judul epic>` (judul dibaca dari tabel epic yang ditaut field Epic; jatuh ke judul kartu pertama bila gagal), deskripsi per kartu (ringkasan AC, verdict, kartu dikeluarkan, kartu yang tetap disertakan setelah berubah), dan peringatan Waiting Fix (R19) di bagian atas deskripsi selama ada kartu Waiting Fix. `mark_waiting_review` memindahkan setiap kartu aktif yang bukan `changed_in_lark` dan menulis `mandor_pr` ke semuanya.
 - **KTD-G8. Waiting Fix grup.** `fix_candidates` dan `fix_loop_records` memetakan semua kartu grup terbuka ke run lewat KTD-G2. Satu run perbaikan per grup; `fix_requested_by`, jeda tenang, dan status loop disimpan per kartu di `run_cards`. State loop run grup diturunkan dari kartunya: run tetap di loop perbaikan selama ada kartu grup di Waiting Fix atau sedang diperbaiki; reset "status diubah manusia" hanya berlaku untuk kartu itu sendiri. `finish_fix_turn` dan `mark_waiting_review` bekerja pada daftar kartu yang diperbaiki, bukan `run.record_id`. Pesan perbaikan menggabungkan komentar per kartu dengan label. Status merged diperiksa saat kartu masuk loop perbaikan, sebelum giliran perbaikan dimulai, dan sebelum push. PR merged sebelum komentar dijurnal: kartu keluar dari run grup dan run tunggal dibuat dari branch default. PR merged yang baru terdeteksi sebelum push: komentar batch dikembalikan ke `pending` agar run tunggal baru menerimanya, dan tidak ada push ke branch grup.
 - **KTD-G9. Field Epic dibaca dari Lark** sebagai daftar id record epic pada `Task` (default kosong agar cache lama tetap terbaca); judul epic dibaca dari tabel yang ditaut field itu, mengikuti pola pembacaan AC. Kandidat grup = kartu di cache tugas dengan epic sama, PIC dev, To Do, lolos `check_start`, tanpa run terbuka (KTD-G2), dan tidak di antrean VM. Fungsi kandidat menerima tanda "di antrean VM" sebagai input sehingga AE1 diuji di U1 dengan fake; sumber antrean nyata dipasang di U10.
-- **KTD-G10. VM (U10) menunggu plan mode VM.** Unit VM memakai antrean, siklus, "Send to review", dan "Take over" dari plan VM; tidak dikerjakan sebelum itu ada.
+- **KTD-G10. Item antrean grup.** `QueueItem` mendapat daftar kartu grup (record_id urut). Kunci item adalah kartu pertama saat diantre, atau `runs.record_id` run grup saat ini bila grup diantre ulang (kartu utama bisa pindah setelah revert, KTD-G1); `start_queued`, `handoff`, dan pengecekan antrean menemukan grup lewat anggota mana pun di daftar itu. Daftar disimpan di kolom baru `overnight_queue.group_json` (migrasi `0009`). Semua kartu grup dianggap "di antrean" untuk R2, papan ("Queued for VM"), dan penolakan `queue.add`. Alasan: penjadwal, posisi, Start now, dan Planned tetap per item tanpa tabel baru.
+- **KTD-G11. Kartu grup berlanjut otomatis di VM.** `vm_after_turn` untuk run grup: worktree kartu aktif berubah → commit kartu dan tandai `done` lewat jalur `next_card` tanpa menunggu dev; worktree semua anggota bersih → `Held stuck` (R8, keputusan pemilik produk 2026-10-31: berbeda dari laptop, kartu tanpa perubahan di VM dianggap buntu). Pengecekan memakai `dirty` worktree, bukan `WorkChanges::is_empty()`, karena commit lokal kartu sebelumnya membuat `unpushed` selalu lebih dari nol. Perubahan sensitif → `Held needs_confirmation` seperti kartu tunggal. Setelah kartu terakhir, `vm_publish` menjalankan gerbang grup yang sudah ada; hasil `CardsChanged` (R13) menahan run `needs_confirmation` dengan catatan "changed in Lark", seperti jalur VM sekarang. Kartu berikutnya di VM selalu `Planning::Skip` (KTD-57 plan VM), kecuali kartu pertama grup Planned (KTD-G14).
+- **KTD-G12. Jeda grup di antara kartu (R20, R21).** Fungsi domain murni memutuskan sebelum kartu berikutnya: jam lembur berakhir (grup tidak dimulai dengan Start now) → jeda "window ended"; ada Waiting Fix kartu VM lain yang siap → jeda "yield to fix"; selain itu lanjut. Jeda = run `Held` dengan alasan baru lalu item grup diantre lagi di posisi pertama (`OvernightStore` mendapat penyisipan di depan). Tick berikutnya melanjutkan grup lewat `continue_group` bila tidak ada kartu aktif, atau lanjutan sesi bila ada. `HoldReason` mendapat `card_removed`, `window_ended`, dan `yield_to_fix`; `hold()` tidak mengirim notifikasi "needs attention" untuk dua yang terakhir. Tanda "dimulai dengan Start now" disimpan di run grup saat `start_queued` memulainya, karena item antrean dihapus begitu run berjalan; item yang diantre ulang membawa `start_now` dari tanda itu sehingga grup Start now tetap berjalan di luar jam (R21). Aturan jeda hanya berlaku sebelum kartu berikutnya, tidak sebelum gerbang setelah kartu terakhir.
+- **KTD-G13. Kartu berubah di Lark di VM (R9, AE4).** `advance` di daemon VM memarkir grup `Held card_removed` alih-alih menunggu dev; "Answer and queue" melanjutkan tanpa kartu itu dan meneruskan catatan dev ke kartu berikutnya.
+- **KTD-G18. Melanjutkan grup VM yang tertahan.** Item grup yang run-nya `Held` atau `Failed` dilanjutkan menurut keadaan kartunya: ada kartu aktif → lanjutan sesi kartu itu; tidak ada kartu aktif dan masih ada `pending` → `continue_group`; semua kartu selesai → `vm_publish` (review diulang bila verdict usang). `continue_group` dan `gate_card_decision` menerima run `Held` di daemon VM. Keputusan R13 diambil dari laporan Overnight (keputusan pemilik produk 2026-10-31): app memanggil `gate_card_decision` di daemon VM; Keep (dengan alasan) atau Revert lalu mengantre grup di depan, dan tick berikutnya menjalankan review AC grup lalu PR draft. Revert yang konflik menahan grup "revert conflict" (R13).
+- **KTD-G14. Grup Planned (R24).** `prepare_for_vm` menerima run grup selama kartu pertama di fase plan menunggu persetujuan; `VmHandover` membawa daftar kartu grup. `queue.add` menyimpan item grup Planned dengan `PlannedWork` kartu pertama. `send_to_vm` memindahkan klaim semua kartu dan menutup run laptop. Di VM, `start_from_plan` untuk grup memulihkan worktree dari branch, membuat run grup (kartu pertama `active` dengan plan, sisanya `pending`), dan memakai `approved_plan_message` ditambah catatan flow. Heartbeat Planned (`tend_planned`) memperbarui klaim semua kartu grup. Item grup Planned baru naik ke `waiting` bila klaim semua kartu dipegang VM; kartu mana pun yang `Hold` atau `Drop` membuat item `held` dengan alasan kartu itu. `send_to_vm` memindahkan klaim kartu pertama paling akhir, dan `start_from_plan` grup memeriksa ulang klaim setiap kartu. Buku AC run grup Planned diisi AC semua kartu berlabel kartunya (seperti `start_group`), lalu tanda Design dari `PlannedWork` diterapkan per `ac_id`.
+- **KTD-G15. Take over grup sebagai satu kesatuan (R22).** `handoff` run grup memindahkan klaim setiap kartu terbuka, menandai semuanya "hanya laptop", dan `Handback` membawa baris kartu (state, commit, plan) di samping `VmCarry`. `takeover` laptop dengan baris kartu memulihkan worktree lalu membuat run grup lewat `create_group`, bukan run tunggal. Grup Planned di antrean (tanpa run) kembali sebagai run grup menunggu persetujuan plan kartu pertama.
+- **KTD-G16. Laporan per kartu (R23).** `ReportCard` untuk run grup dipecah per kartu: kartu `done` dengan PR grup → "draft"; selain itu "parked (group)" beserta alasan grup.
+- **KTD-G17. Pengecualian kartu antrean saat memilih grup (R2).** App meneruskan id kartu di antrean VM (termasuk anggota grup) ke `groups.candidates`, karena daemon laptop tidak membaca antrean VM. Kartu yang dipegang daemon VM sudah tidak lolos lewat klaim.
+
+- **KTD-G19. Plan grup disimpan di run, bukan per kartu (R25).** `RunRecord` mendapat mode plan grup (`per_card` atau `whole_group`); untuk `whole_group`, plan dan persetujuannya disimpan di run (bukan `run_cards.plan`) beserta cuplikan AC per kartu saat plan disetujui (`ac_id` dan hash teks). `start_group` dengan `whole_group` menjalankan satu giliran plan berisi AC semua kartu berlabel kartunya dan prompt "satu bagian per kartu"; `approve_plan` menyimpan cuplikan lalu memulai kartu pertama. `advance` tidak memulai giliran plan untuk kartu berikutnya; pesan implementasi kartu menyebut bagian plan kartu itu. Alasan: plan menyangkut seluruh flow, sedangkan commit dan state tetap per kartu sehingga R8–R19 tidak berubah.
+- **KTD-G20. Plan usang dideteksi dari buku AC (R25).** Sebelum memulai setiap kartu (laptop dan VM), `advance` memperbarui buku AC kartu yang belum `done`, lalu membandingkannya dengan cuplikan saat persetujuan (domain `group::plan_outdated`: AC baru, teks berubah, atau AC hilang). Di laptop: run kembali ke fase plan dengan giliran revisi (plan lama, AC yang berubah, kartu yang tersisa) dan menunggu persetujuan; persetujuan ulang memperbarui cuplikan. Di VM: run `Held` dengan `HoldReason::PlanOutdated` (perlu dev), item tidak diantre ulang otomatis, dan aksi laporan hanya Take over. Grup Planned di antrean diperiksa sama saat dimulai (`start_group_from_plan`) dan ditahan dengan alasan yang sama. Alasan: buku AC sudah menandai baris New/Changed (`reconcile_rows`), jadi tidak perlu sumber kebenaran baru.
+- **KTD-G21. Serah-terima dan Take over membawa plan grup.** `VmHandover`/`PlannedWork` membawa plan grup dan cuplikannya bila mode `whole_group`; `prepare_for_vm` menerima grup `whole_group` selama plan grup menunggu persetujuan (belum ada kartu yang dimulai). `VmCarry` membawa mode, plan, dan cuplikan; Take over grup `whole_group` yang diparkir "plan outdated" kembali di laptop menunggu persetujuan plan revisi.
 
 ### High-Level Technical Design
 
@@ -150,7 +175,8 @@ Antrean VM lembur sudah mengerjakan kartu berurutan, tetapi tetap satu PR per ka
 stateDiagram-v2
   [*] --> pending
   pending --> active: giliran kartu (recheck Lark lolos)
-  pending --> removed: dev mengeluarkan / berubah di Lark (grup berhenti)
+  pending --> removed: dev mengeluarkan (grup lanjut, R10)
+  pending --> removed: berubah di Lark (grup berhenti, R9)
   active --> done: Next card (laptop) / turn selesai tanpa tanya (VM) → commit lokal
   active --> active: agent bertanya / batas biaya (grup berhenti, lanjut dari sini)
   done --> done: changed_in_lark (ditandai, diputuskan di gerbang)
@@ -178,9 +204,26 @@ sequenceDiagram
   Daemon->>Lark: In Progress → Waiting Review (kartu aktif), mandor_pr
 ```
 
+```mermaid
+stateDiagram-v2
+  [*] --> Queued: Queue together / Approve & queue for VM (R20, R24)
+  Queued --> Running: tick (jam lembur atau Start now)
+  Running --> CardDone: turn selesai dengan perubahan → commit kartu
+  CardDone --> Running: kartu berikutnya (recheck Lark lolos)
+  CardDone --> Held: jam lembur habis / Waiting Fix lain siap (window_ended, yield_to_fix; diantre lagi di depan)
+  CardDone --> Held: kartu berubah di Lark (card removed)
+  Running --> Held: buntu (worktree bersih) / batas pemakaian / sensitif
+  CardDone --> Held: kartu yang sudah di-commit berubah di Lark (R13, Keep/Revert di laporan)
+  CardDone --> Draft: kartu terakhir → gerbang grup → PR draft
+  Held --> Queued: Answer and queue / Keep atau Revert (review AC grup lalu PR draft)
+  Held --> Laptop: Take over
+  Draft --> Laptop: Take over
+  Draft --> WaitingReview: Send to review grup
+```
+
 ### Sequencing
 
-U2 → U1 → U3 → U4 → U5 → U6 → U7 (U7 juga bergantung pada U2). U8 mengikuti U4–U7 (RPC per kemampuan). U9 setelah U8. U11 terakhir untuk bagian laptop. U10 setelah plan VM terimplementasi.
+Bagian laptop selesai (U1–U9, U11). Bagian VM: U10 → U12 → U13 → U14 → U15 → U16 → U17. U16 mengikuti RPC yang dipakai U12–U15. Satu plan grup: U18 → U19 → U20 → U21, setelah PR #15.
 
 ---
 
@@ -326,14 +369,180 @@ U2 → U1 → U3 → U4 → U5 → U6 → U7 (U7 juga bergantung pada U2). U8 me
   - Kartu tidak bisa dipilih menampilkan alasan.
 - **Verification:** dicek di `/?mock` dengan grup tiruan.
 
-### U10. Grup di VM lembur (menunggu plan VM)
+### U10. Item antrean grup dan aturan jeda
 
-- **Goal:** grup sebagai item antrean VM.
-- **Requirements:** R2 (VM), R6 (VM), R8 (VM), R9 (VM), R13 (VM), R14 (VM), R20–R23; F2; AE4 (VM), AE6, AE7.
-- **Dependencies:** U1–U9 dan implementasi plan `docs/plans/2026-10-23-002-feat-vm-overnight-mode-plan.md` (antrean, siklus, Send to review, Take over).
-- **Files:** ditentukan setelah plan VM terimplementasi (modul antrean VM, laporan pagi, tab Overnight).
-- **Approach:** item antrean bertipe grup; kartu berlanjut otomatis bila turn selesai tanpa pertanyaan; grup mengalah ke Waiting Fix di antara kartu; "window ended" tetap di depan antrean; parkir, antre ulang, dan ambil alih sebagai satu kesatuan; laporan per kartu; "Send to review" grup.
-- **Test scenarios:** Covers AE4 (VM), AE6, AE7, aturan R20–R23, dan pengecualian kartu di antrean (R2) dengan sumber antrean nyata di test antrean VM.
+- **Goal:** antrean VM bisa menyimpan grup sebagai satu item, dan domain memutuskan kapan grup berjeda di antara kartu.
+- **Requirements:** R2 (VM), R20, R21; KTD-G10, KTD-G12.
+- **Dependencies:** bagian laptop (U1–U9) dan plan VM (sudah di-merge).
+- **Files:** `crates/mandor-store/migrations/0009_overnight_group.sql` (baru), `crates/mandor-store/src/overnight.rs`, `crates/mandor-store/tests/overnight.rs`, `crates/mandor-usecase/src/overnight/ports.rs`, `crates/mandor-domain/src/group.rs`, `crates/mandor-domain/src/run.rs` (`HoldReason`), `crates/mandor-usecase/tests/common/` (fake antrean).
+- **Approach:** `QueueItem` mendapat daftar kartu grup (kosong = kartu tunggal). Kolom `group_json` nullable agar baris lama tetap terbaca. `OvernightStore` mendapat penyisipan di posisi pertama dan daftar id "di antrean" yang memuat anggota grup. Aturan jeda sebagai fungsi domain murni dengan masukan: jam lembur terbuka, grup dimulai dengan Start now, ada Waiting Fix lain yang siap.
+- **Patterns to follow:** `PlannedJson` di `crates/mandor-store/src/overnight.rs` (JSON kolom dengan default), `decide` di `crates/mandor-domain/src/overnight.rs` (keputusan murni dengan `TickState`).
+- **Test scenarios:**
+  - Item grup tiga kartu disimpan lalu dibaca: urutan kartu sama; item tanpa `group_json` terbaca sebagai kartu tunggal.
+  - Penyisipan di depan menempatkan item di posisi pertama tanpa mengubah urutan item lain; Start now tetap dipilih lebih dulu oleh `decide`.
+  - Daftar "di antrean" memuat kartu ke-2 dan ke-3 grup.
+  - Aturan jeda: jendela tutup dan bukan Start now → window ended; jendela tutup dan Start now → lanjut; Waiting Fix lain siap → yield to fix; selain itu lanjut.
+  - `HoldReason` baru bolak-balik `as_str`/`parse`; nilai lama tetap terbaca.
+- **Verification:** test store dan domain lulus; migrasi tercatat di metadata sqlx offline.
+
+### U12. Menjalankan grup di VM
+
+- **Goal:** grup tanpa plan berjalan dari antrean sampai PR draft, berjeda, diparkir, dan dilanjutkan sesuai aturan VM.
+- **Requirements:** R2 (VM), R6 (VM), R8 (VM), R9 (VM), R13 (VM), R14 (VM), R20, R21, R22 (antre ulang); F2; AE4 (VM), AE6, AE7; KTD-G10, KTD-G11, KTD-G12, KTD-G13, KTD-G18.
+- **Dependencies:** U10.
+- **Files:** `crates/mandor-usecase/src/overnight/group.rs` (baru), `crates/mandor-usecase/src/overnight/mod.rs`, `crates/mandor-usecase/src/overnight/flow.rs`, `crates/mandor-usecase/src/overnight/planned.rs` (`enqueue_card` untuk grup), `crates/mandor-usecase/src/run/group.rs`, `crates/mandor-usecase/src/run/session.rs` (akhir giliran run grup VM masuk `vm_after_turn`), `crates/mandor-usecase/tests/group_overnight.rs` (baru).
+- **Approach:** `start_queued` untuk item grup memanggil `start_group` dengan `Planning::Skip` dan sumber desain item; item grup yang run-nya masih ada dan bisa dilanjutkan memakai `continue_group` (tanpa kartu aktif) atau lanjutan sesi (kartu aktif tersangkut). `vm_after_turn` untuk run grup mengikuti KTD-G11. Sebelum kartu berikutnya, aturan jeda U10 dijalankan; jeda menahan run dan mengantre item grup di depan. `advance` di VM memarkir `card_removed` (KTD-G13). Item grup yang tertahan dilanjutkan menurut KTD-G18, termasuk keputusan Keep/Revert R13. `queue.add` grup di VM menolak bila salah satu kartu sudah di antrean, punya run terbuka, atau gagal gerbang Start.
+- **Execution note:** test-first lewat `RunService` dengan fake yang ada; mulai dari F2 penuh (tiga kartu sampai PR draft) sebagai test integrasi pertama.
+- **Patterns to follow:** `crates/mandor-usecase/tests/overnight.rs` (station VM, jam palsu), `crates/mandor-usecase/tests/group_flow.rs` (grup laptop).
+- **Test scenarios:**
+  - Covers F2. Grup tiga kartu di antrean, jam lembur terbuka → tiga giliran berurutan tanpa persetujuan, tiga commit berkunci kartu, satu PR draft, semua kartu tetap In Progress.
+  - Covers AE6. "Send to review" pada run grup → PR ditandai siap dan ketiga kartu Waiting Review bersama.
+  - Covers AE4 (VM). Kartu ketiga dipindah ke Blocked sebelum gilirannya → kartu ketiga `removed`, klaimnya dilepas, run `Held card_removed`, kartu keempat tidak dimulai; "Answer and queue" melanjutkan ke kartu keempat.
+  - Covers AE7. Batas siklus tercapai di kartu kedua → run `Held usage_limit`, kartu tunggal di belakang tetap dimulai pada tick berikutnya, laporan menghitung kedua kartu grup "parked (group)".
+  - R21. Jam lembur habis saat kartu kedua berjalan → kartu kedua selesai dan di-commit, run `Held window_ended`, item grup di posisi pertama; siklus berikutnya melanjutkan dari kartu ketiga tanpa diantre ulang.
+  - R21. Grup dimulai dengan Start now di luar jam → tidak berjeda karena jam.
+  - R20. Waiting Fix kartu VM lain siap saat kartu pertama selesai → grup berjeda `yield_to_fix`, perbaikan dikerjakan, lalu grup lanjut dari kartu kedua di branch yang sama.
+  - R8. Kartu pertama sudah di-commit, giliran kartu kedua berakhir dengan pertanyaan dan worktree bersih → `Held stuck`; jawaban melanjutkan sesi kartu kedua.
+  - R21. Grup Start now di luar jam memberi jalan ke Waiting Fix lain → setelah perbaikan, grup lanjut pada periode luar jam yang sama.
+  - R13. Kartu pertama berubah di Lark setelah di-commit → setelah kartu terakhir, run `Held needs_confirmation` "changed in Lark", tanpa push.
+  - R13. Keep dengan alasan → grup diantre di depan → review AC grup → PR draft dengan alasan tercatat; status kartu itu tidak dipindah saat Send to review.
+  - R13. Revert kartu pertama → kartu utama run pindah ke kartu kedua, grup diantre ulang dengan kunci baru, review AC grup pada kode setelah revert → PR draft.
+  - R13. Revert yang konflik → `Held` "revert conflict", tanpa push.
+  - R2. `queue.add` grup dengan satu kartu yang sudah di antrean atau punya run → ditolak dengan alasan, antrean tidak berubah.
+- **Verification:** `group_overnight.rs` lulus bersama test `overnight.rs` dan `group_flow.rs` yang ada.
+
+### U13. Grup Planned: plan kartu pertama di laptop lalu antre ke VM
+
+- **Goal:** "Approve & queue for VM" untuk grup laptop yang plan kartu pertamanya menunggu persetujuan.
+- **Requirements:** R24, F5, AE9; KTD-G14.
+- **Dependencies:** U12.
+- **Files:** `crates/mandor-usecase/src/run/send_to_vm.rs`, `crates/mandor-usecase/src/run/planned.rs` (`start_from_plan` grup), `crates/mandor-usecase/src/overnight/planned.rs` (`tend_planned`, `check_planned`), `crates/mandor-usecase/src/run/group.rs`, `crates/mandor-usecase/tests/send_to_vm.rs`, `crates/mandor-usecase/tests/planned_queue.rs`.
+- **Approach:** `prepare_for_vm` menerima run grup hanya saat kartu aktif = kartu pertama, fase plan, menunggu persetujuan; paket plan memakai plan kartu pertama dan `VmHandover` membawa daftar kartu. `send_to_vm` memindahkan klaim setiap kartu (aman diulang). Pemeriksaan VM (`check_planned`) memeriksa semua kartu dan repo target (`PlannedWork.repos`). `tend_planned` memperbarui klaim semua kartu item grup. `start_from_plan` grup membuat run grup dengan kartu pertama aktif dan plan-nya, lalu U12 mengambil alih untuk kartu berikutnya.
+- **Patterns to follow:** jalur kartu tunggal di `crates/mandor-usecase/src/run/send_to_vm.rs` dan `crates/mandor-usecase/src/overnight/planned.rs`.
+- **Test scenarios:**
+  - Covers AE9. Grup dua kartu, plan kartu pertama menunggu → prepare, queue add, send → branch di-push, klaim kedua kartu ke VM, run laptop tertutup, satu item grup `waiting`; tick dalam jam lembur memulai kartu pertama dengan pesan berisi plan yang disetujui, lalu kartu kedua tanpa persetujuan.
+  - Grup yang sudah lewat kartu pertama → `prepare_for_vm` ditolak.
+  - Plan kartu pertama dengan AC Follow design tanpa sumber desain VM → queue add ditolak.
+  - Enam jam waktu palsu → klaim kedua kartu item grup tetap segar.
+  - Klaim kartu kedua diambil daemon lain → item grup ditahan dengan alasan, tidak dimulai.
+  - `send_to_vm` gagal setelah klaim kartu kedua pindah → item tetap `handover_pending`, tidak dimulai; pengulangan menyelesaikan serah-terima.
+  - Run grup dari plan → buku AC memuat AC semua kartu berlabel kartunya, dengan tanda Design kartu pertama dari paket plan.
+- **Verification:** test kartu tunggal Planned yang ada tetap lulus.
+
+### U14. Take over grup ke laptop
+
+- **Goal:** grup VM (tertahan, gagal, Waiting Fix, PR draft, atau Planned di antrean) kembali ke laptop sebagai satu run grup.
+- **Requirements:** R22, R6 (laptop); KTD-G15.
+- **Dependencies:** U12, U13.
+- **Files:** `crates/mandor-usecase/src/overnight/handoff.rs`, `crates/mandor-usecase/src/run/ownership.rs`, `crates/mandor-usecase/src/run/group.rs`, `crates/mandor-usecase/tests/handoff.rs`.
+- **Approach:** `handoff` run grup push perubahan yang belum di-push, memindahkan klaim setiap kartu terbuka, menandai semuanya "hanya laptop", lalu menutup run VM. `Handback` membawa baris kartu dan `VmCarry` (draft, hasil review). `takeover` dengan baris kartu memulihkan worktree dan membuat run grup; kartu `pending` mengikuti R6 laptop (plan menunggu persetujuan). Pengulangan (`handed_back`) mengembalikan baris kartu yang sama.
+- **Test scenarios:**
+  - Grup tertahan di kartu kedua → laptop mendapat run grup dengan kartu pertama `done`, kartu kedua `active`, kartu ketiga `pending`; klaim ketiganya milik laptop; antre ulang ke VM ditolak "taken over to the laptop".
+  - Grup PR draft → run laptop memakai PR yang sama, hasil review ikut, "Send to review" dari laptop memindahkan semua kartu aktif ke Waiting Review.
+  - Grup Planned di antrean → run grup laptop menunggu persetujuan plan kartu pertama dengan plan yang sama.
+  - Handoff diulang setelah langkah laptop gagal → hasil sama, tanpa push ulang.
+  - Snapshot kode laptop berbeda dari snapshot review VM → baris AC yang dibawa ditandai usang.
+- **Verification:** test handoff kartu tunggal yang ada tetap lulus.
+
+### U15. Laporan pagi per kartu
+
+- **Goal:** laporan dan ringkasan siklus menghitung hasil grup per kartu.
+- **Requirements:** R22, R23; AE7; KTD-G16.
+- **Dependencies:** U12.
+- **Files:** `crates/mandor-usecase/src/overnight/report.rs`, `crates/mandor-usecase/src/overnight/mod.rs` (`cycle_report`), `crates/mandor-domain/src/overnight.rs` (`report_text`), `crates/mandor-usecase/tests/group_overnight.rs`.
+- **Approach:** satu `ReportCard` per kartu grup dengan kunci dan judulnya; hasil "draft" hanya untuk kartu `done` bila PR grup ada; kartu lain "parked (group)" dengan alasan grup (stuck, usage limit, card removed, window ended). Jeda `window_ended` dan `yield_to_fix` tidak dihitung sebagai kegagalan.
+- **Test scenarios:**
+  - Covers AE7. Grup tertahan batas biaya di kartu kedua → laporan: kartu pertama "parked (group)" committed, kartu kedua "parked (group)" usage limit; jumlah PR draft 0.
+  - Grup selesai → semua kartu aktif "draft" dengan PR yang sama; kartu `removed` tercatat dikeluarkan.
+  - Teks DM laporan memuat progres grup per kartu dalam satu baris per kartu.
+- **Verification:** test laporan kartu tunggal tetap lulus.
+
+### U16. Protokol, RPC, dan UI grup VM
+
+- **Goal:** dev mengantre grup, mengirim grup Planned, melihat dan mengambil alih grup dari app.
+- **Requirements:** R2, R11, R14, R20, R22, R23, R24; KTD-G17.
+- **Dependencies:** U12–U15.
+- **Files:** `crates/mandor-protocol/src/dto.rs`, `crates/mandor-protocol/src/lib.rs`, `crates/mandord/src/dispatch/overnight.rs`, `crates/mandord/src/dispatch/planned.rs`, `crates/mandord/src/dispatch/group.rs`, `crates/mandor-usecase/src/run/group.rs` (`group_candidates` dengan id kartu di antrean), `crates/mandord/src/dispatch.rs`, `crates/mandord/src/views.rs`, `apps/desktop/src/lib/protocol/` (regenerasi), `apps/desktop/src/lib/overnight.ts`, `apps/desktop/src/lib/overnight.test.ts`, `apps/desktop/src/lib/stores/overnight.svelte.ts`, `apps/desktop/src/lib/stores/overnight.test.ts`, `apps/desktop/src/lib/components/overnight/QueueSection.svelte`, `apps/desktop/src/lib/components/overnight/ReportSection.svelte`, `apps/desktop/src/lib/components/workspace/QueueForVm.svelte`, `apps/desktop/src/lib/components/workspace/Workspace.svelte`, `apps/desktop/src/lib/components/kanban/StartTaskDialog.svelte`, `apps/desktop/src/lib/dev/mock-vm.ts`, `docs/design/mandor-design/mandor-design-handoff/prototype/js/components-sheet.js`.
+- **Approach:** DTO antrean dan handoff membawa daftar kartu grup; `groups.candidates` menerima id kartu di antrean VM. Tab Overnight mendapat "Queue together" yang membuka pemilih kandidat "Start together" dengan aksi antre. `QueueForVm` tampil untuk run grup saat plan kartu pertama menunggu. Baris antrean grup menampilkan kunci kartu dan badge Planned/No plan; laporan menampilkan baris per kartu, pilihan Keep (dengan alasan) atau Revert untuk grup yang tertahan "changed in Lark" (dikirim ke daemon VM), serta Send to review dan Take over pada run grup lewat aksi yang sudah ada; papan menandai semua kartu grup "Queued for VM". Prototype diperbarui lebih dulu, lalu app.
+- **Test scenarios:**
+  - DTO item grup dan handoff grup bolak-balik; nilai tak dikenal ditolak.
+  - Store: `queuePlanned` untuk grup mengirim daftar kartu; `takeover` grup meneruskan baris kartu ke laptop.
+  - Helper: kandidat yang ada di antrean VM tidak bisa dipilih dengan alasan "Queued for VM"; tombol Queue grup Planned nonaktif dengan alasan yang sama seperti kartu tunggal.
+  - Baris laporan grup per kartu dengan hasil yang benar.
+  - Keputusan Keep/Revert dari laporan memanggil `gate_card_decision` di daemon VM lalu mengantre grup.
+- **Verification:** `bun run --cwd apps/desktop check` dan `test` hijau; tampilan dicek di dev mode mock terhadap prototype.
+
+### U17. Runbook dan uji langsung grup di VM
+
+- **Goal:** panduan dan bukti di VM dengan kartu uji di Base salinan.
+- **Requirements:** semua bagian VM.
+- **Dependencies:** U16.
+- **Files:** `docs/runbook/grouped-runs.md`, `docs/runbook/setup-vm.md`, `docs/progress/grouped-runs.md`.
+- **Approach:** tiga sampai empat kartu uji baru satu epic uji di Base salinan, repo `mandor-smoke`, sumber desain `mandor-smoke-design`; biner VM dipasang pemilik produk.
+- **Test scenarios:**
+  - F2 penuh sampai PR draft dan Send to review grup (AE6).
+  - F5: plan kartu pertama di laptop lalu VM (AE9).
+  - AE4 (VM): satu kartu dipindah ke Blocked sebelum gilirannya.
+  - AE7: batas token kecil sehingga grup berhenti di kartu kedua.
+  - R21: jam lembur berakhir di tengah grup lalu dilanjutkan siklus berikutnya.
+  - Take over grup PR draft ke laptop.
+- **Verification:** hasil tercatat di `docs/progress/grouped-runs.md`.
+
+### U18. Satu plan untuk grup di laptop
+
+- **Goal:** grup laptop bisa dimulai dengan satu plan, disetujui sekali, dan disetujui ulang bila AC kartu tersisa berubah.
+- **Requirements:** R5, R6, R25; F6; AE10, AE11 (laptop); KTD-G19, KTD-G20.
+- **Dependencies:** U1–U9.
+- **Files:** `crates/mandor-domain/src/group.rs` (`plan_outdated`, cuplikan AC), `crates/mandor-domain/src/run.rs` (mode plan grup), `crates/mandor-store/migrations/0010_group_plan.sql`, `crates/mandor-store/src/run_port.rs`, `crates/mandor-usecase/src/run/group.rs`, `crates/mandor-usecase/src/run/session.rs` (`approve_plan`), `crates/mandor-usecase/src/run_ports.rs`, `crates/mandor-usecase/tests/group_flow.rs`.
+- **Approach:** mode plan disimpan di run; giliran plan grup memakai AC semua kartu berlabel; `approve_plan` menyimpan cuplikan; `advance` memeriksa `plan_outdated` sebelum kartu berikutnya dan memulai giliran revisi bila usang. Mode `per_card` tidak berubah.
+- **Test scenarios:**
+  - AE10: satu giliran plan dengan AC empat kartu, satu persetujuan, empat commit tanpa giliran plan lagi.
+  - AE11 laptop: AC kartu ketiga berubah setelah kartu pertama → giliran revisi, kartu berikutnya tidak dimulai sampai disetujui ulang; cuplikan diperbarui.
+  - AC kartu yang sudah `done` berubah → tidak memicu revisi; gerbang AC menangani.
+  - AC dihapus atau ditambah di kartu tersisa → revisi.
+  - Domain `plan_outdated`: sama, teks berubah, AC baru, AC hilang, kartu `done` diabaikan.
+  - Mode `per_card` tetap seperti sebelumnya (test lama hijau).
+- **Verification:** `make check`.
+
+### U19. Satu plan untuk grup di VM
+
+- **Goal:** grup `whole_group` bisa dikirim ke VM dengan plan grupnya dan diparkir bila plan usang.
+- **Requirements:** R24, R25; AE11 (VM); KTD-G20, KTD-G21.
+- **Dependencies:** U18, U12–U14.
+- **Files:** `crates/mandor-domain/src/run.rs` (`HoldReason::PlanOutdated`), `crates/mandor-domain/src/planned.rs`, `crates/mandor-usecase/src/run/send_to_vm.rs`, `crates/mandor-usecase/src/overnight/group.rs`, `crates/mandor-usecase/src/overnight/planned.rs`, `crates/mandor-usecase/src/overnight/handoff.rs`, `crates/mandor-usecase/src/overnight/report.rs`, `crates/mandor-usecase/tests/planned_group.rs`, `crates/mandor-usecase/tests/group_overnight.rs`, `crates/mandor-usecase/tests/handoff.rs`.
+- **Approach:** `prepare_for_vm` menerima `whole_group` selama plan grup menunggu persetujuan; paket Planned membawa plan grup dan cuplikan; VM memulai kartu pertama dari plan grup dan kartu berikutnya dengan bagian plannya; `plan_outdated` sebelum setiap kartu dan saat grup Planned dimulai → `Held PlanOutdated`; laporan dan DM menampilkan alasan; Take over mengembalikan plan dan mode.
+- **Test scenarios:**
+  - F6 VM: grup `whole_group` diantre lewat Approve & queue for VM, VM mengerjakan empat kartu tanpa giliran plan, PR draft.
+  - AE11 VM: AC kartu ketiga berubah di tengah malam → grup diparkir "plan outdated", kartu ketiga tidak dimulai, item tidak diantre ulang otomatis.
+  - Grup Planned `whole_group` dengan AC berubah sebelum dimulai → ditahan "plan outdated".
+  - Take over grup "plan outdated" → laptop menunggu persetujuan plan revisi dengan mode yang sama.
+- **Verification:** `make check`.
+
+### U20. Protokol dan UI satu plan grup
+
+- **Goal:** dev memilih dan menyetujui plan grup dari app.
+- **Requirements:** R25; KTD-G19–KTD-G21.
+- **Dependencies:** U18, U19.
+- **Files:** `crates/mandor-protocol/src/dto.rs` (`StartGroupParams.plan_mode`, `RunView.plan_mode`), `crates/mandord/src/dispatch/group.rs`, `crates/mandord/src/views.rs`, `apps/desktop/src/lib/components/kanban/GroupCardPicker.svelte`, `apps/desktop/src/lib/components/kanban/StartTaskDialog.svelte`, `apps/desktop/src/lib/components/workspace/Workspace.svelte`, `apps/desktop/src/lib/group.ts`, `apps/desktop/src/lib/overnight.ts`, `apps/desktop/src/lib/dev/mock-transport.ts`, `docs/design/mandor-design/mandor-design-handoff/prototype/js/components-sheet.js`.
+- **Approach:** pilihan "One plan for all cards" (default mati) di Start together bila ≥ 2 kartu dan Planning bukan Skip. Panel persetujuan plan menampilkan design gaps semua kartu dan, saat revisi, AC yang berubah per kartu. Label hold "Plan outdated" di laporan. "Approve & queue for VM" tampil untuk plan grup yang menunggu persetujuan. Prototype diperbarui dulu.
+- **Test scenarios:**
+  - Helper: pilihan hanya muncul untuk ≥ 2 kartu dan Planning bukan Skip; `start_group` mengirim `plan_mode`.
+  - `showQueueForVm` untuk `whole_group` selama plan grup menunggu persetujuan.
+  - Label "Plan outdated"; laporan hanya menawarkan Take over untuk alasan itu.
+- **Verification:** `bun run --cwd apps/desktop check` dan `test` hijau; tampilan dicek di `/?mock`.
+
+### U21. Runbook dan uji langsung satu plan grup
+
+- **Goal:** panduan dan bukti di Base salinan.
+- **Requirements:** R25; F6; AE10, AE11.
+- **Dependencies:** U20.
+- **Files:** `docs/runbook/grouped-runs.md`, `docs/progress/grouped-runs.md`.
+- **Approach:** kartu uji baru satu epic di Base salinan, repo `mandor-smoke`.
+- **Test scenarios:**
+  - AE10 di laptop.
+  - AE11 di laptop (ubah AC kartu ketiga setelah kartu pertama di-commit).
+  - F6 ke VM lewat Approve & queue for VM sampai PR draft.
+- **Verification:** hasil tercatat di `docs/progress/grouped-runs.md`.
 
 ### U11. Runbook dan uji langsung laptop
 
@@ -358,12 +567,15 @@ U2 → U1 → U3 → U4 → U5 → U6 → U7 (U7 juga bergantung pada U2). U8 me
 - Test usecase `group_flow.rs`, `waiting_fix.rs`, `publish_gate.rs`, test store `run_cards.rs` lulus.
 - TS protokol diregenerasi dan sinkron.
 - Uji langsung U11 tercatat.
-- Setelah U10: test antrean VM untuk AE4 (VM), AE6, AE7, dan R20–R23 lulus.
+- Test `group_overnight.rs`, `planned_queue.rs`, `handoff.rs`, `send_to_vm.rs`, dan store `overnight.rs` lulus untuk AE4 (VM), AE6, AE7, AE9, dan R20–R24.
+- Uji langsung U17 di VM tercatat di `docs/progress/grouped-runs.md`.
+- Test `group_flow.rs`, `planned_group.rs`, `group_overnight.rs`, dan `handoff.rs` lulus untuk R25, AE10, dan AE11; uji langsung U21 tercatat.
 
 ## Definition of Done
 
 - U1–U9 dan U11 selesai dengan skenario test terpenuhi dan gerbang hijau; PR bagian laptop dibuka tanpa merge sendiri.
-- U10 dikerjakan setelah plan VM terimplementasi, dengan AE6–AE7 dan R20–R23 terbukti.
+- U10 dan U12–U17 selesai dengan skenario test terpenuhi, gerbang hijau, dan uji langsung VM tercatat; PR bagian VM dibuka tanpa merge sendiri.
+- U18–U21 selesai dengan skenario test terpenuhi, gerbang hijau, dan uji langsung tercatat; PR satu plan grup dibuka tanpa merge sendiri.
 
 ---
 
@@ -377,6 +589,9 @@ U2 → U1 → U3 → U4 → U5 → U6 → U7 (U7 juga bergantung pada U2). U8 me
 - **Biaya review AC grup** pada 3–5 kartu lebih besar; dicatat di laporan untuk dipantau.
 - **Refresh buku AC sebagian.** Bila satu kartu gagal dibaca, `reconcile_rows` bisa menandai AC kartu itu Removed. Mitigasi: refresh grup batal seluruhnya bila ada kartu gagal dibaca (baris lama dipertahankan).
 - **Beban heartbeat Lark** bertambah satu baca per kartu per siklus; dipantau lewat rate limiter yang ada.
+- **Grup memakan seluruh siklus lembur.** Satu grup 4 kartu bisa menghabiskan batas token sebelum kartu tunggal di belakangnya; diterima (R20 satu item sekaligus), dan laporan per kartu (R23) membuatnya terlihat.
+- **Jeda grup dan antrean ulang di depan** bisa berbenturan dengan item Start now; Start now tetap menang (KTD-G12 hanya menyisipkan di posisi pertama antrean biasa).
+- **Take over grup sebagian gagal** (klaim satu kartu gagal dipindah). Mitigasi: klaim dipindah sebelum run VM ditutup; handoff aman diulang (`latest_for`) untuk kartu yang sudah pindah.
 
 ### Assumptions
 
@@ -387,4 +602,5 @@ U2 → U1 → U3 → U4 → U5 → U6 → U7 (U7 juga bergantung pada U2). U8 me
 
 - Product Contract di atas dan dua ronde review dokumen (2026-10-23).
 - Peta kode: `crates/mandor-usecase/src/run/{start,session,publish,members,ownership,reconcile}.rs`, `crates/mandor-usecase/src/waiting_fix/engine.rs`, `crates/mandor-usecase/src/review/{ledger,service,capability}.rs`, `crates/mandor-domain/src/{run,claim,gate,push_gate,ac_ledger,task}.rs`, `crates/mandor-store/migrations/0001_init.sql`, `crates/mandor-store/migrations/0005_ac_review.sql`, `crates/mandord/src/{dispatch,views}.rs`.
-- Plan mode VM: `docs/plans/2026-10-23-002-feat-vm-overnight-mode-plan.md`.
+- Plan mode VM: `docs/plans/2026-10-23-002-feat-vm-overnight-mode-plan.md`; plan siang lalu antre ke VM: `docs/plans/2026-10-30-001-feat-vm-planned-queue-plan.md`.
+- Peta kode VM (2026-10-31): `crates/mandor-usecase/src/overnight/{mod,flow,planned,handoff,report,ports}.rs`, `crates/mandor-usecase/src/run/{group,group_gate,send_to_vm,ownership,planned}.rs`, `crates/mandor-domain/src/{overnight,group,planned,run}.rs`, `crates/mandor-store/src/overnight.rs`.

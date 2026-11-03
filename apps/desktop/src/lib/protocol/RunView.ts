@@ -46,4 +46,8 @@ ac: AcSummaryView | null,
 /**
  * Kartu run grup, urut posisi; kosong untuk run tunggal.
  */
-cards: Array<GroupCardView>, };
+cards: Array<GroupCardView>, 
+/**
+ * Run grup dengan satu plan untuk semua kartu (R25 plan grup).
+ */
+one_plan: boolean, };

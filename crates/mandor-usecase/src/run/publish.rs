@@ -194,7 +194,19 @@ impl<D: Deps> RunService<D> {
     /// sampai dev menekan Send to review (R11, KTD-68 plan VM).
     async fn mark_draft(&self, run: &mut RunRecord, url: &str) -> Result<(), RunError> {
         let op = WriteOp::Fields(vec![AppField::PrUrl(url.to_owned())]);
-        self.sync.request_write(&run.record_id, &op).await?;
+        // Run grup: link PR di setiap kartu yang masih disertakan (R15 plan grup).
+        let cards = self.runs.cards(&run.id).await?;
+        let mut targets: Vec<String> = cards
+            .iter()
+            .filter(|c| !matches!(c.state, mandor_domain::group::CardState::Removed(_)))
+            .map(|c| c.record_id.clone())
+            .collect();
+        if targets.is_empty() {
+            targets.push(run.record_id.clone());
+        }
+        for id in &targets {
+            self.sync.request_write(id, &op).await?;
+        }
         if run.workspace.is_none() {
             run.pr_url = Some(url.to_owned());
         }

@@ -97,3 +97,15 @@ Biner VM `764c64f0…` terpasang, service aktif.
 | R21 (percobaan 1) | Tidak teruji. Jam lembur 23:00–23:30, grup E (PGS-1556–1557) diantre 23:27 tanpa Start now: setiap kartu hanya ~20 detik, kedua kartu selesai 23:28:39 dan PR draft https://github.com/handokobeni/mandor-smoke/pull/29 jadi 23:29:42, sebelum jam lembur habis. Percobaan 2 memakai grup I (PGS-1566 berat, PGS-1567 kecil, epic E-PGS25). |
 | R21 (percobaan 2) | Tidak teruji. Grup I (PGS-1566 berat, PGS-1567) diantre 10:56 untuk jam lembur 10:30–11:00: PGS-1566 selesai 10:59:31, sebelum jam habis, sehingga PGS-1567 dimulai dengan benar (jam masih terbuka). |
 | R21 (percobaan 3) | Lolos. Jam lembur 11:00–11:30, grup J (PGS-1568–1569, epic E-PGS28) diantre 11:28:38 tanpa Start now: PGS-1568 mulai 11:28:54 dan selesai 11:30:43 (setelah jam habis); 11:30:58 PGS-1568 di-commit, grup `held window_ended`, PGS-1569 tidak dimulai, item kembali di posisi pertama antrean. Start now: grup dilanjutkan dari PGS-1569 di branch yang sama, PR draft https://github.com/handokobeni/mandor-smoke/pull/31 berisi commit PGS-1568 dan PGS-1569. |
+
+### Perbaikan temuan uji langsung (2026-11-03)
+
+| Temuan | Tindakan |
+|---|---|
+| Push & create PR harus ditekan dua kali | Tidak diubah: aturan Rilis 2 (R15, KTD-35 plan AC review) — push tidak berlanjut otomatis setelah review. Perubahan perilaku produk menunggu keputusan pemilik produk. |
+| Teks "Queue together" menyebut Next card | `groupFooter(n, 'vm')`: di tab Overnight teksnya "The VM commits each card and starts the next one on its own." |
+| Take over grup berjalan: "No review yet" | `reviewMeta`: tanpa riwayat review tetapi ada verdict → "Verdicts from the VM review". |
+| Take over grup berjalan: sumber desain tidak dipasang | `VmCarry.design_names` / `HandoffResult.design_names` / `TakeoverParams.design_names`; port `DesignSources::ids_named`; laptop memasang sumber miliknya yang bernama sama. Test `planned_group.rs`. |
+| PR draft VM tertaut hanya di kartu pertama | `mark_draft` menulis link PR ke setiap kartu grup yang masih disertakan (R15). Asersi di `covers_f2…`. |
+| Answer and queue tanpa daftar kartu grup | `enqueue_card` untuk run grup tertahan mengisi `group` dengan kartu yang tersisa. Asersi di `covers_ae4…`. |
+| Daemon laptop tidak diperbarui setelah build | Sudah ada di README "Saat kode berubah" (`pkill -TERM -x mandord`); tidak diubah. |

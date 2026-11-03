@@ -69,6 +69,7 @@ impl AppDispatch {
                     review: back.carry.review.as_ref().map(review_dto),
                     cards: back.carry.cards.iter().map(card_dto).collect(),
                     one_plan: back.carry.one_plan.as_deref().map(snaps_dto),
+                    design_names: back.carry.design_names.clone(),
                 })
             }
             other => self.overnight_queue_call(&s, other, v).await,

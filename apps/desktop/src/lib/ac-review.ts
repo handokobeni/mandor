@@ -274,3 +274,11 @@ export function evidenceParts(text: string): EvidencePart[] {
 export function noDesignSource(ledger: Pick<AcLedgerView, 'design_sources'>): boolean {
   return ledger.design_sources.length === 0;
 }
+
+/**
+ * Keterangan header tab AC review saat belum ada riwayat review di daemon ini:
+ * verdict yang ada dibawa dari review VM saat Take over.
+ */
+export function reviewMeta(rows: AcRowView[]): string {
+  return rows.some((r) => r.verdict !== 'not_reviewed') ? 'Verdicts from the VM review' : 'No review yet';
+}

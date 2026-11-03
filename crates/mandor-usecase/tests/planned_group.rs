@@ -625,3 +625,44 @@ async fn take_over_grup_planned_satu_plan_di_antrean_tetap_satu_plan() {
         "kembali sebagai grup satu plan"
     );
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn take_over_grup_berjalan_memasang_sumber_desain_laptop_bernama_sama() {
+    let (lark, clock, laptop, vm) = pair(wib(0, 14, 0)).await;
+    vm.design.add("ds-vm", "mandor-smoke-design");
+    laptop.design.add("ds-lap", "mandor-smoke-design");
+    let run = plan_ready(&laptop).await;
+    let back = laptop.svc.prepare_for_vm(&run.id, &[]).await.unwrap();
+    enqueue(&vm, &laptop, &back, &["ds-vm"]).await;
+    laptop
+        .svc
+        .send_to_vm(&run.id, &vm_daemon(&vm))
+        .await
+        .unwrap();
+    laptop.svc.sync().drain_outbox(50).await.unwrap();
+    vm.svc.sync().poll(true, &[]).await.unwrap();
+    at(&lark, &clock, wib(0, 20, 0));
+    vm.svc.overnight_tick().await.unwrap();
+    vm.svc.sync().drain_outbox(50).await.unwrap();
+
+    let handback = vm.svc.handoff("c1", &laptop_daemon(&laptop)).await.unwrap();
+    assert_eq!(handback.carry.design_names, ["mandor-smoke-design"]);
+    vm.svc.sync().drain_outbox(50).await.unwrap();
+    laptop.svc.sync().poll(true, &[]).await.unwrap();
+    let back_run = laptop
+        .svc
+        .takeover(
+            "c1",
+            &handback.target.clone().unwrap(),
+            handback.planned.as_ref(),
+            &handback.carry,
+        )
+        .await
+        .unwrap();
+    let ids: Vec<&str> = back_run.design.iter().map(|d| d.id.as_str()).collect();
+    assert_eq!(
+        ids,
+        ["ds-lap"],
+        "sumber desain laptop dengan nama yang sama"
+    );
+}

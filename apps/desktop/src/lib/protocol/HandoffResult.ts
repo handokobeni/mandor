@@ -34,4 +34,8 @@ cards: Array<CarriedCardDto>,
  * Grup satu plan: cuplikan AC plan grup terakhir; diteruskan ke
  * `runs.takeover` (R25 plan grup).
  */
-one_plan: Array<AcSnapDto> | null, };
+one_plan: Array<AcSnapDto> | null, 
+/**
+ * Nama sumber desain run VM; diteruskan ke `runs.takeover`.
+ */
+design_names: Array<string>, };

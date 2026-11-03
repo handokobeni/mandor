@@ -226,6 +226,7 @@
               recordId={pick}
               bind:order
               heading="Queue together"
+              where="vm"
               help="Other cards in this epic assigned to you. Checked cards run one after another on the VM in one branch and one PR, in this order."
             />
           </div>

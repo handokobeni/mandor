@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  reviewMeta,
   acTitle,
   canSend,
   counts,
@@ -36,6 +37,14 @@ function row(id: string, verdict: string, extra: Partial<AcRowView> = {}): AcRow
     ...extra
   };
 }
+
+describe('keterangan review terakhir', () => {
+  it('tanpa riwayat: verdict yang ada berasal dari VM; tanpa verdict sama sekali: belum direview', () => {
+    expect(reviewMeta([row('1', 'pass'), row('2', 'not_reviewed')])).toBe('Verdicts from the VM review');
+    expect(reviewMeta([row('1', 'not_reviewed')])).toBe('No review yet');
+    expect(reviewMeta([])).toBe('No review yet');
+  });
+});
 
 describe('gerbang AC', () => {
   it('state untuk setiap hasil, termasuk reviewing dan mode peringatan', () => {

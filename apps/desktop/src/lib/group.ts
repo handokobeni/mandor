@@ -118,6 +118,17 @@ export function groupStartParams<R extends object>(
   return { ...rest, record_ids: order, ...(onePlan && onePlanAvailable(order.length, mode) ? { one_plan: true as const } : {}) };
 }
 
+/**
+ * Teks di bawah pemilih grup: di laptop dev menekan Next card; di VM kartu
+ * di-commit dan berlanjut otomatis (KTD-G11).
+ */
+export function groupFooter(cards: number, where: 'laptop' | 'vm'): string {
+  const claim = `${cards} cards: Mandor claims all of them and moves them to In Progress.`;
+  return where === 'vm'
+    ? `${claim} The VM commits each card and starts the next one on its own.`
+    : `${claim} After each card, press Next card to commit it and start the next one.`;
+}
+
 export function initialOrder(candidates: GroupCandidateView[]): string[] {
   return candidates.filter((c) => !c.blocked).map((c) => c.record_id);
 }

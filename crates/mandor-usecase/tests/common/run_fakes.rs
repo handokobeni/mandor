@@ -1274,4 +1274,17 @@ impl mandor_usecase::review::DesignSources for FakeDesign {
         }
         Ok(out)
     }
+
+    async fn ids_named(&self, names: &[String]) -> Result<Vec<String>, PortError> {
+        let sources = self.sources.lock().unwrap();
+        Ok(names
+            .iter()
+            .filter_map(|n| {
+                sources
+                    .iter()
+                    .find(|(_, name)| *name == n)
+                    .map(|(id, _)| id.clone())
+            })
+            .collect())
+    }
 }

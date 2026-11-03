@@ -483,6 +483,10 @@ pub struct TakeoverParams {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub one_plan: Option<Vec<AcSnapDto>>,
+    /// Nama sumber desain run VM; laptop memasang sumber bernama sama.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub design_names: Option<Vec<String>>,
 }
 
 /// Status Design satu AC hasil tahap plan.
@@ -1210,6 +1214,9 @@ pub struct HandoffResult {
     /// `runs.takeover` (R25 plan grup).
     #[serde(default)]
     pub one_plan: Option<Vec<AcSnapDto>>,
+    /// Nama sumber desain run VM; diteruskan ke `runs.takeover`.
+    #[serde(default)]
+    pub design_names: Vec<String>,
 }
 
 /// Satu kartu grup yang dibawa dari VM ke laptop.

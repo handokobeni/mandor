@@ -997,6 +997,7 @@ async fn takeover<D: mandor_usecase::Deps>(
             .map(planned::card_of)
             .collect::<Result<_, _>>()?,
         one_plan: p.one_plan.map(planned::snaps_of),
+        design_names: p.design_names.unwrap_or_default(),
     };
     let run = runs
         .takeover(&p.record_id, &target, work.as_ref(), &carry)

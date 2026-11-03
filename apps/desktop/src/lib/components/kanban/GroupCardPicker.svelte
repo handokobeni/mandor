@@ -7,7 +7,7 @@
   import { Button } from '#lib/components/ui/button/index.ts';
   import { Checkbox } from '#lib/components/ui/checkbox/index.ts';
   import { untrack } from 'svelte';
-  import { candidatesParams, cardKey, initialOrder, moveCard, toggleCard } from '#lib/group.ts';
+  import { candidatesParams, cardKey, groupFooter, initialOrder, moveCard, toggleCard } from '#lib/group.ts';
   import { overnight } from '#lib/stores/overnight.svelte.ts';
   import type { GroupCandidateView } from '#lib/protocol/GroupCandidateView.ts';
   import type { Rpc } from '#lib/rpc.ts';
@@ -21,12 +21,15 @@
     heading?: string;
     /** Penjelasan di bawah judul. */
     help?: string;
+    /** Tempat grup dikerjakan; menentukan teks bantuan di bawah daftar. */
+    where?: 'laptop' | 'vm';
   }
   let {
     rpc,
     recordId,
     order = $bindable(),
     heading = 'Start together',
+    where = 'laptop',
     help = 'Other cards in this epic assigned to you. Checked cards are built one after another in one branch and one PR, in this order.'
   }: Props = $props();
 
@@ -99,10 +102,7 @@
       {/each}
     </div>
     {#if order.length > 1}
-      <p class="muted text-[length:var(--text-sm)]">
-        {order.length} cards: Mandor claims all of them and moves them to In Progress. After each card, press Next card
-        to commit it and start the next one.
-      </p>
+      <p class="muted text-[length:var(--text-sm)]">{groupFooter(order.length, where)}</p>
     {/if}
   </div>
 {/if}

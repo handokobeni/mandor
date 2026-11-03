@@ -152,8 +152,15 @@ async fn covers_f2_dan_ae6_grup_dikerjakan_berurutan_sampai_pr_draft_lalu_send_t
     assert!(commits[2].starts_with("PGS-1403"), "{commits:?}");
     assert_eq!(st.git.st().drafts.len(), 1, "satu PR draft untuk grup");
     st.svc.sync().drain_outbox(20).await.unwrap();
+    let url = group_run(&st).pr_url.unwrap();
     for id in ["c1", "c2", "c3"] {
-        assert_eq!(lark.get(id).unwrap().status, TaskStatus::InProgress);
+        let t = lark.get(id).unwrap();
+        assert_eq!(t.status, TaskStatus::InProgress);
+        assert_eq!(
+            t.pr_url.as_deref(),
+            Some(url.as_str()),
+            "PR draft tertaut di semua kartu grup (R15): {id}"
+        );
     }
 
     let run = group_run(&st);
@@ -200,6 +207,11 @@ async fn covers_ae4_vm_kartu_berubah_di_lark_memarkir_grup_lalu_lanjut_tanpanya(
         )
         .await
         .unwrap();
+    assert_eq!(
+        st.overnight.queue.lock().unwrap()[0].group,
+        ["c1", "c3"],
+        "antre ulang membawa kartu grup yang tersisa"
+    );
     assert_eq!(tick(&st).await.as_deref(), Some(run.record_id.as_str()));
     assert_eq!(turns(&st), 2, "kartu ketiga dimulai");
     assert!(

@@ -29,4 +29,8 @@ cards?: Array<CarriedCardDto>,
 /**
  * Grup satu plan dari VM: cuplikan AC plan grup terakhir (R25).
  */
-one_plan?: Array<AcSnapDto>, };
+one_plan?: Array<AcSnapDto>, 
+/**
+ * Nama sumber desain run VM; laptop memasang sumber bernama sama.
+ */
+design_names?: Array<string>, };

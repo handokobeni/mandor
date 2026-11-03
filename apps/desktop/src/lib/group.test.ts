@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   candidatesParams,
+  groupFooter,
   groupStartParams,
   onePlanAvailable,
   changedCards,
@@ -110,6 +111,18 @@ describe('pemilihan kartu', () => {
     order = toggleCard(order, '1401');
     expect(order).toEqual(['1403', '1402', '1401']);
     expect(moveCard(order, '1403', -1)).toEqual(order);
+  });
+});
+
+describe('teks bantuan pemilih grup', () => {
+  it('laptop: Next card; VM: berlanjut otomatis tanpa Next card', () => {
+    expect(groupFooter(3, 'laptop')).toBe(
+      '3 cards: Mandor claims all of them and moves them to In Progress. After each card, press Next card to commit it and start the next one.'
+    );
+    const vm = groupFooter(2, 'vm');
+    expect(vm).toContain('2 cards');
+    expect(vm).toContain('commits each card and starts the next one on its own');
+    expect(vm).not.toContain('Next card');
   });
 });
 

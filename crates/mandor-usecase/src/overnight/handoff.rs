@@ -121,6 +121,7 @@ impl<D: Deps> RunService<D> {
             review,
             cards: self.runs.cards(&run.id).await?,
             one_plan: run.one_plan.clone(),
+            design_names: run.design.iter().map(|d| d.name.clone()).collect(),
         })
     }
 

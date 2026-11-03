@@ -316,7 +316,9 @@ export class OvernightStore {
       // Daemon VM versi lama tidak mengirim `cards`.
       ...((back.cards ?? []).length > 0 ? { cards: back.cards } : {}),
       // Grup satu plan (R25): laptop melanjutkan dengan plan grup yang sama.
-      ...(back.one_plan ? { one_plan: back.one_plan } : {})
+      ...(back.one_plan ? { one_plan: back.one_plan } : {}),
+      // Sumber desain VM dipasang ulang di laptop menurut namanya.
+      ...((back.design_names ?? []).length > 0 ? { design_names: back.design_names } : {})
     });
     return run.id;
   }

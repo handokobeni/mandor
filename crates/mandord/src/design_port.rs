@@ -106,6 +106,18 @@ impl DesignSources for DesignStore {
         }
         Ok(out)
     }
+
+    async fn ids_named(&self, names: &[String]) -> Result<Vec<String>, PortError> {
+        let rows = self
+            .store
+            .design_sources()
+            .await
+            .map_err(|e| PortError::Storage(e.to_string()))?;
+        Ok(names
+            .iter()
+            .filter_map(|n| rows.iter().find(|r| &r.name == n).map(|r| r.id.clone()))
+            .collect())
+    }
 }
 
 /// `true` bila `path` dimiliki user yang sama dengan `reference`.

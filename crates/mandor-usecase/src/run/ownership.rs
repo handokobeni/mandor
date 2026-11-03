@@ -40,6 +40,9 @@ pub struct VmCarry {
     /// Grup satu plan: cuplikan AC saat plan grup terakhir disetujui (R25,
     /// KTD-G21); `None` untuk plan per kartu atau kartu tunggal.
     pub one_plan: Option<Vec<mandor_domain::group::AcSnap>>,
+    /// Nama sumber desain run VM; laptop memasang sumber miliknya yang bernama
+    /// sama (id berbeda antar daemon).
+    pub design_names: Vec<String>,
 }
 
 impl<D: Deps> RunService<D> {
@@ -156,6 +159,31 @@ impl<D: Deps> RunService<D> {
         Ok(())
     }
 
+    /// Sumber desain run laptop setelah Take over: dari paket plan (id laptop),
+    /// atau sumber laptop yang bernama sama dengan sumber run VM. Mengembalikan
+    /// nama sumber paket plan yang tidak ada lagi di laptop.
+    async fn carried_design(
+        &self,
+        run: &mut RunRecord,
+        planned: Option<&PlannedWork>,
+        carry: &VmCarry,
+    ) -> Result<Vec<String>, RunError> {
+        if let Some(p) = planned {
+            let check = self.design.prepare(&p.laptop_design, false).await?;
+            run.design = check.roots;
+            return Ok(check
+                .unavailable
+                .into_iter()
+                .map(|(name, _)| name)
+                .collect());
+        }
+        if !carry.design_names.is_empty() {
+            let ids = self.design.ids_named(&carry.design_names).await?;
+            run.design = self.design.prepare(&ids, false).await?.roots;
+        }
+        Ok(Vec::new())
+    }
+
     /// "Ambil alih" task yang klaimnya tidak aktif 30 menit atau diserahkan
     /// VM: klaim dengan baca ulang, lalu run baru dari branch task. Run
     /// workspace memulihkan folder run dan worktree tiap anggota. Dengan paket
@@ -196,17 +224,10 @@ impl<D: Deps> RunService<D> {
         if let Some(review) = &carry.review {
             run.review_snapshot.clone_from(&review.snapshot);
         }
-        let mut missing = Vec::new();
+        let missing = self.carried_design(&mut run, planned, carry).await?;
         if let Some(p) = planned {
-            let check = self.design.prepare(&p.laptop_design, false).await?;
-            missing = check
-                .unavailable
-                .into_iter()
-                .map(|(name, _)| name)
-                .collect();
             run.phase = RunPhase::Plan;
             run.plan = Some(p.plan.clone());
-            run.design = check.roots;
         }
         let now = self.now();
         if carry.cards.is_empty() {

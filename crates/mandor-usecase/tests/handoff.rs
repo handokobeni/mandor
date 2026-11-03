@@ -197,6 +197,7 @@ async fn hasil_review_vm_usang_bila_kode_laptop_berbeda() {
         }),
         cards: Vec::new(),
         one_plan: None,
+        design_names: Vec::new(),
     };
     let run = laptop
         .svc

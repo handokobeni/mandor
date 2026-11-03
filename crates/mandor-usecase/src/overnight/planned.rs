@@ -84,9 +84,22 @@ impl<D: Deps> RunService<D> {
                 reason: None,
             })
         } else {
-            self.check_no_plan(record_id, active.map(|r| r.state))
+            self.check_no_plan(record_id, active.as_ref().map(|r| r.state))
                 .await?;
             None
+        };
+        // Grup yang dijawab lalu diantre ulang tetap tampil sebagai grup
+        // dengan kartu yang tersisa (R22 plan grup).
+        let group = match &active {
+            Some(run) => self
+                .runs
+                .cards(&run.id)
+                .await?
+                .into_iter()
+                .filter(|c| !matches!(c.state, mandor_domain::group::CardState::Removed(_)))
+                .map(|c| c.record_id)
+                .collect(),
+            None => Vec::new(),
         };
         let item = QueueItem {
             record_id: record_id.to_owned(),
@@ -101,7 +114,7 @@ impl<D: Deps> RunService<D> {
             added_at_ms: self.sync.clock.now_ms(),
             design_sources: req.design_sources.clone(),
             planned,
-            group: Vec::new(),
+            group,
         };
         match self.overnight.enqueue(&item).await {
             Err(PortError::Conflict) => Err(RunError::InvalidState("the card is already queued")),

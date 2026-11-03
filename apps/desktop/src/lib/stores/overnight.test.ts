@@ -256,6 +256,19 @@ describe('aksi kartu VM', () => {
     });
   });
 
+  it('Take over grup berjalan: nama sumber desain VM diteruskan ke laptop', async () => {
+    const [store, vm] = await attached();
+    vm.handback = { branch: 'b', repo_id: 'repo1', workspace: null, planned: null, draft: true, review: null, cards: [], one_plan: null, design_names: ['mandor-smoke-design'] };
+    const laptop = new FakeVm();
+    await store.takeover('h', laptop, 'beni@laptop~laptop');
+    expect(laptop.calls.find(([m]) => m === 'runs.takeover')?.[1]).toEqual({
+      record_id: 'h',
+      repo_id: 'repo1',
+      draft: true,
+      design_names: ['mandor-smoke-design']
+    });
+  });
+
   it('Take over grup satu plan: cuplikan AC plan grup ikut ke laptop', async () => {
     const [store, vm] = await attached();
     const cards = [

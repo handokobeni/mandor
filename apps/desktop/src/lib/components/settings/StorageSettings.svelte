@@ -23,18 +23,21 @@
   let { rpc, store, vm = false }: Props = $props();
 
   let rows = $state<RunStorageView[] | null>(null);
+  /** Pesan bila daftar gagal dimuat; daftar kosong tidak ditampilkan sebagai "tidak ada run". */
+  let loadError = $state<string | null>(null);
   let auto = $state(false);
   let dialog = $state(false);
   let closing = $state<RunStorageView | null>(null);
 
   async function reload(): Promise<void> {
+    loadError = null;
     try {
       const [list, on] = await Promise.all([store.storage(), store.autoClose(), store.load()]);
       rows = list;
       auto = on;
     } catch (err) {
-      rows = [];
-      toast.error('Could not read storage', { description: err instanceof Error ? err.message : String(err) });
+      rows = null;
+      loadError = err instanceof Error ? err.message : String(err);
     }
   }
 
@@ -76,6 +79,12 @@
   </p>
   <div class="settings-card">
     <div class="content">
+      {#if loadError}
+        <p class="summary">
+          <span class="chip" data-tone="failed">Could not read storage</span> {loadError}
+          <Button variant="outline" size="xs" onclick={() => void reload()}>Try again</Button>
+        </p>
+      {/if}
       <p class="summary">
         All worktrees: <b>{rows ? formatBytes(total) : '…'}</b>
         {#if store.closable.length > 0}· {store.closable.length} finished {store.closable.length === 1 ? 'run' : 'runs'} can free <b>{formatBytes(freeable)}</b>{/if}
@@ -99,7 +108,9 @@
 <section>
   <h2>Open runs</h2>
   <p class="lede">Largest first. Closing a run removes its worktree; branches and PRs stay on GitHub.</p>
-  {#if rows === null}
+  {#if loadError}
+    <p class="muted">The list appears once the daemon answers.</p>
+  {:else if rows === null}
     <p class="muted">Loading…</p>
   {:else if rows.length === 0}
     <p class="muted">No open runs.</p>

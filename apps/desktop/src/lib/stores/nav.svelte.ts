@@ -9,6 +9,7 @@ export type SettingsSection =
   | 'workspaces'
   | 'design-sources'
   | 'background'
+  | 'storage'
   | 'vm'
   | 'about';
 

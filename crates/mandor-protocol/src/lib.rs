@@ -102,6 +102,14 @@ pub mod method {
     pub const RUNS_START_FIX: &str = "runs.start_fix";
     pub const RUNS_TAKEOVER: &str = "runs.takeover";
     pub const RUNS_CLOSE: &str = "runs.close";
+    /// Run kartu selesai yang bisa ditutup dan yang dilewati (plan
+    /// `2026-11-03-001`).
+    pub const RUNS_FINISHED: &str = "runs.finished";
+    pub const RUNS_CLOSE_FINISHED: &str = "runs.close_finished";
+    /// Semua run terbuka dengan ukuran worktree (R9).
+    pub const RUNS_STORAGE: &str = "runs.storage";
+    pub const SETTINGS_CLEANUP_GET: &str = "settings.cleanup.get";
+    pub const SETTINGS_CLEANUP_SET: &str = "settings.cleanup.set";
     pub const RUNS_CHANGES: &str = "runs.changes";
     pub const RUNS_FILE_DIFF: &str = "runs.file_diff";
     pub const RUNS_DISCARD_FILE: &str = "runs.discard_file";
@@ -337,6 +345,28 @@ fn group_bindings() -> Result<Vec<(&'static str, String)>, String> {
         one("CarriedCardDto.ts", CarriedCardDto::export_to_string(&cfg))?,
         one("CardCommitDto.ts", CardCommitDto::export_to_string(&cfg))?,
         one("AcSnapDto.ts", AcSnapDto::export_to_string(&cfg))?,
+        one(
+            "FinishedRunView.ts",
+            FinishedRunView::export_to_string(&cfg),
+        )?,
+        one("SkippedRunView.ts", SkippedRunView::export_to_string(&cfg))?,
+        one(
+            "FinishedRunsView.ts",
+            FinishedRunsView::export_to_string(&cfg),
+        )?,
+        one(
+            "CloseFinishedParams.ts",
+            CloseFinishedParams::export_to_string(&cfg),
+        )?,
+        one(
+            "CloseFinishedStarted.ts",
+            CloseFinishedStarted::export_to_string(&cfg),
+        )?,
+        one("RunStorageView.ts", RunStorageView::export_to_string(&cfg))?,
+        one(
+            "CleanupSettingsView.ts",
+            CleanupSettingsView::export_to_string(&cfg),
+        )?,
         one(
             "PrepareForVmParams.ts",
             PrepareForVmParams::export_to_string(&cfg),

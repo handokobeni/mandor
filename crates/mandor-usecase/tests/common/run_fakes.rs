@@ -58,6 +58,10 @@ pub struct GitState {
     /// Tree id snapshot per worktree; default `tree0`.
     pub trees: HashMap<PathBuf, String>,
     pub snapshot_fails: bool,
+    /// Ukuran worktree; default 0.
+    pub sizes: HashMap<PathBuf, u64>,
+    /// Pesan kegagalan `dir_size`; `None` = berhasil.
+    pub size_error: Option<String>,
     /// Berkas berubah yang dikembalikan `changed_between` bila tree berbeda.
     pub diff_files: Vec<String>,
     /// Pasangan `(from, to)` yang diminta ke `changed_between`.
@@ -143,6 +147,13 @@ impl GitPort for FakeGit {
     }
     async fn worktree_exists(&self, wt: &Path) -> bool {
         self.state.lock().unwrap().worktrees.contains(wt)
+    }
+    async fn dir_size(&self, path: &Path) -> Result<u64, PortError> {
+        let st = self.state.lock().unwrap();
+        if let Some(e) = &st.size_error {
+            return Err(PortError::Transient(e.clone()));
+        }
+        Ok(st.sizes.get(path).copied().unwrap_or_default())
     }
     async fn changes(&self, _r: &RepoInfo, wt: &Path, _b: &str) -> Result<WorkChanges, PortError> {
         Ok(self
@@ -499,6 +510,8 @@ pub struct FakeRuns {
     pub journal: Arc<Mutex<Vec<(String, String, String)>>>,
     /// Kartu run grup per run.
     pub cards: Arc<Mutex<HashMap<String, Vec<GroupCardRow>>>>,
+    /// Setelan penutupan run selesai.
+    pub cleanup: Arc<Mutex<mandor_usecase::run_ports::CleanupSettings>>,
 }
 
 impl FakeRuns {
@@ -721,6 +734,16 @@ impl RunStore for FakeRuns {
             .filter(|(_, c)| !c)
             .map(|(r, _)| r.clone())
             .collect())
+    }
+    async fn cleanup_settings(&self) -> mandor_usecase::run_ports::CleanupSettings {
+        *self.cleanup.lock().unwrap()
+    }
+    async fn set_cleanup_settings(
+        &self,
+        s: &mandor_usecase::run_ports::CleanupSettings,
+    ) -> Result<(), PortError> {
+        *self.cleanup.lock().unwrap() = *s;
+        Ok(())
     }
     async fn save(&self, run: &RunRecord, expected: i64, _now: i64) -> Result<(), PortError> {
         let mut rows = self.rows.lock().unwrap();

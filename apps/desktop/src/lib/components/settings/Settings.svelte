@@ -7,6 +7,9 @@
   import Frame from '@lucide/svelte/icons/frame';
   import Link from '@lucide/svelte/icons/link';
   import Server from '@lucide/svelte/icons/server';
+  import HardDrive from '@lucide/svelte/icons/hard-drive';
+  import StorageSettings from './StorageSettings.svelte';
+  import { cleanup, vmCleanup } from '#lib/stores/cleanup.svelte.ts';
   import DesignSourceSettings from './DesignSourceSettings.svelte';
   import type { Rpc } from '#lib/rpc.ts';
   import { sectionFor, sectionsFor, type SettingsTarget } from '#lib/settings.ts';
@@ -31,6 +34,7 @@
     { id: 'design-sources', label: 'Design sources', icon: Frame },
     { id: 'general', label: 'General', icon: Bolt },
     { id: 'background', label: 'Background work', icon: MoonStar },
+    { id: 'storage', label: 'Storage', icon: HardDrive },
     { id: 'vm', label: 'Overnight VM', icon: Server },
     { id: 'about', label: 'About', icon: Info }
   ];
@@ -70,6 +74,8 @@
         <RepoSettings rpc={vmRpc} store={vmLark} />
       {:else if section === 'workspaces'}
         <WorkspaceSettings rpc={vmRpc} store={vmLark} />
+      {:else if section === 'storage'}
+        <StorageSettings rpc={vmRpc} store={vmCleanup} vm />
       {:else}
         <VmLarkSettings />
       {/if}
@@ -85,6 +91,8 @@
       <GeneralSettings {rpc} />
     {:else if section === 'background'}
       <BackgroundSettings />
+    {:else if section === 'storage'}
+      <StorageSettings {rpc} store={cleanup} />
     {:else if section === 'vm'}
       <VmSettings />
     {:else}

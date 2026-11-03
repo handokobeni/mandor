@@ -21,6 +21,7 @@
   import { notifyDesktop, onTrayOpenRun, updateTray } from '#lib/native.ts';
   import type { CardView } from '#lib/protocol/CardView.ts';
   import type { Rpc } from '#lib/rpc.ts';
+  import { cleanup, vmCleanup } from '#lib/stores/cleanup.svelte.ts';
   import { board } from '#lib/stores/board.svelte.ts';
   import { connection } from '#lib/stores/connection.svelte.ts';
   import { vm } from '#lib/stores/vm.svelte.ts';
@@ -55,6 +56,16 @@
   }
   // Langkah awal dihitung sekali per sesi agar tidak melompat saat status berubah di tengah setup.
   let onboardingAt = $state<OnboardingStep | null | undefined>(undefined);
+  // Ringkasan penutupan run selesai di latar belakang (plan 2026-11-03-001).
+  $effect(() => {
+    const summary = cleanup.summary;
+    if (summary) untrack(() => toast.success(summary));
+  });
+  $effect(() => {
+    const summary = vmCleanup.summary;
+    if (summary) untrack(() => toast.success(`VM: ${summary}`));
+  });
+
   $effect(() => {
     if (onboardingAt !== undefined || !lark.loaded) return;
     onboardingAt = onboardingStart(lark.status, lark.repos.length, onboarded);
@@ -98,7 +109,7 @@
       return;
     }
     return untrack(() => {
-      const offs = [overnight.attach(client), vmLark.attach(client, () => undefined)];
+      const offs = [overnight.attach(client), vmLark.attach(client, () => undefined), vmCleanup.attach(client)];
       return () => offs.forEach((off) => off());
     });
   });
@@ -113,6 +124,7 @@
         if (shouldNotify(n.kind, notifyPrefs.prefs)) void notifyDesktop(n);
       }),
       board.attach(client),
+      cleanup.attach(client),
       runs.attach(client),
       workspace.attach(client),
       notifications.attach(client),

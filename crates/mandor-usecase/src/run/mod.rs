@@ -1,8 +1,14 @@
 //! Orkestrasi task run (U10): Start, sesi agent, publish, rekonsiliasi.
 
+mod cleanup;
 mod drain;
 mod group;
 mod group_gate;
+pub use crate::run_ports::CleanupSettings;
+pub use cleanup::{
+    CloseFinishedReport, FinishedRun, FinishedRuns, RunStorage, SkippedRun, closed_text,
+    human_bytes,
+};
 pub use drain::{DRAIN_WINDOW_MS, DrainGate, DrainOutcome, WorkGuard};
 pub use group_gate::CardOutcome;
 mod members;
@@ -87,6 +93,11 @@ pub struct RunService<D: Deps> {
     stoppers: Mutex<HashMap<String, (i64, StopperOf<D>)>>,
     /// Gerbang drain untuk pembaruan daemon (dibagi dengan daemon).
     drain: Arc<DrainGate>,
+    /// Waktu pemeriksaan otomatis run selesai terakhir (0 = belum pernah);
+    /// dibangun ulang setelah restart (plan `2026-11-03-001`, KTD-C4).
+    pub(crate) cleanup_checked_ms: std::sync::atomic::AtomicI64,
+    /// Penutupan run selesai sedang berjalan di latar belakang.
+    pub(crate) cleanup_busy: std::sync::atomic::AtomicBool,
 }
 
 impl<D: Deps> std::fmt::Debug for RunService<D> {
@@ -137,6 +148,8 @@ impl<D: Deps> RunService<D> {
             replies: Mutex::new(Vec::new()),
             replies_loaded: std::sync::atomic::AtomicBool::new(false),
             cursor_sent: Mutex::new(HashMap::new()),
+            cleanup_checked_ms: std::sync::atomic::AtomicI64::new(0),
+            cleanup_busy: std::sync::atomic::AtomicBool::new(false),
             stoppers: Mutex::new(HashMap::new()),
             drain: Arc::new(DrainGate::default()),
         }

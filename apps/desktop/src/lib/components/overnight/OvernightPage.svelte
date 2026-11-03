@@ -11,6 +11,10 @@
   import { overnight } from '#lib/stores/overnight.svelte.ts';
   import { vm } from '#lib/stores/vm.svelte.ts';
   import QueueSection from './QueueSection.svelte';
+  import Trash2 from '@lucide/svelte/icons/trash-2';
+  import { closeLabel, formatBytes, totalBytes } from '#lib/cleanup.ts';
+  import CloseFinishedDialog from '#lib/components/cleanup/CloseFinishedDialog.svelte';
+  import { vmCleanup } from '#lib/stores/cleanup.svelte.ts';
   import ReportSection from './ReportSection.svelte';
 
   let { laptop, laptopDaemonId }: { laptop: Rpc; laptopDaemonId: string | null } = $props();
@@ -57,6 +61,8 @@
       toast.error('Could not save the settings', { description: err instanceof Error ? err.message : String(err) });
     }
   }
+  /** Dialog "Close finished runs" untuk run di VM (R7). */
+  let closingVm = $state(false);
 </script>
 
 <div class="overnight settings-main scroll-area">
@@ -202,6 +208,20 @@
 
     <QueueSection {laptop} {laptopDaemonId} />
     <ReportSection {laptop} {laptopDaemonId} />
+    {#if closeLabel(vmCleanup.closable.length)}
+      <section>
+        <h2>Storage on the VM</h2>
+        <div class="settings-card">
+          <div class="content">
+            <p class="line">
+              {vmCleanup.closable.length} finished {vmCleanup.closable.length === 1 ? 'run' : 'runs'} on the VM can free {formatBytes(totalBytes(vmCleanup.closable))}.
+            </p>
+            <div><Button variant="outline" size="sm" disabled={vmCleanup.closing} onclick={() => (closingVm = true)}><Trash2 />{vmCleanup.closing ? 'Closing…' : closeLabel(vmCleanup.closable.length)}</Button></div>
+          </div>
+        </div>
+      </section>
+    {/if}
+    <CloseFinishedDialog store={vmCleanup} bind:open={closingVm} where="on the VM" />
     {/if}
   {/if}
 </div>

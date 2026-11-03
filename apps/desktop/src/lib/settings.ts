@@ -80,7 +80,8 @@ export const NOTIFY_KINDS = [
   { kind: 'pr_created', label: 'PR created' },
   { kind: 'needs_attention', label: 'Needs attention: claim lost, task deleted or reassigned, push held' },
   { kind: 'review_finished', label: 'AC review finished' },
-  { kind: 'app_failed', label: 'App failed to start' }
+  { kind: 'app_failed', label: 'App failed to start' },
+  { kind: 'runs_closed', label: 'Finished runs closed automatically' }
 ] as const;
 
 export type NotifyPrefs = Record<string, boolean>;
@@ -92,7 +93,8 @@ export const DEFAULT_NOTIFY: NotifyPrefs = {
   pr_created: false,
   needs_attention: true,
   review_finished: true,
-  app_failed: true
+  app_failed: true,
+  runs_closed: false
 };
 
 /** Notifikasi desktop untuk jenis ini; jenis yang belum dikenal tetap ditampilkan. */
@@ -165,10 +167,10 @@ export function validateRepoApp(f: RepoAppForm): RepoAppErrors {
 /** Daemon yang diatur di Settings (laptop, atau daemon VM lewat link VM). */
 export type SettingsTarget = 'laptop' | 'vm';
 
-const VM_SECTIONS = ['lark', 'repos', 'workspaces'] as const;
-const LAPTOP_SECTIONS = ['lark', 'repos', 'workspaces', 'design-sources', 'general', 'background', 'vm', 'about'] as const;
+const VM_SECTIONS = ['lark', 'repos', 'workspaces', 'storage'] as const;
+const LAPTOP_SECTIONS = ['lark', 'repos', 'workspaces', 'design-sources', 'general', 'background', 'storage', 'vm', 'about'] as const;
 
-/** Bagian Settings yang tersedia untuk target; daemon VM hanya butuh Lark App, repo, dan workspace. */
+/** Bagian Settings yang tersedia untuk target; daemon VM hanya butuh Lark App, repo, workspace, dan storage. */
 export function sectionsFor(target: SettingsTarget): string[] {
   return target === 'vm' ? [...VM_SECTIONS] : [...LAPTOP_SECTIONS];
 }

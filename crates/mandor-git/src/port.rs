@@ -124,6 +124,12 @@ impl GitPort for GitAdapter {
         tokio::fs::try_exists(worktree).await.unwrap_or(false)
     }
 
+    async fn dir_size(&self, path: &Path) -> Result<u64, PortError> {
+        crate::size::dir_size(path, crate::size::SIZE_TIMEOUT)
+            .await
+            .map_err(|e| PortError::Transient(e.to_string()))
+    }
+
     async fn discard_file(
         &self,
         repo: &RepoInfo,

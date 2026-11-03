@@ -1401,3 +1401,65 @@ pub struct OvernightReportView {
     /// Kartu Planned yang ditahan (R15 plan 2026-10-30-001).
     pub planned_held: Vec<HeldPlannedView>,
 }
+
+/// Run kartu selesai (plan `2026-11-03-001`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+pub struct FinishedRunView {
+    pub run_id: String,
+    /// Kunci kartu yang masih disertakan.
+    pub keys: Vec<String>,
+    pub title: String,
+    /// Ukuran worktree dalam byte; `null` bila gagal diukur.
+    #[ts(type = "number | null")]
+    pub bytes: Option<u64>,
+}
+
+/// Run selesai yang tidak ditutup.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+pub struct SkippedRunView {
+    pub run: FinishedRunView,
+    /// `working` atau `unpushed_changes`.
+    pub reason: String,
+}
+
+/// Hasil `runs.finished`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+pub struct FinishedRunsView {
+    pub closable: Vec<FinishedRunView>,
+    pub skipped: Vec<SkippedRunView>,
+}
+
+/// Parameter `runs.close_finished`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+pub struct CloseFinishedParams {
+    pub run_ids: Vec<String>,
+}
+
+/// Hasil `runs.close_finished`: penutupan berjalan di latar belakang;
+/// ringkasannya datang sebagai notifikasi `runs_closed`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+pub struct CloseFinishedStarted {
+    /// Jumlah run yang diperiksa ulang lalu ditutup bila masih memenuhi syarat.
+    pub count: u32,
+}
+
+/// Satu run terbuka dengan ukuran worktree (R9).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+pub struct RunStorageView {
+    pub run_id: String,
+    pub keys: Vec<String>,
+    pub title: String,
+    pub run_state: String,
+    /// Status Lark kartu yang masih disertakan.
+    pub card_status: Vec<String>,
+    #[ts(type = "number | null")]
+    pub bytes: Option<u64>,
+    #[ts(type = "number")]
+    pub updated_at_ms: i64,
+}
+
+/// Setelan penutupan run selesai.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+pub struct CleanupSettingsView {
+    pub auto_close: bool,
+}

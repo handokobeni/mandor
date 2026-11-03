@@ -87,6 +87,16 @@ Agent yang sedang berjalan ikut berhenti saat daemon di-restart. Run-nya ditanda
 
 `MANDOR_HOME` mengganti lokasi `~/.mandor`, berguna untuk mencoba dengan data terpisah; worktree lalu ada di `$MANDOR_HOME/workspaces/`.
 
+### Mengosongkan storage worktree
+
+Setiap run punya worktree sendiri, termasuk dependensi yang dipasang setup command app run (mis. `node_modules`), sehingga satu run repo besar bisa memakan sekitar 1 GB. Run ditutup lewat **Close run** atau sekaligus:
+
+- **Kolom Done di board** dan **Settings › Storage** menampilkan **Close N finished runs** untuk run yang kartunya Delivered atau Waiting Deploy. Run yang worktree-nya masih punya perubahan atau commit belum di-push dilewati.
+- **Settings › Storage** juga mendaftar semua run terbuka dari yang terbesar, dengan **Open** dan **Close run** per baris, serta setelan **Close finished runs automatically** (daemon memeriksa setelah sinkron Lark, paling sering 10 menit sekali).
+- Untuk daemon VM: pilih target **VM** di Settings › Storage, atau pakai tombol di tab **Overnight**.
+
+Menutup run menghapus worktree-nya; branch di remote, PR, dan status Lark tidak diubah.
+
 ## Variabel environment
 
 | Variabel | Default | Fungsi |

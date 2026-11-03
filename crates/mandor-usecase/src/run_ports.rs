@@ -117,6 +117,9 @@ pub trait GitPort: Send + Sync {
         branch: &str,
     ) -> impl Future<Output = Result<(), PortError>> + Send;
     fn worktree_exists(&self, worktree: &Path) -> impl Future<Output = bool> + Send;
+    /// Ukuran folder dalam byte (berkas di bawahnya, tanpa mengikuti symlink),
+    /// dibatasi waktu (plan `2026-11-03-001`, KTD-C3).
+    fn dir_size(&self, path: &Path) -> impl Future<Output = Result<u64, PortError>> + Send;
     /// Menghapus folder run workspace setelah worktree-nya dihapus. Hanya folder
     /// di bawah direktori worktree milik daemon; tidak pernah gagal.
     fn remove_run_root(&self, root: &Path) -> impl Future<Output = ()> + Send;
@@ -612,6 +615,12 @@ pub trait RunStore: Send + Sync {
         record_id: &str,
     ) -> impl Future<Output = Result<Option<RunRecord>, PortError>> + Send;
     fn list_active(&self) -> impl Future<Output = Result<Vec<RunRecord>, PortError>> + Send;
+    /// Setelan penutupan run selesai daemon ini (plan `2026-11-03-001`, KTD-C4).
+    fn cleanup_settings(&self) -> impl Future<Output = CleanupSettings> + Send;
+    fn set_cleanup_settings(
+        &self,
+        s: &CleanupSettings,
+    ) -> impl Future<Output = Result<(), PortError>> + Send;
     /// Run terbaru kartu, termasuk yang sudah ditutup.
     fn latest_for(
         &self,
@@ -670,6 +679,8 @@ pub trait Journal: Send + Sync {
 /// Jenis notifikasi desktop (R2).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum NoticeKind {
+    /// Run kartu selesai ditutup otomatis (plan `2026-11-03-001`, R6).
+    RunsClosed,
     AwaitingAnswer,
     Failed,
     WaitingFix,
@@ -683,6 +694,7 @@ impl NoticeKind {
     #[must_use]
     pub fn as_str(self) -> &'static str {
         match self {
+            Self::RunsClosed => "runs_closed",
             Self::AwaitingAnswer => "awaiting_answer",
             Self::Failed => "failed",
             Self::WaitingFix => "waiting_fix",
@@ -692,6 +704,13 @@ impl NoticeKind {
             Self::AppFailed => "app_failed",
         }
     }
+}
+
+/// Setelan penutupan run kartu yang sudah selesai.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct CleanupSettings {
+    /// Tutup otomatis setelah sinkron Lark (R6); default mati.
+    pub auto_close: bool,
 }
 
 /// Notifikasi untuk dev.

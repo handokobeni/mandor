@@ -69,6 +69,7 @@ Base salinan `Sv1NbPJh5aD7SesHvtGlmga8g2f`, repo `mandor-smoke`, desain `mandor-
 | H | E-PGS21 | PGS-1563, PGS-1564, PGS-1565 | — | F2/AE6 (pengganti grup A, yang terlanjur dimulai di laptop dengan Skip planning) |
 | I | E-PGS25 | PGS-1566 (berat), PGS-1567 | — | R21 percobaan 2 |
 | J | E-PGS28 | PGS-1568 (berat), PGS-1569 | — | R21 percobaan 3 |
+| K | E-PGS33 | PGS-1570, PGS-1571 | `mandor-smoke-design` (tanpa folder khusus) | Uji perbaikan temuan |
 
 ### Uji langsung U21 di laptop (2026-11-02)
 
@@ -109,3 +110,13 @@ Biner VM `764c64f0…` terpasang, service aktif.
 | PR draft VM tertaut hanya di kartu pertama | `mark_draft` menulis link PR ke setiap kartu grup yang masih disertakan (R15). Asersi di `covers_f2…`. |
 | Answer and queue tanpa daftar kartu grup | `enqueue_card` untuk run grup tertahan mengisi `group` dengan kartu yang tersisa. Asersi di `covers_ae4…`. |
 | Daemon laptop tidak diperbarui setelah build | Sudah ada di README "Saat kode berubah" (`pkill -TERM -x mandord`); tidak diubah. |
+
+### Uji langsung perbaikan (2026-11-03)
+
+Biner VM `1097d9ef…`, daemon laptop dibangun ulang. Grup K (PGS-1570–1571, epic E-PGS33) diantre dari tab Overnight dengan sumber desain `mandor-smoke-design` lalu Start now.
+
+| Perbaikan | Hasil |
+|---|---|
+| Teks Queue together di VM | Lolos: "…The VM commits each card and starts the next one on its own." |
+| Link PR draft di semua kartu | Lolos: PR draft https://github.com/handokobeni/mandor-smoke/pull/32 tertaut di PGS-1570 dan PGS-1571 saat masih In Progress. |
+| Take over grup berjalan | Lolos: run laptop memasang `mandor-smoke-design` ("Design source mandor-smoke-design"), header AC review "Verdicts from the VM review" dengan 3 Pass dari VM, grup "2 of 2 done". Send to review: PR #32 siap di-review, kedua kartu Waiting Review. |

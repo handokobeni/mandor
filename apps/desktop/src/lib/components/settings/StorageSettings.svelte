@@ -3,7 +3,7 @@
   // setelan otomatis untuk satu daemon (plan 2026-11-03-001, R5, R7, R9).
   import Trash2 from '@lucide/svelte/icons/trash-2';
   import { toast } from 'svelte-sonner';
-  import { closeLabel, formatBytes, totalBytes } from '#lib/cleanup.ts';
+  import { closeLabel, formatBytes, keyLabel, totalBytes } from '#lib/cleanup.ts';
   import CloseFinishedDialog from '#lib/components/cleanup/CloseFinishedDialog.svelte';
   import * as AlertDialog from '#lib/components/ui/alert-dialog/index.ts';
   import { Button, buttonVariants } from '#lib/components/ui/button/index.ts';
@@ -107,9 +107,9 @@
     <ul class="storage" aria-label="Open runs by size">
       {#each rows as r (r.run_id)}
         <li>
-          <span class="mono key">{r.keys.join(', ')}</span>
+          <span class="mono key" title={r.keys.join(', ')}>{keyLabel(r.keys)}</span>
           <span class="title" title={r.title}>{r.title}</span>
-          <span class="muted meta">{runMeta(r.run_state).label} · {r.card_status.join(', ')}</span>
+          <span class="muted meta">{runMeta(r.run_state).label} · {[...new Set(r.card_status)].join(', ')}</span>
           <span class="mono size">{formatBytes(r.bytes)}</span>
           {#if !vm}<Button variant="ghost" size="xs" onclick={() => nav.run(r.run_id)}>Open</Button>{/if}
           <Button variant="ghost" size="xs" onclick={() => (closing = r)}>Close run</Button>
@@ -156,6 +156,7 @@
     padding: 6px 0;
     border-bottom: 1px solid var(--border);
     font-size: 13px;
+    min-width: 0;
   }
   .storage .key,
   .storage .size,

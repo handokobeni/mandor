@@ -41,3 +41,9 @@ export function confirmLabel(count: number, bytes: number): string {
   const runs = count === 1 ? '1 run' : `${count} runs`;
   return bytes > 0 ? `Close ${runs} · free ${formatBytes(bytes)}` : `Close ${runs}`;
 }
+
+/** Kunci run di daftar: run grup diringkas menjadi kunci pertama plus jumlah kartu lain. */
+export function keyLabel(keys: string[]): string {
+  if (keys.length <= 1) return keys[0] ?? '';
+  return `${keys[0]} +${keys.length - 1}`;
+}

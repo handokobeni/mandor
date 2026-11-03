@@ -2,7 +2,7 @@
   // Konfirmasi menutup run kartu selesai (plan 2026-11-03-001, R4).
   import Trash2 from '@lucide/svelte/icons/trash-2';
   import { toast } from 'svelte-sonner';
-  import { confirmLabel, formatBytes, reasonLabel, totalBytes } from '#lib/cleanup.ts';
+  import { confirmLabel, formatBytes, keyLabel, reasonLabel, totalBytes } from '#lib/cleanup.ts';
   import { Button } from '#lib/components/ui/button/index.ts';
   import * as Dialog from '#lib/components/ui/dialog/index.ts';
   import type { CleanupStore } from '#lib/stores/cleanup.svelte.ts';
@@ -35,7 +35,7 @@
 </script>
 
 <Dialog.Root bind:open>
-  <Dialog.Content class="sm:max-w-[560px] max-h-[90vh] overflow-y-auto">
+  <Dialog.Content class="sm:max-w-[560px] max-h-[90vh] overflow-y-auto overflow-x-hidden">
     <Dialog.Header>
       <Dialog.Title>Close finished runs{where ? ` ${where}` : ''}</Dialog.Title>
       <Dialog.Description>
@@ -48,7 +48,7 @@
     {:else}
       <ul class="rows" aria-label="Runs to close">
         {#each store.closable as r (r.run_id)}
-          <li><span class="mono key">{r.keys.join(', ')}</span><span class="title" title={r.title}>{r.title}</span><span class="mono muted">{formatBytes(r.bytes)}</span></li>
+          <li><span class="mono key" title={r.keys.join(', ')}>{keyLabel(r.keys)}</span><span class="title" title={r.title}>{r.title}</span><span class="mono muted">{formatBytes(r.bytes)}</span></li>
         {/each}
       </ul>
     {/if}
@@ -57,7 +57,7 @@
       <ul class="rows" aria-label="Skipped runs">
         {#each store.skipped as s (s.run.run_id)}
           <li>
-            <span class="mono key">{s.run.keys.join(', ')}</span><span class="title" title={s.run.title}>{s.run.title}</span>
+            <span class="mono key" title={s.run.keys.join(', ')}>{keyLabel(s.run.keys)}</span><span class="title" title={s.run.title}>{s.run.title}</span>
             <span class="chip" data-tone="warning">{reasonLabel(s.reason)}</span><span class="mono muted">{formatBytes(s.run.bytes)}</span>
           </li>
         {/each}
@@ -77,6 +77,7 @@
     list-style: none;
     margin: 0;
     padding: 0;
+    min-width: 0;
   }
   .rows li {
     display: flex;
@@ -85,8 +86,11 @@
     padding: 6px 0;
     border-bottom: 1px solid var(--border);
     font-size: 13px;
+    min-width: 0;
   }
-  .rows .key {
+  .rows .key,
+  .rows .chip,
+  .rows .muted {
     flex-shrink: 0;
   }
   .rows .title {

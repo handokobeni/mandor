@@ -1,7 +1,8 @@
 // Run kartu selesai yang bisa ditutup, untuk satu daemon (laptop atau VM)
 // (plan 2026-11-03-001, R4, R5, R7, R9).
 import type { CleanupSettingsView } from '#lib/protocol/CleanupSettingsView.ts';
-import type { CloseFinishedResult } from '#lib/protocol/CloseFinishedResult.ts';
+import type { CloseFinishedStarted } from '#lib/protocol/CloseFinishedStarted.ts';
+import type { NoticeView } from '#lib/protocol/NoticeView.ts';
 import type { FinishedRunView } from '#lib/protocol/FinishedRunView.ts';
 import type { FinishedRunsView } from '#lib/protocol/FinishedRunsView.ts';
 import type { RunStorageView } from '#lib/protocol/RunStorageView.ts';
@@ -11,6 +12,10 @@ import type { Rpc } from '#lib/rpc.ts';
 export class CleanupStore {
   closable = $state<FinishedRunView[]>([]);
   skipped = $state<SkippedRunView[]>([]);
+  /** Daemon sedang menutup run di latar belakang. */
+  closing = $state(false);
+  /** Ringkasan penutupan terakhir ("Closed N finished runs, freed X"). */
+  summary = $state<string | null>(null);
   private rpc: Rpc | null = null;
   private off: (() => void)[] = [];
 
@@ -18,7 +23,17 @@ export class CleanupStore {
   attach(rpc: Rpc): () => void {
     this.detach();
     this.rpc = rpc;
-    this.off = [rpc.on('board.updated', () => void this.load()), rpc.on('run.updated', () => void this.load())];
+    this.off = [
+      rpc.on('board.updated', () => void this.load()),
+      rpc.on('run.updated', () => void this.load()),
+      rpc.on('notice', (p) => {
+        const n = p as NoticeView;
+        if (n.kind !== 'runs_closed') return;
+        this.closing = false;
+        this.summary = n.body;
+        void this.load();
+      })
+    ];
     void this.load();
     return () => this.detach();
   }
@@ -49,14 +64,19 @@ export class CleanupStore {
     return this.rpc;
   }
 
-  /** Menutup semua run yang saat ini bisa ditutup; daemon memeriksa ulang tiap run. */
-  async closeAll(): Promise<CloseFinishedResult> {
+  /**
+   * Meminta daemon menutup semua run yang saat ini bisa ditutup di latar
+   * belakang; daemon memeriksa ulang tiap run. Mengembalikan jumlah run.
+   * Selesai saat notifikasi `runs_closed` datang.
+   */
+  async closeAll(): Promise<number> {
     const rpc = this.client();
-    const res = await rpc.request<CloseFinishedResult>('runs.close_finished', {
+    const res = await rpc.request<CloseFinishedStarted>('runs.close_finished', {
       run_ids: this.closable.map((r) => r.run_id)
     });
-    await this.load();
-    return res;
+    this.closing = res.count > 0;
+    this.summary = null;
+    return res.count;
   }
 
   /** Semua run terbuka, worktree terbesar dulu. */

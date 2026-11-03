@@ -359,8 +359,8 @@ fn group_bindings() -> Result<Vec<(&'static str, String)>, String> {
             CloseFinishedParams::export_to_string(&cfg),
         )?,
         one(
-            "CloseFinishedResult.ts",
-            CloseFinishedResult::export_to_string(&cfg),
+            "CloseFinishedStarted.ts",
+            CloseFinishedStarted::export_to_string(&cfg),
         )?,
         one("RunStorageView.ts", RunStorageView::export_to_string(&cfg))?,
         one(

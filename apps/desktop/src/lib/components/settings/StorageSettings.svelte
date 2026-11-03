@@ -97,7 +97,7 @@
         <Switch id="cleanup-auto" checked={auto} onCheckedChange={(on) => void setAuto(on)} />
       </div>
       {#if label}
-        <Button variant="outline" size="sm" onclick={() => (dialog = true)}><Trash2 />{label}</Button>
+        <Button variant="outline" size="sm" disabled={store.closing} onclick={() => (dialog = true)}><Trash2 />{store.closing ? 'Closing finished runs…' : label}</Button>
       {:else}
         <p class="muted" style="margin:0">No finished runs to close. Cards count as finished when they are Delivered or Waiting Deploy.</p>
       {/if}

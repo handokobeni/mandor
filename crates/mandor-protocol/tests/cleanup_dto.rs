@@ -2,7 +2,7 @@
 #![allow(clippy::unwrap_used)]
 
 use mandor_protocol::{
-    CleanupSettingsView, CloseFinishedResult, FinishedRunView, FinishedRunsView, SkippedRunView,
+    CleanupSettingsView, CloseFinishedStarted, FinishedRunView, FinishedRunsView, SkippedRunView,
 };
 
 #[test]
@@ -27,15 +27,10 @@ fn dto_bolak_balik_dan_ukuran_kosong_menjadi_null() {
         view
     );
 
-    let result = CloseFinishedResult {
-        closed: vec!["r1".to_owned()],
-        skipped: Vec::new(),
-        freed_bytes: 2_000_000,
-        summary: "Closed 1 finished run, freed 2.0 MB".to_owned(),
-    };
-    let back: CloseFinishedResult =
-        serde_json::from_str(&serde_json::to_string(&result).unwrap()).unwrap();
-    assert_eq!(back, result);
+    let started = CloseFinishedStarted { count: 17 };
+    let back: CloseFinishedStarted =
+        serde_json::from_str(&serde_json::to_string(&started).unwrap()).unwrap();
+    assert_eq!(back, started);
 
     let s: CleanupSettingsView = serde_json::from_str(r#"{"auto_close":true}"#).unwrap();
     assert!(s.auto_close);

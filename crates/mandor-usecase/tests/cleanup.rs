@@ -180,10 +180,7 @@ async fn covers_ae3_otomatis_hanya_bila_dinyalakan_dan_paling_sering_sepuluh_men
     set_size(&st, &r1, 3_000);
     set_status(&lark, &st, "c1", TaskStatus::Delivered).await;
 
-    assert!(
-        st.svc.auto_close_finished().await.unwrap().is_none(),
-        "mati"
-    );
+    assert_eq!(st.svc.auto_close_finished().await.unwrap(), None, "mati");
     assert!(is_open(&st, &r1.id));
 
     st.svc
@@ -191,33 +188,63 @@ async fn covers_ae3_otomatis_hanya_bila_dinyalakan_dan_paling_sering_sepuluh_men
         .await
         .unwrap();
     assert!(st.svc.cleanup_settings().await.auto_close);
-    let report = st.svc.auto_close_finished().await.unwrap().unwrap();
-    assert_eq!(report.closed, [r1.id.as_str()]);
-    assert!(!is_open(&st, &r1.id));
-    let notices: Vec<_> = st
-        .notifier
+    assert_eq!(st.svc.auto_close_finished().await.unwrap(), Some(1));
+    eventually(|| !is_open(&st, &r1.id)).await;
+    eventually(|| closed_notices(&st).len() == 1).await;
+    assert!(
+        closed_notices(&st)[0]
+            .body
+            .contains("Closed 1 finished run"),
+        "{:?}",
+        closed_notices(&st)
+    );
+
+    set_status(&lark, &st, "c2", TaskStatus::Delivered).await;
+    clock.set(100 * MIN + 5 * MIN);
+    assert_eq!(
+        st.svc.auto_close_finished().await.unwrap(),
+        None,
+        "belum 10 menit"
+    );
+    clock.set(100 * MIN + 11 * MIN);
+    assert_eq!(st.svc.auto_close_finished().await.unwrap(), Some(1));
+    eventually(|| !is_open(&st, &r2.id)).await;
+}
+
+fn closed_notices(st: &Station) -> Vec<mandor_usecase::run_ports::Notice> {
+    st.notifier
         .sent
         .lock()
         .unwrap()
         .iter()
         .filter(|n| n.kind == NoticeKind::RunsClosed)
         .cloned()
-        .collect();
-    assert_eq!(notices.len(), 1);
+        .collect()
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn penutupan_berjalan_di_latar_dan_hanya_satu_sekaligus() {
+    let (lark, _clock, st) = setup(&["c1", "c2"]);
+    let r1 = waiting_run(&st, "c1").await;
+    let r2 = waiting_run(&st, "c2").await;
+    set_status(&lark, &st, "c1", TaskStatus::Delivered).await;
+    set_status(&lark, &st, "c2", TaskStatus::Delivered).await;
+
+    let started = st
+        .svc
+        .start_close_finished(vec![r1.id.clone(), r2.id.clone()])
+        .unwrap();
+    assert_eq!(started, 2);
+    eventually(|| !is_open(&st, &r1.id) && !is_open(&st, &r2.id)).await;
+    eventually(|| closed_notices(&st).len() == 1).await;
     assert!(
-        notices[0].body.contains("Closed 1 finished run"),
-        "{notices:?}"
+        closed_notices(&st)[0]
+            .body
+            .contains("Closed 2 finished runs")
     );
 
-    set_status(&lark, &st, "c2", TaskStatus::Delivered).await;
-    clock.set(100 * MIN + 5 * MIN);
-    assert!(
-        st.svc.auto_close_finished().await.unwrap().is_none(),
-        "belum 10 menit"
-    );
-    clock.set(100 * MIN + 11 * MIN);
-    let report = st.svc.auto_close_finished().await.unwrap().unwrap();
-    assert_eq!(report.closed, [r2.id.as_str()]);
+    // Setelah selesai, penutupan berikutnya boleh dimulai lagi.
+    assert_eq!(st.svc.start_close_finished(Vec::new()).unwrap(), 0);
 }
 
 #[tokio::test(flavor = "multi_thread")]

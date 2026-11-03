@@ -226,12 +226,12 @@
           {#if col.id === 'done' && closeLabel(cleanup.closable.length)}
             {@const label = closeLabel(cleanup.closable.length)}
             {#if collapsed}
-              <Button variant="outline" size="icon-xs" aria-label={label} title={label} onclick={() => (closingFinished = true)}>
+              <Button variant="outline" size="icon-xs" aria-label={label} title={cleanup.closing ? 'Closing…' : label} disabled={cleanup.closing} onclick={() => (closingFinished = true)}>
                 <Trash2 />
               </Button>
             {:else}
-              <Button variant="outline" size="xs" class="ml-auto" onclick={() => (closingFinished = true)}>
-                <Trash2 />{label}
+              <Button variant="outline" size="xs" class="ml-auto" disabled={cleanup.closing} onclick={() => (closingFinished = true)}>
+                <Trash2 />{cleanup.closing ? 'Closing…' : label}
               </Button>
             {/if}
           {/if}

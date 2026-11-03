@@ -12,7 +12,7 @@ use mandor_domain::{RunState, TaskStatus};
 use super::{RunError, RunService};
 use crate::ports::{Clock, Deps};
 use crate::run_ports::{
-    CleanupSettings, GitPort, Notice, NoticeKind, Notifier, RunRecord, RunStore,
+    CleanupSettings, GitPort, Notice, NoticeKind, Notifier, RunRecord, RunStore, Spawner,
 };
 
 /// Jarak minimum antar pemeriksaan otomatis (KTD-C4).
@@ -127,14 +127,53 @@ impl<D: Deps> RunService<D> {
         Ok(report)
     }
 
+    /// Menutup run `run_ids` di latar belakang; satu penutupan sekaligus.
+    /// Melepas klaim di Lark bisa lambat saat Lark membatasi permintaan,
+    /// jadi pemanggil tidak menunggu; hasilnya dikirim sebagai notifikasi
+    /// `RunsClosed`. Mengembalikan jumlah run yang akan diperiksa.
+    ///
+    /// # Errors
+    /// Penutupan lain masih berjalan.
+    pub fn start_close_finished(self: &Arc<Self>, run_ids: Vec<String>) -> Result<usize, RunError> {
+        if run_ids.is_empty() {
+            return Ok(0);
+        }
+        if self.cleanup_busy.swap(true, Ordering::AcqRel) {
+            return Err(RunError::InvalidState(
+                "finished runs are already being closed",
+            ));
+        }
+        let count = run_ids.len();
+        let svc = Arc::clone(self);
+        self.spawner.spawn(async move {
+            let body = match svc.close_finished(&run_ids).await {
+                Ok(report) => closed_text(report.closed.len(), report.freed_bytes),
+                Err(e) => {
+                    tracing::warn!(error = %e, "penutupan run selesai berhenti");
+                    format!("Closing finished runs stopped: {e}")
+                }
+            };
+            svc.cleanup_busy.store(false, Ordering::Release);
+            svc.notifier
+                .notify(Notice {
+                    kind: NoticeKind::RunsClosed,
+                    record_id: String::new(),
+                    run_id: None,
+                    title: "Finished runs closed".to_owned(),
+                    body,
+                })
+                .await;
+        });
+        Ok(count)
+    }
+
     /// Penutupan otomatis (R6): hanya bila dinyalakan dan paling sering sekali
-    /// per 10 menit. `None` bila tidak berjalan.
+    /// per 10 menit; berjalan di latar belakang. `None` bila tidak berjalan,
+    /// selain itu jumlah run yang mulai ditutup.
     ///
     /// # Errors
     /// Penyimpanan gagal.
-    pub async fn auto_close_finished(
-        self: &Arc<Self>,
-    ) -> Result<Option<CloseFinishedReport>, RunError> {
+    pub async fn auto_close_finished(self: &Arc<Self>) -> Result<Option<usize>, RunError> {
         if !self.runs.cleanup_settings().await.auto_close {
             return Ok(None);
         }
@@ -151,19 +190,11 @@ impl<D: Deps> RunService<D> {
             .into_iter()
             .map(|r| r.run_id)
             .collect();
-        let report = self.close_finished(&ids).await?;
-        if !report.closed.is_empty() {
-            self.notifier
-                .notify(Notice {
-                    kind: NoticeKind::RunsClosed,
-                    record_id: String::new(),
-                    run_id: None,
-                    title: "Finished runs closed".to_owned(),
-                    body: closed_text(report.closed.len(), report.freed_bytes),
-                })
-                .await;
+        if ids.is_empty() {
+            return Ok(None);
         }
-        Ok(Some(report))
+        // Penutupan manual yang masih berjalan menangani run yang sama.
+        Ok(self.start_close_finished(ids).ok())
     }
 
     /// Semua run terbuka beserta ukuran worktree, terbesar dulu (R9).

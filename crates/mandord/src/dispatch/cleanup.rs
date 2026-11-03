@@ -2,10 +2,10 @@
 //! `2026-11-03-001`, U3).
 
 use mandor_protocol::{
-    CleanupSettingsView, CloseFinishedParams, CloseFinishedResult, FinishedRunView,
+    CleanupSettingsView, CloseFinishedParams, CloseFinishedStarted, FinishedRunView,
     FinishedRunsView, RpcError, RunStorageView, SkippedRunView, method,
 };
-use mandor_usecase::run::{CleanupSettings, FinishedRun, SkippedRun, closed_text};
+use mandor_usecase::run::{CleanupSettings, FinishedRun, SkippedRun};
 use serde_json::{Value, json};
 
 use super::{AppDispatch, ok, params, run_error};
@@ -35,13 +35,9 @@ impl AppDispatch {
             }
             method::RUNS_CLOSE_FINISHED => {
                 let p: CloseFinishedParams = params(v)?;
-                let report = runs.close_finished(&p.run_ids).await.map_err(run_error)?;
-                s.poke.notify_one();
-                ok(&CloseFinishedResult {
-                    summary: closed_text(report.closed.len(), report.freed_bytes),
-                    skipped: report.skipped.iter().map(skipped_view).collect(),
-                    closed: report.closed,
-                    freed_bytes: report.freed_bytes,
+                let count = runs.start_close_finished(p.run_ids).map_err(run_error)?;
+                ok(&CloseFinishedStarted {
+                    count: u32::try_from(count).unwrap_or(u32::MAX),
                 })
             }
             method::RUNS_STORAGE => {

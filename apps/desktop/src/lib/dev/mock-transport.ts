@@ -625,12 +625,8 @@ function handle(method: string, params: Record<string, unknown>): unknown {
         closable: mockFinished,
         skipped: [{ run: { run_id: 'm-skip', keys: ['PGS-1404'], title: 'Edit a job', bytes: 29_100_000 }, reason: 'unpushed_changes' }]
       };
-    case 'runs.close_finished': {
-      const ids = (params as { run_ids: string[] }).run_ids;
-      const freed = mockFinished.filter((r) => ids.includes(r.run_id)).reduce((n, r) => n + (r.bytes ?? 0), 0);
-      mockFinished = mockFinished.filter((r) => !ids.includes(r.run_id));
-      return { closed: ids, skipped: [], freed_bytes: freed, summary: `Closed ${ids.length} finished runs, freed ${(freed / 1e9).toFixed(1)} GB` };
-    }
+    case 'runs.close_finished':
+      return { count: (params as { run_ids: string[] }).run_ids.length };
     case 'runs.storage':
       return [
         { run_id: '1', keys: ['PGS-1401'], title: 'Job list', run_state: 'awaiting_dev', card_status: ['In Progress'], bytes: 1_001_000_000, updated_at_ms: Date.now() - 86_400_000 },
@@ -823,8 +819,34 @@ export class MockTransport implements Transport {
     this.onLine = onLine;
   }
 
+  /** Penutupan tiruan di latar belakang: run hilang satu per satu, lalu notifikasi ringkasan. */
+  private playClose(ids: string[]): void {
+    const freed = mockFinished.filter((r) => ids.includes(r.run_id)).reduce((n, r) => n + (r.bytes ?? 0), 0);
+    ids.forEach((id, i) =>
+      setTimeout(() => {
+        mockFinished = mockFinished.filter((r) => r.run_id !== id);
+        this.emit('run.updated', { run_id: id });
+        if (i === ids.length - 1) {
+          this.emit('notice', {
+            id: Date.now(),
+            read: false,
+            kind: 'runs_closed',
+            record_id: '',
+            run_id: null,
+            title: 'Finished runs closed',
+            body: `Closed ${ids.length} finished runs, freed ${(freed / 1e6).toFixed(1)} MB`,
+            created_at_ms: Date.now()
+          });
+        }
+      }, 800 * (i + 1))
+    );
+  }
+
   async send(line: string): Promise<void> {
     const req = JSON.parse(line) as { id: number; method: string; params?: Record<string, unknown> };
+    if (req.method === 'runs.close_finished') {
+      this.playClose((req.params?.run_ids as string[] | undefined) ?? []);
+    }
     if (req.method === 'runs.start' || req.method === 'runs.start_group') {
       const ids = req.params?.record_ids;
       const progressId = Array.isArray(ids) ? ids[0] : req.params?.record_id;

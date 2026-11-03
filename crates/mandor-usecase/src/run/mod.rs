@@ -96,6 +96,8 @@ pub struct RunService<D: Deps> {
     /// Waktu pemeriksaan otomatis run selesai terakhir (0 = belum pernah);
     /// dibangun ulang setelah restart (plan `2026-11-03-001`, KTD-C4).
     pub(crate) cleanup_checked_ms: std::sync::atomic::AtomicI64,
+    /// Penutupan run selesai sedang berjalan di latar belakang.
+    pub(crate) cleanup_busy: std::sync::atomic::AtomicBool,
 }
 
 impl<D: Deps> std::fmt::Debug for RunService<D> {
@@ -147,6 +149,7 @@ impl<D: Deps> RunService<D> {
             replies_loaded: std::sync::atomic::AtomicBool::new(false),
             cursor_sent: Mutex::new(HashMap::new()),
             cleanup_checked_ms: std::sync::atomic::AtomicI64::new(0),
+            cleanup_busy: std::sync::atomic::AtomicBool::new(false),
             stoppers: Mutex::new(HashMap::new()),
             drain: Arc::new(DrainGate::default()),
         }

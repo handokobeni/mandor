@@ -216,7 +216,7 @@
             <p class="line">
               {vmCleanup.closable.length} finished {vmCleanup.closable.length === 1 ? 'run' : 'runs'} on the VM can free {formatBytes(totalBytes(vmCleanup.closable))}.
             </p>
-            <div><Button variant="outline" size="sm" onclick={() => (closingVm = true)}><Trash2 />{closeLabel(vmCleanup.closable.length)}</Button></div>
+            <div><Button variant="outline" size="sm" disabled={vmCleanup.closing} onclick={() => (closingVm = true)}><Trash2 />{vmCleanup.closing ? 'Closing…' : closeLabel(vmCleanup.closable.length)}</Button></div>
           </div>
         </div>
       </section>

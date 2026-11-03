@@ -22,8 +22,8 @@
   async function confirm(): Promise<void> {
     busy = true;
     try {
-      const res = await store.closeAll();
-      toast.success(res.summary);
+      const count = await store.closeAll();
+      toast.info(`Closing ${count === 1 ? '1 run' : `${count} runs`} in the background. You can keep working.`);
       open = false;
       ondone?.();
     } catch (err) {
@@ -65,7 +65,7 @@
     {/if}
     <Dialog.Footer>
       <Button variant="ghost" onclick={() => (open = false)}>Cancel</Button>
-      <Button variant="destructive" disabled={busy || store.closable.length === 0} onclick={confirm}>
+      <Button variant="destructive" disabled={busy || store.closing || store.closable.length === 0} onclick={confirm}>
         <Trash2 />{confirmLabel(store.closable.length, freed)}
       </Button>
     </Dialog.Footer>

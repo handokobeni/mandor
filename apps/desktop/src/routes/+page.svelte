@@ -56,6 +56,16 @@
   }
   // Langkah awal dihitung sekali per sesi agar tidak melompat saat status berubah di tengah setup.
   let onboardingAt = $state<OnboardingStep | null | undefined>(undefined);
+  // Ringkasan penutupan run selesai di latar belakang (plan 2026-11-03-001).
+  $effect(() => {
+    const summary = cleanup.summary;
+    if (summary) untrack(() => toast.success(summary));
+  });
+  $effect(() => {
+    const summary = vmCleanup.summary;
+    if (summary) untrack(() => toast.success(`VM: ${summary}`));
+  });
+
   $effect(() => {
     if (onboardingAt !== undefined || !lark.loaded) return;
     onboardingAt = onboardingStart(lark.status, lark.repos.length, onboarded);

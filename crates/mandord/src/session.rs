@@ -364,9 +364,8 @@ async fn cleanup_once(s: &LarkSession) {
         s.runs.auto_close_finished().await,
         "penutupan run selesai gagal",
     );
-    if let Some(r) = report.flatten().filter(|r| !r.closed.is_empty()) {
-        tracing::info!(closed = ?r.closed, freed_bytes = r.freed_bytes, "run kartu selesai ditutup otomatis");
-        crate::prod::emit(&s.events, event::BOARD_UPDATED, serde_json::json!({}));
+    if let Some(count) = report.flatten() {
+        tracing::info!(count, "penutupan otomatis run kartu selesai dimulai");
     }
 }
 

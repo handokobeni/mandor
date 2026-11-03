@@ -1435,15 +1435,12 @@ pub struct CloseFinishedParams {
     pub run_ids: Vec<String>,
 }
 
-/// Hasil `runs.close_finished`.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
-pub struct CloseFinishedResult {
-    pub closed: Vec<String>,
-    pub skipped: Vec<SkippedRunView>,
-    #[ts(type = "number")]
-    pub freed_bytes: u64,
-    /// "Closed N finished runs, freed X".
-    pub summary: String,
+/// Hasil `runs.close_finished`: penutupan berjalan di latar belakang;
+/// ringkasannya datang sebagai notifikasi `runs_closed`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+pub struct CloseFinishedStarted {
+    /// Jumlah run yang diperiksa ulang lalu ditutup bila masih memenuhi syarat.
+    pub count: u32,
 }
 
 /// Satu run terbuka dengan ukuran worktree (R9).

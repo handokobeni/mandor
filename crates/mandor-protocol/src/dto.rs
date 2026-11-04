@@ -1568,6 +1568,9 @@ pub struct EnvKeysParams {
     pub repo_id: Option<String>,
     #[serde(default)]
     pub design_source_id: Option<String>,
+    /// Folder sumber desain yang belum disimpan (dialog Add source).
+    #[serde(default)]
+    pub design_path: Option<String>,
 }
 
 /// Nama kunci `.env` di folder asli; nilai tidak pernah dikirim.

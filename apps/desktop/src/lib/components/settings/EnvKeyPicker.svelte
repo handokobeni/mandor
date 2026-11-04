@@ -11,8 +11,8 @@
 
   interface Props {
     rpc: Rpc;
-    /** Tepat satu dari `repo_id` atau `design_source_id`. */
-    target: { repo_id: string } | { design_source_id: string };
+    /** Tepat satu dari `repo_id`, `design_source_id`, atau `design_path` (sumber baru). */
+    target: { repo_id: string } | { design_source_id: string } | { design_path: string };
     saved: string[];
     oncancel: () => void;
     onpick: (keys: string[]) => void;

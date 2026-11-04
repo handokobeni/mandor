@@ -119,16 +119,16 @@
           <span class="text-sm font-medium">.env keys passed to the prototype</span>
           <ListEditor list="env" label=".env keys" placeholder="KELOLA_API_MODE" bind:items={app.envKeys} />
           {#if appErrors.envKeys}<p class="field-error">{appErrors.envKeys}</p>{/if}
-          {#if source}
-            <div>
-              <Button variant="outline" size="sm" onclick={() => (picking = true)}>Pick from .env</Button>
-            </div>
-          {/if}
+          <div>
+            <Button variant="outline" size="sm" disabled={!path.trim()} onclick={() => (picking = true)}
+              >Pick from .env</Button
+            >
+          </div>
         </div>
-        {#if picking && source}
+        {#if picking}
           <EnvKeyPicker
             {rpc}
-            target={{ design_source_id: source.id }}
+            target={source && source.path === path.trim() ? { design_source_id: source.id } : { design_path: path.trim() }}
             saved={app.envKeys}
             oncancel={() => (picking = false)}
             onpick={(keys) => {

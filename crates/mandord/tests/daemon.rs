@@ -922,3 +922,48 @@ fn rpc_revisi_prototype_dilihat_dan_dikonfirmasi() {
     stop(home.path());
     let _ = daemon.wait();
 }
+
+/// Pick from .env untuk sumber desain yang belum disimpan: path harus lolos
+/// pemeriksaan sumber desain (plan 2026-11-03-002, R5).
+#[test]
+fn rpc_nama_kunci_env_dari_path_sumber_desain_baru() {
+    let home = tempfile::tempdir().unwrap();
+    let mut daemon = serve(home.path());
+    let token = wait_for_info(home.path())["token"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let root = tempfile::tempdir().unwrap();
+    let proto = root.path().join("proto");
+    std::fs::create_dir_all(&proto).unwrap();
+    std::fs::write(proto.join(".env"), "KELOLA_API_MODE=demo\n").unwrap();
+    let state = home.path().join(".mandor");
+    let replies = connect_roundtrip(
+        home.path(),
+        &[
+            hello(&token),
+            rpc(
+                2,
+                "app.env_keys",
+                &json!({"design_path": proto.to_str().unwrap()}),
+            ),
+            rpc(3, "app.env_keys", &json!({"design_path": "relatif/x"})),
+            rpc(
+                4,
+                "app.env_keys",
+                &json!({"design_path": state.to_str().unwrap()}),
+            ),
+        ],
+    );
+    assert_eq!(
+        replies[1]["result"],
+        json!({"found": true, "keys": ["KELOLA_API_MODE"]})
+    );
+    assert_eq!(replies[2]["error"]["code"], "rejected");
+    assert_eq!(
+        replies[3]["error"]["code"], "rejected",
+        "folder data Mandor ditolak"
+    );
+    stop(home.path());
+    let _ = daemon.wait();
+}

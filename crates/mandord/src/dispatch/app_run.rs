@@ -21,13 +21,20 @@ const ENV_READ_TIMEOUT: Duration = Duration::from_secs(5);
 enum EnvSource<'a> {
     Repo(&'a str),
     Design(&'a str),
+    /// Path sumber desain yang belum disimpan; diperiksa seperti saat didaftarkan.
+    DesignPath(&'a str),
 }
 
-/// Tepat satu dari repo atau sumber desain.
+/// Tepat satu dari repo, sumber desain, atau path sumber desain baru.
 fn env_source(p: &EnvKeysParams) -> Result<EnvSource<'_>, RpcError> {
-    match (p.repo_id.as_deref(), p.design_source_id.as_deref()) {
-        (Some(id), None) => Ok(EnvSource::Repo(id)),
-        (None, Some(id)) => Ok(EnvSource::Design(id)),
+    match (
+        p.repo_id.as_deref(),
+        p.design_source_id.as_deref(),
+        p.design_path.as_deref(),
+    ) {
+        (Some(id), None, None) => Ok(EnvSource::Repo(id)),
+        (None, Some(id), None) => Ok(EnvSource::Design(id)),
+        (None, None, Some(path)) => Ok(EnvSource::DesignPath(path)),
         _ => Err(rejected("Pass either a repo or a design source")),
     }
 }
@@ -154,6 +161,10 @@ impl AppDispatch {
                     .ok_or_else(|| rejected("Design source not found"))?;
                 super::design::folder_path(&row).into()
             }
+            EnvSource::DesignPath(path) => match super::design::check(path.trim()).await {
+                mandor_usecase::review::SourceCheck::Ready(canonical) => canonical,
+                other => return Err(rejected(other.message())),
+            },
         };
         ok(&read_env_keys(&dir).await?)
     }
@@ -309,19 +320,25 @@ mod tests {
 
     #[test]
     fn sumber_env_harus_tepat_satu() {
-        let p = |repo: Option<&str>, design: Option<&str>| EnvKeysParams {
+        let p = |repo: Option<&str>, design: Option<&str>, path: Option<&str>| EnvKeysParams {
             repo_id: repo.map(str::to_owned),
             design_source_id: design.map(str::to_owned),
+            design_path: path.map(str::to_owned),
         };
         assert!(matches!(
-            env_source(&p(Some("r"), None)),
+            env_source(&p(Some("r"), None, None)),
             Ok(EnvSource::Repo("r"))
         ));
         assert!(matches!(
-            env_source(&p(None, Some("d"))),
+            env_source(&p(None, Some("d"), None)),
             Ok(EnvSource::Design("d"))
         ));
-        assert!(env_source(&p(None, None)).is_err());
-        assert!(env_source(&p(Some("r"), Some("d"))).is_err());
+        assert!(matches!(
+            env_source(&p(None, None, Some("/x"))),
+            Ok(EnvSource::DesignPath("/x"))
+        ));
+        assert!(env_source(&p(None, None, None)).is_err());
+        assert!(env_source(&p(Some("r"), Some("d"), None)).is_err());
+        assert!(env_source(&p(None, Some("d"), Some("/x"))).is_err());
     }
 }

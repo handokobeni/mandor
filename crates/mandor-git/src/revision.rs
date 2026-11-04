@@ -20,10 +20,11 @@ const GIT_PREFIX: &str = "git:";
 const FILES_PREFIX: &str = "files:";
 
 impl Git {
-    /// Revisi folder: `git:<HEAD>` ditambah `+<hash>` atas isi perubahan
-    /// belum di-commit (diff dan berkas untracked); folder bukan git memakai
-    /// hash isi semua berkas dan target symlink, tanpa dependensi dan hasil
-    /// build.
+    /// Revisi folder. Repo git: `git:<HEAD>+<hash>` atas isi berkas yang
+    /// dilacak dan untracked yang tidak diabaikan, dibaca langsung tanpa
+    /// perintah git yang menjalankan filter, diff eksternal, atau textconv
+    /// dari konfigurasi repo. Folder bukan git: hash isi semua berkas dan
+    /// target symlink, tanpa dependensi dan hasil build.
     ///
     /// # Errors
     /// [`GitError`] bila git gagal, folder tidak terbaca, atau terlalu besar.
@@ -37,32 +38,18 @@ impl Git {
             .stdout
             .trim()
             .to_owned();
-        let status = self.porcelain(dir).await?;
-        if status.is_empty() {
-            return Ok(format!("{GIT_PREFIX}{head}"));
-        }
-        // Isi perubahan, bukan hanya daftar berkas: mengubah lagi berkas yang
-        // sudah kotor harus mengubah revisi. Diff eksternal dan textconv dari
-        // konfigurasi repo prototype tidak dijalankan.
-        let diff = self
+        // `ls-files` hanya membaca index dan pola abaikan; isi berkas tidak
+        // melewati filter repo.
+        let mut files: Vec<String> = self
             .ok(
-                "diff HEAD (prototype)",
+                "ls-files (prototype)",
                 self.git(dir).args([
-                    "--no-optional-locks",
-                    "diff",
-                    "--no-ext-diff",
-                    "--no-textconv",
-                    "HEAD",
-                    "--binary",
+                    "ls-files",
+                    "--cached",
+                    "--others",
+                    "--exclude-standard",
+                    "-z",
                 ]),
-            )
-            .await?
-            .stdout;
-        let untracked: Vec<String> = self
-            .ok(
-                "ls-files --others (prototype)",
-                self.git(dir)
-                    .args(["ls-files", "--others", "--exclude-standard", "-z"]),
             )
             .await?
             .stdout
@@ -70,26 +57,33 @@ impl Git {
             .filter(|p| !p.is_empty())
             .map(str::to_owned)
             .collect();
+        if files.len() > MAX_FILES {
+            return Err(GitError::Io(format!(
+                "the folder has more than {MAX_FILES} files"
+            )));
+        }
+        files.sort();
+        files.dedup();
         let root = dir.to_path_buf();
         let task = tokio::task::spawn_blocking(move || {
             let mut hasher = Sha256::new();
-            hasher.update(status.as_bytes());
-            hasher.update(diff.as_bytes());
-            for rel in &untracked {
+            for rel in &files {
                 hash_entry(&mut hasher, &root, rel)?;
             }
             Ok::<_, GitError>(hex(&hasher.finalize()[..8]))
         });
-        let dirty = match tokio::time::timeout(HASH_TIMEOUT, task).await {
+        let content = match tokio::time::timeout(HASH_TIMEOUT, task).await {
             Ok(Ok(result)) => result?,
             Ok(Err(e)) => return Err(GitError::Io(format!("hash task failed: {e}"))),
             Err(_) => return Err(GitError::Io("hashing the folder took too long".to_owned())),
         };
-        Ok(format!("{GIT_PREFIX}{head}+{dirty}"))
+        Ok(format!("{GIT_PREFIX}{head}+{content}"))
     }
 
-    /// Berkas yang berubah sejak revisi `from` (commit baru dan perubahan
-    /// belum di-commit). Kosong untuk folder bukan git.
+    /// Berkas yang berubah di commit sejak revisi `from`; perubahan yang
+    /// belum di-commit tidak dirinci (mengubah revisi, tetapi membacanya
+    /// butuh perintah yang menjalankan filter repo). Kosong untuk folder
+    /// bukan git.
     ///
     /// # Errors
     /// [`GitError`] bila git gagal.
@@ -98,6 +92,7 @@ impl Git {
             return Ok(Vec::new());
         };
         let base = base.split('+').next().unwrap_or_default();
+        // Diff antar-commit: tidak menyentuh worktree, jadi tidak ada filter.
         let mut files: Vec<String> = self
             .ok(
                 "diff --name-only (prototype)",
@@ -116,31 +111,9 @@ impl Git {
             .lines()
             .map(str::to_owned)
             .collect();
-        files.extend(
-            self.porcelain(dir)
-                .await?
-                .lines()
-                .filter_map(|l| l.get(3..))
-                .map(str::to_owned),
-        );
         files.sort();
         files.dedup();
         Ok(files)
-    }
-
-    async fn porcelain(&self, dir: &Path) -> Result<String, GitError> {
-        Ok(self
-            .ok(
-                "status (prototype)",
-                self.git(dir).args([
-                    "--no-optional-locks",
-                    "status",
-                    "--porcelain=v1",
-                    "--untracked-files=all",
-                ]),
-            )
-            .await?
-            .stdout)
     }
 }
 
@@ -264,7 +237,7 @@ mod tests {
         let g = git(dir.path());
 
         let a = g.folder_revision(&repo).await.unwrap();
-        assert!(a.starts_with("git:") && !a.contains('+'), "{a}");
+        assert!(a.starts_with("git:"), "{a}");
         std::fs::create_dir_all(repo.join("node_modules/x")).unwrap();
         std::fs::write(repo.join("node_modules/x/i.js"), "1").unwrap();
         assert_eq!(
@@ -275,7 +248,7 @@ mod tests {
 
         std::fs::write(repo.join("page.tsx"), "b").unwrap();
         let dirty = g.folder_revision(&repo).await.unwrap();
-        assert!(dirty.starts_with(&a) && dirty.contains('+'), "{dirty}");
+        assert_ne!(dirty, a, "perubahan belum di-commit mengubah revisi");
         std::fs::write(repo.join("page.tsx"), "c").unwrap();
         let dirtier = g.folder_revision(&repo).await.unwrap();
         assert_ne!(dirtier, dirty, "isi berkas yang sudah kotor ikut dihitung");
@@ -294,10 +267,7 @@ mod tests {
         std::fs::write(repo.join("baru.tsx"), "c").unwrap();
         let b = g.folder_revision(&repo).await.unwrap();
         assert_ne!(b, a);
-        assert_eq!(
-            g.folder_changes(&repo, &a).await.unwrap(),
-            ["baru.tsx", "page.tsx"]
-        );
+        assert_eq!(g.folder_changes(&repo, &a).await.unwrap(), ["page.tsx"]);
     }
 
     #[tokio::test]
@@ -362,7 +332,9 @@ mod tests {
         let cmd = format!("touch {}", marker.display());
         sh(&repo, &["config", "diff.external", &cmd]);
         sh(&repo, &["config", "diff.tx.textconv", &cmd]);
-        std::fs::write(repo.join(".gitattributes"), "*.tsx diff=tx\n").unwrap();
+        sh(&repo, &["config", "filter.tx.clean", &cmd]);
+        sh(&repo, &["config", "filter.tx.process", &cmd]);
+        std::fs::write(repo.join(".gitattributes"), "*.tsx diff=tx filter=tx\n").unwrap();
         std::fs::write(repo.join("page.tsx"), "b").unwrap();
         let g = git(dir.path());
         let a = g.folder_revision(&repo).await.unwrap();
@@ -373,7 +345,7 @@ mod tests {
         g.folder_changes(&repo, &from).await.unwrap();
         assert!(
             !marker.exists(),
-            "perintah dari konfigurasi repo tidak boleh jalan"
+            "diff eksternal, textconv, dan filter repo tidak boleh jalan"
         );
     }
 }

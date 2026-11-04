@@ -65,6 +65,27 @@ Konfirmasi login dipertahankan karena cookie di browser tetap ada. Bila app butu
 
 **Settings → Design sources → Add source**: nama dan path folder (atau repo lokal) berisi desain, mis. prototipe HTML atau ekspor desain. Mandor hanya membaca folder ini, dan agent tidak bisa menulis ke dalamnya. Sumber yang path-nya hilang ditandai **Path missing** dan tidak bisa dipilih di Start.
 
+### Prototype yang bisa dijalankan (perbandingan tampilan)
+
+Bila desain berupa app (mis. `kelola-web-prototype`, Next.js di branch `prototype`), nyalakan **Runnable prototype** di dialog sumber desain:
+
+| Field | Isi |
+|---|---|
+| Setup command | Opsional, mis. `pnpm install`; jalan saat lockfile berubah |
+| Start command | Mis. `pnpm dev --port 3001` |
+| Port | Harus berbeda dari port app repo mana pun dan prototype lain (di VM: dalam rentang port developer) |
+| URL | Alamat lokal dengan **host berbeda** dari app, mis. `http://127.0.0.1:3001` bila app memakai `localhost`. Cookie login app terikat host, bukan port, jadi host yang sama akan mengirim cookie login app ke kode prototype |
+| .env keys | Kunci dari `.env` folder prototype; **Pick from .env** tersedia setelah sumber disimpan |
+
+Perilakunya:
+
+- Run yang memakai sumber ini menyalakan prototype bersama app repo saat **Run app**, dari folder sumber apa adanya (tanpa `git pull`). Tombol **Open prototype** muncul di samping URL app. Prototype yang gagal menyala tidak menghentikan app repo.
+- Kode prototype dijalankan hanya pada revisi yang Anda konfirmasi. Dialog Run app menampilkan berkas yang berubah sejak konfirmasi terakhir. Untuk mengonfirmasi tanpa Run app (mis. prototype di VM), buka **Prototype code** di daftar sumber desain.
+- Reviewer AC membandingkan halaman app dan prototype pada viewport 1440×900 untuk baris AC yang **In design** atau **Partly**. Isi data diabaikan; hanya bagian yang ada di desain yang dibandingkan. Baris Conflicts dan Missing dinilai dari perilaku AC saja, baris Follow design tetap di luar review.
+- Hasil tampilan tampil sebagai chip kedua (Looks like the prototype, Looks different, Look not verified) dengan deskripsi dan link halaman. Tampilan yang berbeda menahan push seperti AC gagal; **Push anyway** dengan alasan menerima perbedaan, dan keputusan itu bertahan selama review berikutnya menemukan perbedaan yang sama. Baris yang hanya berbeda tampilannya bisa dikirim ke agent.
+- Prototype yang berubah setelah review membuat hasil review usang, sehingga Push & PR memulai review baru.
+- Run VM menyimpan screenshot kedua sisi (tombol **Show screenshots** di detail baris); screenshot dihapus saat run ditutup. Laptop tidak menyimpan screenshot.
+
 ## 5. View "Design gaps" di Lark
 
 Field `mandor_design_gaps` (Text) dibuat otomatis saat login. Isinya satu baris per AC yang berbeda dari desain, mis. `AC-4: Conflicts with design: amber dot, not red badge`, atau `AC-5: Follow design: PM please update the AC`. Field dikosongkan bila tidak ada selisih.

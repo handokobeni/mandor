@@ -261,7 +261,8 @@
             </div>
             <Switch bind:checked={edit.browserTests} aria-label="Browser testing" />
           </div>
-          {#if edit.app.testMode === 'web' && edit.browserTests}
+          <!-- Mengatur cara app dinyalakan, juga untuk run workspace: tidak bergantung pada Browser testing. -->
+          {#if edit.app.testMode === 'web'}
             <div class="row-setting">
               <div class="txt">
                 Restart the app before reviews
@@ -270,7 +271,8 @@
                   including automatic reviews after Waiting Fix. The agent's code then runs with the selected .env keys
                   without you checking the changes first. Use only with local or dev credentials. Needs a login you
                   confirmed once. On the laptop, another run's app is never stopped. On the VM, Mandor also starts an
-                  app that is not running and stops the previous card's app, since overnight cards run one at a time.
+                  app that is not running and stops the previous card's app, since overnight cards run one at a time. In a
+                  workspace run, every web repo of the run must turn this on.
                 </span>
               </div>
               <Switch bind:checked={edit.autoRestart} aria-label="Restart the app before reviews" />
@@ -281,7 +283,8 @@
                 <span>
                   For overnight work on the VM. The setup command creates a test user and signs in by itself, so the
                   headless browser review can run without you confirming the login. Without this, browser checks on the
-                  VM are marked Can't verify and the card is held for you.
+                  VM are marked Can't verify and the card is held for you. In a workspace run, every web repo of the run
+                  must turn this on.
                 </span>
               </div>
               <Switch bind:checked={edit.unattendedLogin} aria-label="Setup command prepares a test login" />

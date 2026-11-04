@@ -1463,3 +1463,21 @@ pub struct RunStorageView {
 pub struct CleanupSettingsView {
     pub auto_close: bool,
 }
+
+/// Sumber `.env` untuk Pick from .env: tepat satu dari repo atau sumber
+/// desain (plan `2026-11-03-002`, KTD-P1).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+pub struct EnvKeysParams {
+    #[serde(default)]
+    pub repo_id: Option<String>,
+    #[serde(default)]
+    pub design_source_id: Option<String>,
+}
+
+/// Nama kunci `.env` di folder asli; nilai tidak pernah dikirim.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+pub struct EnvKeysView {
+    /// Berkas `.env` ada.
+    pub found: bool,
+    pub keys: Vec<String>,
+}

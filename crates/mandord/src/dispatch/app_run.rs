@@ -1,14 +1,60 @@
 //! Method `app.*`: run app milik run (KTD-36).
 
-use mandor_domain::app_run::{AppSettings, TestMode};
+use std::path::{Path, PathBuf};
+use std::time::Duration;
+
+use mandor_domain::app_run::{AppSettings, TestMode, env_key_names};
 use mandor_protocol::{
-    AppChangesView, AppConfirm, AppLogView, AppMemberView, AppRunParams, AppRunView, RepoAppView,
-    RpcError, RunRef, method,
+    AppChangesView, AppConfirm, AppLogView, AppMemberView, AppRunParams, AppRunView, EnvKeysParams,
+    EnvKeysView, RepoAppView, RpcError, RunRef, method,
 };
 use mandor_usecase::run_ports::AppRecord;
 use serde_json::Value;
 
-use super::{AppDispatch, ok, params, rejected, run_error};
+use super::{AppDispatch, ok, params, rejected, run_error, store_error};
+
+/// Batas waktu membaca `.env` untuk Pick from .env.
+const ENV_READ_TIMEOUT: Duration = Duration::from_secs(5);
+
+/// Folder sumber `.env` untuk Pick from .env.
+#[derive(Debug)]
+enum EnvSource<'a> {
+    Repo(&'a str),
+    Design(&'a str),
+}
+
+/// Tepat satu dari repo atau sumber desain.
+fn env_source(p: &EnvKeysParams) -> Result<EnvSource<'_>, RpcError> {
+    match (p.repo_id.as_deref(), p.design_source_id.as_deref()) {
+        (Some(id), None) => Ok(EnvSource::Repo(id)),
+        (None, Some(id)) => Ok(EnvSource::Design(id)),
+        _ => Err(rejected("Pass either a repo or a design source")),
+    }
+}
+
+/// Nama kunci `.env` di `dir`; nilai dan isi berkas tidak pernah keluar,
+/// termasuk di pesan error (R4, KTD-P1).
+async fn read_env_keys(dir: &Path) -> Result<EnvKeysView, RpcError> {
+    let read = tokio::time::timeout(
+        ENV_READ_TIMEOUT,
+        tokio::fs::read_to_string(dir.join(".env")),
+    );
+    match read.await {
+        Ok(Ok(text)) => Ok(EnvKeysView {
+            found: true,
+            keys: env_key_names(&text),
+        }),
+        Ok(Err(e)) if e.kind() == std::io::ErrorKind::NotFound => Ok(EnvKeysView {
+            found: false,
+            keys: Vec::new(),
+        }),
+        Ok(Err(e)) => {
+            tracing::warn!(dir = %dir.display(), kind = ?e.kind(), "berkas .env tidak terbaca");
+            Err(rejected("The .env file cannot be read"))
+        }
+        Err(_) => Err(rejected("Reading the .env file took too long")),
+    }
+}
 
 pub(super) fn repo_app_view(a: &AppSettings) -> RepoAppView {
     RepoAppView {
@@ -92,6 +138,25 @@ fn app_view(r: AppRecord) -> AppRunView {
 }
 
 impl AppDispatch {
+    /// Pick from .env: nama kunci dari folder repo asli atau sumber desain.
+    pub(super) async fn env_keys(&self, p: EnvKeysParams) -> Result<Value, RpcError> {
+        let store = &self.app.store;
+        let dir: PathBuf = match env_source(&p)? {
+            EnvSource::Repo(id) => store.get_repo(id).await.map_err(store_error)?.path.into(),
+            EnvSource::Design(id) => {
+                let row = store
+                    .design_sources()
+                    .await
+                    .map_err(store_error)?
+                    .into_iter()
+                    .find(|r| r.id == id)
+                    .ok_or_else(|| rejected("Design source not found"))?;
+                super::design::folder_path(&row).into()
+            }
+        };
+        ok(&read_env_keys(&dir).await?)
+    }
+
     pub(super) fn is_app_method(name: &str) -> bool {
         [
             method::APP_STATUS,
@@ -101,11 +166,16 @@ impl AppDispatch {
             method::APP_CONFIRM,
             method::APP_LOGS,
             method::APP_OWNER,
+            method::APP_ENV_KEYS,
         ]
         .contains(&name)
     }
 
     pub(super) async fn app_call(&self, name: &str, v: Value) -> Result<Value, RpcError> {
+        // Membaca nama kunci tidak butuh sesi Lark.
+        if name == method::APP_ENV_KEYS {
+            return self.env_keys(params(v)?).await;
+        }
         let s = self.session().await?;
         let runs = &s.runs;
         match name {
@@ -209,5 +279,46 @@ mod tests {
         let mut bad = view();
         bad.test_mode = "desktop".to_owned();
         assert!(app_settings_from(&bad).is_err());
+    }
+
+    #[tokio::test]
+    async fn nama_kunci_env_dibaca_tanpa_nilai() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            dir.path().join(".env"),
+            "SECRET=hunter2\nexport KELOLA_ADDR=:8080\n",
+        )
+        .unwrap();
+        let view = read_env_keys(dir.path()).await.unwrap();
+        assert!(view.found);
+        assert_eq!(view.keys, ["SECRET", "KELOLA_ADDR"]);
+        let json = serde_json::to_string(&view).unwrap();
+        assert!(!json.contains("hunter2") && !json.contains("8080"));
+    }
+
+    #[tokio::test]
+    async fn folder_tanpa_env_tidak_ditemukan() {
+        let dir = tempfile::tempdir().unwrap();
+        let view = read_env_keys(dir.path()).await.unwrap();
+        assert!(!view.found);
+        assert!(view.keys.is_empty());
+    }
+
+    #[test]
+    fn sumber_env_harus_tepat_satu() {
+        let p = |repo: Option<&str>, design: Option<&str>| EnvKeysParams {
+            repo_id: repo.map(str::to_owned),
+            design_source_id: design.map(str::to_owned),
+        };
+        assert!(matches!(
+            env_source(&p(Some("r"), None)),
+            Ok(EnvSource::Repo("r"))
+        ));
+        assert!(matches!(
+            env_source(&p(None, Some("d"))),
+            Ok(EnvSource::Design("d"))
+        ));
+        assert!(env_source(&p(None, None)).is_err());
+        assert!(env_source(&p(Some("r"), Some("d"))).is_err());
     }
 }

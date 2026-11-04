@@ -55,6 +55,7 @@ mandord (app) ──► mandor-api, mandor-store, mandor-lark, mandor-git, mando
 | `subtle` | Perbandingan token waktu-konstan | `mandor-api` |
 | `tokio-tungstenite` | Client WebSocket untuk relay `mandord connect` dan test; sudah ada di graf lewat fitur `ws` axum | `mandor-api` |
 | `sha2`, `base64` | PKCE S256 untuk OAuth Lark (hash dan base64url); `sha2` juga untuk hash biner daemon yang dibawa installer Windows (build script dan verifikasi saat pasang) dan untuk revisi folder prototype yang dikonfirmasi dev sebelum dijalankan; `base64` juga untuk screenshot perbandingan tampilan sebagai data URL | `mandor-lark`; `sha2` di `apps/desktop/src-tauri` dan `mandor-git`; `base64` di `mandord` |
+| `libc` (unix) | Flag `O_NOFOLLOW` dan `O_NONBLOCK` saat membaca dan menulis screenshot perbandingan tampilan dari folder yang bisa ditulis agent, tanpa `unsafe` di kode kita; sudah ada di graf lewat tokio | `mandor-agent` |
 | `tempfile` (dev) | Direktori sementara untuk test | test semua crate, termasuk `apps/desktop/src-tauri` |
 | `keepawake` | Menahan sleep dan idle Windows untuk penjaga keep-awake (`SetThreadExecutionState`) tanpa `unsafe` di kode kita; MIT; hanya target Windows | `apps/desktop/src-tauri` |
 

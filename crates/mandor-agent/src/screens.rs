@@ -2,8 +2,8 @@
 //! salinan daemon dari folder output Playwright reviewer, hanya berkas biasa
 //! di folder itu, dibatasi ukuran dan jenisnya.
 
-use std::io::Read;
-use std::path::{Path, PathBuf};
+use std::io::{Read, Write};
+use std::path::Path;
 
 /// Batas ukuran satu screenshot.
 pub(crate) const MAX_BYTES: u64 = 5 * 1024 * 1024;
@@ -34,14 +34,12 @@ pub(crate) fn read_checked(dir: &Path, name: &str) -> Result<Vec<u8>, String> {
         return Err(format!("{name}: not a plain screenshot file name"));
     }
     let path = dir.join(name);
-    let before = std::fs::symlink_metadata(&path).map_err(|e| format!("{name}: {e}"))?;
-    if !before.file_type().is_file() {
-        return Err(format!("{name}: not a regular file"));
-    }
-    let file = std::fs::File::open(&path).map_err(|e| format!("{name}: {e}"))?;
+    // Tidak mengikuti symlink dan tidak menunggu FIFO; jenis berkas diperiksa
+    // dari handle yang sudah terbuka.
+    let file = open_no_follow(&path).map_err(|e| format!("{name}: {e}"))?;
     let opened = file.metadata().map_err(|e| format!("{name}: {e}"))?;
-    if !same_file(&before, &opened) || !opened.is_file() {
-        return Err(format!("{name}: the file changed while it was being read"));
+    if !opened.is_file() {
+        return Err(format!("{name}: not a regular file"));
     }
     if opened.len() > MAX_BYTES {
         return Err(format!(
@@ -66,14 +64,54 @@ pub(crate) fn read_checked(dir: &Path, name: &str) -> Result<Vec<u8>, String> {
 }
 
 #[cfg(unix)]
-fn same_file(a: &std::fs::Metadata, b: &std::fs::Metadata) -> bool {
-    use std::os::unix::fs::MetadataExt;
-    a.dev() == b.dev() && a.ino() == b.ino()
+fn open_no_follow(path: &Path) -> std::io::Result<std::fs::File> {
+    use std::os::unix::fs::OpenOptionsExt;
+    std::fs::OpenOptions::new()
+        .read(true)
+        .custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK)
+        .open(path)
 }
 
 #[cfg(not(unix))]
-fn same_file(a: &std::fs::Metadata, b: &std::fs::Metadata) -> bool {
-    a.len() == b.len() && a.modified().ok() == b.modified().ok()
+fn open_no_follow(path: &Path) -> std::io::Result<std::fs::File> {
+    if std::fs::symlink_metadata(path)?.file_type().is_symlink() {
+        return Err(std::io::Error::other("symbolic link"));
+    }
+    std::fs::File::open(path)
+}
+
+/// Folder tujuan dibuat khusus daemon (0700) dan tidak boleh berupa symlink.
+fn private_dir(dir: &Path) -> Result<(), String> {
+    let mut builder = std::fs::DirBuilder::new();
+    builder.recursive(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::DirBuilderExt;
+        builder.mode(0o700);
+    }
+    builder.create(dir).map_err(|e| e.to_string())?;
+    let meta = std::fs::symlink_metadata(dir).map_err(|e| e.to_string())?;
+    if meta.file_type().is_symlink() || !meta.is_dir() {
+        return Err("the screenshot folder is not a plain directory".to_owned());
+    }
+    Ok(())
+}
+
+/// Berkas baru (0600) yang tidak mengikuti symlink; entri lama dihapus dulu.
+fn write_new(path: &Path, bytes: &[u8]) -> Result<(), String> {
+    match std::fs::remove_file(path) {
+        Err(e) if e.kind() != std::io::ErrorKind::NotFound => return Err(e.to_string()),
+        _ => {}
+    }
+    let mut opts = std::fs::OpenOptions::new();
+    opts.write(true).create_new(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        opts.mode(0o600).custom_flags(libc::O_NOFOLLOW);
+    }
+    let mut file = opts.open(path).map_err(|e| e.to_string())?;
+    file.write_all(bytes).map_err(|e| e.to_string())
 }
 
 /// Menyalin screenshot `names` dari `from` ke `to` dengan nama
@@ -84,21 +122,16 @@ pub(crate) fn keep(
     prefix: &str,
     names: &[String],
 ) -> Result<Vec<String>, String> {
-    std::fs::create_dir_all(to).map_err(|e| e.to_string())?;
+    private_dir(to)?;
     let mut kept = Vec::with_capacity(names.len());
     for (i, name) in names.iter().enumerate() {
         let bytes = read_checked(from, name)?;
         let ext = if bytes.starts_with(PNG) { "png" } else { "jpg" };
         let stored = format!("{prefix}-{i}.{ext}");
-        std::fs::write(to.join(&stored), &bytes).map_err(|e| e.to_string())?;
+        write_new(&to.join(&stored), &bytes)?;
         kept.push(stored);
     }
     Ok(kept)
-}
-
-/// Folder salinan screenshot satu run.
-pub(crate) fn run_dir(root: &Path, run_key: &str) -> PathBuf {
-    root.join("screens").join(run_key)
 }
 
 #[cfg(test)]
@@ -157,5 +190,45 @@ mod tests {
         std::fs::write(from.join("besar.png"), big_png).unwrap();
         let err = keep(&from, &to, "ac1", &["besar.png".to_owned()]).unwrap_err();
         assert!(err.contains("larger than"), "{err}");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn fifo_ditolak_tanpa_menunggu_dan_tujuan_symlink_ditolak() {
+        let dir = tempfile::tempdir().unwrap();
+        let from = dir.path().join("out");
+        std::fs::create_dir_all(&from).unwrap();
+        let fifo = from.join("pipa.png");
+        let ok = std::process::Command::new("mkfifo")
+            .arg(&fifo)
+            .status()
+            .unwrap()
+            .success();
+        assert!(ok);
+        let err = read_checked(&from, "pipa.png").unwrap_err();
+        assert!(err.contains("not a regular file"), "{err}");
+
+        std::fs::write(from.join("app.png"), png()).unwrap();
+        let target = dir.path().join("lain");
+        std::fs::create_dir_all(&target).unwrap();
+        let link = dir.path().join("keep");
+        std::os::unix::fs::symlink(&target, &link).unwrap();
+        assert!(keep(&from, &link, "ac1", &["app.png".to_owned()]).is_err());
+        assert!(std::fs::read_dir(&target).unwrap().next().is_none());
+
+        let to = dir.path().join("asli");
+        std::fs::create_dir_all(&to).unwrap();
+        std::os::unix::fs::symlink(dir.path().join("dicuri"), to.join("ac1-0.png")).unwrap();
+        keep(&from, &to, "ac1", &["app.png".to_owned()]).unwrap();
+        assert!(
+            !dir.path().join("dicuri").exists(),
+            "symlink lama diganti, bukan diikuti"
+        );
+        let mode = std::os::unix::fs::PermissionsExt::mode(
+            &std::fs::metadata(to.join("ac1-0.png"))
+                .unwrap()
+                .permissions(),
+        );
+        assert_eq!(mode & 0o777, 0o600);
     }
 }

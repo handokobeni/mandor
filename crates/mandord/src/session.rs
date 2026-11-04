@@ -223,6 +223,8 @@ async fn build_agent(cfg: &Config, rpc_port: u16) -> anyhow::Result<ClaudeAgent>
         commit_model: "haiku".to_owned(),
         mcp_dir: files.join("mcp"),
         review_dir: files.join("review"),
+        // Di luar direktori grup: user agent tidak bisa menulis ke sini.
+        screens_dir: cfg.home.join("screens"),
         runner: cfg.vm_agent.as_ref().map(|v| AgentRunner {
             exe: cfg.exe.clone(),
             user: v.user.clone(),

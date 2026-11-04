@@ -97,6 +97,9 @@ pub struct ClaudeConfig {
     /// Folder berkas state pagar reviewer (`~/.mandor/agent/review`), ditolak
     /// bagi agent.
     pub review_dir: PathBuf,
+    /// Salinan screenshot perbandingan tampilan (`~/.mandor/screens`): hanya
+    /// daemon yang bisa membaca dan menulisnya, juga di VM (KTD-P8).
+    pub screens_dir: PathBuf,
     /// Daemon VM: agent sebagai user Linux terpisah (KTD-62 plan VM).
     pub runner: Option<crate::claude::command::AgentRunner>,
     /// Daemon VM: biner MCP Playwright untuk review headless, menggantikan
@@ -750,7 +753,7 @@ impl ClaudeAgent {
 
     /// Folder salinan screenshot run di simpanan daemon.
     fn screens_dir(&self, run_id: &str) -> PathBuf {
-        crate::screens::run_dir(&self.cfg.review_dir, &wt_key(Path::new(run_id)))
+        self.cfg.screens_dir.join(wt_key(Path::new(run_id)))
     }
 }
 
@@ -1214,6 +1217,7 @@ mod tests {
             model: None,
             commit_model: "haiku".to_owned(),
             review_dir: mcp_dir.join("review"),
+            screens_dir: mcp_dir.join("screens"),
             runner: None,
             headless_browser: None,
             mcp_dir,
@@ -1730,6 +1734,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let mut cfg = test_agent(dir.path().join("mcp")).cfg;
         cfg.review_dir = dir.path().join("reviews");
+        cfg.screens_dir = dir.path().join("screens");
         let laptop = ClaudeAgent::new(cfg.clone());
         let names = ["app.png".to_owned()];
         assert!(

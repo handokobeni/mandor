@@ -42,12 +42,19 @@ impl Git {
             return Ok(format!("{GIT_PREFIX}{head}"));
         }
         // Isi perubahan, bukan hanya daftar berkas: mengubah lagi berkas yang
-        // sudah kotor harus mengubah revisi.
+        // sudah kotor harus mengubah revisi. Diff eksternal dan textconv dari
+        // konfigurasi repo prototype tidak dijalankan.
         let diff = self
             .ok(
                 "diff HEAD (prototype)",
-                self.git(dir)
-                    .args(["--no-optional-locks", "diff", "HEAD", "--binary"]),
+                self.git(dir).args([
+                    "--no-optional-locks",
+                    "diff",
+                    "--no-ext-diff",
+                    "--no-textconv",
+                    "HEAD",
+                    "--binary",
+                ]),
             )
             .await?
             .stdout;
@@ -94,8 +101,15 @@ impl Git {
         let mut files: Vec<String> = self
             .ok(
                 "diff --name-only (prototype)",
-                self.git(dir)
-                    .args(["diff", "--name-only", base, "HEAD", "--"]),
+                self.git(dir).args([
+                    "diff",
+                    "--no-ext-diff",
+                    "--no-textconv",
+                    "--name-only",
+                    base,
+                    "HEAD",
+                    "--",
+                ]),
             )
             .await?
             .stdout
@@ -332,6 +346,34 @@ mod tests {
                 .folder_revision(&dir.path().join("hilang"))
                 .await
                 .is_err()
+        );
+    }
+
+    #[tokio::test]
+    async fn diff_eksternal_dan_textconv_repo_prototype_tidak_dijalankan() {
+        let dir = tempfile::tempdir().unwrap();
+        let repo = dir.path().join("proto");
+        std::fs::create_dir(&repo).unwrap();
+        sh(&repo, &["init", "-q", "-b", "prototype"]);
+        std::fs::write(repo.join("page.tsx"), "a").unwrap();
+        sh(&repo, &["add", "-A"]);
+        sh(&repo, &["commit", "-qm", "awal"]);
+        let marker = dir.path().join("dijalankan");
+        let cmd = format!("touch {}", marker.display());
+        sh(&repo, &["config", "diff.external", &cmd]);
+        sh(&repo, &["config", "diff.tx.textconv", &cmd]);
+        std::fs::write(repo.join(".gitattributes"), "*.tsx diff=tx\n").unwrap();
+        std::fs::write(repo.join("page.tsx"), "b").unwrap();
+        let g = git(dir.path());
+        let a = g.folder_revision(&repo).await.unwrap();
+        let from = format!(
+            "git:{}",
+            a.trim_start_matches("git:").split('+').next().unwrap()
+        );
+        g.folder_changes(&repo, &from).await.unwrap();
+        assert!(
+            !marker.exists(),
+            "perintah dari konfigurasi repo tidak boleh jalan"
         );
     }
 }

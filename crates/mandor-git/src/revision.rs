@@ -13,15 +13,17 @@ use crate::{Git, GitError};
 const HASH_TIMEOUT: Duration = Duration::from_secs(30);
 /// Batas jumlah berkas folder bukan git.
 const MAX_FILES: usize = 20_000;
-/// Folder hasil build dan dependensi yang tidak ikut revisi.
-const SKIPPED_DIRS: [&str; 4] = ["node_modules", "dist", "build", "target"];
+/// Folder yang tidak ikut revisi folder bukan git: isinya dibuat ulang dari
+/// lockfile atau sumber yang ikut di-hash (KTD-P4), atau metadata git.
+const SKIPPED_DIRS: [&str; 6] = ["node_modules", ".next", "dist", "build", "target", ".git"];
 const GIT_PREFIX: &str = "git:";
 const FILES_PREFIX: &str = "files:";
 
 impl Git {
-    /// Revisi folder: `git:<HEAD>` ditambah `+<hash status>` bila ada
-    /// perubahan belum di-commit; folder bukan git memakai hash isi berkas
-    /// tanpa folder tersembunyi, dependensi, dan hasil build.
+    /// Revisi folder: `git:<HEAD>` ditambah `+<hash>` atas isi perubahan
+    /// belum di-commit (diff dan berkas untracked); folder bukan git memakai
+    /// hash isi semua berkas dan target symlink, tanpa dependensi dan hasil
+    /// build.
     ///
     /// # Errors
     /// [`GitError`] bila git gagal, folder tidak terbaca, atau terlalu besar.
@@ -37,13 +39,46 @@ impl Git {
             .to_owned();
         let status = self.porcelain(dir).await?;
         if status.is_empty() {
-            Ok(format!("{GIT_PREFIX}{head}"))
-        } else {
-            Ok(format!(
-                "{GIT_PREFIX}{head}+{}",
-                short_hash(status.as_bytes())
-            ))
+            return Ok(format!("{GIT_PREFIX}{head}"));
         }
+        // Isi perubahan, bukan hanya daftar berkas: mengubah lagi berkas yang
+        // sudah kotor harus mengubah revisi.
+        let diff = self
+            .ok(
+                "diff HEAD (prototype)",
+                self.git(dir)
+                    .args(["--no-optional-locks", "diff", "HEAD", "--binary"]),
+            )
+            .await?
+            .stdout;
+        let untracked: Vec<String> = self
+            .ok(
+                "ls-files --others (prototype)",
+                self.git(dir)
+                    .args(["ls-files", "--others", "--exclude-standard", "-z"]),
+            )
+            .await?
+            .stdout
+            .split('\0')
+            .filter(|p| !p.is_empty())
+            .map(str::to_owned)
+            .collect();
+        let root = dir.to_path_buf();
+        let task = tokio::task::spawn_blocking(move || {
+            let mut hasher = Sha256::new();
+            hasher.update(status.as_bytes());
+            hasher.update(diff.as_bytes());
+            for rel in &untracked {
+                hash_entry(&mut hasher, &root, rel)?;
+            }
+            Ok::<_, GitError>(hex(&hasher.finalize()[..8]))
+        });
+        let dirty = match tokio::time::timeout(HASH_TIMEOUT, task).await {
+            Ok(Ok(result)) => result?,
+            Ok(Err(e)) => return Err(GitError::Io(format!("hash task failed: {e}"))),
+            Err(_) => return Err(GitError::Io("hashing the folder took too long".to_owned())),
+        };
+        Ok(format!("{GIT_PREFIX}{head}+{dirty}"))
     }
 
     /// Berkas yang berubah sejak revisi `from` (commit baru dan perubahan
@@ -104,10 +139,6 @@ async fn is_git_dir(dir: &Path) -> bool {
     .is_ok_and(|m| m.is_ok())
 }
 
-fn short_hash(bytes: &[u8]) -> String {
-    hex(&Sha256::digest(bytes)[..8])
-}
-
 fn hex(bytes: &[u8]) -> String {
     use std::fmt::Write as _;
     bytes.iter().fold(String::new(), |mut out, b| {
@@ -131,22 +162,35 @@ fn hash_folder(root: &Path) -> Result<String, GitError> {
     files.sort();
     let mut hasher = Sha256::new();
     for rel in &files {
-        let bytes = std::fs::read(root.join(rel)).map_err(|e| GitError::Io(e.to_string()))?;
-        hasher.update(rel.as_bytes());
-        hasher.update([0]);
+        hash_entry(&mut hasher, root, rel)?;
+    }
+    Ok(format!("{FILES_PREFIX}{}", hex(&hasher.finalize())))
+}
+
+/// Path, jenis, dan isi satu entri: berkas biasa dengan isinya, symlink
+/// dengan targetnya (tidak diikuti).
+fn hash_entry(hasher: &mut Sha256, root: &Path, rel: &str) -> Result<(), GitError> {
+    let path = root.join(rel);
+    let meta = std::fs::symlink_metadata(&path).map_err(|e| GitError::Io(e.to_string()))?;
+    hasher.update(rel.as_bytes());
+    hasher.update([0]);
+    if meta.file_type().is_symlink() {
+        let target = std::fs::read_link(&path).map_err(|e| GitError::Io(e.to_string()))?;
+        hasher.update(b"link:");
+        hasher.update(target.to_string_lossy().as_bytes());
+    } else if meta.is_file() {
+        let bytes = std::fs::read(&path).map_err(|e| GitError::Io(e.to_string()))?;
         hasher.update((bytes.len() as u64).to_le_bytes());
         hasher.update(&bytes);
     }
-    Ok(format!("{FILES_PREFIX}{}", hex(&hasher.finalize())))
+    hasher.update([0]);
+    Ok(())
 }
 
 fn collect(root: &Path, dir: &Path, out: &mut Vec<String>) -> Result<(), GitError> {
     let entries = std::fs::read_dir(dir).map_err(|e| GitError::Io(e.to_string()))?;
     for entry in entries.flatten() {
         let name = entry.file_name().to_string_lossy().into_owned();
-        if name.starts_with('.') {
-            continue;
-        }
         let Ok(kind) = entry.file_type() else {
             continue;
         };
@@ -155,7 +199,7 @@ fn collect(root: &Path, dir: &Path, out: &mut Vec<String>) -> Result<(), GitErro
             if !SKIPPED_DIRS.contains(&name.as_str()) {
                 collect(root, &path, out)?;
             }
-        } else if kind.is_file() {
+        } else if kind.is_file() || kind.is_symlink() {
             if out.len() >= MAX_FILES {
                 return Err(GitError::Io(format!(
                     "the folder has more than {MAX_FILES} files"
@@ -218,6 +262,19 @@ mod tests {
         std::fs::write(repo.join("page.tsx"), "b").unwrap();
         let dirty = g.folder_revision(&repo).await.unwrap();
         assert!(dirty.starts_with(&a) && dirty.contains('+'), "{dirty}");
+        std::fs::write(repo.join("page.tsx"), "c").unwrap();
+        let dirtier = g.folder_revision(&repo).await.unwrap();
+        assert_ne!(dirtier, dirty, "isi berkas yang sudah kotor ikut dihitung");
+        std::fs::write(repo.join("lepas.js"), "1").unwrap();
+        let untracked = g.folder_revision(&repo).await.unwrap();
+        std::fs::write(repo.join("lepas.js"), "2").unwrap();
+        assert_ne!(
+            g.folder_revision(&repo).await.unwrap(),
+            untracked,
+            "isi untracked ikut"
+        );
+        std::fs::remove_file(repo.join("lepas.js")).unwrap();
+        std::fs::write(repo.join("page.tsx"), "b").unwrap();
 
         sh(&repo, &["commit", "-qam", "ubah"]);
         std::fs::write(repo.join("baru.tsx"), "c").unwrap();
@@ -250,6 +307,18 @@ mod tests {
             std::fs::write(p, "x").unwrap();
         }
         assert_eq!(g.folder_revision(&root).await.unwrap(), a);
+        std::fs::write(root.join(".env.example"), "A=1").unwrap();
+        let dot = g.folder_revision(&root).await.unwrap();
+        assert_ne!(dot, a, "dotfile ikut dihitung");
+        #[cfg(unix)]
+        {
+            std::os::unix::fs::symlink("/etc/hosts", root.join("src/link")).unwrap();
+            let linked = g.folder_revision(&root).await.unwrap();
+            assert_ne!(linked, dot, "symlink dicatat dengan targetnya");
+            std::fs::remove_file(root.join("src/link")).unwrap();
+            std::os::unix::fs::symlink("/etc/passwd", root.join("src/link")).unwrap();
+            assert_ne!(g.folder_revision(&root).await.unwrap(), linked);
+        }
         std::fs::write(root.join("src/page.tsx"), "b").unwrap();
         assert_ne!(g.folder_revision(&root).await.unwrap(), a);
         assert!(g.folder_changes(&root, &a).await.unwrap().is_empty());

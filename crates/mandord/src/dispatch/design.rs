@@ -3,15 +3,17 @@
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
+use mandor_domain::app_run::{AppSettings, PortUse, TestMode, check_prototype_url, port_conflict};
 use mandor_protocol::{
     DesignSourceAdd, DesignSourceCheckView, DesignSourceRef, DesignSourceTest, DesignSourceUpdate,
-    DesignSourceView, RpcError, method,
+    DesignSourceView, RepoAppView, RpcError, method,
 };
 use mandor_store::DesignSourceRow;
 use mandor_usecase::review::{DesignRoot, PathProbe, SourceCheck, check_source};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
+use super::app_run::{app_settings_from, check_app_port, repo_app_view};
 use super::{AppDispatch, ok, params, rejected, store_error};
 use crate::prod::now_ms;
 
@@ -20,10 +22,13 @@ const FOLDER: &str = "folder";
 /// Batas waktu memeriksa satu path.
 const PROBE_TIMEOUT: Duration = Duration::from_secs(5);
 
-/// Konfigurasi sumber berjenis folder.
+/// Konfigurasi sumber berjenis folder; `app` berisi setelan prototype yang
+/// bisa dijalankan (plan 2026-11-03-002, KTD-P2).
 #[derive(Debug, Serialize, Deserialize)]
 struct FolderConfig {
     path: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    app: Option<Value>,
 }
 
 /// Memeriksa path di sistem berkas, dibatasi waktu.
@@ -57,9 +62,18 @@ pub(crate) fn folder_path(row: &DesignSourceRow) -> String {
         .unwrap_or_default()
 }
 
-fn config_json(path: &str) -> Result<String, RpcError> {
+/// Setelan app sumber yang bisa dijalankan; `None` untuk folder biasa (R6).
+pub(crate) fn prototype_app(row: &DesignSourceRow) -> Option<AppSettings> {
+    let app = serde_json::from_str::<FolderConfig>(&row.config_json)
+        .ok()?
+        .app?;
+    Some(mandor_store::app_settings_of(&json!({ "app": app }))).filter(AppSettings::runnable)
+}
+
+fn config_json(path: &str, app: Option<&AppSettings>) -> Result<String, RpcError> {
     serde_json::to_string(&FolderConfig {
         path: path.to_owned(),
+        app: app.map(mandor_store::app_settings_json),
     })
     .map_err(rejected)
 }
@@ -70,6 +84,7 @@ async fn view(row: DesignSourceRow) -> DesignSourceView {
     DesignSourceView {
         ready: matches!(status, SourceCheck::Ready(_)),
         status: status.message().to_owned(),
+        app: prototype_app(&row).map(|a| repo_app_view(&a)),
         id: row.id,
         name: row.name,
         kind: row.kind,
@@ -112,11 +127,15 @@ impl AppDispatch {
                 let p: DesignSourceAdd = params(v)?;
                 let name = valid_name(&p.name)?;
                 ready_path(&p.path).await?;
+                let app = match &p.app {
+                    Some(view) => Some(self.prototype_settings(view, None).await?),
+                    None => None,
+                };
                 let row = DesignSourceRow {
                     id: uuid_like(),
                     name,
                     kind: FOLDER.to_owned(),
-                    config_json: config_json(p.path.trim())?,
+                    config_json: config_json(p.path.trim(), app.as_ref())?,
                     created_at_ms: now_ms(),
                 };
                 store
@@ -129,8 +148,12 @@ impl AppDispatch {
                 let p: DesignSourceUpdate = params(v)?;
                 let name = valid_name(&p.name)?;
                 ready_path(&p.path).await?;
+                let app = match &p.app {
+                    Some(view) => Some(self.prototype_settings(view, Some(&p.id)).await?),
+                    None => None,
+                };
                 store
-                    .update_design_source(&p.id, &name, &config_json(p.path.trim())?)
+                    .update_design_source(&p.id, &name, &config_json(p.path.trim(), app.as_ref())?)
                     .await
                     .map_err(store_error)?;
                 let row = self.design_row(&p.id).await?;
@@ -160,6 +183,90 @@ impl AppDispatch {
                 }
                 ok(&out)
             }
+        }
+    }
+
+    /// Setelan prototype dari input dev: harus bisa dijalankan, port tidak
+    /// bentrok dengan app repo atau prototype lain, di rentang port VM, dan
+    /// URL loopback dengan host berbeda dari app (R7, R8).
+    async fn prototype_settings(
+        &self,
+        view: &RepoAppView,
+        design_id: Option<&str>,
+    ) -> Result<AppSettings, RpcError> {
+        let mut app = app_settings_from(view)?;
+        app.test_mode = TestMode::Web;
+        let Some(port) = app.port.filter(|_| app.runnable()) else {
+            return Err(rejected(
+                "A runnable prototype needs a start command and a port",
+            ));
+        };
+        let url = app
+            .app_url
+            .get_or_insert_with(|| format!("http://127.0.0.1:{port}"))
+            .clone();
+        check_app_port(self.app.cfg.vm_agent.as_ref().map(|v| v.ports), &app)?;
+        let (repos, repo_urls) = self.repo_ports().await?;
+        let mut taken = repos;
+        taken.extend(self.prototype_ports(design_id).await?);
+        if let Some(u) = port_conflict(app.port, &taken) {
+            return Err(rejected(format!(
+                "Port {port} is already used by {}",
+                u.owner
+            )));
+        }
+        check_prototype_url(&url, port, &repo_urls).map_err(|e| rejected(e.to_string()))?;
+        Ok(app)
+    }
+
+    /// Port dan URL app repo Web di daemon ini.
+    async fn repo_ports(&self) -> Result<(Vec<PortUse>, Vec<String>), RpcError> {
+        let mut ports = Vec::new();
+        let mut urls = Vec::new();
+        for r in self.app.store.list_repos().await.map_err(store_error)? {
+            let app = mandor_store::app_settings_of(&r.settings);
+            if app.test_mode != TestMode::Web {
+                continue;
+            }
+            urls.extend(app.canonical_url());
+            if let Some(port) = app.port {
+                ports.push(PortUse { owner: r.id, port });
+            }
+        }
+        Ok((ports, urls))
+    }
+
+    /// Port prototype terdaftar, kecuali sumber `skip`.
+    async fn prototype_ports(&self, skip: Option<&str>) -> Result<Vec<PortUse>, RpcError> {
+        Ok(self
+            .app
+            .store
+            .design_sources()
+            .await
+            .map_err(store_error)?
+            .into_iter()
+            .filter(|r| Some(r.id.as_str()) != skip)
+            .filter_map(|r| {
+                let port = prototype_app(&r)?.port?;
+                Some(PortUse {
+                    owner: r.name,
+                    port,
+                })
+            })
+            .collect())
+    }
+
+    /// Port app repo tidak boleh dipakai prototype (R8, dua arah).
+    pub(super) async fn check_repo_port(&self, app: &AppSettings) -> Result<(), RpcError> {
+        if app.test_mode != TestMode::Web {
+            return Ok(());
+        }
+        match port_conflict(app.port, &self.prototype_ports(None).await?) {
+            Some(u) => Err(rejected(format!(
+                "Port {} is already used by the prototype {}",
+                u.port, u.owner
+            ))),
+            None => Ok(()),
         }
     }
 

@@ -151,8 +151,8 @@ const GROUP_REASON = 'In group PGS-1401–PGS-1404';
 
 // Sumber desain dan setelan reviewer tiruan (Rilis 2 U14).
 let designSources: DesignSourceView[] = [
-  { id: 'ds1', name: 'pegasus-mock', kind: 'folder', path: '/home/beni/work/pegasus-mock', ready: true, status: 'Ready' },
-  { id: 'ds2', name: 'old-figma-export', kind: 'folder', path: '/home/beni/old/figma', ready: false, status: 'Path missing' }
+  { id: 'ds1', name: 'pegasus-mock', kind: 'folder', path: '/home/beni/work/pegasus-mock', ready: true, status: 'Ready', app: null },
+  { id: 'ds2', name: 'old-figma-export', kind: 'folder', path: '/home/beni/old/figma', ready: false, status: 'Path missing', app: null }
 ];
 let reviewer: ReviewerSettingsView = { model: null, budget_cents: 200, timeout_secs: 900 };
 
@@ -709,14 +709,24 @@ function handle(method: string, params: Record<string, unknown>): unknown {
     case 'design_sources.test':
       return { ready: true, status: 'Ready' };
     case 'design_sources.add': {
-      const p = params as { name: string; path: string };
-      const s = { id: `ds${designSources.length + 1}`, name: p.name, kind: 'folder', path: p.path, ready: true, status: 'Ready' };
+      const p = params as { name: string; path: string; app: DesignSourceView['app'] };
+      const s: DesignSourceView = {
+        id: `ds${designSources.length + 1}`,
+        name: p.name,
+        kind: 'folder',
+        path: p.path,
+        ready: true,
+        status: 'Ready',
+        app: p.app ?? null
+      };
       designSources = [...designSources, s];
       return s;
     }
     case 'design_sources.update': {
-      const p = params as { id: string; name: string; path: string };
-      designSources = designSources.map((s) => (s.id === p.id ? { ...s, name: p.name, path: p.path } : s));
+      const p = params as { id: string; name: string; path: string; app: DesignSourceView['app'] };
+      designSources = designSources.map((s) =>
+        s.id === p.id ? { ...s, name: p.name, path: p.path, app: p.app ?? null } : s
+      );
       return designSources.find((s) => s.id === p.id) ?? null;
     }
     case 'design_sources.remove':

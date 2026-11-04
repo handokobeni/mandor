@@ -1116,6 +1116,8 @@ pub struct DesignSourceView {
     pub ready: bool,
     /// `Ready`, `Path missing`, `Not a folder`, atau alasan penolakan.
     pub status: String,
+    /// Setelan app prototype; `null` untuk folder biasa (plan 2026-11-03-002, R6).
+    pub app: Option<RepoAppView>,
 }
 
 /// Parameter `design_sources.add`.
@@ -1123,6 +1125,9 @@ pub struct DesignSourceView {
 pub struct DesignSourceAdd {
     pub name: String,
     pub path: String,
+    /// Isi untuk "Runnable prototype".
+    #[serde(default)]
+    pub app: Option<RepoAppView>,
 }
 
 /// Parameter `design_sources.update`.
@@ -1131,6 +1136,9 @@ pub struct DesignSourceUpdate {
     pub id: String,
     pub name: String,
     pub path: String,
+    /// `null` mematikan "Runnable prototype".
+    #[serde(default)]
+    pub app: Option<RepoAppView>,
 }
 
 /// Parameter `design_sources.remove`.

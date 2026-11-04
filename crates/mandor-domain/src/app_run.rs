@@ -125,6 +125,72 @@ impl AppSettings {
     }
 }
 
+/// Pemakai port lain di daemon yang sama: app repo atau prototype (R8).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PortUse {
+    /// Nama repo atau sumber desain.
+    pub owner: String,
+    pub port: u16,
+}
+
+/// Pemakai lain yang sudah memakai `port`, bila ada (R8).
+#[must_use]
+pub fn port_conflict(port: Option<u16>, others: &[PortUse]) -> Option<&PortUse> {
+    let port = port?;
+    others.iter().find(|u| u.port == port)
+}
+
+/// Alasan URL prototype ditolak (R7).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+pub enum PrototypeUrlError {
+    #[error("The prototype URL must be a local address such as http://127.0.0.1:<port>")]
+    NotLoopback,
+    #[error("The prototype URL must use the prototype's port")]
+    PortMismatch,
+    #[error(
+        "The prototype URL must use a different host from the app URL (for example 127.0.0.1 when the app uses localhost), so the app's login cookies are not sent to the prototype"
+    )]
+    SameHostAsApp,
+}
+
+/// URL prototype harus loopback, memakai `port`, dan host-nya berbeda dari
+/// host URL app repo, karena cookie terikat host, bukan port (R7).
+///
+/// # Errors
+/// [`PrototypeUrlError`] dengan alasan untuk dev.
+pub fn check_prototype_url(
+    url: &str,
+    port: u16,
+    app_urls: &[String],
+) -> Result<(), PrototypeUrlError> {
+    let (host, url_port) = host_port(url).ok_or(PrototypeUrlError::NotLoopback)?;
+    if !is_loopback(&host) {
+        return Err(PrototypeUrlError::NotLoopback);
+    }
+    if url_port != port {
+        return Err(PrototypeUrlError::PortMismatch);
+    }
+    if app_urls
+        .iter()
+        .filter_map(|u| host_port(u))
+        .any(|(h, _)| h == host)
+    {
+        return Err(PrototypeUrlError::SameHostAsApp);
+    }
+    Ok(())
+}
+
+fn host_port(url: &str) -> Option<(String, u16)> {
+    let origin = crate::hook_review::origin_of(url)?;
+    let authority = origin.split_once("://")?.1;
+    let (host, port) = authority.rsplit_once(':')?;
+    Some((host.to_owned(), port.parse().ok()?))
+}
+
+fn is_loopback(host: &str) -> bool {
+    host == "localhost" || host == "[::1]" || host.starts_with("127.")
+}
+
 /// Lockfile yang menentukan kapan perintah setup perlu dijalankan ulang.
 pub const LOCKFILES: &[&str] = &[
     "bun.lock",
@@ -361,5 +427,54 @@ mod tests {
     fn nama_kunci_env_melewati_nilai_berkutip_multi_baris() {
         let text = "KEY=\"-----BEGIN KEY-----\nABCDEF==\nQUOTE=palsu\n-----END KEY-----\"\nNEXT='satu\nX=dua'\nLAST=ok\nONE=\"utuh\"\n";
         assert_eq!(env_key_names(text), ["KEY", "NEXT", "LAST", "ONE"]);
+    }
+
+    #[test]
+    fn url_prototype_loopback_port_sama_dan_host_beda_dari_app() {
+        let apps = ["http://localhost:3000".to_owned()];
+        assert_eq!(
+            check_prototype_url("http://127.0.0.1:3001", 3001, &apps),
+            Ok(())
+        );
+        assert_eq!(
+            check_prototype_url("http://[::1]:3001/x", 3001, &apps),
+            Ok(())
+        );
+        assert_eq!(
+            check_prototype_url("http://example.com:3001", 3001, &apps),
+            Err(PrototypeUrlError::NotLoopback)
+        );
+        assert_eq!(
+            check_prototype_url("http://127.0.0.1:3002", 3001, &apps),
+            Err(PrototypeUrlError::PortMismatch)
+        );
+        assert_eq!(
+            check_prototype_url("http://LOCALHOST:3001", 3001, &apps),
+            Err(PrototypeUrlError::SameHostAsApp)
+        );
+        assert_eq!(
+            check_prototype_url("bukan-url", 3001, &apps),
+            Err(PrototypeUrlError::NotLoopback)
+        );
+    }
+
+    #[test]
+    fn port_bentrok_dengan_pemakai_lain() {
+        let others = [
+            PortUse {
+                owner: "kelola-web".to_owned(),
+                port: 3000,
+            },
+            PortUse {
+                owner: "kelola-api".to_owned(),
+                port: 8080,
+            },
+        ];
+        assert_eq!(
+            port_conflict(Some(3000), &others).map(|u| u.owner.as_str()),
+            Some("kelola-web")
+        );
+        assert!(port_conflict(Some(3001), &others).is_none());
+        assert!(port_conflict(None, &others).is_none());
     }
 }

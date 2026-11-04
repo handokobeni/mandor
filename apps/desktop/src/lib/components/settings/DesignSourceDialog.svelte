@@ -10,7 +10,12 @@
   import type { DesignSourceCheckView } from '#lib/protocol/DesignSourceCheckView.ts';
   import type { DesignSourceView } from '#lib/protocol/DesignSourceView.ts';
   import type { Rpc } from '#lib/rpc.ts';
+  import { Switch } from '#lib/components/ui/switch/index.ts';
+  import { prototypeForm, prototypePayload } from '#lib/prototype.ts';
+  import { validateRepoApp } from '#lib/settings.ts';
+  import EnvKeyPicker from './EnvKeyPicker.svelte';
   import Field from './Field.svelte';
+  import ListEditor from './ListEditor.svelte';
   import FolderBrowser from './FolderBrowser.svelte';
 
   interface Props {
@@ -28,18 +33,32 @@
   let busy = $state(false);
   let error = $state<string | null>(null);
   let check = $state<DesignSourceCheckView | null>(null);
+  // Runnable prototype: Run app menyalakannya bersama app run (R6–R8).
+  let runnable = $state(untrack(() => source?.app != null));
+  let app = $state(untrack(() => prototypeForm(source?.app ?? null)));
+  let tried = $state(false);
+  let picking = $state(false);
+  const appErrors = $derived(runnable && tried ? validateRepoApp(app) : {});
 
   async function test(): Promise<void> {
     check = await rpc.request<DesignSourceCheckView>('design_sources.test', { path: path.trim() });
   }
 
   async function save(): Promise<void> {
+    tried = true;
+    if (runnable && Object.keys(validateRepoApp(app)).length > 0) return;
     busy = true;
     error = null;
+    const appPayload = runnable ? prototypePayload(app) : null;
     try {
       const saved = source
-        ? await rpc.request<DesignSourceView>('design_sources.update', { id: source.id, name, path: path.trim() })
-        : await rpc.request<DesignSourceView>('design_sources.add', { name, path: path.trim() });
+        ? await rpc.request<DesignSourceView>('design_sources.update', {
+            id: source.id,
+            name,
+            path: path.trim(),
+            app: appPayload
+          })
+        : await rpc.request<DesignSourceView>('design_sources.add', { name, path: path.trim(), app: appPayload });
       onsaved(saved);
     } catch (err) {
       error = err instanceof Error ? err.message : String(err);
@@ -73,6 +92,52 @@
           {:else}Absolute path on the daemon machine.{/if}
         {/snippet}
       </Field>
+      <div class="row-setting">
+        <div class="txt">
+          Runnable prototype
+          <span>Run app also starts this prototype so the AC reviewer can compare pages side by side.</span>
+        </div>
+        <Switch bind:checked={runnable} aria-label="Runnable prototype" />
+      </div>
+      {#if runnable}
+        <div class="grid grid-cols-2 gap-3">
+          <Field id="ds-setup" label="Setup command (optional)">
+            <Input id="ds-setup" class="mono" placeholder="pnpm install" bind:value={app.setupCommand} />
+          </Field>
+          <Field id="ds-start" label="Start command" error={appErrors.startCommand}>
+            <Input id="ds-start" class="mono" placeholder="pnpm dev --port 3001" bind:value={app.startCommand} />
+          </Field>
+          <Field id="ds-port" label="Port" error={appErrors.port}>
+            <Input id="ds-port" class="mono" placeholder="3001" bind:value={app.port} />
+          </Field>
+          <Field id="ds-url" label="URL (optional)" error={appErrors.appUrl}>
+            <Input id="ds-url" class="mono" placeholder="http://127.0.0.1:3001" bind:value={app.appUrl} />
+            {#snippet help()}Use a different host from the app (127.0.0.1 when the app uses localhost).{/snippet}
+          </Field>
+        </div>
+        <div class="field">
+          <span class="text-sm font-medium">.env keys passed to the prototype</span>
+          <ListEditor list="env" label=".env keys" placeholder="KELOLA_API_MODE" bind:items={app.envKeys} />
+          {#if appErrors.envKeys}<p class="field-error">{appErrors.envKeys}</p>{/if}
+          {#if source}
+            <div>
+              <Button variant="outline" size="sm" onclick={() => (picking = true)}>Pick from .env</Button>
+            </div>
+          {/if}
+        </div>
+        {#if picking && source}
+          <EnvKeyPicker
+            {rpc}
+            target={{ design_source_id: source.id }}
+            saved={app.envKeys}
+            oncancel={() => (picking = false)}
+            onpick={(keys) => {
+              app.envKeys = keys;
+              picking = false;
+            }}
+          />
+        {/if}
+      {/if}
       <Dialog.Footer>
         <Button variant="ghost" disabled={busy} onclick={oncancel}>Cancel</Button>
         <Button variant="outline" disabled={busy || !path.trim()} onclick={test}>Test</Button>

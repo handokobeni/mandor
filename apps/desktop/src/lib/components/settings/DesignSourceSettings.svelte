@@ -86,6 +86,7 @@
             <div class="si-txt">
               <div class="si-name">{s.name}</div>
               <div class="si-loc mono">{s.path}</div>
+              {#if s.app}<div class="si-loc">Runnable prototype · {s.app.app_url ?? `port ${s.app.port}`}</div>{/if}
               <div class="muted si-kind">Code repo or folder</div>
             </div>
             <span class="si-status" data-tone={s.ready ? 'ok' : 'failed'}>

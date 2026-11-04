@@ -1,9 +1,11 @@
 import { describe, expect, it } from 'vitest';
+import { NO_VISUAL } from '#lib/ac-review.ts';
 import { followCandidates, toggleFollow } from '#lib/plan-approval.ts';
 import type { AcRowView } from '#lib/protocol/AcRowView.ts';
 
 function row(id: string, design: string, status = 'active'): AcRowView {
   return {
+    ...NO_VISUAL,
     ac_id: id,
     label: `AC-${id}`,
     text: id,

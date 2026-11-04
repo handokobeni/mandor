@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { NO_VISUAL } from '#lib/ac-review.ts';
 import type { AcLedgerView } from '#lib/protocol/AcLedgerView.ts';
 import type { AcRowView } from '#lib/protocol/AcRowView.ts';
 import type { ReviewView } from '#lib/protocol/ReviewView.ts';
@@ -7,6 +8,7 @@ import { LedgerStore } from './ledger.svelte.ts';
 
 function row(id: string, verdict: string): AcRowView {
   return {
+    ...NO_VISUAL,
     ac_id: id,
     label: `AC-${id}`,
     text: id,

@@ -67,7 +67,7 @@
   import QueueForVm from './QueueForVm.svelte';
   import { appRun } from '#lib/stores/app-run.svelte.ts';
   import { runs } from '#lib/stores/runs.svelte.ts';
-  import { snapshots } from '#lib/app-run.ts';
+  import { appUrls, snapshots } from '#lib/app-run.ts';
   import type { AppChangesView } from '#lib/protocol/AppChangesView.ts';
   import type { AppLogView } from '#lib/protocol/AppLogView.ts';
   import type { RepoView } from '#lib/protocol/RepoView.ts';
@@ -803,6 +803,7 @@
           onsend={sendFindings}
           onfile={(p) => void openFile(p)}
           cards={run.cards}
+          urls={appRun.current?.run_id === run.id ? appUrls(appRun.current) : { app: null, prototype: null }}
         />
       </section>
     {/if}

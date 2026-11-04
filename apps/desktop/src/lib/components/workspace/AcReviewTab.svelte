@@ -47,8 +47,21 @@
     onfile: (path: string) => void;
     /** Kartu run grup; baris AC dikelompokkan per kartu. Kosong untuk run tunggal. */
     cards?: GroupCardView[];
+    /** URL app dan prototype yang menyala (link halaman di hasil tampilan). */
+    urls?: { app: string | null; prototype: string | null };
   }
-  let { taskKey, store, reviewing, agentBusy, now, onreview, onsend, onfile, cards = [] }: Props = $props();
+  let {
+    taskKey,
+    store,
+    reviewing,
+    agentBusy,
+    now,
+    onreview,
+    onsend,
+    onfile,
+    cards = [],
+    urls = { app: null, prototype: null }
+  }: Props = $props();
 
   let focusIdx = $state(0);
   let expanded = $state<Record<string, boolean>>({});
@@ -271,6 +284,7 @@
           onfocus={() => (focusIdx = i)}
           onkey={(e) => onkey(e, r)}
           {onfile}
+          {urls}
         />
       {/each}
       {#each removed as r (r.ac_id)}

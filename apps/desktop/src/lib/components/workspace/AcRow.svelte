@@ -5,7 +5,16 @@
   import ChevronRight from '@lucide/svelte/icons/chevron-right';
   import FileCode from '@lucide/svelte/icons/file-code';
   import Wrench from '@lucide/svelte/icons/wrench';
-  import { canSend, DESIGN_META, evidenceParts, label, rowMarks, shownVerdict } from '#lib/ac-review.ts';
+  import {
+    canSend,
+    DESIGN_META,
+    evidenceParts,
+    label,
+    rowMarks,
+    shownVerdict,
+    visualLinks,
+    visualMeta
+  } from '#lib/ac-review.ts';
   import { Button } from '#lib/components/ui/button/index.ts';
   import { Checkbox } from '#lib/components/ui/checkbox/index.ts';
   import type { AcRowView } from '#lib/protocol/AcRowView.ts';
@@ -24,6 +33,8 @@
     onfocus: () => void;
     onkey: (e: KeyboardEvent) => void;
     onfile: (path: string) => void;
+    /** URL app dan prototype yang menyala, untuk link halaman yang dibandingkan. */
+    urls?: { app: string | null; prototype: string | null };
   }
   let {
     row,
@@ -37,7 +48,8 @@
     onselect,
     onfocus,
     onkey,
-    onfile
+    onfile,
+    urls = { app: null, prototype: null }
   }: Props = $props();
 
   let el = $state<HTMLDivElement | null>(null);
@@ -46,6 +58,8 @@
   });
 
   const verdict = $derived(shownVerdict(row));
+  const look = $derived(visualMeta(row.visual));
+  const links = $derived(visualLinks(row, urls.app, urls.prototype));
   const selectable = $derived(!readonly && canSend(row));
   const fixing = $derived(!readonly && row.verdict === 'fix_in_progress');
   const pending = $derived(reviewing && row.in_gate && row.verdict === 'not_reviewed');
@@ -103,7 +117,10 @@
   <span class="ac-c ac-d" role="gridcell">
     {#if !noSource}<AcChip kind="design" value={row.design} />{/if}
   </span>
-  <span class="ac-c ac-v" role="gridcell"><AcChip kind="verdict" value={verdict} stale={row.stale} {pending} /></span>
+  <span class="ac-c ac-v" role="gridcell">
+    <AcChip kind="verdict" value={verdict} stale={row.stale} {pending} />
+    {#if look && !pending}<AcChip kind="visual" value={row.visual} />{/if}
+  </span>
   <span class="ac-c ac-x" role="gridcell">
     <Button variant="ghost" size="icon-xs" tabindex={-1} aria-label="{expanded ? 'Collapse' : 'Expand'} {label(row)}" onclick={onexpand}>
       {#if expanded}<ChevronDown />{:else}<ChevronRight />{/if}
@@ -137,6 +154,30 @@
           </p>
         {/if}
       </div>
+      {#if look}
+        <div class="ev-col">
+          <div class="ev-h">Look vs prototype</div>
+          <p class="ev-lead">{look.label}</p>
+          {#if row.visual_detail.decided_by !== null && (row.visual === 'accepted' || row.visual === 'checked_manually')}
+            <p>By {row.visual_detail.decided_by}{#if row.visual_detail.decision_reason}: {row.visual_detail.decision_reason}{/if}</p>
+          {/if}
+          {#if row.visual_detail.description}<p class="ev-text">{row.visual_detail.description}</p>{/if}
+          {#if row.visual_detail.app_path || row.visual_detail.prototype_path}
+            <p class="ev-links">
+              {#if links.app}<a href={links.app} target="_blank" rel="noopener noreferrer">App page</a>{:else if row.visual_detail.app_path}<span
+                  class="muted"
+                  title="Run the app to open this page">App page</span
+                >{/if}
+              <span class="mono muted">{row.visual_detail.app_path ?? ''}</span>
+              {#if links.prototype}<a href={links.prototype} target="_blank" rel="noopener noreferrer">Prototype page</a
+                >{:else if row.visual_detail.prototype_path}<span class="muted" title="Run the app to open this page"
+                  >Prototype page</span
+                >{/if}
+              <span class="mono muted">{row.visual_detail.prototype_path ?? ''}</span>
+            </p>
+          {/if}
+        </div>
+      {/if}
       <div class="ev-col">
         <div class="ev-h">Design</div>
         {#if noSource}

@@ -14,12 +14,17 @@ import {
   shownVerdict,
   tabCount,
   toggleSelection,
-  validReason
+  validReason,
+  NO_VISUAL,
+  visualMeta,
+  gateRows,
+  visualLinks
 } from '#lib/ac-review.ts';
 import type { AcRowView } from '#lib/protocol/AcRowView.ts';
 
 function row(id: string, verdict: string, extra: Partial<AcRowView> = {}): AcRowView {
   return {
+    ...NO_VISUAL,
     ac_id: id,
     label: `AC-${id}`,
     text: `teks ${id}`,
@@ -160,5 +165,48 @@ describe('acTitle', () => {
     expect(acTitle('AC-1 — Fibonacci\nGiven pengguna membuka halaman\nWhen …')).toBe('AC-1 — Fibonacci');
     expect(acTitle('  Satu baris saja  ')).toBe('Satu baris saja');
     expect(acTitle('\nGiven tanpa judul')).toBe('Given tanpa judul');
+  });
+});
+
+describe('hasil tampilan dengan prototype (plan 2026-11-03-002)', () => {
+  const look = (verdict: string, visual: string, extra: Partial<AcRowView> = {}) =>
+    row('v', verdict, { ...NO_VISUAL, visual, ...extra });
+
+  it('counts a passing row that looks different as failed and a row whose look was not verified as cant verify', () => {
+    const c = counts([look('pass', 'differs'), look('pass', 'cant_verify'), look('pass', 'accepted'), look('pass', 'match')]);
+    expect([c.pass, c.fail, c.cant]).toEqual([2, 1, 1]);
+    expect(gate([look('pass', 'differs')], 'block', false).state).toBe('blocked');
+    expect(gate([look('pass', 'cant_verify')], 'block', false).state).toBe('needs_confirmation');
+  });
+
+  it('lets a row that only looks different be sent to the agent', () => {
+    expect(canSend(look('pass', 'differs', { selectable: true }))).toBe(true);
+    expect(canSend(look('pass', 'match', { selectable: false }))).toBe(false);
+  });
+
+  it('labels the look chip and hides it when the row was not compared', () => {
+    expect(visualMeta('differs')?.label).toBe('Looks different');
+    expect(visualMeta('accepted')?.label).toBe('Difference accepted');
+    expect(visualMeta('not_compared')).toBeNull();
+  });
+
+  it('collects rows the gate dialog lists for push anyway and manual checks', () => {
+    const rows = [look('pass', 'differs'), { ...look('cant_verify', 'match'), ac_id: 'c' }, { ...look('pass', 'cant_verify'), ac_id: 'd' }];
+    expect(gateRows(rows).fails.map((r) => r.ac_id)).toEqual(['v']);
+    expect(gateRows(rows).cants.map((r) => r.ac_id)).toEqual(['c', 'd']);
+  });
+
+  it('builds page links on the running app and prototype only for same-origin paths', () => {
+    const r = look('pass', 'differs', {
+      visual_detail: { ...NO_VISUAL.visual_detail, app_path: '/jabatan?x=1', prototype_path: '/proto/jabatan' }
+    });
+    expect(visualLinks(r, 'http://localhost:3000', 'http://127.0.0.1:3001')).toEqual({
+      app: 'http://localhost:3000/jabatan?x=1',
+      prototype: 'http://127.0.0.1:3001/proto/jabatan'
+    });
+    const bad = look('pass', 'differs', {
+      visual_detail: { ...NO_VISUAL.visual_detail, app_path: '//evil.example/x', prototype_path: '/a' }
+    });
+    expect(visualLinks(bad, 'http://localhost:3000', null)).toEqual({ app: null, prototype: null });
   });
 });

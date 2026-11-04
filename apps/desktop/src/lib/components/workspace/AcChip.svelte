@@ -13,17 +13,19 @@
   import SignpostBig from '@lucide/svelte/icons/signpost-big';
   import UserRoundCheck from '@lucide/svelte/icons/user-round-check';
   import Wrench from '@lucide/svelte/icons/wrench';
-  import { DESIGN_META, VERDICT_META } from '#lib/ac-review.ts';
+  import Eye from '@lucide/svelte/icons/eye';
+  import { DESIGN_META, VERDICT_META, VISUAL_META } from '#lib/ac-review.ts';
 
   interface Props {
-    kind: 'design' | 'verdict';
+    kind: 'design' | 'verdict' | 'visual';
     value: string;
     stale?: boolean;
     pending?: boolean;
   }
   let { kind, value, stale = false, pending = false }: Props = $props();
 
-  const meta = $derived((kind === 'design' ? DESIGN_META : VERDICT_META)[value] ?? { label: value, tone: 'muted' });
+  const metas = { design: DESIGN_META, verdict: VERDICT_META, visual: VISUAL_META };
+  const meta = $derived(metas[kind][value] ?? { label: value, tone: 'muted' });
   const ICONS = {
     not_checked: CircleDashed,
     in_design: CircleCheck,
@@ -40,7 +42,7 @@
     fix_in_progress: Wrench,
     follows_design: SignpostBig
   } as const;
-  const Icon = $derived(ICONS[value as keyof typeof ICONS] ?? CircleDashed);
+  const Icon = $derived(kind === 'visual' ? Eye : (ICONS[value as keyof typeof ICONS] ?? CircleDashed));
 </script>
 
 {#if pending}

@@ -3,6 +3,7 @@
 // reviewing, failed, tracker, pass, no_ac, no_source.
 
 import type { AcLedgerView } from '#lib/protocol/AcLedgerView.ts';
+import { NO_VISUAL } from '#lib/ac-review.ts';
 import type { AcRowView } from '#lib/protocol/AcRowView.ts';
 import type { ReviewView } from '#lib/protocol/ReviewView.ts';
 
@@ -17,6 +18,7 @@ const TEXT: [string, string][] = [
 function row(i: number, verdict: string, extra: Partial<AcRowView> = {}): AcRowView {
   const [lbl, text] = TEXT[i];
   return {
+    ...NO_VISUAL,
     ac_id: `ac${i + 1}`,
     label: lbl,
     text,
@@ -57,8 +59,23 @@ const EVIDENCE: Record<string, string> = {
 
 function current(): AcRowView[] {
   return [
-    designed(0, 'pass', { evidence: EVIDENCE.pass1 }),
-    designed(1, 'pass', { evidence: EVIDENCE.pass2 }),
+    designed(0, 'pass', {
+      evidence: EVIDENCE.pass1,
+      visual: 'match',
+      visual_detail: { ...NO_VISUAL.visual_detail, app_path: '/invoices', prototype_path: '/invoices' }
+    }),
+    designed(1, 'pass', {
+      evidence: EVIDENCE.pass2,
+      selectable: true,
+      visual: 'differs',
+      visual_detail: {
+        ...NO_VISUAL.visual_detail,
+        description: 'The date range sits below the status chips; the prototype puts it on the same row, right-aligned.',
+        app_path: '/invoices',
+        prototype_path: '/invoices',
+        prototype_rev: 'git:4f2a9c1'
+      }
+    }),
     designed(2, 'fail', { evidence: EVIDENCE.fail3 }),
     designed(3, 'cant_verify', { evidence: EVIDENCE.cant4 }),
     designed(4, 'pass', { evidence: EVIDENCE.pass5 })

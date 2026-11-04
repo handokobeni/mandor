@@ -5,7 +5,7 @@
   import CircleQuestionMark from '@lucide/svelte/icons/circle-question-mark';
   import CircleX from '@lucide/svelte/icons/circle-x';
   import GitPullRequestArrow from '@lucide/svelte/icons/git-pull-request-arrow';
-  import { acTitle, label, publishParams, validReason } from '#lib/ac-review.ts';
+  import { acTitle, gateRows, label, publishParams, validReason } from '#lib/ac-review.ts';
   import * as Alert from '#lib/components/ui/alert/index.ts';
   import { Button } from '#lib/components/ui/button/index.ts';
   import { Checkbox } from '#lib/components/ui/checkbox/index.ts';
@@ -25,8 +25,11 @@
   }
   let { mode, runId, rows, syncWarning, oncancel, onconfirm }: Props = $props();
 
-  const fails = $derived(rows.filter((r) => r.in_gate && !r.stale && r.verdict === 'fail'));
-  const cants = $derived(rows.filter((r) => r.in_gate && !r.stale && r.verdict === 'cant_verify'));
+  // Termasuk baris yang hanya berbeda tampilannya atau tampilannya belum
+  // terverifikasi (plan 2026-11-03-002, R25).
+  const split = $derived(gateRows(rows));
+  const fails = $derived(split.fails);
+  const cants = $derived(split.cants);
   let checked = $state<Record<string, boolean>>({});
   let reason = $state('');
   let tried = $state(false);
@@ -65,7 +68,8 @@
         {#if mode === 'manual'}
           Check each one yourself before pushing. Your confirmation is recorded in the AC ledger and in the PR description.
         {:else if mode === 'anyway'}
-          These rows become Skipped. Your reason is written next to them in the PR description.
+          Failing rows become Skipped, and differences from the prototype are marked accepted. Your reason is written next to
+          them in the PR description.
         {:else}
           This run uses warn mode, so these do not block the push. They are listed in the PR description.
         {/if}
@@ -85,7 +89,12 @@
             <CircleX class="gate-x" aria-hidden="true" />
             <span>
               <span class="mono">{label(r)}</span> <span title={r.text}>{acTitle(r.text)}</span>
-              {#if r.evidence}<span class="muted gate-why" title={r.evidence}>Reviewer found: {r.evidence}</span>{/if}
+              {#if r.verdict === 'fail' && r.evidence}<span class="muted gate-why" title={r.evidence}
+                  >Reviewer found: {r.evidence}</span
+                >{/if}
+              {#if r.visual === 'differs'}<span class="muted gate-why" title={r.visual_detail.description ?? ''}
+                  >Looks different from the prototype{#if r.visual_detail.description}: {r.visual_detail.description}{/if}</span
+                >{/if}
             </span>
           </div>
         {/each}

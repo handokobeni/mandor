@@ -111,11 +111,23 @@ impl Git {
             })
             .collect();
         let present = self.listed_files(dir).await?;
-        // Path dengan baris baru tidak bisa lewat --stdin-paths; selalu
-        // dianggap berubah.
-        let (plain, odd): (Vec<&String>, Vec<&String>) =
-            present.iter().partition(|p| !p.contains('\n'));
-        let mut changed: Vec<String> = odd.into_iter().cloned().collect();
+        // Hanya berkas biasa dengan path polos yang dibaca git: symlink tidak
+        // diikuti ke luar folder, dan path berkutip atau berkarakter kontrol
+        // tidak bisa ditafsirkan lain oleh --stdin-paths. Sisanya selalu
+        // dilaporkan berubah.
+        let root = dir.to_path_buf();
+        let candidates = present.clone();
+        let task = tokio::task::spawn_blocking(move || {
+            candidates
+                .into_iter()
+                .partition::<Vec<String>, _>(|rel| plain_regular_file(&root, rel))
+        });
+        let (plain, odd) = match tokio::time::timeout(HASH_TIMEOUT, task).await {
+            Ok(Ok(split)) => split,
+            Ok(Err(e)) => return Err(GitError::Io(format!("listing task failed: {e}"))),
+            Err(_) => return Err(GitError::Io("listing the folder took too long".to_owned())),
+        };
+        let mut changed: Vec<String> = odd;
         if !plain.is_empty() {
             let input = plain.iter().fold(String::new(), |mut acc, p| {
                 acc.push_str(p);
@@ -133,7 +145,7 @@ impl Git {
                 .stdout;
             for (path, hash) in plain.iter().zip(hashes.lines()) {
                 if head.get(path.as_str()).map(String::as_str) != Some(hash.trim()) {
-                    changed.push((*path).clone());
+                    changed.push(path.clone());
                 }
             }
         }
@@ -180,6 +192,14 @@ impl Git {
             Err(_) => Err(GitError::Io("listing the folder took too long".to_owned())),
         }
     }
+}
+
+/// Berkas biasa (bukan symlink atau berkas khusus) dengan path tanpa kutip,
+/// garis miring terbalik, atau karakter kontrol.
+fn plain_regular_file(root: &Path, rel: &str) -> bool {
+    let plain_path =
+        !rel.starts_with('"') && !rel.chars().any(|c| c == '"' || c == '\\' || c.is_control());
+    plain_path && std::fs::symlink_metadata(root.join(rel)).is_ok_and(|m| m.file_type().is_file())
 }
 
 async fn is_git_dir(dir: &Path) -> bool {
@@ -422,5 +442,25 @@ mod tests {
             !marker.exists(),
             "diff eksternal, textconv, dan filter repo tidak boleh jalan"
         );
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn symlink_dan_path_ganjil_dilaporkan_berubah_tanpa_dibaca() {
+        let dir = tempfile::tempdir().unwrap();
+        let repo = dir.path().join("proto");
+        std::fs::create_dir(&repo).unwrap();
+        sh(&repo, &["init", "-q", "-b", "prototype"]);
+        std::fs::write(repo.join("page.tsx"), "a").unwrap();
+        sh(&repo, &["add", "-A"]);
+        sh(&repo, &["commit", "-qm", "awal"]);
+        let g = git(dir.path());
+        let a = g.folder_revision(&repo).await.unwrap();
+        std::os::unix::fs::symlink("/etc/passwd", repo.join("link")).unwrap();
+        std::fs::write(repo.join("\"kutip\".tsx"), "x").unwrap();
+        let changes = g.folder_changes(&repo, &a).await.unwrap();
+        assert!(changes.contains(&"link".to_owned()), "{changes:?}");
+        assert!(changes.contains(&"\"kutip\".tsx".to_owned()), "{changes:?}");
+        assert!(!changes.contains(&"page.tsx".to_owned()), "{changes:?}");
     }
 }

@@ -148,7 +148,7 @@ pub enum PrototypeUrlError {
     #[error("The prototype URL must use the prototype's port")]
     PortMismatch,
     #[error(
-        "The prototype URL must use a different host from the app URL (for example 127.0.0.1 when the app uses localhost), so the app's login cookies are not sent to the prototype"
+        "The prototype URL must use a different host from the app URL (for example 127.0.0.1 when the app uses localhost or a *.localhost name), so the app's login cookies are not sent to the prototype"
     )]
     SameHostAsApp,
 }
@@ -173,7 +173,7 @@ pub fn check_prototype_url(
     if app_urls
         .iter()
         .filter_map(|u| host_port(u))
-        .any(|(h, _)| h == host)
+        .any(|(h, _)| cookie_site(&h) == cookie_site(&host))
     {
         return Err(PrototypeUrlError::SameHostAsApp);
     }
@@ -187,8 +187,26 @@ fn host_port(url: &str) -> Option<(String, u16)> {
     Some((host.to_owned(), port.parse().ok()?))
 }
 
+/// `localhost` dan subdomainnya (`*.localhost`, RFC 6761) selalu loopback.
+fn is_localhost_name(host: &str) -> bool {
+    host == "localhost"
+        || host
+            .strip_suffix(".localhost")
+            .is_some_and(|sub| !sub.is_empty() && !sub.starts_with('.'))
+}
+
 fn is_loopback(host: &str) -> bool {
-    host == "localhost" || host == "[::1]" || host.starts_with("127.")
+    is_localhost_name(host) || host == "[::1]" || host.starts_with("127.")
+}
+
+/// Host yang bisa berbagi cookie: seluruh keluarga `localhost` dianggap satu,
+/// karena cookie ber-`Domain=localhost` bisa terkirim ke subdomainnya.
+fn cookie_site(host: &str) -> &str {
+    if is_localhost_name(host) {
+        "localhost"
+    } else {
+        host
+    }
 }
 
 /// Lockfile yang menentukan kapan perintah setup perlu dijalankan ulang.
@@ -454,6 +472,41 @@ mod tests {
         );
         assert_eq!(
             check_prototype_url("bukan-url", 3001, &apps),
+            Err(PrototypeUrlError::NotLoopback)
+        );
+    }
+
+    #[test]
+    fn subdomain_localhost_dianggap_lokal_dan_sekeluarga_dengan_localhost() {
+        // App multi-tenant memakai subdomain `*.localhost` (selalu loopback).
+        let apps = ["http://stagingintegro.localhost:3000".to_owned()];
+        assert_eq!(
+            check_prototype_url("http://127.0.0.1:3001", 3001, &apps),
+            Ok(())
+        );
+        assert_eq!(
+            check_prototype_url("http://mock.localhost:3001", 3001, &apps),
+            Err(PrototypeUrlError::SameHostAsApp),
+            "cookie bisa berbagi domain localhost, jadi keluarga localhost ditolak"
+        );
+        assert_eq!(
+            check_prototype_url(
+                "http://mock.localhost:3001",
+                3001,
+                &["http://localhost:3000".to_owned()]
+            ),
+            Err(PrototypeUrlError::SameHostAsApp)
+        );
+        assert_eq!(
+            check_prototype_url(
+                "http://mock.localhost:3001",
+                3001,
+                &["http://127.0.0.1:3000".to_owned()]
+            ),
+            Ok(())
+        );
+        assert_eq!(
+            check_prototype_url("http://localhost.example.com:3001", 3001, &apps),
             Err(PrototypeUrlError::NotLoopback)
         );
     }

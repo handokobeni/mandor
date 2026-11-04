@@ -155,8 +155,9 @@ export function validateRepoApp(f: RepoAppForm): RepoAppErrors {
   if (!portOk) errors.port = 'Use a port between 1024 and 65535.';
   const url = f.appUrl.trim();
   if (url) {
-    const m = /^https?:\/\/(localhost|127\.0\.0\.1)(?::(\d+))?\/?$/.exec(url);
-    if (!m) errors.appUrl = 'Use http://localhost:<port> or http://127.0.0.1:<port>.';
+    // `*.localhost` (mis. tenant `acme.localhost`) selalu loopback, untuk app multi-tenant per domain.
+    const m = /^https?:\/\/((?:[a-z0-9-]+\.)*localhost|127\.0\.0\.1)(?::(\d+))?\/?$/i.exec(url);
+    if (!m) errors.appUrl = 'Use http://localhost:<port>, http://<name>.localhost:<port> or http://127.0.0.1:<port>.';
     else if (portOk && m[2] && Number(m[2]) !== port) errors.appUrl = 'The app URL must use the same port.';
   }
   const bad = f.envKeys.find((k) => !ENV_KEY.test(k));

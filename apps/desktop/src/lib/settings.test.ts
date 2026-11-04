@@ -122,6 +122,10 @@ describe('validasi app repo', () => {
     expect(validateRepoApp({ ...base, appUrl: 'http://example.com:5173' }).appUrl).toBeDefined();
     expect(validateRepoApp({ ...base, appUrl: 'http://localhost:3000' }).appUrl).toBe('The app URL must use the same port.');
     expect(validateRepoApp({ ...base, appUrl: 'http://127.0.0.1:5173' })).toEqual({});
+    expect(validateRepoApp({ ...base, appUrl: 'http://stagingintegro.localhost:5173' })).toEqual({});
+    expect(validateRepoApp({ ...base, appUrl: 'http://a-b.c1.localhost:5173/' })).toEqual({});
+    expect(validateRepoApp({ ...base, appUrl: 'http://localhost.example.com:5173' }).appUrl).toBeDefined();
+    expect(validateRepoApp({ ...base, appUrl: 'http://.localhost:5173' }).appUrl).toBeDefined();
     expect(validateRepoApp({ ...base, envKeys: ['MY-KEY'] }).envKeys).toContain('MY-KEY');
     expect(validateRepoApp({ ...base, testMode: 'no_app', startCommand: '' })).toEqual({});
   });

@@ -112,7 +112,7 @@
           </Field>
           <Field id="ds-url" label="URL (optional)" error={appErrors.appUrl}>
             <Input id="ds-url" class="mono" placeholder="http://127.0.0.1:3001" bind:value={app.appUrl} />
-            {#snippet help()}Use a different host from the app (127.0.0.1 when the app uses localhost).{/snippet}
+            {#snippet help()}Use a different host from the app (127.0.0.1 when the app uses localhost or a *.localhost name).{/snippet}
           </Field>
         </div>
         <div class="field">

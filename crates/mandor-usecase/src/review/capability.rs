@@ -12,7 +12,7 @@ use secrecy::{ExposeSecret, SecretString};
 
 use crate::ports::{Deps, Ids};
 use crate::run::RunService;
-use crate::run_ports::{AppRecord, AppRecords, LedgerStore};
+use crate::run_ports::{AgentPort, AppRecord, AppRecords, LedgerStore, RunStore};
 
 /// Batas panjang bukti reviewer per AC.
 const EVIDENCE_MAX: usize = 2_000;
@@ -303,6 +303,9 @@ impl<D: Deps> RunService<D> {
         if rows.iter().any(|r| r.ac_id == ac_id && !r.compares_look()) {
             return Err(LedgerToolError::NotAllowed("ac not in the design"));
         }
+        let screenshots = self
+            .keep_screenshots(&scope.run_id, ac_id, &report.screenshots)
+            .await;
         self.update_row(&scope.run_id, ac_id, |r| {
             r.visual = result;
             let d = &mut r.visual_detail;
@@ -314,9 +317,51 @@ impl<D: Deps> RunService<D> {
             d.app_path = report.app_path;
             d.prototype_path = report.prototype_path;
             d.prototype_rev = Some(rev);
-            d.screenshots = report.screenshots;
+            d.screenshots = screenshots;
         })
         .await
+    }
+
+    /// Salinan screenshot reviewer untuk run VM; laptop tidak menyimpannya
+    /// (R21). Salinan yang gagal hanya dicatat; hasil tampilan tetap disimpan.
+    async fn keep_screenshots(&self, run_id: &str, ac_id: &str, names: &[String]) -> Vec<String> {
+        if names.is_empty() || !self.is_vm() {
+            return Vec::new();
+        }
+        let review_id = match self.runs.get(run_id).await {
+            Ok(Some(run)) => run.review_id.unwrap_or_default(),
+            _ => return Vec::new(),
+        };
+        match self
+            .agent
+            .keep_screenshots(&review_id, run_id, ac_id, names)
+            .await
+        {
+            Ok(kept) => kept,
+            Err(e) => {
+                tracing::warn!(run_id, ac_id, error = %e, "screenshot tampilan tidak disimpan");
+                Vec::new()
+            }
+        }
+    }
+
+    /// Isi screenshot ke-`index` hasil tampilan baris `ac_id` (run VM).
+    ///
+    /// # Errors
+    /// Baris atau screenshot tidak ada, atau berkas tidak terbaca.
+    pub async fn visual_screenshot(
+        &self,
+        run_id: &str,
+        ac_id: &str,
+        index: usize,
+    ) -> Result<Vec<u8>, crate::RunError> {
+        let rows = self.reviews.ac_rows(run_id).await?;
+        let name = rows
+            .iter()
+            .find(|r| r.ac_id == ac_id)
+            .and_then(|r| r.visual_detail.screenshots.get(index).cloned())
+            .ok_or(crate::RunError::NotFound("screenshot"))?;
+        Ok(self.agent.screenshot(run_id, &name).await?)
     }
 
     async fn update_row(

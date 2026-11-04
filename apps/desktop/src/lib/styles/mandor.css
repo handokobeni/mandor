@@ -588,6 +588,8 @@ button.notif-item { width: 100%; border-left: 0; border-right: 0; border-top: 0;
 .ac-v { flex-direction: column; align-items: flex-start; gap: 4px; }
 .ev-links { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 8px; }
 .ev-links .mono { font-size: var(--text-xs); overflow-wrap: anywhere; }
+.ev-shots { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 8px; }
+.ev-shots img { width: 100%; height: auto; border: 1px solid var(--border); border-radius: var(--radius-sm); }
 .ac-id { flex-wrap: wrap; align-content: center; gap: 4px; }
 .ac-id .mono { font-size: var(--text-sm); font-weight: 500; }
 .ac-txt { line-height: 1.45; padding-top: 2px; }

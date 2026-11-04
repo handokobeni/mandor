@@ -7,6 +7,7 @@ import type { LedgerRowsEvent } from '#lib/protocol/LedgerRowsEvent.ts';
 import type { ReviewView } from '#lib/protocol/ReviewView.ts';
 import type { RunEventView } from '#lib/protocol/RunEventView.ts';
 import type { Rpc } from '#lib/rpc.ts';
+import type { VisualScreenshotView } from '#lib/protocol/VisualScreenshotView.ts';
 
 export class LedgerStore {
   ledger = $state<AcLedgerView | null>(null);
@@ -56,6 +57,17 @@ export class LedgerStore {
     } catch (err) {
       this.error = err instanceof Error ? err.message : String(err);
     }
+  }
+
+  /** Screenshot hasil tampilan baris (run VM) sebagai data URL. */
+  async screenshot(acId: string, index: number): Promise<string> {
+    if (!this.rpc || !this.runId) throw new Error('No run attached');
+    const view = await this.rpc.request<VisualScreenshotView>('review.screenshot', {
+      run_id: this.runId,
+      ac_id: acId,
+      index
+    });
+    return view.data_url;
   }
 
   async loadHistory(): Promise<void> {

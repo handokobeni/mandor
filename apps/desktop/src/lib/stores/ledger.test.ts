@@ -85,3 +85,21 @@ describe('buku AC', () => {
     expect(rpc.handlers.size).toBe(0);
   });
 });
+
+describe('screenshot hasil tampilan (plan 2026-11-03-002, U7)', () => {
+  it('requests a screenshot of the attached run and returns its data URL', async () => {
+    const calls: [string, unknown][] = [];
+    const rpc = {
+      request: async (method: string, params: unknown) => {
+        calls.push([method, params]);
+        if (method === 'review.screenshot') return { data_url: 'data:image/png;base64,AA==' };
+        return method === 'review.history' ? [] : { run_id: 'r1', rows: [], synced_at_ms: null, sync_error: null, design_sources: [], gate_mode: 'block' };
+      },
+      on: () => () => {}
+    } as unknown as Rpc;
+    const store = new LedgerStore();
+    store.attach(rpc, 'r1');
+    expect(await store.screenshot('ac1', 1)).toBe('data:image/png;base64,AA==');
+    expect(calls.find(([m]) => m === 'review.screenshot')?.[1]).toEqual({ run_id: 'r1', ac_id: 'ac1', index: 1 });
+  });
+});

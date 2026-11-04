@@ -427,7 +427,14 @@ pub struct FakeAgent {
     pub ended_reviews: Arc<Mutex<Vec<String>>>,
     /// Login Claude tidak valid (plan VM U3).
     pub logged_out: Arc<Mutex<bool>>,
+    /// Screenshot yang disalin.
+    pub kept: Arc<Mutex<Vec<KeptShots>>>,
+    /// Run yang salinan screenshot-nya dihapus.
+    pub forgotten: Arc<Mutex<Vec<String>>>,
 }
+
+/// Screenshot yang disalin fake agent: (review, run, ac, nama asal).
+pub type KeptShots = (String, String, String, Vec<String>);
 
 /// Salinan [`PrContext`] yang diterima fake agent.
 #[derive(Debug, Clone)]
@@ -499,6 +506,37 @@ impl AgentPort for FakeAgent {
             .lock()
             .unwrap()
             .push(review_id.to_owned());
+    }
+
+    async fn keep_screenshots(
+        &self,
+        review_id: &str,
+        run_id: &str,
+        ac_id: &str,
+        names: &[String],
+    ) -> Result<Vec<String>, PortError> {
+        if names.iter().any(|n| n.contains("besar")) {
+            return Err(PortError::Rejected(
+                "besar.png: larger than 5 MB".to_owned(),
+            ));
+        }
+        self.kept.lock().unwrap().push((
+            review_id.to_owned(),
+            run_id.to_owned(),
+            ac_id.to_owned(),
+            names.to_vec(),
+        ));
+        Ok((0..names.len())
+            .map(|i| format!("{ac_id}-{i}.png"))
+            .collect())
+    }
+
+    async fn screenshot(&self, run_id: &str, name: &str) -> Result<Vec<u8>, PortError> {
+        Ok(format!("{run_id}/{name}").into_bytes())
+    }
+
+    async fn forget_run(&self, run_id: &str) {
+        self.forgotten.lock().unwrap().push(run_id.to_owned());
     }
 }
 

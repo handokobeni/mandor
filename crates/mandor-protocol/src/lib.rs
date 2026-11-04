@@ -41,6 +41,9 @@ pub mod method {
     pub const LEDGER_TOOL_SET_VERDICT: &str = "ledger.tool.set_verdict";
     /// Koneksi kapabilitas, peran verdict: `LedgerToolSetVisual`.
     pub const LEDGER_TOOL_SET_VISUAL: &str = "ledger.tool.set_visual";
+    /// Screenshot hasil tampilan run VM (`VisualScreenshotParams` →
+    /// `VisualScreenshotView`).
+    pub const REVIEW_SCREENSHOT: &str = "review.screenshot";
     /// Kesiapan uji browser (`RunRef` → `ReviewReadinessView`).
     pub const REVIEW_READINESS: &str = "review.readiness";
     /// Cek ekstensi Claude in Chrome (`ChromeCheckParams` → `ChromeCheckView`).
@@ -333,6 +336,14 @@ fn prototype_bindings() -> Result<Vec<(&'static str, String)>, String> {
         one(
             "VisualDetailView.ts",
             VisualDetailView::export_to_string(&cfg),
+        )?,
+        one(
+            "VisualScreenshotParams.ts",
+            VisualScreenshotParams::export_to_string(&cfg),
+        )?,
+        one(
+            "VisualScreenshotView.ts",
+            VisualScreenshotView::export_to_string(&cfg),
         )?,
         one(
             "PrototypeRevisionView.ts",

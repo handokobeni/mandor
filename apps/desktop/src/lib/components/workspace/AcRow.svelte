@@ -35,6 +35,8 @@
     onfile: (path: string) => void;
     /** URL app dan prototype yang menyala, untuk link halaman yang dibandingkan. */
     urls?: { app: string | null; prototype: string | null };
+    /** Memuat screenshot hasil tampilan (run VM) sebagai data URL. */
+    onscreenshot?: (index: number) => Promise<string>;
   }
   let {
     row,
@@ -49,8 +51,20 @@
     onfocus,
     onkey,
     onfile,
-    urls = { app: null, prototype: null }
+    urls = { app: null, prototype: null },
+    onscreenshot
   }: Props = $props();
+
+  let shots = $state<string[] | null>(null);
+  let shotError = $state<string | null>(null);
+  async function loadShots(): Promise<void> {
+    if (!onscreenshot) return;
+    try {
+      shots = await Promise.all(row.visual_detail.screenshots.map((_, i) => onscreenshot(i)));
+    } catch (err) {
+      shotError = err instanceof Error ? err.message : String(err);
+    }
+  }
 
   let el = $state<HTMLDivElement | null>(null);
   $effect(() => {
@@ -162,6 +176,22 @@
             <p>By {row.visual_detail.decided_by}{#if row.visual_detail.decision_reason}: {row.visual_detail.decision_reason}{/if}</p>
           {/if}
           {#if row.visual_detail.description}<p class="ev-text">{row.visual_detail.description}</p>{/if}
+          {#if row.visual_detail.screenshots.length > 0 && onscreenshot}
+            {#if shots}
+              <div class="ev-shots">
+                {#each shots as src, i (i)}<img {src} alt="Screenshot {i + 1} of {label(row)}" />{/each}
+              </div>
+            {:else}
+              <p>
+                <button type="button" class="link" onclick={() => void loadShots()}
+                  >Show {row.visual_detail.screenshots.length} screenshot{row.visual_detail.screenshots.length === 1
+                    ? ''
+                    : 's'}</button
+                >
+                {#if shotError}<span class="field-error">{shotError}</span>{/if}
+              </p>
+            {/if}
+          {/if}
           {#if row.visual_detail.app_path || row.visual_detail.prototype_path}
             <p class="ev-links">
               {#if links.app}<a href={links.app} target="_blank" rel="noopener noreferrer">App page</a>{:else if row.visual_detail.app_path}<span

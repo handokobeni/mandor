@@ -964,6 +964,20 @@ pub struct VisualDetailView {
     pub decided_by: Option<String>,
 }
 
+/// Parameter `review.screenshot`: screenshot ke-`index` baris AC.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+pub struct VisualScreenshotParams {
+    pub run_id: String,
+    pub ac_id: String,
+    pub index: u32,
+}
+
+/// Screenshot sebagai data URL gambar.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+pub struct VisualScreenshotView {
+    pub data_url: String,
+}
+
 /// Satu baris buku AC (Rilis 2).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
 pub struct AcRowView {

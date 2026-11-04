@@ -285,6 +285,7 @@
           onkey={(e) => onkey(e, r)}
           {onfile}
           {urls}
+          onscreenshot={(i) => store.screenshot(r.ac_id, i)}
         />
       {/each}
       {#each removed as r (r.ac_id)}

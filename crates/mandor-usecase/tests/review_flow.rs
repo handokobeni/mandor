@@ -915,3 +915,59 @@ async fn covers_ae14_prototype_berubah_membuat_hasil_review_usang() {
         mandor_usecase::run::PublishOutcome::ReviewStarted { .. }
     ));
 }
+
+/// Plan 2026-11-03-002, U7/R21/R26: run VM menyimpan salinan screenshot,
+/// berkas yang ditolak tidak menggagalkan hasil, dan salinan dihapus saat
+/// run ditutup.
+#[tokio::test(flavor = "multi_thread")]
+async fn covers_ae15_screenshot_vm_disimpan_lalu_dihapus_saat_run_ditutup() {
+    use mandor_domain::Design;
+    use mandor_domain::ac_ledger::Visual;
+    use mandor_usecase::run_ports::LedgerStore as _;
+    let (_lark, _clock, st, run) =
+        vm_review(async |st| vm_prototype(st, Some("git:a"), "git:a")).await;
+    let mut rows = st.svc.ledger(&run).await.unwrap();
+    rows[0].design = Design::InDesign;
+    st.reviews.save_ac_rows(&run, &rows).await.unwrap();
+    let token = st.agent.last().req.ledger.unwrap().token;
+    let scope = st.svc.verify_capability(token.expose()).unwrap();
+    let report = |shots: &[&str]| mandor_usecase::review::VisualReport {
+        description: Some("beda".to_owned()),
+        app_path: Some("/a".to_owned()),
+        prototype_path: Some("/a".to_owned()),
+        screenshots: shots.iter().map(|s| (*s).to_owned()).collect(),
+    };
+    let rows = st
+        .svc
+        .ledger_set_visual(
+            &scope,
+            "ac1",
+            Visual::Differs,
+            report(&["app.png", "proto.png"]),
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        rows[0].visual_detail.screenshots,
+        ["ac1-0.png", "ac1-1.png"]
+    );
+    let review_id = st.runs.only().review_id.unwrap();
+    assert_eq!(st.agent.kept.lock().unwrap()[0].0, review_id);
+    assert_eq!(
+        st.svc.visual_screenshot(&run, "ac1", 1).await.unwrap(),
+        format!("{run}/ac1-1.png").into_bytes()
+    );
+    assert!(st.svc.visual_screenshot(&run, "ac1", 2).await.is_err());
+    assert!(st.svc.visual_screenshot(&run, "ac2", 0).await.is_err());
+
+    let rows = st
+        .svc
+        .ledger_set_visual(&scope, "ac1", Visual::Differs, report(&["besar.png"]))
+        .await
+        .unwrap();
+    assert_eq!(rows[0].visual, Visual::Differs, "hasil tetap tersimpan");
+    assert!(rows[0].visual_detail.screenshots.is_empty());
+
+    st.svc.close_run(&run).await.unwrap();
+    assert_eq!(*st.agent.forgotten.lock().unwrap(), [run]);
+}

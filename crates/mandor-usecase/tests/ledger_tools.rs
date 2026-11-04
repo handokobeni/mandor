@@ -523,3 +523,21 @@ async fn covers_ae7_tanpa_prototype_menyala_tampilan_tidak_bisa_dicatat() {
         Err(LedgerToolError::NotAllowed(_))
     ));
 }
+
+/// Plan 2026-11-03-002, U7: screenshot hanya disalin untuk run VM.
+#[tokio::test]
+async fn screenshot_laptop_diabaikan() {
+    use mandor_domain::ac_ledger::Visual;
+    let (_lark, _clock, st, run) = visual_run(true).await;
+    let token = st.svc.issue_capability(&run, CapabilityRole::Verdict);
+    let scope = st.svc.verify_capability(token.expose()).unwrap();
+    let mut r = report("/jabatan");
+    r.screenshots = vec!["app.png".to_owned()];
+    let rows = st
+        .svc
+        .ledger_set_visual(&scope, "ac1", Visual::Differs, r)
+        .await
+        .unwrap();
+    assert!(rows[0].visual_detail.screenshots.is_empty());
+    assert!(st.agent.kept.lock().unwrap().is_empty());
+}

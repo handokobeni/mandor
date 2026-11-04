@@ -459,16 +459,7 @@ impl ClaudeAgent {
             req.review.as_ref().filter(|r| r.browser),
             &self.cfg.headless_browser,
         ) {
-            // Direktori run bisa ditulis user agent (grup developer); tanpa
-            // runner, folder MCP daemon.
-            let base = self
-                .cfg
-                .runner
-                .as_ref()
-                .map_or_else(|| self.cfg.mcp_dir.clone(), |r| r.run_dir.clone());
-            let output = base
-                .join("playwright")
-                .join(wt_key(Path::new(&review.review_id)));
+            let output = self.review_output_dir(&review.review_id);
             picked.insert(
                 PLAYWRIGHT_SERVER_NAME.to_owned(),
                 playwright_server(bin, &review.origins, &output),
@@ -745,6 +736,24 @@ impl AgentRunHandle for ClaudeRun {
     }
 }
 
+impl ClaudeAgent {
+    /// Folder output Playwright satu review. Direktori run bisa ditulis user
+    /// agent (grup developer); tanpa runner, folder MCP daemon.
+    fn review_output_dir(&self, review_id: &str) -> PathBuf {
+        let base = self
+            .cfg
+            .runner
+            .as_ref()
+            .map_or_else(|| self.cfg.mcp_dir.clone(), |r| r.run_dir.clone());
+        base.join("playwright").join(wt_key(Path::new(review_id)))
+    }
+
+    /// Folder salinan screenshot run di simpanan daemon.
+    fn screens_dir(&self, run_id: &str) -> PathBuf {
+        crate::screens::run_dir(&self.cfg.review_dir, &wt_key(Path::new(run_id)))
+    }
+}
+
 impl AgentPort for ClaudeAgent {
     type Run = ClaudeRun;
 
@@ -790,6 +799,58 @@ impl AgentPort for ClaudeAgent {
         });
         if tokio::time::timeout(FILE_TIMEOUT, cleanup).await.is_err() {
             tracing::warn!(review_id, "berkas review tidak terhapus tepat waktu");
+        }
+    }
+
+    async fn keep_screenshots(
+        &self,
+        review_id: &str,
+        run_id: &str,
+        ac_id: &str,
+        names: &[String],
+    ) -> Result<Vec<String>, PortError> {
+        if self.cfg.headless_browser.is_none() || names.is_empty() {
+            return Ok(Vec::new());
+        }
+        let from = self.review_output_dir(review_id);
+        let to = self.screens_dir(run_id);
+        let prefix = wt_key(Path::new(ac_id));
+        let names = names.to_vec();
+        let task =
+            tokio::task::spawn_blocking(move || crate::screens::keep(&from, &to, &prefix, &names));
+        match tokio::time::timeout(SCREENS_TIMEOUT, task).await {
+            Ok(Ok(result)) => result.map_err(PortError::Rejected),
+            Ok(Err(e)) => Err(PortError::Storage(e.to_string())),
+            Err(_) => Err(PortError::Transient(
+                "copying screenshots took too long".to_owned(),
+            )),
+        }
+    }
+
+    async fn screenshot(&self, run_id: &str, name: &str) -> Result<Vec<u8>, PortError> {
+        let dir = self.screens_dir(run_id);
+        let name = name.to_owned();
+        let task = tokio::task::spawn_blocking(move || crate::screens::read_checked(&dir, &name));
+        match tokio::time::timeout(FILE_TIMEOUT, task).await {
+            Ok(Ok(result)) => result.map_err(PortError::Rejected),
+            Ok(Err(e)) => Err(PortError::Storage(e.to_string())),
+            Err(_) => Err(PortError::Transient(
+                "reading the screenshot took too long".to_owned(),
+            )),
+        }
+    }
+
+    async fn forget_run(&self, run_id: &str) {
+        let dir = self.screens_dir(run_id);
+        let task = tokio::task::spawn_blocking(move || match std::fs::remove_dir_all(&dir) {
+            Err(e) if e.kind() != std::io::ErrorKind::NotFound => Err(e),
+            _ => Ok(()),
+        });
+        match tokio::time::timeout(FILE_TIMEOUT, task).await {
+            Ok(Ok(Ok(()))) => {}
+            Ok(Ok(Err(e))) => tracing::warn!(run_id, error = %e, "screenshot run tidak terhapus"),
+            Ok(Err(e)) => tracing::warn!(run_id, error = %e, "penghapusan screenshot gagal"),
+            Err(_) => tracing::warn!(run_id, "penghapusan screenshot melewati batas waktu"),
         }
     }
 
@@ -999,6 +1060,8 @@ pub fn chrome_check_result(stdout: &str, stderr: &str) -> ChromeCheck {
 const REVIEW_WRITE_TOOLS: &[&str] = &["Edit", "Write", "MultiEdit", "NotebookEdit"];
 /// Batas waktu menulis atau menghapus berkas state review.
 const FILE_TIMEOUT: Duration = Duration::from_secs(5);
+/// Batas waktu menyalin screenshot satu baris AC.
+const SCREENS_TIMEOUT: Duration = Duration::from_secs(30);
 /// Batas `agent-exec --reap` (termasuk jeda TERM→KILL).
 const REAP_TIMEOUT: Duration = Duration::from_secs(20);
 /// Batas `claude auth status`.
@@ -1658,5 +1721,46 @@ mod tests {
             "feat: a\n\nbody"
         );
         assert_eq!(clean_message("  \n"), "");
+    }
+
+    /// Plan 2026-11-03-002, U7: salinan screenshot VM dari folder output
+    /// review, dibaca ulang, lalu dihapus bersama run; laptop tidak menyalin.
+    #[tokio::test]
+    async fn screenshot_review_vm_disalin_dibaca_dan_dihapus() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut cfg = test_agent(dir.path().join("mcp")).cfg;
+        cfg.review_dir = dir.path().join("reviews");
+        let laptop = ClaudeAgent::new(cfg.clone());
+        let names = ["app.png".to_owned()];
+        assert!(
+            laptop
+                .keep_screenshots("rv1", "run1", "ac1", &names)
+                .await
+                .unwrap()
+                .is_empty()
+        );
+
+        cfg.headless_browser = Some("/usr/local/bin/mcp-server-playwright".into());
+        let vm = ClaudeAgent::new(cfg);
+        let out = vm.review_output_dir("rv1");
+        std::fs::create_dir_all(&out).unwrap();
+        let mut png = b"\x89PNG\r\n\x1a\n".to_vec();
+        png.extend_from_slice(b"isi");
+        std::fs::write(out.join("app.png"), &png).unwrap();
+        let kept = vm
+            .keep_screenshots("rv1", "run1", "ac1", &names)
+            .await
+            .unwrap();
+        assert_eq!(kept, ["ac1-0.png"]);
+        assert_eq!(vm.screenshot("run1", "ac1-0.png").await.unwrap(), png);
+        assert!(vm.screenshot("run1", "../reviews/x.png").await.is_err());
+        assert!(
+            vm.keep_screenshots("rv1", "run1", "ac1", &["../../x.png".to_owned()])
+                .await
+                .is_err()
+        );
+        vm.forget_run("run1").await;
+        assert!(vm.screenshot("run1", "ac1-0.png").await.is_err());
+        vm.forget_run("run1").await;
     }
 }

@@ -29,13 +29,12 @@ pub(super) enum LedgerTool {
         verdict: Verdict,
         evidence: Option<String>,
     },
-    /// `screenshots`: nama berkas dari reviewer, diperiksa sebelum disalin
-    /// (run VM, KTD-P8); `report.screenshots` diisi salinan yang sah.
+    /// `report.screenshots`: nama berkas dari reviewer; adapter agent
+    /// memeriksanya sebelum disalin (run VM, KTD-P8).
     SetVisual {
         ac_id: String,
         result: mandor_domain::ac_ledger::Visual,
         report: mandor_usecase::review::VisualReport,
-        screenshots: Vec<String>,
     },
 }
 
@@ -74,9 +73,8 @@ pub(super) fn ledger_tool(name: &str, v: Value) -> Result<LedgerTool, RpcError> 
                     description: p.description,
                     app_path: p.app_path,
                     prototype_path: p.prototype_path,
-                    screenshots: Vec::new(),
+                    screenshots: p.screenshots,
                 },
-                screenshots: p.screenshots,
             })
         }
         other => Err(RpcError::new(
@@ -84,6 +82,35 @@ pub(super) fn ledger_tool(name: &str, v: Value) -> Result<LedgerTool, RpcError> 
             format!("{other} is not available on this connection"),
         )),
     }
+}
+
+/// `review.screenshot`: screenshot hasil tampilan run VM sebagai data URL.
+async fn screenshot_call(s: &crate::session::LarkSession, v: Value) -> Result<Value, RpcError> {
+    let p: mandor_protocol::VisualScreenshotParams = params(v)?;
+    let index = usize::try_from(p.index).unwrap_or(usize::MAX);
+    let bytes = s
+        .runs
+        .visual_screenshot(&p.run_id, &p.ac_id, index)
+        .await
+        .map_err(run_error)?;
+    ok(&mandor_protocol::VisualScreenshotView {
+        data_url: data_url(&bytes),
+    })
+}
+
+/// Gambar sebagai data URL; jenis dari magic bytes (salinan sudah diperiksa
+/// adapter agent).
+fn data_url(bytes: &[u8]) -> String {
+    use base64::Engine;
+    let mime = if bytes.starts_with(b"\x89PNG") {
+        "image/png"
+    } else {
+        "image/jpeg"
+    };
+    format!(
+        "data:{mime};base64,{}",
+        base64::engine::general_purpose::STANDARD.encode(bytes)
+    )
 }
 
 fn invalid(field: &str, value: &str) -> RpcError {
@@ -258,7 +285,6 @@ impl AppDispatch {
                 ac_id,
                 result,
                 report,
-                screenshots: _,
             } => {
                 s.runs
                     .ledger_set_visual(&scope, &ac_id, result, report)
@@ -327,6 +353,7 @@ impl AppDispatch {
             method::REVIEW_SEND_FINDINGS,
             method::SETTINGS_REVIEWER_GET,
             method::SETTINGS_REVIEWER_SET,
+            method::REVIEW_SCREENSHOT,
         ]
         .contains(&name)
     }
@@ -334,6 +361,7 @@ impl AppDispatch {
     pub(super) async fn review_call(&self, name: &str, v: Value) -> Result<Value, RpcError> {
         let s = self.session().await?;
         match name {
+            method::REVIEW_SCREENSHOT => screenshot_call(&s, v).await,
             method::LEDGER_GET => {
                 let p: RunRef = params(v)?;
                 let r = s.runs.refresh_ledger(&p.run_id).await.map_err(run_error)?;
@@ -486,7 +514,6 @@ mod tests {
                     prototype_path: Some("/b".to_owned()),
                     screenshots: Vec::new(),
                 },
-                screenshots: Vec::new(),
             }
         );
         let bad = ledger_tool(
@@ -552,5 +579,11 @@ mod tests {
         let v = ac_row_view(&r);
         assert_eq!(v.design, "follow_design");
         assert!(!v.in_gate && !v.selectable);
+    }
+
+    #[test]
+    fn screenshot_menjadi_data_url_sesuai_jenisnya() {
+        assert_eq!(data_url(b"\x89PNGx"), "data:image/png;base64,iVBOR3g=");
+        assert!(data_url(&[0xFF, 0xD8, 0xFF]).starts_with("data:image/jpeg;base64,"));
     }
 }

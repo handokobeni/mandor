@@ -304,6 +304,25 @@ pub trait AgentPort: Send + Sync {
     fn reap(&self, pid: u32) -> impl Future<Output = ()> + Send;
     /// Membersihkan berkas milik sesi reviewer (state pagar browser).
     fn end_review(&self, review_id: &str) -> impl Future<Output = ()> + Send;
+    /// Menyalin screenshot `names` dari folder output browser review ke
+    /// simpanan daemon untuk run itu (plan 2026-11-03-002, KTD-P8); hanya
+    /// berkas biasa di folder itu, dibatasi ukuran dan jenisnya. Mengembalikan
+    /// nama salinan; kosong bila review tanpa browser headless.
+    fn keep_screenshots(
+        &self,
+        review_id: &str,
+        run_id: &str,
+        ac_id: &str,
+        names: &[String],
+    ) -> impl Future<Output = Result<Vec<String>, PortError>> + Send;
+    /// Isi salinan screenshot `name` milik run.
+    fn screenshot(
+        &self,
+        run_id: &str,
+        name: &str,
+    ) -> impl Future<Output = Result<Vec<u8>, PortError>> + Send;
+    /// Menghapus salinan screenshot run (R26).
+    fn forget_run(&self, run_id: &str) -> impl Future<Output = ()> + Send;
     /// Login Claude Code yang dipakai agent masih valid (KTD-59 plan VM).
     /// Kegagalan memeriksa berarti tidak valid.
     fn logged_in(&self) -> impl Future<Output = bool> + Send;

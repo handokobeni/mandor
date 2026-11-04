@@ -366,6 +366,7 @@ impl<D: Deps> RunService<D> {
             self.discard_members(&removable, branch, root).await;
         }
         self.runs.close(run_id, self.now()).await?;
+        crate::run_ports::AgentPort::forget_run(&self.agent, run_id).await;
         Ok(())
     }
 }

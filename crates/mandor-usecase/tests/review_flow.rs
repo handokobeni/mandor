@@ -312,6 +312,7 @@ async fn covers_ae5_browser_hanya_bila_semua_syarat_kesiapan_terpenuhi() {
             url: Some("http://localhost:5173".to_owned()),
             pgid: Some(1),
             state: AppRunState::Running,
+            prototype: None,
         }],
         snapshot: [("repo1".to_owned(), "tree-lama".to_owned())].into(),
         ..AppRecord::default()
@@ -461,6 +462,7 @@ async fn app_lama(auto: bool) -> (FakeLark, FakeClock, Station, String) {
             url: Some("http://localhost:5173".to_owned()),
             pgid: Some(1),
             state: AppRunState::Running,
+            prototype: None,
         }],
         snapshot: [("repo1".to_owned(), "tree-lama".to_owned())].into(),
         login_confirmed: true,
@@ -689,4 +691,47 @@ async fn laptop_tidak_menyalakan_app_yang_belum_menyala() {
         .await
         .unwrap();
     assert!(!st.apps.calls().iter().any(|c| c.starts_with("spawn:")));
+}
+
+/// Sumber desain `d1` yang bisa dijalankan dipasang ke run VM sebelum review.
+fn vm_prototype(st: &Station, confirmed: Option<&str>, current: &str) {
+    st.design.add_prototype(
+        "d1",
+        "kelola-web-prototype",
+        AppSettings {
+            test_mode: TestMode::Web,
+            start_command: Some("pnpm dev".to_owned()),
+            port: Some(5151),
+            ..AppSettings::default()
+        },
+        confirmed,
+    );
+    st.design.set_revision("kelola-web-prototype", current);
+    let mut r = st.runs.only();
+    r.design = vec![mandor_usecase::review::DesignRoot {
+        id: "d1".to_owned(),
+        name: "kelola-web-prototype".to_owned(),
+        path: PathBuf::from("/design/kelola-web-prototype"),
+    }];
+    st.runs.insert(r);
+}
+
+/// Plan 2026-11-03-002, R28/AE15: VM hanya menyalakan prototype pada revisi
+/// yang dikonfirmasi dev.
+#[tokio::test(flavor = "multi_thread")]
+async fn covers_ae15_vm_menyalakan_prototype_hanya_pada_revisi_terkonfirmasi() {
+    let (_lark, _clock, st, _run) =
+        vm_review(async |st| vm_prototype(st, Some("git:a"), "git:a")).await;
+    assert!(
+        st.apps.calls().contains(&"spawn:prototype:d1".to_owned()),
+        "{:?}",
+        st.apps.calls()
+    );
+
+    let (_lark, _clock, st, run) =
+        vm_review(async |st| vm_prototype(st, Some("git:a"), "git:b")).await;
+    let calls = st.apps.calls();
+    assert!(calls.contains(&"spawn:repo1".to_owned()), "{calls:?}");
+    assert!(!calls.iter().any(|c| c.contains("prototype")), "{calls:?}");
+    assert_eq!(st.apps.record(&run).unwrap().members.len(), 1);
 }

@@ -1255,9 +1255,46 @@ pub struct FakeDesign {
     pub stale: Arc<Mutex<HashMap<String, String>>>,
     /// Id yang diminta diperbarui.
     pub refreshed: Arc<Mutex<Vec<String>>>,
+    /// Prototype yang bisa dijalankan per id sumber.
+    pub prototypes: Arc<Mutex<HashMap<String, mandor_usecase::review::Prototype>>>,
+    /// Revisi folder per nama sumber.
+    pub revisions: Arc<Mutex<HashMap<String, String>>>,
+    pub changes: Arc<Mutex<Vec<String>>>,
+    pub confirms: Arc<Mutex<Vec<(String, String)>>>,
 }
 
 impl FakeDesign {
+    pub fn add_prototype(
+        &self,
+        id: &str,
+        name: &str,
+        app: mandor_domain::app_run::AppSettings,
+        confirmed: Option<&str>,
+    ) {
+        self.add(id, name);
+        self.prototypes.lock().unwrap().insert(
+            id.to_owned(),
+            mandor_usecase::review::Prototype {
+                id: id.to_owned(),
+                name: name.to_owned(),
+                path: PathBuf::from(format!("/design/{name}")),
+                app,
+                confirmed: confirmed.map(str::to_owned),
+            },
+        );
+    }
+    pub fn set_revision(&self, name: &str, rev: &str) {
+        self.revisions
+            .lock()
+            .unwrap()
+            .insert(name.to_owned(), rev.to_owned());
+    }
+    pub fn set_changes(&self, files: &[&str]) {
+        *self.changes.lock().unwrap() = files.iter().map(|f| (*f).to_owned()).collect();
+    }
+    pub fn confirmed(&self) -> Vec<(String, String)> {
+        self.confirms.lock().unwrap().clone()
+    }
     pub fn add(&self, id: &str, name: &str) {
         self.sources
             .lock()
@@ -1296,6 +1333,41 @@ impl mandor_usecase::review::DesignSources for FakeDesign {
             });
         }
         Ok(out)
+    }
+
+    async fn prototype(
+        &self,
+        id: &str,
+    ) -> Result<Option<mandor_usecase::review::Prototype>, PortError> {
+        Ok(self.prototypes.lock().unwrap().get(id).cloned())
+    }
+
+    async fn revision(&self, path: &Path) -> Result<String, PortError> {
+        let name = path
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_default();
+        self.revisions
+            .lock()
+            .unwrap()
+            .get(&name)
+            .cloned()
+            .ok_or_else(|| PortError::Transient("no revision".to_owned()))
+    }
+
+    async fn changes_since(&self, _path: &Path, _from: &str) -> Result<Vec<String>, PortError> {
+        Ok(self.changes.lock().unwrap().clone())
+    }
+
+    async fn confirm(&self, id: &str, revision: &str) -> Result<(), PortError> {
+        self.confirms
+            .lock()
+            .unwrap()
+            .push((id.to_owned(), revision.to_owned()));
+        if let Some(p) = self.prototypes.lock().unwrap().get_mut(id) {
+            p.confirmed = Some(revision.to_owned());
+        }
+        Ok(())
     }
 
     async fn ids_named(&self, names: &[String]) -> Result<Vec<String>, PortError> {

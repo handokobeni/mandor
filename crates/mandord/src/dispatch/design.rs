@@ -6,9 +6,10 @@ use std::time::Duration;
 use mandor_domain::app_run::{AppSettings, PortUse, TestMode, check_prototype_url, port_conflict};
 use mandor_protocol::{
     DesignSourceAdd, DesignSourceCheckView, DesignSourceRef, DesignSourceTest, DesignSourceUpdate,
-    DesignSourceView, RepoAppView, RpcError, method,
+    DesignSourceView, PrototypeConfirm, PrototypeRevisionView, RepoAppView, RpcError, method,
 };
 use mandor_store::DesignSourceRow;
+use mandor_usecase::review::DesignSources;
 use mandor_usecase::review::{DesignRoot, PathProbe, SourceCheck, check_source};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -29,6 +30,9 @@ struct FolderConfig {
     path: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     app: Option<Value>,
+    /// Revisi folder yang terakhir dikonfirmasi dev (R15, R28).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    confirmed_rev: Option<String>,
 }
 
 /// Memeriksa path di sistem berkas, dibatasi waktu.
@@ -70,10 +74,27 @@ pub(crate) fn prototype_app(row: &DesignSourceRow) -> Option<AppSettings> {
     Some(mandor_store::app_settings_of(&json!({ "app": app }))).filter(AppSettings::runnable)
 }
 
+/// Revisi prototype yang terakhir dikonfirmasi dev.
+pub(crate) fn confirmed_revision(row: &DesignSourceRow) -> Option<String> {
+    serde_json::from_str::<FolderConfig>(&row.config_json)
+        .ok()?
+        .confirmed_rev
+}
+
+/// Konfigurasi `row` dengan revisi terkonfirmasi `rev`.
+pub(crate) fn with_confirmed_revision(row: &DesignSourceRow, rev: &str) -> Option<String> {
+    let mut config = serde_json::from_str::<FolderConfig>(&row.config_json).ok()?;
+    config.confirmed_rev = Some(rev.to_owned());
+    serde_json::to_string(&config).ok()
+}
+
+/// Konfigurasi baru; menyimpan setelan mereset revisi terkonfirmasi sehingga
+/// dev mengonfirmasi ulang kode prototype.
 fn config_json(path: &str, app: Option<&AppSettings>) -> Result<String, RpcError> {
     serde_json::to_string(&FolderConfig {
         path: path.to_owned(),
         app: app.map(mandor_store::app_settings_json),
+        confirmed_rev: None,
     })
     .map_err(rejected)
 }
@@ -116,6 +137,8 @@ impl AppDispatch {
             method::DESIGN_SOURCES_UPDATE,
             method::DESIGN_SOURCES_REMOVE,
             method::DESIGN_SOURCES_TEST,
+            method::DESIGN_SOURCES_REVISION,
+            method::DESIGN_SOURCES_CONFIRM,
         ]
         .contains(&name)
     }
@@ -167,6 +190,28 @@ impl AppDispatch {
                     .map_err(store_error)?;
                 ok(&json!({}))
             }
+            method::DESIGN_SOURCES_REVISION => {
+                let p: DesignSourceRef = params(v)?;
+                ok(&self.prototype_revision(&p.id).await?)
+            }
+            method::DESIGN_SOURCES_CONFIRM => {
+                let p: PrototypeConfirm = params(v)?;
+                let current = self.prototype_revision(&p.id).await?;
+                if current.current != p.revision {
+                    return Err(rejected(
+                        "The prototype changed since you checked it; review the changes again",
+                    ));
+                }
+                self.design_port()
+                    .confirm(&p.id, &p.revision)
+                    .await
+                    .map_err(|e| rejected(e.to_string()))?;
+                ok(&PrototypeRevisionView {
+                    confirmed: Some(p.revision),
+                    files: Vec::new(),
+                    ..current
+                })
+            }
             method::DESIGN_SOURCES_TEST => {
                 let p: DesignSourceTest = params(v)?;
                 let status = check(p.path.trim()).await;
@@ -184,6 +229,45 @@ impl AppDispatch {
                 ok(&out)
             }
         }
+    }
+
+    /// Adapter sumber desain tanpa sesi Lark (revisi dan konfirmasi prototype).
+    fn design_port(&self) -> crate::design_port::DesignStore {
+        let mut cfg = mandor_git::GitConfig::new(self.app.cfg.workspaces_dir());
+        cfg.gh_bin.clone_from(&self.app.cfg.gh_bin);
+        cfg.distrust_repo_config = self.app.cfg.vm_agent.is_some();
+        crate::design_port::DesignStore::new(
+            self.app.store.clone(),
+            mandor_git::Git::new(cfg),
+            self.app.cfg.home.clone(),
+        )
+    }
+
+    /// Revisi prototype `id` saat ini, yang terakhir dikonfirmasi, dan berkas
+    /// yang berubah sejak itu (R15, R28).
+    async fn prototype_revision(&self, id: &str) -> Result<PrototypeRevisionView, RpcError> {
+        let port = self.design_port();
+        let p = port
+            .prototype(id)
+            .await
+            .map_err(|e| rejected(e.to_string()))?
+            .ok_or_else(|| rejected("This design source is not a runnable prototype"))?;
+        let current = port
+            .revision(&p.path)
+            .await
+            .map_err(|e| rejected(e.to_string()))?;
+        let files = match p.confirmed.as_deref() {
+            Some(from) if from != current => port
+                .changes_since(&p.path, from)
+                .await
+                .map_err(|e| rejected(e.to_string()))?,
+            _ => Vec::new(),
+        };
+        Ok(PrototypeRevisionView {
+            current,
+            confirmed: p.confirmed,
+            files,
+        })
     }
 
     /// Setelan prototype dari input dev: harus bisa dijalankan, port tidak

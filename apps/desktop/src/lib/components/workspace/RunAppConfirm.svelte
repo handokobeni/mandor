@@ -47,7 +47,7 @@
     <div class="grid gap-3" style="max-height:360px;overflow:auto">
       {#each repos as r (r.repo_id)}
         <div class="grid gap-1.5">
-          <span class="text-sm font-medium">{r.repo_id}
+          <span class="text-sm font-medium">{r.label}
             <span class="muted font-normal">· {r.files.length} changed file{r.files.length === 1 ? '' : 's'}</span></span>
           {#if r.files.length === 0}
             <span class="muted text-[length:var(--text-sm)]">No changes since the app last ran.</span>

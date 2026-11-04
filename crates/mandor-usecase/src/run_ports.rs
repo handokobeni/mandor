@@ -810,6 +810,18 @@ pub struct AppMember {
     /// Folder repo asli: sumber `.env` (tidak pernah disalin ke worktree).
     pub repo_path: PathBuf,
     pub settings: mandor_domain::app_run::AppSettings,
+    /// Sumber desain bila anggota ini prototype; `worktree` dan `repo_path`
+    /// adalah folder sumber (KTD-P3).
+    pub prototype: Option<PrototypeRef>,
+}
+
+/// Sumber desain milik anggota prototype.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PrototypeRef {
+    pub id: String,
+    pub name: String,
+    /// Revisi yang terakhir dikonfirmasi dev (R15, R28).
+    pub confirmed: Option<String>,
 }
 
 /// Proses app milik daemon (KTD-36). Satu langkah per panggilan sehingga
@@ -853,6 +865,8 @@ pub struct AppMemberRecord {
     pub url: Option<String>,
     pub pgid: Option<u32>,
     pub state: mandor_domain::app_run::AppRunState,
+    /// Nama sumber desain bila anggota ini prototype (plan 2026-11-03-002).
+    pub prototype: Option<String>,
 }
 
 /// State app milik satu run.

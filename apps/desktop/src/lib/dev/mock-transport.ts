@@ -20,7 +20,7 @@ function appView(runId: string, state: string): AppRunView {
   return {
     run_id: runId,
     state,
-    members: [{ repo_id: 'pegasus-web', url: 'http://localhost:5173', state }],
+    members: [{ repo_id: 'pegasus-web', url: 'http://localhost:5173', state, prototype: null }],
     database_confirmed: false,
     login_confirmed: false,
     error: state === 'failed' ? 'pegasus-web: the app exited (code 1) before opening its port' : null
@@ -668,7 +668,9 @@ function handle(method: string, params: Record<string, unknown>): unknown {
           repo_id: 'pegasus-web',
           snapshot: 'tree-mock',
           files: ['src/routes/invoices/Filters.svelte', 'package.json', 'src/lib/api/invoices.ts'],
-          flagged: ['package.json']
+          flagged: ['package.json'],
+          prototype: null,
+          confirmed: false
         }
       ];
     case 'app.stop': {
@@ -706,6 +708,12 @@ function handle(method: string, params: Record<string, unknown>): unknown {
     }
     case 'design_sources.list':
       return designSources;
+    case 'design_sources.revision':
+      return { current: 'git:4f2a9c1', confirmed: 'git:1b7e3d0', files: ['src/app/(app)/jabatan/page.tsx'] };
+    case 'design_sources.confirm': {
+      const p = params as { revision: string };
+      return { current: p.revision, confirmed: p.revision, files: [] };
+    }
     case 'design_sources.test':
       return { ready: true, status: 'Ready' };
     case 'design_sources.add': {

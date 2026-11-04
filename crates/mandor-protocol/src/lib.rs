@@ -75,6 +75,10 @@ pub mod method {
     pub const DESIGN_SOURCES_LIST: &str = "design_sources.list";
     /// `DesignSourceAdd` → `DesignSourceView`.
     pub const DESIGN_SOURCES_ADD: &str = "design_sources.add";
+    /// Revisi prototype (`DesignSourceRef` → `PrototypeRevisionView`).
+    pub const DESIGN_SOURCES_REVISION: &str = "design_sources.revision";
+    /// Konfirmasi revisi prototype (`PrototypeConfirm` → `PrototypeRevisionView`).
+    pub const DESIGN_SOURCES_CONFIRM: &str = "design_sources.confirm";
     /// `DesignSourceUpdate` → `DesignSourceView`.
     pub const DESIGN_SOURCES_UPDATE: &str = "design_sources.update";
     /// `DesignSourceRef` → `{}`.
@@ -311,7 +315,29 @@ pub fn ts_bindings() -> Result<Vec<(&'static str, String)>, String> {
     .into_iter()
     .chain(review_bindings()?)
     .chain(group_bindings()?)
+    .chain(prototype_bindings()?)
     .collect())
+}
+
+/// Tipe Pick from .env dan prototype (plan 2026-11-03-002).
+fn prototype_bindings() -> Result<Vec<(&'static str, String)>, String> {
+    use ts_rs::{Config, TS};
+    let cfg = Config::new();
+    let one = |name: &'static str, s: Result<String, ts_rs::ExportError>| {
+        s.map(|body| (name, body)).map_err(|e| e.to_string())
+    };
+    Ok(vec![
+        one("EnvKeysParams.ts", EnvKeysParams::export_to_string(&cfg))?,
+        one(
+            "PrototypeRevisionView.ts",
+            PrototypeRevisionView::export_to_string(&cfg),
+        )?,
+        one(
+            "PrototypeConfirm.ts",
+            PrototypeConfirm::export_to_string(&cfg),
+        )?,
+        one("EnvKeysView.ts", EnvKeysView::export_to_string(&cfg))?,
+    ])
 }
 
 /// Tipe run grup (plan run grup U8).
@@ -369,8 +395,6 @@ fn group_bindings() -> Result<Vec<(&'static str, String)>, String> {
             "CleanupSettingsView.ts",
             CleanupSettingsView::export_to_string(&cfg),
         )?,
-        one("EnvKeysParams.ts", EnvKeysParams::export_to_string(&cfg))?,
-        one("EnvKeysView.ts", EnvKeysView::export_to_string(&cfg))?,
         one(
             "PrepareForVmParams.ts",
             PrepareForVmParams::export_to_string(&cfg),

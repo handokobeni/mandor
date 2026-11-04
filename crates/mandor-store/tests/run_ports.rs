@@ -195,6 +195,7 @@ async fn pengaturan_app_repo_dan_state_app_per_run() {
             url: Some("http://localhost:5173".to_owned()),
             pgid: Some(4242),
             state: AppRunState::Running,
+            prototype: None,
         }],
         snapshot: [("repo1".to_owned(), "t1".to_owned())].into(),
         setup_hashes: [("repo1".to_owned(), "h1".to_owned())].into(),

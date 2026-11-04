@@ -129,6 +129,7 @@ fn app_view(r: AppRecord) -> AppRunView {
                 repo_id: m.repo_id,
                 url: m.url,
                 state: m.state.as_str().to_owned(),
+                prototype: m.prototype,
             })
             .collect(),
         database_confirmed: r.database_confirmed,
@@ -211,6 +212,8 @@ impl AppDispatch {
                                 snapshot: c.snapshot,
                                 files: c.files,
                                 flagged: c.flagged,
+                                prototype: c.prototype,
+                                confirmed: c.confirmed,
                             })
                             .collect::<Vec<_>>())
                     }

@@ -11,6 +11,7 @@ mod gh;
 mod port;
 mod publish;
 mod repo;
+mod revision;
 mod size;
 mod snapshot;
 mod worktree;

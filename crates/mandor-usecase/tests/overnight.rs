@@ -826,6 +826,7 @@ async fn vm_review_with_app(unattended: bool) -> Station {
             url: Some("http://localhost:5173".to_owned()),
             pgid: Some(1),
             state: mandor_domain::app_run::AppRunState::Running,
+            prototype: None,
         }],
         snapshot: [("repo1".to_owned(), "tree-1".to_owned())].into(),
         ..Default::default()

@@ -7,7 +7,7 @@
   import Play from '@lucide/svelte/icons/play';
   import ScrollText from '@lucide/svelte/icons/scroll-text';
   import Square from '@lucide/svelte/icons/square';
-  import { appControlAction, appControlLabel, appStateMeta } from '#lib/app-run.ts';
+  import { appControlAction, appControlLabel, appStateMeta, appUrls } from '#lib/app-run.ts';
   import { Button } from '#lib/components/ui/button/index.ts';
   import type { AppRunView } from '#lib/protocol/AppRunView.ts';
 
@@ -22,7 +22,12 @@
 
   const meta = $derived(appStateMeta(app?.state ?? 'off'));
   const action = $derived(appControlAction(app));
-  const url = $derived(app?.state === 'running' ? (app.members.find((m) => m.url)?.url ?? null) : null);
+  const urls = $derived(appUrls(app));
+  const url = $derived(urls.app);
+  // Prototype gagal tidak menghentikan app repo (plan 2026-11-03-002, KTD-P3).
+  const protoFailed = $derived(
+    app?.state === 'running' ? (app.members.find((m) => m.prototype && m.state === 'failed')?.prototype ?? null) : null
+  );
 </script>
 
 <span class="run-app">
@@ -34,6 +39,11 @@
   </span>
   {#if url}
     <a class="link mono" href={url} target="_blank" rel="noopener noreferrer" title="Open in your browser">{url}</a>
+  {/if}
+  {#if urls.prototype}
+    <a class="link" href={urls.prototype} target="_blank" rel="noopener noreferrer" title={urls.prototype}>Open prototype</a>
+  {:else if protoFailed}
+    <button type="button" class="link" onclick={onlogs} title="View logs">Prototype failed</button>
   {/if}
   {#if action === 'run'}
     <Button variant="outline" size="sm" {disabled} onclick={onrun}><Play />Run app</Button>

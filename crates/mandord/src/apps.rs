@@ -387,6 +387,7 @@ mod tests {
                 port: Some(port),
                 ..AppSettings::default()
             },
+            prototype: None,
         };
         procs.spawn("r1", &member).await.unwrap();
         procs.wait_ready("r1", "web", port).await.unwrap();

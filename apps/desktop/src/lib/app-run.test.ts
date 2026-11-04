@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   appControlAction,
   appControlLabel,
+  appUrls,
   cantVerifyReason,
   confirmModel,
   missingCount,
@@ -15,7 +16,7 @@ function app(state: string, members: [string, string][]): AppRunView {
   return {
     run_id: 'r1',
     state,
-    members: members.map(([repo_id, s]) => ({ repo_id, url: 'http://localhost:5173', state: s })),
+    members: members.map(([repo_id, s]) => ({ repo_id, url: 'http://localhost:5173', state: s, prototype: null })),
     database_confirmed: false,
     login_confirmed: false,
     error: null
@@ -74,11 +75,55 @@ describe('checklist kesiapan', () => {
 describe('dialog konfirmasi Run app', () => {
   it('berkas berubah per repo dengan package.json di atas dan snapshot untuk app.run', () => {
     const changes = [
-      { repo_id: 'web', snapshot: 't1', files: ['src/a.ts', 'package.json'], flagged: ['package.json'] }
+      {
+        repo_id: 'web',
+        snapshot: 't1',
+        files: ['src/a.ts', 'package.json'],
+        flagged: ['package.json'],
+        prototype: null,
+        confirmed: false
+      }
     ];
     const m = confirmModel(changes);
     expect(m[0].files).toEqual(['package.json', 'src/a.ts']);
     expect(m[0].flagged.has('package.json')).toBe(true);
     expect(snapshots(changes)).toEqual({ web: 't1' });
+  });
+});
+
+describe('prototype di Run app (plan 2026-11-03-002)', () => {
+  const proto = (confirmed: boolean) => ({
+    repo_id: 'prototype:d1',
+    snapshot: 'git:b',
+    files: confirmed ? [] : ['src/app/page.tsx'],
+    flagged: [],
+    prototype: 'kelola-web-prototype',
+    confirmed
+  });
+  const web = { repo_id: 'web', snapshot: 't1', files: [], flagged: [], prototype: null, confirmed: false };
+
+  it('hides a prototype whose revision is already confirmed but still sends its snapshot', () => {
+    const changes = [web, proto(true)];
+    expect(confirmModel(changes).map((r) => r.repo_id)).toEqual(['web']);
+    expect(snapshots(changes)).toEqual({ web: 't1', 'prototype:d1': 'git:b' });
+  });
+
+  it('labels a changed prototype with its design source name', () => {
+    const m = confirmModel([web, proto(false)]);
+    expect(m[1].label).toBe('kelola-web-prototype (prototype)');
+    expect(m[0].label).toBe('web');
+  });
+
+  it('names the prototype in the control label and finds its URL apart from the app URL', () => {
+    const a = app('waiting_for_port', [
+      ['web', 'running'],
+      ['prototype:d1', 'waiting_for_port']
+    ]);
+    a.members[1].prototype = 'kelola-web-prototype';
+    a.members[1].url = 'http://127.0.0.1:3001';
+    expect(appControlLabel(a)).toBe('Waiting for port kelola-web-prototype (2 of 2)');
+    a.state = 'running';
+    a.members[1].state = 'running';
+    expect(appUrls(a)).toEqual({ app: 'http://localhost:5173', prototype: 'http://127.0.0.1:3001' });
   });
 });

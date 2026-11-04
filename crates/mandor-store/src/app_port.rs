@@ -22,6 +22,8 @@ struct StoredMember {
     url: Option<String>,
     pgid: Option<u32>,
     state: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    prototype: Option<String>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -76,6 +78,7 @@ impl AppRecords for AppStateStore {
                     url: m.url,
                     pgid: m.pgid,
                     state: state_of(&m.state),
+                    prototype: m.prototype,
                 })
                 .collect(),
             snapshot: s.snapshot,
@@ -97,6 +100,7 @@ impl AppRecords for AppStateStore {
                     url: m.url.clone(),
                     pgid: m.pgid,
                     state: m.state.as_str().to_owned(),
+                    prototype: m.prototype.clone(),
                 })
                 .collect(),
             snapshot: rec.snapshot.clone(),

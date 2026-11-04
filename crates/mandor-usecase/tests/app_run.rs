@@ -335,3 +335,136 @@ async fn app_ditolak_saat_agent_bekerja_dan_dibatalkan_bila_kode_berubah() {
     );
     assert!(!st.apps.calls().iter().any(|c| c.starts_with("spawn:")));
 }
+
+// --- Prototype yang bisa dijalankan (plan 2026-11-03-002, U3) ---
+
+const PROTO_KEY: &str = "prototype:d1";
+
+/// Run tunggal dengan sumber desain `d1` yang bisa dijalankan di port 3001.
+async fn with_prototype(
+    lark: &FakeLark,
+    clock: &FakeClock,
+    confirmed: Option<&str>,
+) -> (Station, String) {
+    let (st, run) = single(lark, clock).await;
+    st.design
+        .add_prototype("d1", "kelola-web-prototype", web(3001, None), confirmed);
+    st.design.set_revision("kelola-web-prototype", "git:a");
+    let mut r = st.runs.only();
+    r.design = vec![mandor_usecase::review::DesignRoot {
+        id: "d1".to_owned(),
+        name: "kelola-web-prototype".to_owned(),
+        path: PathBuf::from("/design/kelola-web-prototype"),
+    }];
+    st.runs.insert(r);
+    (st, run)
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn covers_ae5_prototype_menyala_setelah_repo_dan_revisinya_dikonfirmasi() {
+    let (lark, clock) = setup();
+    let (st, run) = with_prototype(&lark, &clock, None).await;
+    let changes = st.svc.app_changes(&run).await.unwrap();
+    let proto = changes.iter().find(|c| c.repo_id == PROTO_KEY).unwrap();
+    assert_eq!(proto.snapshot, "git:a");
+    assert!(!proto.confirmed, "belum pernah dikonfirmasi");
+    running(&st, &run).await;
+    let rec = st.apps.record(&run).unwrap();
+    assert_eq!(rec.state, AppRunState::Running, "{rec:?}");
+    assert_eq!(rec.members.len(), 2);
+    assert_eq!(
+        rec.members[1].prototype.as_deref(),
+        Some("kelola-web-prototype")
+    );
+    assert_eq!(rec.members[1].url.as_deref(), Some("http://localhost:3001"));
+    let calls = st.apps.calls();
+    let repo_at = calls.iter().position(|c| c == "spawn:repo1").unwrap();
+    let proto_at = calls
+        .iter()
+        .position(|c| c == &format!("spawn:{PROTO_KEY}"))
+        .unwrap();
+    assert!(repo_at < proto_at, "{calls:?}");
+    assert_eq!(
+        st.design.confirmed(),
+        [("d1".to_owned(), "git:a".to_owned())]
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn covers_ae6_revisi_sama_tidak_perlu_dikonfirmasi_ulang_dan_yang_berubah_menampilkan_berkas()
+{
+    let (lark, clock) = setup();
+    let (st, run) = with_prototype(&lark, &clock, Some("git:a")).await;
+    let changes = st.svc.app_changes(&run).await.unwrap();
+    assert!(
+        changes
+            .iter()
+            .find(|c| c.repo_id == PROTO_KEY)
+            .unwrap()
+            .confirmed
+    );
+
+    st.design.set_revision("kelola-web-prototype", "git:b");
+    st.design.set_changes(&["src/app/page.tsx", "package.json"]);
+    let changes = st.svc.app_changes(&run).await.unwrap();
+    let proto = changes.iter().find(|c| c.repo_id == PROTO_KEY).unwrap();
+    assert!(!proto.confirmed);
+    assert_eq!(proto.files, ["src/app/page.tsx", "package.json"]);
+    assert_eq!(proto.flagged, ["package.json"]);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn revisi_prototype_berubah_setelah_ditampilkan_menolak_app_run() {
+    let (lark, clock) = setup();
+    let (st, run) = with_prototype(&lark, &clock, None).await;
+    let snap = confirmed(&st, &run);
+    st.design.set_revision("kelola-web-prototype", "git:b");
+    let err = st.svc.app_run(&run, &snap).await.unwrap_err();
+    assert!(err.to_string().contains("changed"), "{err}");
+    assert!(st.design.confirmed().is_empty());
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn covers_ae7_run_tanpa_sumber_yang_bisa_dijalankan_tidak_menyalakan_prototype() {
+    let (lark, clock) = setup();
+    let (st, run) = single(&lark, &clock).await;
+    st.design.add("d2", "folder-biasa");
+    let mut r = st.runs.only();
+    r.design = vec![mandor_usecase::review::DesignRoot {
+        id: "d2".to_owned(),
+        name: "folder-biasa".to_owned(),
+        path: PathBuf::from("/design/folder-biasa"),
+    }];
+    st.runs.insert(r);
+    let changes = st.svc.app_changes(&run).await.unwrap();
+    assert_eq!(changes.len(), 1);
+    running(&st, &run).await;
+    assert_eq!(st.apps.record(&run).unwrap().members.len(), 1);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn prototype_gagal_tidak_menghentikan_app_repo() {
+    let (lark, clock) = setup();
+    let (st, run) = with_prototype(&lark, &clock, None).await;
+    st.apps
+        .st
+        .lock()
+        .unwrap()
+        .fail_ready
+        .insert(PROTO_KEY.to_owned());
+    running(&st, &run).await;
+    eventually(|| {
+        st.apps
+            .record(&run)
+            .is_some_and(|r| r.members[1].state == AppRunState::Failed)
+    })
+    .await;
+    let rec = st.apps.record(&run).unwrap();
+    assert_eq!(rec.state, AppRunState::Running, "{rec:?}");
+    assert_eq!(rec.members[0].state, AppRunState::Running);
+    assert!(
+        rec.error
+            .unwrap_or_default()
+            .contains("kelola-web-prototype")
+    );
+}

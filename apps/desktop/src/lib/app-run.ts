@@ -38,7 +38,7 @@ export function appControlLabel(app: AppRunView | null): string {
   if (!appStarting(app.state)) {
     if (app.state === 'failed') {
       const failed = app.members.find((m) => m.state === 'failed');
-      return failed ? `${meta.label} · ${failed.repo_id}` : meta.label;
+      return failed ? `${meta.label} · ${memberName(failed)}` : meta.label;
     }
     return meta.label;
   }
@@ -46,7 +46,20 @@ export function appControlLabel(app: AppRunView | null): string {
   if (i < 0) return meta.label;
   const m = app.members[i];
   const count = app.members.length > 1 ? ` (${i + 1} of ${app.members.length})` : '';
-  return `${appStateMeta(m.state).label} ${m.repo_id}${count}`;
+  return `${appStateMeta(m.state).label} ${memberName(m)}${count}`;
+}
+
+/** Nama anggota: nama sumber desain untuk prototype, selain itu id repo. */
+function memberName(m: { repo_id: string; prototype: string | null }): string {
+  return m.prototype ?? m.repo_id;
+}
+
+/** URL app (repo pertama) dan URL prototype yang menyala, terpisah. */
+export function appUrls(app: AppRunView | null): { app: string | null; prototype: string | null } {
+  if (!app || app.state !== 'running') return { app: null, prototype: null };
+  const url = (proto: boolean) =>
+    app.members.find((m) => m.url && m.state === 'running' && (m.prototype !== null) === proto)?.url ?? null;
+  return { app: url(false), prototype: url(true) };
 }
 
 /** Tombol kontrol: jalankan, hentikan, atau lihat log. */
@@ -153,6 +166,8 @@ export function cantVerifyReason(items: ReadinessItem[]): string | null {
 
 export interface ConfirmRepo {
   repo_id: string;
+  /** Judul di dialog: id repo, atau nama sumber desain untuk prototype. */
+  label: string;
   snapshot: string;
   files: string[];
   flagged: Set<string>;
@@ -160,11 +175,15 @@ export interface ConfirmRepo {
 
 /** Model dialog konfirmasi Run app: berkas berubah per repo, yang ditandai di atas. */
 export function confirmModel(changes: AppChangesView[]): ConfirmRepo[] {
-  return changes.map((c) => {
-    const flagged = new Set(c.flagged);
-    const files = [...c.files].sort((a, b) => Number(flagged.has(b)) - Number(flagged.has(a)) || a.localeCompare(b));
-    return { repo_id: c.repo_id, snapshot: c.snapshot, files, flagged };
-  });
+  // Prototype dengan revisi yang sudah dikonfirmasi tidak perlu dilihat lagi (R15).
+  return changes
+    .filter((c) => !c.confirmed)
+    .map((c) => {
+      const flagged = new Set(c.flagged);
+      const files = [...c.files].sort((a, b) => Number(flagged.has(b)) - Number(flagged.has(a)) || a.localeCompare(b));
+      const label = c.prototype ? `${c.prototype} (prototype)` : c.repo_id;
+      return { repo_id: c.repo_id, label, snapshot: c.snapshot, files, flagged };
+    });
 }
 
 /** Snapshot yang dikirim ke `app.run`. */

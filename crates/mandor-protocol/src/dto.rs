@@ -724,6 +724,8 @@ pub struct AppMemberView {
     /// URL app kanonik: alamat login dev dan origin reviewer.
     pub url: Option<String>,
     pub state: String,
+    /// Nama sumber desain bila anggota ini prototype (plan 2026-11-03-002).
+    pub prototype: Option<String>,
 }
 
 /// State app milik run.
@@ -748,6 +750,10 @@ pub struct AppChangesView {
     pub files: Vec<String>,
     /// Manifest paket, lockfile, skrip, dan berkas perintah start.
     pub flagged: Vec<String>,
+    /// Nama sumber desain bila entri ini prototype.
+    pub prototype: Option<String>,
+    /// Prototype dengan revisi yang sudah dikonfirmasi; tidak perlu ditampilkan.
+    pub confirmed: bool,
 }
 
 /// Parameter `app.run`.
@@ -1139,6 +1145,22 @@ pub struct DesignSourceUpdate {
     /// `null` mematikan "Runnable prototype".
     #[serde(default)]
     pub app: Option<RepoAppView>,
+}
+
+/// Revisi prototype: saat ini, yang terakhir dikonfirmasi, dan berkas yang
+/// berubah di antaranya (plan 2026-11-03-002, R15, R28).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+pub struct PrototypeRevisionView {
+    pub current: String,
+    pub confirmed: Option<String>,
+    pub files: Vec<String>,
+}
+
+/// Parameter `design_sources.confirm`: revisi yang ditampilkan ke dev.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+pub struct PrototypeConfirm {
+    pub id: String,
+    pub revision: String,
 }
 
 /// Parameter `design_sources.remove`.

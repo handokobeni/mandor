@@ -856,3 +856,69 @@ fn rpc_sumber_desain_prototype_divalidasi_port_dan_host() {
     stop(home.path());
     let _ = daemon.wait();
 }
+
+/// Plan 2026-11-03-002, R15/R28: revisi prototype dilihat dan dikonfirmasi
+/// tanpa Run app (dipakai untuk VM dari laptop).
+#[test]
+fn rpc_revisi_prototype_dilihat_dan_dikonfirmasi() {
+    let home = tempfile::tempdir().unwrap();
+    let mut daemon = serve(home.path());
+    let token = wait_for_info(home.path())["token"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let root = tempfile::tempdir().unwrap();
+    let proto = root.path().join("kelola-web-prototype");
+    std::fs::create_dir_all(&proto).unwrap();
+    std::fs::write(proto.join("page.tsx"), "a").unwrap();
+    let proto_s = proto.to_str().unwrap();
+    let replies = connect_roundtrip(
+        home.path(),
+        &[
+            hello(&token),
+            rpc(
+                2,
+                "design_sources.add",
+                &json!({"name": "proto", "path": proto_s, "app": web_app(3005, None)}),
+            ),
+        ],
+    );
+    let id = replies[1]["result"]["id"].as_str().unwrap().to_owned();
+
+    let replies = connect_roundtrip(
+        home.path(),
+        &[
+            hello(&token),
+            rpc(2, "design_sources.revision", &json!({"id": id})),
+        ],
+    );
+    let rev = replies[1]["result"]["current"].as_str().unwrap().to_owned();
+    assert!(rev.starts_with("files:"), "{}", replies[1]);
+    assert!(replies[1]["result"]["confirmed"].is_null());
+
+    let replies = connect_roundtrip(
+        home.path(),
+        &[
+            hello(&token),
+            rpc(
+                2,
+                "design_sources.confirm",
+                &json!({"id": id, "revision": "files:lain"}),
+            ),
+            rpc(
+                3,
+                "design_sources.confirm",
+                &json!({"id": id, "revision": rev}),
+            ),
+            rpc(4, "design_sources.revision", &json!({"id": id})),
+        ],
+    );
+    assert_eq!(
+        replies[1]["error"]["code"], "rejected",
+        "revisi basi ditolak"
+    );
+    assert!(replies[2]["error"].is_null(), "{}", replies[2]);
+    assert_eq!(replies[3]["result"]["confirmed"], rev.as_str());
+    stop(home.path());
+    let _ = daemon.wait();
+}

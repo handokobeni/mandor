@@ -7,4 +7,8 @@ export type AppMemberView = { repo_id: string,
 /**
  * URL app kanonik: alamat login dev dan origin reviewer.
  */
-url: string | null, state: string, };
+url: string | null, state: string, 
+/**
+ * Nama sumber desain bila anggota ini prototype (plan 2026-11-03-002).
+ */
+prototype: string | null, };

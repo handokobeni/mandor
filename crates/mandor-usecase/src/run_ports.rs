@@ -911,6 +911,9 @@ pub struct ReviewFacts {
     pub reason: Option<String>,
     /// URL app kanonik yang boleh dibuka.
     pub app_urls: Vec<String>,
+    /// Prototype yang menyala untuk perbandingan tampilan (plan
+    /// 2026-11-03-002, R16); hanya bila browser tersedia.
+    pub prototype_url: Option<String>,
 }
 
 /// Bahan pesan pertama reviewer.

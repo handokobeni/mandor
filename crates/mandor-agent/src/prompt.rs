@@ -193,6 +193,7 @@ pub fn review_message(brief: &mandor_usecase::run_ports::ReviewBrief<'_>, nonce:
             brief.repos.join(", ")
         );
     }
+    push_look_compare(&mut out, brief);
     out.push('\n');
     push_skill(&mut out, brief.skill, "to guide the review");
     if brief.cards.is_empty() {
@@ -230,6 +231,40 @@ pub fn review_message(brief: &mandor_usecase::run_ports::ReviewBrief<'_>, nonce:
         ));
     }
     out
+}
+
+/// Viewport yang dipakai di kedua sisi perbandingan tampilan.
+const COMPARE_VIEWPORT: &str = "1440x900";
+
+/// Perbandingan tampilan dengan prototype yang menyala (plan 2026-11-03-002,
+/// R16–R19, R24): hanya baris In design atau Partly.
+fn push_look_compare(out: &mut String, brief: &mandor_usecase::run_ports::ReviewBrief<'_>) {
+    let Some(url) = brief.facts.prototype_url.as_deref() else {
+        return;
+    };
+    let ids: Vec<&str> = brief
+        .rows
+        .iter()
+        .filter(|r| r.compares_look())
+        .map(|r| r.ac_id.as_str())
+        .collect();
+    if ids.is_empty() {
+        return;
+    }
+    let _ = writeln!(
+        out,
+        "- Design prototype: running at {url}. Compare the look of: {}. For each of these, \
+         open the matching page on the app and on the prototype at a {COMPARE_VIEWPORT} \
+         desktop viewport, find the page from the criterion's design note and the routes, and \
+         call `mcp__mandor__ac_set_visual` once with match, differs, or cant_verify, a short \
+         description, and both page paths. Judge layout, components, UI text, colours, \
+         typography, and spacing. Ignore data content, since the prototype uses demo data. \
+         Compare only the parts that are in the design; behaviour the criterion asks for \
+         beyond the design is not a visual difference. Use cant_verify when the prototype has \
+         no matching page or the app cannot reach the same state because of its data. The \
+         visual result does not change the criterion's verdict.",
+        ids.join(", ")
+    );
 }
 
 /// Kunci task dari Lark untuk teks di luar blok data: hanya huruf, angka,
@@ -931,6 +966,7 @@ mod tests {
             browser: false,
             reason: Some("app running older code".to_owned()),
             app_urls: vec![],
+            prototype_url: None,
         };
         let brief = mandor_usecase::run_ports::ReviewBrief {
             task: &task,
@@ -972,6 +1008,7 @@ mod tests {
             browser: false,
             reason: None,
             app_urls: vec![],
+            prototype_url: None,
         };
         let cards = [a.clone(), b];
         let brief = mandor_usecase::run_ports::ReviewBrief {
@@ -1056,5 +1093,62 @@ mod tests {
         assert!(msg.contains("Prototype page: /prototype/jabatan"), "{msg}");
         r.visual = Visual::Match;
         assert!(!findings_message(&[r], "n1").contains("prototype"));
+    }
+
+    #[test]
+    fn pesan_review_meminta_perbandingan_tampilan_hanya_untuk_baris_di_desain() {
+        let mut task = mandor_domain::Task::new("rec1", mandor_domain::TaskStatus::ToDo);
+        task.key = Some("PGS-1".to_owned());
+        let mut in_design = mandor_domain::AcRow::new(
+            "ac1",
+            Some("AC-1"),
+            "Tabel jabatan",
+            mandor_domain::RowStatus::Active,
+        );
+        in_design.design = mandor_domain::Design::Partly;
+        in_design.design_note = Some("halaman jabatan, tanpa filter".to_owned());
+        let mut conflicts = in_design.clone();
+        conflicts.ac_id = "ac2".to_owned();
+        conflicts.design = mandor_domain::Design::Conflicts;
+        let facts = mandor_usecase::run_ports::ReviewFacts {
+            browser: true,
+            reason: None,
+            app_urls: vec!["http://localhost:3000".to_owned()],
+            prototype_url: Some("http://127.0.0.1:3001".to_owned()),
+        };
+        let rows = [in_design, conflicts];
+        let brief = mandor_usecase::run_ports::ReviewBrief {
+            task: &task,
+            rows: &rows,
+            facts: &facts,
+            skill: None,
+            repos: &[],
+            cards: &[],
+        };
+        let msg = review_message(&brief, "n1");
+        assert!(
+            msg.contains("Design prototype: running at http://127.0.0.1:3001"),
+            "{msg}"
+        );
+        assert!(msg.contains("mcp__mandor__ac_set_visual"), "{msg}");
+        assert!(msg.contains("1440x900"), "{msg}");
+        assert!(msg.contains("Ignore data"), "{msg}");
+        assert!(
+            msg.contains("only the parts that are in the design"),
+            "{msg}"
+        );
+        assert!(msg.contains("cant_verify"), "{msg}");
+        assert!(msg.contains("Compare the look of: ac1"), "{msg}");
+        assert!(!msg.contains("Compare the look of: ac1, ac2"), "{msg}");
+
+        let no_proto = mandor_usecase::run_ports::ReviewFacts {
+            prototype_url: None,
+            ..facts.clone()
+        };
+        let brief = mandor_usecase::run_ports::ReviewBrief {
+            facts: &no_proto,
+            ..brief
+        };
+        assert!(!review_message(&brief, "n1").contains("ac_set_visual"));
     }
 }

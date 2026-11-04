@@ -595,14 +595,24 @@ impl mandor_usecase::run_ports::Prompts for PlainMessage {
 
     fn review_message(&self, b: &mandor_usecase::run_ports::ReviewBrief<'_>) -> String {
         let acs: Vec<String> = b.rows.iter().map(|r| r.ac_id.clone()).collect();
-        format!(
+        let mut out = format!(
             "REVIEW {} AC:{} BROWSER:{} REASON:{} SKILL:{}",
             b.task.title,
             acs.join("|"),
             b.facts.browser,
             b.facts.reason.as_deref().unwrap_or("-"),
             b.skill.unwrap_or("-")
-        )
+        );
+        if let Some(url) = &b.facts.prototype_url {
+            let look: Vec<&str> = b
+                .rows
+                .iter()
+                .filter(|r| r.compares_look())
+                .map(|r| r.ac_id.as_str())
+                .collect();
+            out = out + " PROTO:" + url + " LOOK:" + &look.join("|");
+        }
+        out
     }
 
     fn findings_message(&self, rows: &[mandor_domain::AcRow]) -> String {

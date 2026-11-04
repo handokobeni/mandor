@@ -1219,6 +1219,10 @@ pub struct LedgerToolInfo {
     pub run_id: String,
     /// `design` atau `verdict`.
     pub role: String,
+    /// Prototype run ini menyala; reviewer mendapat `ac_set_visual`
+    /// (plan 2026-11-03-002, R16).
+    #[serde(default)]
+    pub visual: bool,
 }
 
 /// Parameter `ledger.tool.set_design`.
@@ -1239,6 +1243,23 @@ pub struct LedgerToolSetVerdict {
     pub verdict: String,
     #[serde(default)]
     pub evidence: Option<String>,
+}
+
+/// Parameter `ledger.tool.set_visual` (plan 2026-11-03-002, KTD-P6).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct LedgerToolSetVisual {
+    pub ac_id: String,
+    /// `match`, `differs`, atau `cant_verify`.
+    pub result: String,
+    #[serde(default)]
+    pub description: Option<String>,
+    #[serde(default)]
+    pub app_path: Option<String>,
+    #[serde(default)]
+    pub prototype_path: Option<String>,
+    /// Nama berkas screenshot di folder output browser (run VM).
+    #[serde(default)]
+    pub screenshots: Vec<String>,
 }
 
 /// Parameter `runs.handoff`.

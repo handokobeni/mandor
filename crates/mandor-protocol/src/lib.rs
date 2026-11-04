@@ -39,6 +39,8 @@ pub mod method {
     pub const LEDGER_TOOL_SET_DESIGN: &str = "ledger.tool.set_design";
     /// Koneksi kapabilitas, peran verdict: `LedgerToolSetVerdict`.
     pub const LEDGER_TOOL_SET_VERDICT: &str = "ledger.tool.set_verdict";
+    /// Koneksi kapabilitas, peran verdict: `LedgerToolSetVisual`.
+    pub const LEDGER_TOOL_SET_VISUAL: &str = "ledger.tool.set_visual";
     /// Kesiapan uji browser (`RunRef` → `ReviewReadinessView`).
     pub const REVIEW_READINESS: &str = "review.readiness";
     /// Cek ekstensi Claude in Chrome (`ChromeCheckParams` → `ChromeCheckView`).

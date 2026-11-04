@@ -3,9 +3,9 @@
 use mandor_domain::{Design, Verdict};
 use mandor_protocol::{
     AcLedgerView, ChromeCheckParams, ChromeCheckView, ErrorCode, LedgerToolInfo,
-    LedgerToolSetDesign, LedgerToolSetVerdict, ReadinessConfirmations, ReviewFindings,
-    ReviewReadinessView, ReviewStart, ReviewVerdictView, ReviewView, ReviewerSettingsView,
-    RpcError, RunRef, method,
+    LedgerToolSetDesign, LedgerToolSetVerdict, LedgerToolSetVisual, ReadinessConfirmations,
+    ReviewFindings, ReviewReadinessView, ReviewStart, ReviewVerdictView, ReviewView,
+    ReviewerSettingsView, RpcError, RunRef, method,
 };
 use mandor_usecase::review::{CapabilityRole, CapabilityScope, LedgerToolError};
 use mandor_usecase::run_ports::{ReviewRecord, ReviewTrigger, ReviewerSettings};
@@ -28,6 +28,14 @@ pub(super) enum LedgerTool {
         ac_id: String,
         verdict: Verdict,
         evidence: Option<String>,
+    },
+    /// `screenshots`: nama berkas dari reviewer, diperiksa sebelum disalin
+    /// (run VM, KTD-P8); `report.screenshots` diisi salinan yang sah.
+    SetVisual {
+        ac_id: String,
+        result: mandor_domain::ac_ledger::Visual,
+        report: mandor_usecase::review::VisualReport,
+        screenshots: Vec<String>,
     },
 }
 
@@ -53,6 +61,22 @@ pub(super) fn ledger_tool(name: &str, v: Value) -> Result<LedgerTool, RpcError> 
                 ac_id: p.ac_id,
                 verdict,
                 evidence: p.evidence,
+            })
+        }
+        method::LEDGER_TOOL_SET_VISUAL => {
+            let p: LedgerToolSetVisual = params(v)?;
+            let result = mandor_domain::ac_ledger::Visual::parse(&p.result)
+                .ok_or_else(|| invalid("result", &p.result))?;
+            Ok(LedgerTool::SetVisual {
+                ac_id: p.ac_id,
+                result,
+                report: mandor_usecase::review::VisualReport {
+                    description: p.description,
+                    app_path: p.app_path,
+                    prototype_path: p.prototype_path,
+                    screenshots: Vec::new(),
+                },
+                screenshots: p.screenshots,
             })
         }
         other => Err(RpcError::new(
@@ -203,9 +227,12 @@ impl AppDispatch {
         let s = self.session().await?;
         let rows = match tool {
             LedgerTool::Info => {
+                let visual = scope.role == CapabilityRole::Verdict
+                    && s.runs.visual_prototype_url(&scope.run_id).await.is_some();
                 return ok(&LedgerToolInfo {
                     run_id: scope.run_id,
                     role: scope.role.as_str().to_owned(),
+                    visual,
                 });
             }
             LedgerTool::Read => s.runs.ledger_read(&scope).await,
@@ -225,6 +252,16 @@ impl AppDispatch {
             } => {
                 s.runs
                     .ledger_set_verdict(&scope, &ac_id, verdict, evidence.as_deref())
+                    .await
+            }
+            LedgerTool::SetVisual {
+                ac_id,
+                result,
+                report,
+                screenshots: _,
+            } => {
+                s.runs
+                    .ledger_set_visual(&scope, &ac_id, result, report)
                     .await
             }
         }
@@ -429,6 +466,32 @@ mod tests {
         let bad = ledger_tool(
             method::LEDGER_TOOL_SET_VERDICT,
             serde_json::json!({"ac_id": "rec1", "verdict": "lulus"}),
+        )
+        .unwrap_err();
+        assert_eq!(bad.code, ErrorCode::InvalidParams);
+        let t = ledger_tool(
+            method::LEDGER_TOOL_SET_VISUAL,
+            serde_json::json!({"ac_id": "rec1", "result": "differs", "description": "biru",
+                               "app_path": "/a", "prototype_path": "/b"}),
+        )
+        .unwrap();
+        assert_eq!(
+            t,
+            LedgerTool::SetVisual {
+                ac_id: "rec1".to_owned(),
+                result: mandor_domain::ac_ledger::Visual::Differs,
+                report: mandor_usecase::review::VisualReport {
+                    description: Some("biru".to_owned()),
+                    app_path: Some("/a".to_owned()),
+                    prototype_path: Some("/b".to_owned()),
+                    screenshots: Vec::new(),
+                },
+                screenshots: Vec::new(),
+            }
+        );
+        let bad = ledger_tool(
+            method::LEDGER_TOOL_SET_VISUAL,
+            serde_json::json!({"ac_id": "rec1", "result": "beda"}),
         )
         .unwrap_err();
         assert_eq!(bad.code, ErrorCode::InvalidParams);

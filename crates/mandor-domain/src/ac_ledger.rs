@@ -282,6 +282,14 @@ impl AcRow {
             && (self.verdict == Verdict::Fail || self.visual == Visual::Differs)
     }
 
+    /// Baris yang tampilannya dibandingkan dengan prototype: di gerbang dan
+    /// ada di desain (In design atau Partly). AC menang atas desain untuk
+    /// baris Conflicts dan Missing (R17–R19 plan 2026-11-03-002).
+    #[must_use]
+    pub fn compares_look(&self) -> bool {
+        self.in_gate() && matches!(self.design, Design::InDesign | Design::Partly)
+    }
+
     /// Verdict gabungan perilaku dan tampilan untuk hitungan dan laporan:
     /// perilaku lulus tetapi tampilan berbeda dihitung gagal, tampilan yang
     /// tidak bisa dipastikan dihitung Can't verify (R20).
@@ -385,6 +393,22 @@ pub fn mark_stale(rows: &mut [AcRow]) {
     {
         r.stale = true;
     }
+}
+
+/// Batas panjang path halaman dari reviewer.
+const PAGE_PATH_MAX: usize = 512;
+
+/// Path halaman dari reviewer aman dipakai sebagai link relatif ke app atau
+/// prototype: diawali satu `/`, tanpa `@`, `\`, atau karakter kontrol
+/// (KTD-P6).
+#[must_use]
+pub fn valid_page_path(path: &str) -> bool {
+    path.starts_with('/')
+        && !path.starts_with("//")
+        && path.len() <= PAGE_PATH_MAX
+        && !path
+            .chars()
+            .any(|c| c == '@' || c == '\\' || c.is_control())
 }
 
 /// Alasan AC yang tidak dilaporkan reviewer (KTD-38).

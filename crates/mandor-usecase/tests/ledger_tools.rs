@@ -393,3 +393,133 @@ async fn tulisan_selisih_desain_batal_bila_task_bukan_milik_dev_lagi() {
     let _ = st.svc.sync().drain_outbox(10).await;
     assert!(gaps_writes(&lark).is_empty(), "validasi ulang KTD-7");
 }
+
+// --- ac_set_visual (plan 2026-11-03-002, U5) ---
+
+/// Run plan dengan ac1 In design, ac2 Conflicts, dan prototype `d1` yang
+/// menyala dari revisi `git:a` bila `prototype`.
+async fn visual_run(prototype: bool) -> (FakeLark, FakeClock, Station, String) {
+    use mandor_domain::app_run::AppRunState;
+    use mandor_usecase::run_ports::{AppMemberRecord, AppRecord, AppRecords, LedgerStore};
+    let (lark, clock) = setup();
+    let (st, run) = plan_run(&lark, &clock).await;
+    let mut rows = st.svc.ledger(&run).await.unwrap();
+    rows[0].design = Design::InDesign;
+    rows[1].design = Design::Conflicts;
+    st.reviews.save_ac_rows(&run, &rows).await.unwrap();
+    if prototype {
+        let rec = AppRecord {
+            run_id: run.clone(),
+            state: AppRunState::Running,
+            members: vec![AppMemberRecord {
+                repo_id: "prototype:d1".to_owned(),
+                url: Some("http://127.0.0.1:3001".to_owned()),
+                pgid: Some(1),
+                state: AppRunState::Running,
+                prototype: Some("kelola-web-prototype".to_owned()),
+            }],
+            snapshot: [("prototype:d1".to_owned(), "git:a".to_owned())].into(),
+            ..AppRecord::default()
+        };
+        st.apps.save_app_record(&rec).await.unwrap();
+        st.apps.set_app_owner(Some(&run)).await.unwrap();
+    }
+    (lark, clock, st, run)
+}
+
+fn report(app_path: &str) -> mandor_usecase::review::VisualReport {
+    mandor_usecase::review::VisualReport {
+        description: Some("tombol abu-abu, prototype biru".to_owned()),
+        app_path: Some(app_path.to_owned()),
+        prototype_path: Some("/jabatan".to_owned()),
+        screenshots: Vec::new(),
+    }
+}
+
+#[tokio::test]
+async fn covers_ae8_reviewer_mencatat_tampilan_berbeda_dengan_revisi_prototype() {
+    use mandor_domain::ac_ledger::Visual;
+    let (_lark, _clock, st, run) = visual_run(true).await;
+    let token = st.svc.issue_capability(&run, CapabilityRole::Verdict);
+    let scope = st.svc.verify_capability(token.expose()).unwrap();
+    let rows = st
+        .svc
+        .ledger_set_visual(&scope, "ac1", Visual::Differs, report("/jabatan"))
+        .await
+        .unwrap();
+    assert_eq!(rows[0].visual, Visual::Differs);
+    let d = &rows[0].visual_detail;
+    assert_eq!(
+        d.description.as_deref(),
+        Some("tombol abu-abu, prototype biru")
+    );
+    assert_eq!(d.app_path.as_deref(), Some("/jabatan"));
+    assert_eq!(d.prototype_path.as_deref(), Some("/jabatan"));
+    assert_eq!(d.prototype_rev.as_deref(), Some("git:a"));
+}
+
+#[tokio::test]
+async fn covers_ae11_tampilan_hanya_untuk_baris_di_desain_dan_hasil_dari_reviewer() {
+    use mandor_domain::ac_ledger::Visual;
+    let (_lark, _clock, st, run) = visual_run(true).await;
+    let token = st.svc.issue_capability(&run, CapabilityRole::Verdict);
+    let scope = st.svc.verify_capability(token.expose()).unwrap();
+    assert!(matches!(
+        st.svc
+            .ledger_set_visual(&scope, "ac2", Visual::Match, report("/jabatan"))
+            .await,
+        Err(LedgerToolError::NotAllowed(_))
+    ));
+    for v in [
+        Visual::Accepted,
+        Visual::CheckedManually,
+        Visual::NotCompared,
+    ] {
+        assert!(matches!(
+            st.svc
+                .ledger_set_visual(&scope, "ac1", v, report("/jabatan"))
+                .await,
+            Err(LedgerToolError::NotAllowed(_))
+        ));
+    }
+    for bad in [
+        "@evil.example/x",
+        "//evil.example",
+        "/a\\b",
+        "jabatan",
+        "/a\nb",
+    ] {
+        assert!(
+            matches!(
+                st.svc
+                    .ledger_set_visual(&scope, "ac1", Visual::Match, report(bad))
+                    .await,
+                Err(LedgerToolError::NotAllowed(_))
+            ),
+            "{bad:?}"
+        );
+    }
+    let design = st.svc.issue_capability(&run, CapabilityRole::Design);
+    let design = st.svc.verify_capability(design.expose()).unwrap();
+    assert_eq!(
+        st.svc
+            .ledger_set_visual(&design, "ac1", Visual::Match, report("/jabatan"))
+            .await,
+        Err(LedgerToolError::WrongRole)
+    );
+}
+
+#[tokio::test]
+async fn covers_ae7_tanpa_prototype_menyala_tampilan_tidak_bisa_dicatat() {
+    use mandor_domain::ac_ledger::Visual;
+    let (_lark, _clock, st, run) = visual_run(false).await;
+    let token = st.svc.issue_capability(&run, CapabilityRole::Verdict);
+    let scope = st.svc.verify_capability(token.expose()).unwrap();
+    assert!(st.svc.visual_prototype_url(&run).await.is_none());
+    assert!(matches!(
+        st.svc
+            .ledger_set_visual(&scope, "ac1", Visual::Match, report("/jabatan"))
+            .await,
+        Err(LedgerToolError::NotAllowed(_))
+    ));
+}

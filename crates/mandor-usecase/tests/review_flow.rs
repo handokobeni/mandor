@@ -770,3 +770,148 @@ async fn kirim_temuan_untuk_baris_yang_tampilannya_berbeda() {
     assert_eq!(row.verdict, Verdict::FixInProgress);
     assert_eq!(row.visual, Visual::NotCompared);
 }
+
+/// Run laptop yang app dan prototype-nya menyala dari kode terbaru, login
+/// dikonfirmasi, ekstensi tersambung, ac1 In design dan ac2 Conflicts.
+async fn with_running_prototype() -> (FakeLark, FakeClock, Station, String) {
+    use mandor_domain::Design;
+    use mandor_usecase::run_ports::LedgerStore as _;
+    let (lark, clock) = setup();
+    let st = station(&lark, &clock, "ou_me");
+    let app = AppSettings {
+        test_mode: TestMode::Web,
+        start_command: Some("bun run dev".to_owned()),
+        port: Some(5173),
+        browser_tests: true,
+        ..AppSettings::default()
+    };
+    st.repos.repos.lock().unwrap()[0].app = app.clone();
+    *st.reviews.chrome.lock().unwrap() = true;
+    st.svc.start("rec1", "repo1", None).await.unwrap();
+    st.agent.last().done();
+    eventually(|| st.runs.only().state == RunState::AwaitingDev).await;
+    let run = st.runs.only().id;
+    st.design.add_prototype(
+        "d1",
+        "kelola-web-prototype",
+        AppSettings {
+            port: Some(3001),
+            app_url: Some("http://127.0.0.1:3001".to_owned()),
+            ..app
+        },
+        Some("git:a"),
+    );
+    st.design.set_revision("kelola-web-prototype", "git:a");
+    let mut r = st.runs.only();
+    r.design = vec![mandor_usecase::review::DesignRoot {
+        id: "d1".to_owned(),
+        name: "kelola-web-prototype".to_owned(),
+        path: PathBuf::from("/design/kelola-web-prototype"),
+    }];
+    st.runs.insert(r);
+    let wt: PathBuf = st.runs.only().worktree.unwrap();
+    st.git.st().trees.insert(wt, "tree-1".to_owned());
+    let rec = AppRecord {
+        run_id: run.clone(),
+        state: AppRunState::Running,
+        members: vec![
+            AppMemberRecord {
+                repo_id: "repo1".to_owned(),
+                url: Some("http://localhost:5173".to_owned()),
+                pgid: Some(1),
+                state: AppRunState::Running,
+                prototype: None,
+            },
+            AppMemberRecord {
+                repo_id: "prototype:d1".to_owned(),
+                url: Some("http://127.0.0.1:3001".to_owned()),
+                pgid: Some(2),
+                state: AppRunState::Running,
+                prototype: Some("kelola-web-prototype".to_owned()),
+            },
+        ],
+        snapshot: [
+            ("repo1".to_owned(), "tree-1".to_owned()),
+            ("prototype:d1".to_owned(), "git:a".to_owned()),
+        ]
+        .into(),
+        login_confirmed: true,
+        ..AppRecord::default()
+    };
+    st.apps.save_app_record(&rec).await.unwrap();
+    st.apps.set_app_owner(Some(&run)).await.unwrap();
+    let mut rows = st.svc.ledger(&run).await.unwrap();
+    rows[0].design = Design::InDesign;
+    rows[1].design = Design::Conflicts;
+    st.reviews.save_ac_rows(&run, &rows).await.unwrap();
+    (lark, clock, st, run)
+}
+
+/// Plan 2026-11-03-002, R16/R19: reviewer mendapat URL prototype dan hanya
+/// origin app serta prototype.
+#[tokio::test(flavor = "multi_thread")]
+async fn reviewer_mendapat_prototype_dan_origin_app_serta_prototype() {
+    let (_lark, _clock, st, run) = with_running_prototype().await;
+    st.svc
+        .start_review(&run, ReviewTrigger::Manual, None)
+        .await
+        .unwrap();
+    let req = st.agent.last().req;
+    let review = req.review.unwrap();
+    assert!(review.browser, "{}", req.message);
+    assert_eq!(
+        review.origins,
+        ["http://localhost:5173", "http://127.0.0.1:3001"]
+    );
+    assert!(
+        req.message.contains("PROTO:http://127.0.0.1:3001 LOOK:ac1"),
+        "{}",
+        req.message
+    );
+}
+
+/// Plan 2026-11-03-002, R24: baris di desain yang tidak dibandingkan
+/// reviewer menjadi Can't verify untuk tampilan; baris Conflicts tidak.
+#[tokio::test(flavor = "multi_thread")]
+async fn baris_desain_yang_tidak_dibandingkan_menjadi_cant_verify() {
+    use mandor_domain::ac_ledger::Visual;
+    let (_lark, _clock, st, run) = with_running_prototype().await;
+    st.svc
+        .start_review(&run, ReviewTrigger::Manual, None)
+        .await
+        .unwrap();
+    verdict(&st, "ac1", Verdict::Pass, "ok");
+    verdict(&st, "ac2", Verdict::Pass, "ok");
+    st.agent.last().done();
+    reviewed(&st, &run).await;
+    let rows = st.svc.ledger(&run).await.unwrap();
+    assert_eq!(rows[0].visual, Visual::CantVerify);
+    assert!(rows[0].visual_detail.description.is_some());
+    assert_eq!(rows[1].visual, Visual::NotCompared);
+}
+
+/// Plan 2026-11-03-002, R22/AE14: prototype berubah setelah review membuat
+/// hasil review usang, seperti kode yang berubah.
+#[tokio::test(flavor = "multi_thread")]
+async fn covers_ae14_prototype_berubah_membuat_hasil_review_usang() {
+    let (_lark, _clock, st, run) = with_running_prototype().await;
+    st.svc
+        .start_review(&run, ReviewTrigger::Manual, None)
+        .await
+        .unwrap();
+    verdict(&st, "ac1", Verdict::Pass, "ok");
+    verdict(&st, "ac2", Verdict::Pass, "ok");
+    st.agent.last().done();
+    reviewed(&st, &run).await;
+    assert!(st.runs.only().review_snapshot.contains_key("prototype:d1"));
+    let decision = mandor_domain::push_gate::GateDecision::default();
+    assert!(matches!(
+        st.svc.publish_gated(&run, &decision).await.unwrap(),
+        mandor_usecase::run::PublishOutcome::NeedsConfirmation { .. }
+    ));
+    st.design.set_revision("kelola-web-prototype", "git:b");
+    assert!(matches!(
+        st.svc.publish_gated(&run, &decision).await.unwrap(),
+        mandor_usecase::run::PublishOutcome::ReviewStarted { .. }
+    ));
+}

@@ -735,3 +735,38 @@ async fn covers_ae15_vm_menyalakan_prototype_hanya_pada_revisi_terkonfirmasi() {
     assert!(!calls.iter().any(|c| c.contains("prototype")), "{calls:?}");
     assert_eq!(st.apps.record(&run).unwrap().members.len(), 1);
 }
+
+/// Plan 2026-11-03-002, R23: baris yang hanya berbeda tampilannya bisa
+/// dikirim ke agent, dan hasil tampilannya dibandingkan ulang.
+#[tokio::test(flavor = "multi_thread")]
+async fn kirim_temuan_untuk_baris_yang_tampilannya_berbeda() {
+    use mandor_domain::ac_ledger::Visual;
+    use mandor_usecase::run_ports::LedgerStore as _;
+    let (lark, clock) = setup();
+    let (st, run) = waiting(&lark, &clock).await;
+    st.svc
+        .start_review(&run, ReviewTrigger::Manual, None)
+        .await
+        .unwrap();
+    verdict(&st, "ac1", Verdict::Pass, "ok");
+    verdict(&st, "ac2", Verdict::Pass, "ok");
+    st.agent.last().done();
+    reviewed(&st, &run).await;
+    let mut rows = st.svc.ledger(&run).await.unwrap();
+    rows[0].visual = Visual::Differs;
+    rows[0].visual_detail.description = Some("tombol abu-abu, prototype biru".to_owned());
+    st.reviews.save_ac_rows(&run, &rows).await.unwrap();
+    assert!(
+        st.svc
+            .send_findings(&run, &["ac2".to_owned()])
+            .await
+            .is_err()
+    );
+    st.svc
+        .send_findings(&run, &["ac1".to_owned()])
+        .await
+        .unwrap();
+    let row = &st.svc.ledger(&run).await.unwrap()[0];
+    assert_eq!(row.verdict, Verdict::FixInProgress);
+    assert_eq!(row.visual, Visual::NotCompared);
+}

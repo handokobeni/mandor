@@ -258,11 +258,18 @@ pub fn findings_message(rows: &[mandor_domain::AcRow], nonce: &str) -> String {
         out.push_str("\n\n");
         let label = r.label.as_deref().unwrap_or("AC");
         let evidence = r.evidence.as_deref().unwrap_or("no evidence given");
-        out.push_str(&data_block(
-            &format!("finding_{}", i + 1),
-            &format!("{label}: {}\nReviewer evidence: {evidence}", r.text),
-            nonce,
-        ));
+        let mut text = format!("{label}: {}\nReviewer evidence: {evidence}", r.text);
+        if r.visual == mandor_domain::ac_ledger::Visual::Differs {
+            let d = &r.visual_detail;
+            let _ = write!(
+                text,
+                "\nThe page looks different from the design prototype: {}\nApp page: {}\nPrototype page: {}",
+                d.description.as_deref().unwrap_or("no description given"),
+                d.app_path.as_deref().unwrap_or("unknown"),
+                d.prototype_path.as_deref().unwrap_or("unknown"),
+            );
+        }
+        out.push_str(&data_block(&format!("finding_{}", i + 1), &text, nonce));
     }
     out
 }
@@ -1028,5 +1035,26 @@ mod tests {
         // Perintah gabungan diperiksa per bagian; variabel shell tidak lolos allowlist.
         assert!(p.contains("every part of a chained Bash command"));
         assert!(p.contains("shell variables"));
+    }
+
+    #[test]
+    fn pesan_perbaikan_memuat_perbedaan_tampilan_dan_path_kedua_sisi() {
+        use mandor_domain::ac_ledger::Visual;
+        let mut r = mandor_domain::AcRow::new(
+            "ac1",
+            Some("AC-1"),
+            "Tombol simpan",
+            mandor_domain::RowStatus::Active,
+        );
+        r.visual = Visual::Differs;
+        r.visual_detail.description = Some("tombol abu-abu, prototype biru".to_owned());
+        r.visual_detail.app_path = Some("/jabatan".to_owned());
+        r.visual_detail.prototype_path = Some("/prototype/jabatan".to_owned());
+        let msg = findings_message(&[r.clone()], "n1");
+        assert!(msg.contains("tombol abu-abu, prototype biru"), "{msg}");
+        assert!(msg.contains("App page: /jabatan"), "{msg}");
+        assert!(msg.contains("Prototype page: /prototype/jabatan"), "{msg}");
+        r.visual = Visual::Match;
+        assert!(!findings_message(&[r], "n1").contains("prototype"));
     }
 }

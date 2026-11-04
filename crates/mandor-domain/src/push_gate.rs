@@ -3,7 +3,7 @@
 
 use std::fmt::Write as _;
 
-use crate::ac_ledger::{AcRow, Design, RowStatus, Verdict};
+use crate::ac_ledger::{AcRow, Design, RowStatus, Verdict, Visual};
 
 /// Ketatnya gerbang per workspace atau repo (R19).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
@@ -76,6 +76,7 @@ pub fn apply_decision(rows: &mut [AcRow], decision: &GateDecision) {
         .map(str::trim)
         .filter(|r| !r.is_empty());
     for r in rows.iter_mut().filter(|r| r.in_gate() && !r.stale) {
+        apply_visual_decision(r, reason, decision);
         match r.verdict {
             Verdict::Fail => {
                 if let Some(reason) = reason {
@@ -93,6 +94,27 @@ pub fn apply_decision(rows: &mut [AcRow], decision: &GateDecision) {
     }
 }
 
+/// Keputusan dev atas hasil tampilan (plan 2026-11-03-002, R25): Push anyway
+/// menerima perbedaan dengan alasan sendiri, konfirmasi manual menutup Can't
+/// verify. Keputusan perilaku tidak disentuh.
+fn apply_visual_decision(r: &mut AcRow, reason: Option<&str>, decision: &GateDecision) {
+    let d = &mut r.visual_detail;
+    match r.visual {
+        Visual::Differs => {
+            if let Some(reason) = reason {
+                r.visual = Visual::Accepted;
+                d.decision_reason = Some(reason.to_owned());
+                d.decided_by.clone_from(&decision.decided_by);
+            }
+        }
+        Visual::CantVerify if decision.confirmed.contains(&r.ac_id) => {
+            r.visual = Visual::CheckedManually;
+            d.decided_by.clone_from(&decision.decided_by);
+        }
+        _ => {}
+    }
+}
+
 /// Mengevaluasi gerbang atas baris setelah keputusan dev diterapkan.
 #[must_use]
 pub fn evaluate(rows: &[AcRow], mode: GateMode, decision: &GateDecision) -> GateOutcome {
@@ -105,15 +127,19 @@ pub fn evaluate(rows: &[AcRow], mode: GateMode, decision: &GateDecision) -> Gate
     {
         return GateOutcome::NeedsReview;
     }
-    let labels = |v: Verdict| -> Vec<String> {
+    // Baris gagal bila perilaku gagal atau tampilan berbeda (R20).
+    let labels = |v: Verdict, look: Visual| -> Vec<String> {
         active
             .iter()
-            .filter(|r| r.verdict == v)
+            .filter(|r| r.verdict == v || r.visual == look)
             .map(|r| r.display_label().to_owned())
             .collect()
     };
-    let failed = labels(Verdict::Fail);
-    let unverified = labels(Verdict::CantVerify);
+    let failed = labels(Verdict::Fail, Visual::Differs);
+    let unverified: Vec<String> = labels(Verdict::CantVerify, Visual::CantVerify)
+        .into_iter()
+        .filter(|l| !failed.contains(l))
+        .collect();
     match mode {
         GateMode::Warn => GateOutcome::Ready {
             warnings: failed.into_iter().chain(unverified).collect(),
@@ -242,14 +268,40 @@ fn row_result(r: &AcRow) -> String {
         .map(|n| format!(" by {n}"))
         .unwrap_or_default();
     let stale = if r.stale { " (stale)" } else { "" };
-    match r.verdict {
+    let behavior = match r.verdict {
         Verdict::Skipped => format!(
             "Skipped{by}: {}",
             r.reason.as_deref().unwrap_or("no reason given")
         ),
         Verdict::CheckedManually => format!("Checked manually{by}"),
         v => format!("{}{stale}", v.label()),
+    };
+    match visual_result(r) {
+        Some(look) => format!("{behavior}; {look}"),
+        None => behavior,
     }
+}
+
+/// Hasil tampilan untuk deskripsi PR; deskripsi perbedaan dan path halaman
+/// tidak ikut (R33 Rilis 2).
+fn visual_result(r: &AcRow) -> Option<String> {
+    let d = &r.visual_detail;
+    let by = d
+        .decided_by
+        .as_deref()
+        .map(|n| format!(" by {n}"))
+        .unwrap_or_default();
+    Some(match r.visual {
+        Visual::NotCompared => return None,
+        Visual::Match => "matches the prototype".to_owned(),
+        Visual::Differs => "looks different from the prototype".to_owned(),
+        Visual::CantVerify => "look not verified against the prototype".to_owned(),
+        Visual::Accepted => format!(
+            "looks different from the prototype, accepted{by}: {}",
+            d.decision_reason.as_deref().unwrap_or("no reason given")
+        ),
+        Visual::CheckedManually => format!("look checked manually{by}"),
+    })
 }
 
 #[cfg(test)]
@@ -510,5 +562,118 @@ mod tests {
         );
         assert_eq!(GateMode::parse("x"), None);
         assert_eq!(GateMode::default(), GateMode::Block);
+    }
+
+    // --- Hasil tampilan (plan 2026-11-03-002, U4) ---
+
+    fn visual(label: &str, verdict: Verdict, v: crate::ac_ledger::Visual) -> AcRow {
+        let mut r = row(label, verdict);
+        r.visual = v;
+        r
+    }
+
+    fn push_anyway(reason: &str) -> GateDecision {
+        GateDecision {
+            push_anyway_reason: Some(reason.to_owned()),
+            decided_by: Some("Beni".to_owned()),
+            ..GateDecision::default()
+        }
+    }
+
+    #[test]
+    fn tampilan_berbeda_memblokir_walau_perilaku_lulus() {
+        use crate::ac_ledger::Visual;
+        let rows = [visual("AC-1", Verdict::Pass, Visual::Differs)];
+        assert_eq!(
+            evaluate(&rows, GateMode::Block, &GateDecision::default()),
+            GateOutcome::Blocked {
+                failed: vec!["AC-1".to_owned()]
+            }
+        );
+        let rows = [visual("AC-1", Verdict::Fail, Visual::Match)];
+        assert!(matches!(
+            evaluate(&rows, GateMode::Block, &GateDecision::default()),
+            GateOutcome::Blocked { .. }
+        ));
+        let rows = [visual("AC-1", Verdict::Pass, Visual::CantVerify)];
+        assert_eq!(
+            evaluate(&rows, GateMode::Block, &GateDecision::default()),
+            GateOutcome::NeedsConfirmation {
+                unverified: vec!["AC-1".to_owned()]
+            }
+        );
+        let rows = [visual("AC-1", Verdict::Pass, Visual::Differs)];
+        assert_eq!(
+            evaluate(&rows, GateMode::Warn, &GateDecision::default()),
+            GateOutcome::Ready {
+                warnings: vec!["AC-1".to_owned()]
+            }
+        );
+    }
+
+    #[test]
+    fn covers_ae13_push_anyway_menerima_perbedaan_tampilan_dengan_alasan_sendiri() {
+        use crate::ac_ledger::Visual;
+        let mut rows = vec![visual("AC-1", Verdict::Pass, Visual::Differs)];
+        apply_decision(&mut rows, &push_anyway("warna dari design system baru"));
+        assert_eq!(rows[0].visual, Visual::Accepted);
+        assert_eq!(rows[0].verdict, Verdict::Pass, "perilaku tidak disentuh");
+        assert_eq!(rows[0].reason, None, "alasan perilaku tetap kosong");
+        assert_eq!(
+            rows[0].visual_detail.decision_reason.as_deref(),
+            Some("warna dari design system baru")
+        );
+        assert_eq!(rows[0].visual_detail.decided_by.as_deref(), Some("Beni"));
+        assert_eq!(
+            evaluate(&rows, GateMode::Block, &GateDecision::default()),
+            GateOutcome::Ready { warnings: vec![] }
+        );
+    }
+
+    #[test]
+    fn push_anyway_pada_baris_gagal_perilaku_melepas_seluruh_baris() {
+        use crate::ac_ledger::Visual;
+        let mut rows = vec![visual("AC-1", Verdict::Fail, Visual::Differs)];
+        apply_decision(&mut rows, &push_anyway("hotfix"));
+        assert_eq!(rows[0].verdict, Verdict::Skipped);
+        assert_eq!(rows[0].visual, Visual::Accepted);
+        assert_eq!(
+            evaluate(&rows, GateMode::Block, &GateDecision::default()),
+            GateOutcome::Ready { warnings: vec![] }
+        );
+    }
+
+    #[test]
+    fn tampilan_cant_verify_dikonfirmasi_manual() {
+        use crate::ac_ledger::Visual;
+        let mut rows = vec![visual("AC-1", Verdict::Pass, Visual::CantVerify)];
+        let d = GateDecision {
+            confirmed: vec!["rec-AC-1".to_owned()],
+            decided_by: Some("Beni".to_owned()),
+            ..GateDecision::default()
+        };
+        apply_decision(&mut rows, &d);
+        assert_eq!(rows[0].visual, Visual::CheckedManually);
+        assert_eq!(rows[0].visual_detail.decided_by.as_deref(), Some("Beni"));
+        assert_eq!(
+            evaluate(&rows, GateMode::Block, &GateDecision::default()),
+            GateOutcome::Ready { warnings: vec![] }
+        );
+    }
+
+    #[test]
+    fn ringkasan_pr_menyebut_hasil_tampilan() {
+        use crate::ac_ledger::Visual;
+        let mut a = visual("AC-1", Verdict::Pass, Visual::Accepted);
+        a.visual_detail.decision_reason = Some("warna baru".to_owned());
+        a.visual_detail.decided_by = Some("Beni".to_owned());
+        let got = pr_summary(&[a, visual("AC-2", Verdict::Pass, Visual::Match)], None);
+        assert!(
+            got.contains(
+                "AC-1: Pass; looks different from the prototype, accepted by Beni: warna baru"
+            ),
+            "{got}"
+        );
+        assert!(got.contains("AC-2: Pass; matches the prototype"), "{got}");
     }
 }

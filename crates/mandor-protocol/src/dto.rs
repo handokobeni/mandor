@@ -939,6 +939,31 @@ pub struct RunEventView {
     pub run_id: String,
 }
 
+fn not_compared() -> String {
+    "not_compared".to_owned()
+}
+
+/// Rincian hasil tampilan baris AC (plan 2026-11-03-002, R21).
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, TS)]
+pub struct VisualDetailView {
+    /// Deskripsi perbedaan dari reviewer.
+    #[serde(default)]
+    pub description: Option<String>,
+    #[serde(default)]
+    pub app_path: Option<String>,
+    #[serde(default)]
+    pub prototype_path: Option<String>,
+    #[serde(default)]
+    pub prototype_rev: Option<String>,
+    /// Berkas screenshot salinan daemon (run VM saja).
+    #[serde(default)]
+    pub screenshots: Vec<String>,
+    #[serde(default)]
+    pub decision_reason: Option<String>,
+    #[serde(default)]
+    pub decided_by: Option<String>,
+}
+
 /// Satu baris buku AC (Rilis 2).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
 pub struct AcRowView {
@@ -965,6 +990,12 @@ pub struct AcRowView {
     /// Kartu asal AC di run grup (`record_id`, kunci ada di `RunView.cards`);
     /// `None` untuk run tunggal.
     pub card: Option<String>,
+    /// Hasil tampilan terhadap prototype: `not_compared`, `match`, `differs`,
+    /// `cant_verify`, `accepted`, `checked_manually` (plan 2026-11-03-002).
+    #[serde(default = "not_compared")]
+    pub visual: String,
+    #[serde(default)]
+    pub visual_detail: VisualDetailView,
 }
 
 /// Hasil `ledger.get`: buku AC run setelah refresh dari tracker.

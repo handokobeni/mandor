@@ -329,6 +329,10 @@ fn prototype_bindings() -> Result<Vec<(&'static str, String)>, String> {
     Ok(vec![
         one("EnvKeysParams.ts", EnvKeysParams::export_to_string(&cfg))?,
         one(
+            "VisualDetailView.ts",
+            VisualDetailView::export_to_string(&cfg),
+        )?,
+        one(
             "PrototypeRevisionView.ts",
             PrototypeRevisionView::export_to_string(&cfg),
         )?,

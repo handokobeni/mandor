@@ -264,6 +264,22 @@ pub fn ac_row_view(r: &mandor_domain::AcRow) -> mandor_protocol::AcRowView {
         in_gate: r.in_gate(),
         selectable: r.selectable(),
         card: r.card.clone(),
+        visual: r.visual.as_str().to_owned(),
+        visual_detail: visual_detail_view(&r.visual_detail),
+    }
+}
+
+fn visual_detail_view(
+    d: &mandor_domain::ac_ledger::VisualDetail,
+) -> mandor_protocol::VisualDetailView {
+    mandor_protocol::VisualDetailView {
+        description: d.description.clone(),
+        app_path: d.app_path.clone(),
+        prototype_path: d.prototype_path.clone(),
+        prototype_rev: d.prototype_rev.clone(),
+        screenshots: d.screenshots.clone(),
+        decision_reason: d.decision_reason.clone(),
+        decided_by: d.decided_by.clone(),
     }
 }
 

@@ -1,5 +1,6 @@
 //! Konversi DTO kartu Planned dan target antrean (plan 2026-10-30-001, U6).
 
+use mandor_domain::ac_ledger::{Visual, VisualDetail};
 use mandor_domain::group::{AcSnap, CardState};
 use mandor_domain::planned::{DesignMark, PlannedWork};
 use mandor_domain::{AcRow, Design, RowStatus, Verdict};
@@ -104,6 +105,7 @@ fn ac_row_of(v: AcRowView) -> Result<AcRow, RpcError> {
     Ok(AcRow {
         design: Design::parse(&v.design).ok_or_else(|| unknown("design", &v.design))?,
         verdict: Verdict::parse(&v.verdict).ok_or_else(|| unknown("verdict", &v.verdict))?,
+        visual: Visual::parse(&v.visual).ok_or_else(|| unknown("visual", &v.visual))?,
         status: RowStatus::parse(&v.status).ok_or_else(|| unknown("status", &v.status))?,
         ac_id: v.ac_id,
         label: v.label,
@@ -114,6 +116,16 @@ fn ac_row_of(v: AcRowView) -> Result<AcRow, RpcError> {
         reason: v.reason,
         decided_by: v.decided_by,
         card: v.card,
+        visual_detail: VisualDetail {
+            description: v.visual_detail.description,
+            app_path: v.visual_detail.app_path,
+            prototype_path: v.visual_detail.prototype_path,
+            prototype_rev: v.visual_detail.prototype_rev,
+            // Berkas screenshot milik daemon asal tidak ikut berpindah.
+            screenshots: Vec::new(),
+            decision_reason: v.visual_detail.decision_reason,
+            decided_by: v.visual_detail.decided_by,
+        },
     })
 }
 

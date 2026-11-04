@@ -487,9 +487,9 @@ impl<D: Deps> RunService<D> {
         }
         let mut rows = self.reviews.ac_rows(run_id).await?;
         for id in ac_ids {
-            let ok = rows
-                .iter()
-                .any(|r| &r.ac_id == id && r.selectable() && r.verdict == Verdict::Fail);
+            // Perilaku gagal, atau tampilan berbeda dari prototype (R23 plan
+            // 2026-11-03-002).
+            let ok = rows.iter().any(|r| &r.ac_id == id && r.selectable());
             if !ok {
                 return Err(rejected("Only failed criteria can be sent to the agent"));
             }
@@ -512,6 +512,9 @@ impl<D: Deps> RunService<D> {
         .await?;
         for r in rows.iter_mut().filter(|r| ac_ids.contains(&r.ac_id)) {
             r.verdict = Verdict::FixInProgress;
+            if r.visual == mandor_domain::ac_ledger::Visual::Differs {
+                r.visual = mandor_domain::ac_ledger::Visual::NotCompared;
+            }
         }
         self.reviews.save_ac_rows(run_id, &rows).await?;
         Ok(())

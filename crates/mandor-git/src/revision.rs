@@ -40,30 +40,7 @@ impl Git {
             .to_owned();
         // `ls-files` hanya membaca index dan pola abaikan; isi berkas tidak
         // melewati filter repo.
-        let mut files: Vec<String> = self
-            .ok(
-                "ls-files (prototype)",
-                self.git(dir).args([
-                    "ls-files",
-                    "--cached",
-                    "--others",
-                    "--exclude-standard",
-                    "-z",
-                ]),
-            )
-            .await?
-            .stdout
-            .split('\0')
-            .filter(|p| !p.is_empty())
-            .map(str::to_owned)
-            .collect();
-        if files.len() > MAX_FILES {
-            return Err(GitError::Io(format!(
-                "the folder has more than {MAX_FILES} files"
-            )));
-        }
-        files.sort();
-        files.dedup();
+        let files = self.listed_files(dir).await?;
         let root = dir.to_path_buf();
         let task = tokio::task::spawn_blocking(move || {
             let mut hasher = Sha256::new();
@@ -80,13 +57,13 @@ impl Git {
         Ok(format!("{GIT_PREFIX}{head}+{content}"))
     }
 
-    /// Berkas yang berubah di commit sejak revisi `from`; perubahan yang
-    /// belum di-commit tidak dirinci (mengubah revisi, tetapi membacanya
-    /// butuh perintah yang menjalankan filter repo). Kosong untuk folder
-    /// bukan git.
+    /// Berkas yang berubah sejak revisi `from`: commit baru ditambah
+    /// perubahan yang belum di-commit, dihitung tanpa filter repo dengan
+    /// membandingkan blob id isi berkas (`hash-object --no-filters`) terhadap
+    /// `HEAD`. Kosong untuk folder bukan git.
     ///
     /// # Errors
-    /// [`GitError`] bila git gagal.
+    /// [`GitError`] bila git gagal atau folder terlalu besar.
     pub async fn folder_changes(&self, dir: &Path, from: &str) -> Result<Vec<String>, GitError> {
         let Some(base) = from.strip_prefix(GIT_PREFIX) else {
             return Ok(Vec::new());
@@ -111,9 +88,97 @@ impl Git {
             .lines()
             .map(str::to_owned)
             .collect();
+        files.extend(self.uncommitted(dir).await?);
         files.sort();
         files.dedup();
         Ok(files)
+    }
+
+    /// Berkas yang isinya berbeda dari `HEAD`, baru, atau terhapus.
+    async fn uncommitted(&self, dir: &Path) -> Result<Vec<String>, GitError> {
+        let head: std::collections::HashMap<String, String> = self
+            .ok(
+                "ls-tree (prototype)",
+                self.git(dir).args(["ls-tree", "-r", "-z", "HEAD"]),
+            )
+            .await?
+            .stdout
+            .split('\0')
+            .filter_map(|entry| {
+                let (meta, path) = entry.split_once('\t')?;
+                let blob = meta.split_whitespace().nth(2)?;
+                Some((path.to_owned(), blob.to_owned()))
+            })
+            .collect();
+        let present = self.listed_files(dir).await?;
+        // Path dengan baris baru tidak bisa lewat --stdin-paths; selalu
+        // dianggap berubah.
+        let (plain, odd): (Vec<&String>, Vec<&String>) =
+            present.iter().partition(|p| !p.contains('\n'));
+        let mut changed: Vec<String> = odd.into_iter().cloned().collect();
+        if !plain.is_empty() {
+            let input = plain.iter().fold(String::new(), |mut acc, p| {
+                acc.push_str(p);
+                acc.push('\n');
+                acc
+            });
+            let hashes = self
+                .ok(
+                    "hash-object --no-filters (prototype)",
+                    self.git(dir)
+                        .args(["hash-object", "--no-filters", "--stdin-paths"])
+                        .stdin_bytes(input),
+                )
+                .await?
+                .stdout;
+            for (path, hash) in plain.iter().zip(hashes.lines()) {
+                if head.get(path.as_str()).map(String::as_str) != Some(hash.trim()) {
+                    changed.push((*path).clone());
+                }
+            }
+        }
+        changed.extend(head.keys().filter(|p| !present.contains(p)).cloned());
+        Ok(changed)
+    }
+
+    /// Berkas dilacak dan untracked yang tidak diabaikan; tidak menjalankan
+    /// filter repo.
+    async fn listed_files(&self, dir: &Path) -> Result<Vec<String>, GitError> {
+        let mut files: Vec<String> = self
+            .ok(
+                "ls-files (prototype)",
+                self.git(dir).args([
+                    "ls-files",
+                    "--cached",
+                    "--others",
+                    "--exclude-standard",
+                    "-z",
+                ]),
+            )
+            .await?
+            .stdout
+            .split('\0')
+            .filter(|p| !p.is_empty())
+            .map(str::to_owned)
+            .collect();
+        if files.len() > MAX_FILES {
+            return Err(GitError::Io(format!(
+                "the folder has more than {MAX_FILES} files"
+            )));
+        }
+        files.sort();
+        files.dedup();
+        // Berkas yang dihapus dari worktree masih tercantum di index.
+        let root = dir.to_path_buf();
+        let task = tokio::task::spawn_blocking(move || {
+            files.retain(|rel| std::fs::symlink_metadata(root.join(rel)).is_ok());
+            files
+        });
+        match tokio::time::timeout(HASH_TIMEOUT, task).await {
+            Ok(Ok(files)) => Ok(files),
+            Ok(Err(e)) => Err(GitError::Io(format!("listing task failed: {e}"))),
+            Err(_) => Err(GitError::Io("listing the folder took too long".to_owned())),
+        }
     }
 }
 
@@ -249,6 +314,11 @@ mod tests {
         std::fs::write(repo.join("page.tsx"), "b").unwrap();
         let dirty = g.folder_revision(&repo).await.unwrap();
         assert_ne!(dirty, a, "perubahan belum di-commit mengubah revisi");
+        assert_eq!(
+            g.folder_changes(&repo, &a).await.unwrap(),
+            ["page.tsx"],
+            "perubahan belum di-commit dirinci"
+        );
         std::fs::write(repo.join("page.tsx"), "c").unwrap();
         let dirtier = g.folder_revision(&repo).await.unwrap();
         assert_ne!(dirtier, dirty, "isi berkas yang sudah kotor ikut dihitung");
@@ -267,7 +337,12 @@ mod tests {
         std::fs::write(repo.join("baru.tsx"), "c").unwrap();
         let b = g.folder_revision(&repo).await.unwrap();
         assert_ne!(b, a);
-        assert_eq!(g.folder_changes(&repo, &a).await.unwrap(), ["page.tsx"]);
+        std::fs::remove_file(repo.join(".gitignore")).unwrap();
+        assert_eq!(
+            g.folder_changes(&repo, &a).await.unwrap(),
+            [".gitignore", "baru.tsx", "node_modules/x/i.js", "page.tsx"],
+            "commit baru, berkas baru, dan berkas terhapus"
+        );
     }
 
     #[tokio::test]

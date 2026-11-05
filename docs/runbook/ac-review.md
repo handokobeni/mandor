@@ -74,7 +74,7 @@ Bila desain berupa app (mis. `kelola-web-prototype`, Next.js di branch `prototyp
 | Setup command | Opsional, mis. `pnpm install`; jalan saat lockfile berubah |
 | Start command | Mis. `pnpm dev --port 3001` |
 | Port | Harus berbeda dari port app repo mana pun dan prototype lain (di VM: dalam rentang port developer) |
-| URL | Alamat lokal yang **tidak terjangkau cookie login app**: bukan host app dan bukan subdomainnya. Mis. `http://127.0.0.1:3001` bila app memakai `localhost`, atau `http://localhost:3001` bila app memakai nama tenant seperti `stagingintegro.localhost`. Cookie terikat host, bukan port. Di WSL, Chrome di Windows menjangkau nama `localhost`/`*.localhost` tetapi belum tentu `127.0.0.1` |
+| URL | Alamat lokal yang **tidak terjangkau cookie login app mana pun**: bukan host app repo mana pun di daemon ini (cookie mengabaikan port) dan bukan subdomainnya. Paling aman nama sendiri seperti `http://mock.localhost:3001`. Di WSL, Chrome di Windows menjangkau nama `localhost`/`*.localhost` tetapi belum tentu `127.0.0.1` |
 | .env keys | Kunci dari `.env` folder prototype; **Pick from .env** tersedia setelah sumber disimpan |
 
 Perilakunya:

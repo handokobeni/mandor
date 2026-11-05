@@ -148,7 +148,7 @@ pub enum PrototypeUrlError {
     #[error("The prototype URL must use the prototype's port")]
     PortMismatch,
     #[error(
-        "The prototype URL must use a host the app's login cookies cannot reach: not the app's host or a subdomain of it (for example 127.0.0.1 or localhost when the app uses a *.localhost name)"
+        "The prototype URL must use a host no app's login cookies can reach: not the host of any app (cookies ignore the port) or a subdomain of it, for example http://mock.localhost:<port>"
     )]
     SameHostAsApp,
 }
@@ -199,18 +199,20 @@ fn is_loopback(host: &str) -> bool {
     is_localhost_name(host) || host == "[::1]" || host.starts_with("127.")
 }
 
-/// Prototype di `proto` bisa menerima cookie app di `app`: host sama,
-/// subdomain host app (cookie `Domain=<app>`), atau induk host app yang
-/// bukan sufiks publik. `localhost` diperlakukan browser sebagai sufiks
-/// publik, jadi `x.localhost` tidak bisa menulis cookie untuk `localhost`
-/// maupun saudaranya.
+/// Prototype di `proto` bisa menerima cookie app di `app`: host sama
+/// (cookie terikat host, bukan port), subdomain host app (cookie
+/// `Domain=<app>`), atau induk host app. Host satu label seperti `localhost`
+/// diperlakukan Chromium sebagai sufiks publik: cookie `Domain=localhost`
+/// menjadi host-only dan `x.localhost` tidak bisa menulis cookie untuk
+/// `localhost`, jadi keduanya tidak berbagi cookie lintas subdomain.
 fn shares_cookies(app: &str, proto: &str) -> bool {
     let under = |child: &str, parent: &str| {
-        child
-            .strip_suffix(parent)
-            .is_some_and(|rest| rest.ends_with('.'))
+        parent.contains('.')
+            && child
+                .strip_suffix(parent)
+                .is_some_and(|rest| rest.ends_with('.'))
     };
-    proto == app || under(proto, app) || (under(app, proto) && proto.contains('.'))
+    proto == app || under(proto, app) || under(app, proto)
 }
 
 /// Lockfile yang menentukan kapan perintah setup perlu dijalankan ulang.
@@ -498,8 +500,12 @@ mod tests {
             ok("http://mock.stagingintegro.localhost:3001", &tenant),
             Err(PrototypeUrlError::SameHostAsApp)
         );
+        // Cookie `Domain=localhost` dijadikan host-only oleh Chromium, jadi
+        // subdomain `localhost` tidak menerimanya; port lain di host yang
+        // sama tetap menerima cookie.
+        assert_eq!(ok("http://mock.localhost:3001", &plain), Ok(()));
         assert_eq!(
-            ok("http://mock.localhost:3001", &plain),
+            ok("http://localhost:3001", &plain),
             Err(PrototypeUrlError::SameHostAsApp)
         );
         assert_eq!(

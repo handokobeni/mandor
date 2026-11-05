@@ -112,7 +112,7 @@
           </Field>
           <Field id="ds-url" label="URL (optional)" error={appErrors.appUrl}>
             <Input id="ds-url" class="mono" placeholder="http://127.0.0.1:3001" bind:value={app.appUrl} />
-            {#snippet help()}Not the app's host or a subdomain of it: 127.0.0.1 when the app uses localhost; localhost when the app uses a *.localhost name.{/snippet}
+            {#snippet help()}A host no app uses, since login cookies ignore the port, e.g. http://mock.localhost:3001.{/snippet}
           </Field>
         </div>
         <div class="field">

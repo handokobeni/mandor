@@ -256,8 +256,9 @@ fn push_look_compare(out: &mut String, brief: &mandor_usecase::run_ports::Review
     let _ = writeln!(
         out,
         "- Design prototype: running at {url}. Compare the look of: {}. For each of these, \
-         open the matching page on the app and on the prototype at a {COMPARE_VIEWPORT} \
-         desktop viewport, find the page from the criterion's design note and the routes, and \
+         open the matching page on the app and on the prototype at the same viewport on both \
+         sides ({COMPARE_VIEWPORT} with browser_resize in the headless browser; in Chrome keep \
+         the current window and do not resize the Chrome window), find the page from the criterion's design note and the routes, and \
          call `mcp__mandor__ac_set_visual` once with match, differs, or cant_verify, a short \
          description, and both page paths. Judge layout, components, UI text, colours, \
          typography, and spacing. Ignore data content, since the prototype uses demo data. \
@@ -1137,6 +1138,8 @@ mod tests {
         );
         assert!(msg.contains("mcp__mandor__ac_set_visual"), "{msg}");
         assert!(msg.contains("1440x900"), "{msg}");
+        // Pagar menolak resize_window di Chrome milik dev.
+        assert!(msg.contains("do not resize the Chrome window"), "{msg}");
         assert!(msg.contains("Ignore data"), "{msg}");
         assert!(
             msg.contains("only the parts that are in the design"),

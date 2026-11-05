@@ -148,7 +148,7 @@ pub enum PrototypeUrlError {
     #[error("The prototype URL must use the prototype's port")]
     PortMismatch,
     #[error(
-        "The prototype URL must use a different host from the app URL (for example 127.0.0.1 when the app uses localhost or a *.localhost name), so the app's login cookies are not sent to the prototype"
+        "The prototype URL must use a host the app's login cookies cannot reach: not the app's host or a subdomain of it (for example 127.0.0.1 or localhost when the app uses a *.localhost name)"
     )]
     SameHostAsApp,
 }
@@ -173,7 +173,7 @@ pub fn check_prototype_url(
     if app_urls
         .iter()
         .filter_map(|u| host_port(u))
-        .any(|(h, _)| cookie_site(&h) == cookie_site(&host))
+        .any(|(app, _)| shares_cookies(&app, &host))
     {
         return Err(PrototypeUrlError::SameHostAsApp);
     }
@@ -199,14 +199,18 @@ fn is_loopback(host: &str) -> bool {
     is_localhost_name(host) || host == "[::1]" || host.starts_with("127.")
 }
 
-/// Host yang bisa berbagi cookie: seluruh keluarga `localhost` dianggap satu,
-/// karena cookie ber-`Domain=localhost` bisa terkirim ke subdomainnya.
-fn cookie_site(host: &str) -> &str {
-    if is_localhost_name(host) {
-        "localhost"
-    } else {
-        host
-    }
+/// Prototype di `proto` bisa menerima cookie app di `app`: host sama,
+/// subdomain host app (cookie `Domain=<app>`), atau induk host app yang
+/// bukan sufiks publik. `localhost` diperlakukan browser sebagai sufiks
+/// publik, jadi `x.localhost` tidak bisa menulis cookie untuk `localhost`
+/// maupun saudaranya.
+fn shares_cookies(app: &str, proto: &str) -> bool {
+    let under = |child: &str, parent: &str| {
+        child
+            .strip_suffix(parent)
+            .is_some_and(|rest| rest.ends_with('.'))
+    };
+    proto == app || under(proto, app) || (under(app, proto) && proto.contains('.'))
 }
 
 /// Lockfile yang menentukan kapan perintah setup perlu dijalankan ulang.
@@ -477,36 +481,40 @@ mod tests {
     }
 
     #[test]
-    fn subdomain_localhost_dianggap_lokal_dan_sekeluarga_dengan_localhost() {
+    fn subdomain_localhost_lokal_dan_cookie_hanya_turun_ke_subdomain() {
         // App multi-tenant memakai subdomain `*.localhost` (selalu loopback).
-        let apps = ["http://stagingintegro.localhost:3000".to_owned()];
+        // Chrome di Windows tidak menjangkau 127.0.0.1 milik WSL, jadi
+        // prototype perlu bisa memakai nama localhost juga.
+        let tenant = ["http://stagingintegro.localhost:3000".to_owned()];
+        let plain = ["http://localhost:3000".to_owned()];
+        let ok = |url: &str, apps: &[String]| check_prototype_url(url, 3001, apps);
+        assert_eq!(ok("http://127.0.0.1:3001", &tenant), Ok(()));
+        // `localhost` adalah sufiks publik bagi browser: subdomain tidak
+        // bisa menulis cookie `Domain=localhost`, jadi induk dan saudara aman.
+        assert_eq!(ok("http://localhost:3001", &tenant), Ok(()));
+        assert_eq!(ok("http://mock.localhost:3001", &tenant), Ok(()));
+        // Cookie `Domain=<host app>` terkirim ke subdomain host app.
         assert_eq!(
-            check_prototype_url("http://127.0.0.1:3001", 3001, &apps),
-            Ok(())
-        );
-        assert_eq!(
-            check_prototype_url("http://mock.localhost:3001", 3001, &apps),
-            Err(PrototypeUrlError::SameHostAsApp),
-            "cookie bisa berbagi domain localhost, jadi keluarga localhost ditolak"
-        );
-        assert_eq!(
-            check_prototype_url(
-                "http://mock.localhost:3001",
-                3001,
-                &["http://localhost:3000".to_owned()]
-            ),
+            ok("http://mock.stagingintegro.localhost:3001", &tenant),
             Err(PrototypeUrlError::SameHostAsApp)
         );
         assert_eq!(
-            check_prototype_url(
+            ok("http://mock.localhost:3001", &plain),
+            Err(PrototypeUrlError::SameHostAsApp)
+        );
+        assert_eq!(
+            ok("http://STAGINGINTEGRO.localhost:3001", &tenant),
+            Err(PrototypeUrlError::SameHostAsApp)
+        );
+        assert_eq!(
+            ok(
                 "http://mock.localhost:3001",
-                3001,
                 &["http://127.0.0.1:3000".to_owned()]
             ),
             Ok(())
         );
         assert_eq!(
-            check_prototype_url("http://localhost.example.com:3001", 3001, &apps),
+            ok("http://localhost.example.com:3001", &tenant),
             Err(PrototypeUrlError::NotLoopback)
         );
     }

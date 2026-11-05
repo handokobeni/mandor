@@ -11,4 +11,8 @@ url: string | null, state: string,
 /**
  * Nama sumber desain bila anggota ini prototype (plan 2026-11-03-002).
  */
-prototype: string | null, };
+prototype: string | null, 
+/**
+ * Repo Web yang diuji reviewer dengan browser: link app di UI.
+ */
+browser_tests: boolean, };

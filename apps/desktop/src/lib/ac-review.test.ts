@@ -17,6 +17,7 @@ import {
   validReason,
   NO_VISUAL,
   visualMeta,
+  cantReasons,
   gateRows,
   visualLinks
 } from '#lib/ac-review.ts';
@@ -194,6 +195,21 @@ describe('hasil tampilan dengan prototype (plan 2026-11-03-002)', () => {
     const rows = [look('pass', 'differs'), { ...look('cant_verify', 'match'), ac_id: 'c' }, { ...look('pass', 'cant_verify'), ac_id: 'd' }];
     expect(gateRows(rows).fails.map((r) => r.ac_id)).toEqual(['v']);
     expect(gateRows(rows).cants.map((r) => r.ac_id)).toEqual(['c', 'd']);
+  });
+
+  it('explains why the gate asks: behaviour evidence or the reason the look was not verified', () => {
+    const lookOnly = look('pass', 'cant_verify', {
+      evidence: 'Code renders the marker.',
+      visual_detail: { ...NO_VISUAL.visual_detail, description: 'Demo data has no critical job.' }
+    });
+    expect(cantReasons(lookOnly)).toEqual(['Look not verified: Demo data has no critical job.']);
+    expect(cantReasons(look('pass', 'cant_verify'))).toEqual(['Look not verified']);
+    const both = look('cant_verify', 'cant_verify', {
+      evidence: 'Needs a database.',
+      visual_detail: { ...NO_VISUAL.visual_detail, description: 'Prototype page missing.' }
+    });
+    expect(cantReasons(both)).toEqual(['Needs a database.', 'Look not verified: Prototype page missing.']);
+    expect(cantReasons(look('cant_verify', 'match', { evidence: 'Needs a database.' }))).toEqual(['Needs a database.']);
   });
 
   it('builds page links on the running app and prototype only for same-origin paths', () => {

@@ -5,7 +5,7 @@
   import FileCode from '@lucide/svelte/icons/file-code';
   import Play from '@lucide/svelte/icons/play';
   import TriangleAlert from '@lucide/svelte/icons/triangle-alert';
-  import { confirmModel } from '#lib/app-run.ts';
+  import { confirmModel, confirmedPrototypes } from '#lib/app-run.ts';
   import * as Alert from '#lib/components/ui/alert/index.ts';
   import { Button } from '#lib/components/ui/button/index.ts';
   import * as Dialog from '#lib/components/ui/dialog/index.ts';
@@ -25,6 +25,7 @@
   let { taskKey, changes, envKeys, otherRun, oncancel, onconfirm, onfile }: Props = $props();
 
   const repos = $derived(confirmModel(changes));
+  const prototypes = $derived(confirmedPrototypes(changes));
 </script>
 
 <Dialog.Root open onOpenChange={(o) => !o && oncancel()}>
@@ -70,6 +71,12 @@
               .env keys passed: <span class="mono">{(envKeys[r.repo_id] ?? []).join(', ')}</span> (values are never shown)
             </span>
           {/if}
+        </div>
+      {/each}
+      {#each prototypes as name (name)}
+        <div class="grid gap-1.5">
+          <span class="text-sm font-medium">{name} (prototype)</span>
+          <span class="muted text-[length:var(--text-sm)]">Starts too, from the revision you already confirmed.</span>
         </div>
       {/each}
     </div>

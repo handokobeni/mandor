@@ -20,7 +20,7 @@ function appView(runId: string, state: string): AppRunView {
   return {
     run_id: runId,
     state,
-    members: [{ repo_id: 'pegasus-web', url: 'http://localhost:5173', state, prototype: null }],
+    members: [{ repo_id: 'pegasus-web', url: 'http://localhost:5173', state, prototype: null, browser_tests: true }],
     database_confirmed: false,
     login_confirmed: false,
     error: state === 'failed' ? 'pegasus-web: the app exited (code 1) before opening its port' : null

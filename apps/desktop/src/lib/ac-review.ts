@@ -87,6 +87,18 @@ export function gateRows(rows: AcRowView[]): { fails: AcRowView[]; cants: AcRowV
   };
 }
 
+/** Alasan baris diminta dikonfirmasi di gerbang: bukti perilaku yang tak
+ * terverifikasi dan/atau alasan tampilannya tak terverifikasi. */
+export function cantReasons(r: AcRowView): string[] {
+  const out: string[] = [];
+  if (r.verdict === 'cant_verify' && r.evidence) out.push(r.evidence);
+  if (r.visual === 'cant_verify') {
+    const why = r.visual_detail.description;
+    out.push(why ? `Look not verified: ${why}` : 'Look not verified');
+  }
+  return out;
+}
+
 /** Link halaman yang dibandingkan reviewer; hanya path dengan origin yang sama (KTD-P6). */
 export function visualLinks(
   r: AcRowView,

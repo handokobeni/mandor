@@ -726,6 +726,8 @@ pub struct AppMemberView {
     pub state: String,
     /// Nama sumber desain bila anggota ini prototype (plan 2026-11-03-002).
     pub prototype: Option<String>,
+    /// Repo Web yang diuji reviewer dengan browser: link app di UI.
+    pub browser_tests: bool,
 }
 
 /// State app milik run.

@@ -5,7 +5,7 @@
   import CircleQuestionMark from '@lucide/svelte/icons/circle-question-mark';
   import CircleX from '@lucide/svelte/icons/circle-x';
   import GitPullRequestArrow from '@lucide/svelte/icons/git-pull-request-arrow';
-  import { acTitle, gateRows, label, publishParams, validReason } from '#lib/ac-review.ts';
+  import { acTitle, cantReasons, gateRows, label, publishParams, validReason } from '#lib/ac-review.ts';
   import * as Alert from '#lib/components/ui/alert/index.ts';
   import { Button } from '#lib/components/ui/button/index.ts';
   import { Checkbox } from '#lib/components/ui/checkbox/index.ts';
@@ -124,7 +124,7 @@
             {#if mode === 'warn'}
               <div class="gate-row">
                 <CircleQuestionMark class="gate-q" aria-hidden="true" />
-                <span><span class="mono">{label(r)}</span> <span title={r.text}>{acTitle(r.text)}</span>{#if r.evidence}<span class="muted gate-why" title={r.evidence}>{r.evidence}</span>{/if}</span>
+                <span><span class="mono">{label(r)}</span> <span title={r.text}>{acTitle(r.text)}</span>{#each cantReasons(r) as why, i (i)}<span class="muted gate-why" title={why}>{why}</span>{/each}</span>
               </div>
             {:else}
               <label class="gate-row">
@@ -135,7 +135,7 @@
                 />
                 <span>
                   <span class="mono">{label(r)}</span> <span title={r.text}>{acTitle(r.text)}</span>
-                  {#if r.evidence}<span class="muted gate-why" title={r.evidence}>{r.evidence}</span>{/if}
+                  {#each cantReasons(r) as why, i (i)}<span class="muted gate-why" title={why}>{why}</span>{/each}
                   <span class="gate-ck">I checked this myself</span>
                 </span>
               </label>

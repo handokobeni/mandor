@@ -57,9 +57,11 @@ function memberName(m: { repo_id: string; prototype: string | null }): string {
 /** URL app (repo pertama) dan URL prototype yang menyala, terpisah. */
 export function appUrls(app: AppRunView | null): { app: string | null; prototype: string | null } {
   if (!app || app.state !== 'running') return { app: null, prototype: null };
-  const url = (proto: boolean) =>
-    app.members.find((m) => m.url && m.state === 'running' && (m.prototype !== null) === proto)?.url ?? null;
-  return { app: url(false), prototype: url(true) };
+  const running = app.members.filter((m) => m.url && m.state === 'running');
+  const repos = running.filter((m) => m.prototype === null);
+  // Workspace berisi API dan web: link app menunjuk repo yang diuji browser.
+  const repo = repos.find((m) => m.browser_tests) ?? repos[0];
+  return { app: repo?.url ?? null, prototype: running.find((m) => m.prototype !== null)?.url ?? null };
 }
 
 /** Tombol kontrol: jalankan, hentikan, atau lihat log. */
@@ -184,6 +186,11 @@ export function confirmModel(changes: AppChangesView[]): ConfirmRepo[] {
       const label = c.prototype ? `${c.prototype} (prototype)` : c.repo_id;
       return { repo_id: c.repo_id, label, snapshot: c.snapshot, files, flagged };
     });
+}
+
+/** Prototype yang ikut jalan pada revisi terkonfirmasi tanpa perlu dilihat lagi. */
+export function confirmedPrototypes(changes: AppChangesView[]): string[] {
+  return changes.flatMap((c) => (c.confirmed && c.prototype ? [c.prototype] : []));
 }
 
 /** Snapshot yang dikirim ke `app.run`. */

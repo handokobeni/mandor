@@ -1,5 +1,6 @@
 //! Method `app.*`: run app milik run (KTD-36).
 
+use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
@@ -125,7 +126,9 @@ pub(super) fn check_app_port(
     }
 }
 
-fn app_view(r: AppRecord) -> AppRunView {
+/// `browser`: repo Web yang diuji reviewer dengan browser; link app di UI
+/// memakai repo ini, bukan repo API tanpa uji browser.
+fn app_view(r: AppRecord, browser: &BTreeSet<String>) -> AppRunView {
     AppRunView {
         run_id: r.run_id,
         state: r.state.as_str().to_owned(),
@@ -133,6 +136,7 @@ fn app_view(r: AppRecord) -> AppRunView {
             .members
             .into_iter()
             .map(|m| AppMemberView {
+                browser_tests: m.prototype.is_none() && browser.contains(&m.repo_id),
                 repo_id: m.repo_id,
                 url: m.url,
                 state: m.state.as_str().to_owned(),
@@ -169,6 +173,23 @@ impl AppDispatch {
         ok(&read_env_keys(&dir).await?)
     }
 
+    /// Repo Web dengan uji browser di daemon ini.
+    async fn browser_repos(&self) -> Result<BTreeSet<String>, RpcError> {
+        Ok(self
+            .app
+            .store
+            .list_repos()
+            .await
+            .map_err(store_error)?
+            .into_iter()
+            .filter(|r| {
+                let a = mandor_store::app_settings_of(&r.settings);
+                a.test_mode == TestMode::Web && a.browser_tests
+            })
+            .map(|r| r.id)
+            .collect())
+    }
+
     pub(super) fn is_app_method(name: &str) -> bool {
         [
             method::APP_STATUS,
@@ -190,10 +211,11 @@ impl AppDispatch {
         }
         let s = self.session().await?;
         let runs = &s.runs;
+        let browser = self.browser_repos().await?;
         match name {
             method::APP_OWNER => {
                 let owner = runs.app_owner_status().await.map_err(run_error)?;
-                ok(&owner.map(app_view))
+                ok(&owner.map(|r| app_view(r, &browser)))
             }
             method::APP_RUN => {
                 let p: AppRunParams = params(v)?;
@@ -201,7 +223,7 @@ impl AppDispatch {
                     .app_run(&p.run_id, &p.snapshots)
                     .await
                     .map_err(run_error)?;
-                ok(&app_view(rec))
+                ok(&app_view(rec, &browser))
             }
             method::APP_CONFIRM => {
                 let p: AppConfirm = params(v)?;
@@ -209,7 +231,7 @@ impl AppDispatch {
                     .app_confirm(&p.run_id, p.database, p.login)
                     .await
                     .map_err(run_error)?;
-                ok(&app_view(rec))
+                ok(&app_view(rec, &browser))
             }
             _ => {
                 let p: RunRef = params(v)?;
@@ -230,6 +252,7 @@ impl AppDispatch {
                     }
                     method::APP_STOP => ok(&app_view(
                         runs.app_stop(&p.run_id).await.map_err(run_error)?,
+                        &browser,
                     )),
                     method::APP_LOGS => ok(&runs
                         .app_logs(&p.run_id)
@@ -239,6 +262,7 @@ impl AppDispatch {
                         .collect::<Vec<_>>()),
                     _ => ok(&app_view(
                         runs.app_status(&p.run_id).await.map_err(run_error)?,
+                        &browser,
                     )),
                 }
             }
@@ -262,6 +286,37 @@ mod tests {
             auto_restart: true,
             unattended_login: true,
         }
+    }
+
+    #[test]
+    fn anggota_app_menandai_repo_yang_diuji_browser() {
+        use mandor_domain::app_run::AppRunState;
+        use mandor_usecase::run_ports::AppMemberRecord;
+        let member = |repo: &str, proto: Option<&str>| AppMemberRecord {
+            repo_id: repo.to_owned(),
+            url: Some(format!("http://{repo}.localhost:3000")),
+            pgid: None,
+            state: AppRunState::Running,
+            prototype: proto.map(str::to_owned),
+        };
+        let rec = AppRecord {
+            run_id: "r1".to_owned(),
+            members: vec![
+                member("api", None),
+                member("web", None),
+                member("prototype:d1", Some("mock")),
+            ],
+            ..AppRecord::default()
+        };
+        let browser =
+            std::collections::BTreeSet::from(["web".to_owned(), "prototype:d1".to_owned()]);
+        let v = app_view(rec, &browser);
+        let flags: Vec<bool> = v.members.iter().map(|m| m.browser_tests).collect();
+        assert_eq!(
+            flags,
+            [false, true, false],
+            "prototype bukan app yang diuji"
+        );
     }
 
     #[test]

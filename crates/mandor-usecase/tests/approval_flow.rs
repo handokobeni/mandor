@@ -163,6 +163,49 @@ async fn ae4_expired_menyalakan_tolak_langsung_sampai_chat_dibuka() {
 }
 
 #[tokio::test]
+async fn satu_keputusan_kartu_tercatat_sekali_di_chat() {
+    let st = setup();
+    let first = ask(
+        &st,
+        req(
+            &st,
+            "t1",
+            "curl -sI https://example.org",
+            TurnKind::Implement,
+        ),
+    );
+    let card = pending_card(&st, 1).await;
+    st.svc
+        .answer_approval(RUN, &card, ApprovalAnswer::Deny)
+        .await
+        .unwrap();
+    assert!(denied(&first.await.unwrap()));
+    let notes: Vec<String> = chat(&st)
+        .into_iter()
+        .filter(|t| t.starts_with("Denied"))
+        .collect();
+    assert_eq!(notes.len(), 1, "{notes:?}");
+
+    let expiring = ask(
+        &st,
+        req(
+            &st,
+            "t2",
+            "curl -sI https://example.net",
+            TurnKind::Implement,
+        ),
+    );
+    let card = pending_card(&st, 1).await;
+    st.waiter.time_out(&card);
+    assert!(denied(&expiring.await.unwrap()));
+    let expired: Vec<String> = chat(&st)
+        .into_iter()
+        .filter(|t| t.contains("example.net") && !t.starts_with("Approval requested"))
+        .collect();
+    assert_eq!(expired.len(), 1, "{expired:?}");
+}
+
+#[tokio::test]
 async fn ae13_deny_berlaku_lintas_giliran() {
     let st = setup();
     let first = ask(&st, req(&st, "t1", "docker compose up -d", TurnKind::Plan));
@@ -350,7 +393,7 @@ mod permit_token {
     use std::sync::atomic::Ordering;
 
     use super::{
-        ChatItem, FakeClock, FakeLark, RUN, Station, TurnKind, denied, json, setup, station,
+        ChatItem, FakeClock, FakeLark, RUN, Station, TurnKind, denied, json, req, setup, station,
     };
     use crate::common::{ready_task, vm_station};
     use mandor_usecase::review::{CapabilityRole, CapabilityScope};
@@ -444,6 +487,35 @@ mod permit_token {
             })
             .collect();
         assert_eq!(notes.len(), 1, "t1 sudah tampil sebagai event: {notes:?}");
+    }
+
+    #[tokio::test]
+    async fn penolakan_lewat_alat_persetujuan_tidak_dicatat_ulang_dari_stream() {
+        let (lark, clock) = board();
+        let st = station(&lark, &clock, "ou_me");
+        start(&st, Planning::Plan { skill: None }).await;
+        let mut r = req(&st, "t5", "git push origin HEAD", TurnKind::Plan);
+        r.run_id = st.runs.only().id;
+        assert!(denied(&st.svc.permit_request(r).await));
+        st.agent
+            .last()
+            .finish_denied(vec![denial("t5", "git push origin HEAD")]);
+        crate::common::run_fakes::eventually(|| {
+            st.runs.only().state != mandor_domain::RunState::Running
+        })
+        .await;
+        let notes: Vec<String> = st
+            .runs
+            .chat
+            .lock()
+            .unwrap()
+            .iter()
+            .filter_map(|(_, i)| match i {
+                ChatItem::System(t) if t.contains("git push") => Some(t.clone()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(notes.len(), 1, "{notes:?}");
     }
 
     #[tokio::test]

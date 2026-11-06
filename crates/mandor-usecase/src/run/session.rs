@@ -176,6 +176,12 @@ impl<D: Deps> RunService<D> {
         denied: Vec<mandor_domain::Denial>,
         shown: &std::collections::HashSet<String>,
     ) {
+        let handled = self
+            .permit_handled
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .remove(run_id)
+            .unwrap_or_default();
         if denied.is_empty() {
             return;
         }
@@ -189,7 +195,11 @@ impl<D: Deps> RunService<D> {
             .collect();
         let fresh: Vec<String> = denied
             .into_iter()
-            .filter(|d| !shown.contains(&d.tool_use_id) && !carded.contains(&d.tool_use_id))
+            .filter(|d| {
+                !shown.contains(&d.tool_use_id)
+                    && !carded.contains(&d.tool_use_id)
+                    && !handled.contains(&d.tool_use_id)
+            })
             .map(|d| format!("{} `{}`", d.tool_name, d.input))
             .collect();
         if fresh.is_empty() {

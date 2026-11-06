@@ -98,6 +98,14 @@ impl<D: Deps> RunService<D> {
 
     /// Memutuskan permintaan izin agent; menunggu jawaban dev bila perlu.
     pub async fn permit_request(self: &Arc<Self>, req: PermitRequest) -> PermitAnswer {
+        // Penolakan dari jalur ini sudah tercatat; `permission_denials` di
+        // akhir giliran tidak mencatatnya lagi (KTD-A17).
+        self.permit_handled
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .entry(req.run_id.clone())
+            .or_default()
+            .insert(req.tool_use_id.clone());
         match self.permit_decide(&req).await {
             Ok(answer) => answer,
             Err(reason) => {
@@ -228,7 +236,9 @@ impl<D: Deps> RunService<D> {
                     .unwrap_or(false)
                 {
                     self.approval_expired(&req.run_id, &card).await;
-                    return Err("the approval request expired after 10 minutes".to_owned());
+                    return Ok(PermitAnswer::Deny(
+                        "the approval request expired after 10 minutes".to_owned(),
+                    ));
                 }
                 // Jawaban menang tepat di tenggat.
                 self.approvals
@@ -244,8 +254,13 @@ impl<D: Deps> RunService<D> {
             Some(ApprovalAnswer::AllowOnce | ApprovalAnswer::AllowRun) => {
                 Ok(PermitAnswer::Allow(req.input.clone()))
             }
-            Some(ApprovalAnswer::Deny) => Err("the developer denied this request".to_owned()),
-            None => Err("the run stopped before the request was answered".to_owned()),
+            // Jawaban dan pembatalan sudah tercatat di Chat oleh jalurnya.
+            Some(ApprovalAnswer::Deny) => Ok(PermitAnswer::Deny(
+                "the developer denied this request".to_owned(),
+            )),
+            None => Ok(PermitAnswer::Deny(
+                "the run stopped before the request was answered".to_owned(),
+            )),
         }
     }
 

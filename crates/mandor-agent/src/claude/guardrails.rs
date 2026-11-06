@@ -327,7 +327,7 @@ pub fn parse_hook_input(raw: &[u8]) -> Result<ToolCall, String> {
         .get("command")
         .and_then(Value::as_str)
         .map(str::to_owned);
-    let paths = ["file_path", "path", "notebook_path"]
+    let paths = ["file_path", "path", "notebook_path", "filename"]
         .iter()
         .filter_map(|k| input.get(*k).and_then(Value::as_str).map(str::to_owned))
         .collect();
@@ -462,6 +462,17 @@ mod tests {
         assert_eq!(call.response.as_deref(), Some("Captured\nTab Context"));
         assert_eq!(call.tab_id, Some(7));
         assert_eq!(call.action.as_deref(), Some("screenshot"));
+    }
+
+    #[test]
+    fn nama_berkas_tool_browser_ikut_dibaca_sebagai_path() {
+        // Screenshot Playwright bernama relatif ditulis di worktree.
+        let raw = json!({
+            "tool_name": "mcp__playwright__browser_take_screenshot",
+            "tool_input": {"filename": "app-100.png", "fullPage": true}
+        });
+        let call = parse_hook_input(raw.to_string().as_bytes()).unwrap();
+        assert_eq!(call.paths, ["app-100.png"]);
     }
 
     #[test]

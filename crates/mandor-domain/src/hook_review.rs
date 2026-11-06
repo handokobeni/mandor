@@ -278,6 +278,14 @@ fn playwright_verdict(tool: &str, call: &ToolCall, state: &ReviewState) -> Verdi
     let Some(kind) = pw_kind(tool) else {
         return deny(&format!("`{tool}` is not available during review"));
     };
+    // Nama berkas relatif ditulis di folder kerja (worktree); berkas baru di
+    // worktree membuat hasil review usang. Tanpa nama, Playwright menyimpan
+    // hasilnya di folder output review.
+    if matches!(tool, "browser_take_screenshot" | "browser_snapshot") && !call.paths.is_empty() {
+        return deny(&format!(
+            "call `{tool}` without a filename; it is saved in the review output folder and the reply names the file"
+        ));
+    }
     match kind {
         Kind::Navigate if allowed(state, call.url.as_deref()) => Verdict::Allow,
         Kind::Navigate => deny("that address is outside the app allowed for this review"),
@@ -1256,6 +1264,29 @@ mod tests {
 
     fn allows(tool: &str, s: &ReviewState) -> bool {
         classify_review(&pw(tool, None), s, &[]) == Verdict::Allow
+    }
+
+    #[test]
+    fn playwright_screenshot_dan_snapshot_tanpa_nama_berkas() {
+        // Nama berkas relatif ditulis Playwright di folder kerja (worktree):
+        // berkas baru membuat hasil review usang. Tanpa nama, hasilnya masuk
+        // folder output review.
+        let mut s = state();
+        pw_post(
+            "browser_navigate",
+            Some("http://localhost:5173/jobs"),
+            &page_state("http://localhost:5173/jobs"),
+            &mut s,
+        );
+        for tool in ["browser_take_screenshot", "browser_snapshot"] {
+            let mut call = pw(tool, None);
+            call.paths = vec!["app-100.png".to_owned()];
+            assert!(
+                matches!(classify_review(&call, &s, &[]), Verdict::Deny(r) if r.contains("without a filename")),
+                "{tool}"
+            );
+            assert!(allows(tool, &s), "{tool}");
+        }
     }
 
     #[test]

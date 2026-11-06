@@ -85,6 +85,8 @@ pub struct RunService<D: Deps> {
     pub(crate) ledger_synced: Mutex<HashMap<String, i64>>,
     /// Token kapabilitas tool ledger yang berlaku (KTD-26).
     pub(crate) capabilities: Arc<Mutex<crate::review::capability::Issued>>,
+    /// Berkas izin per run untuk token `Permit` giliran yang berjalan.
+    pub(crate) permit_grants: Mutex<HashMap<String, crate::review::PermitGrant>>,
     /// Balasan komentar yang dikenal (digabung tiap poll, tanpa duplikat).
     pub(crate) replies: Mutex<Vec<mandor_domain::Reply>>,
     /// Semua komentar Base sudah dimuat sekali sejak start; cache di atas
@@ -154,6 +156,7 @@ impl<D: Deps> RunService<D> {
             permits: ports.permits,
             ledger_synced: Mutex::new(HashMap::new()),
             capabilities: crate::review::capability::empty(),
+            permit_grants: Mutex::new(HashMap::new()),
             replies: Mutex::new(Vec::new()),
             replies_loaded: std::sync::atomic::AtomicBool::new(false),
             cursor_sent: Mutex::new(HashMap::new()),

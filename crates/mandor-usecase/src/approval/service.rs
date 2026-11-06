@@ -68,6 +68,32 @@ fn summary(tool: &str, input: &Value) -> String {
 }
 
 impl<D: Deps> RunService<D> {
+    /// Permintaan dari koneksi token `Permit`: berkas izin dan jenis giliran
+    /// diambil dari giliran yang memegang token (KTD-A10).
+    pub async fn permit_request_scoped(
+        self: &Arc<Self>,
+        scope: &crate::review::CapabilityScope,
+        tool: String,
+        input: Value,
+        tool_use_id: String,
+    ) -> PermitAnswer {
+        let grant = (scope.role == crate::review::CapabilityRole::Permit)
+            .then(|| self.permit_grant(&scope.run_id))
+            .flatten();
+        let Some(grant) = grant else {
+            return PermitAnswer::Deny("this session cannot ask for approval".to_owned());
+        };
+        self.permit_request(PermitRequest {
+            run_id: scope.run_id.clone(),
+            turn: grant.turn,
+            permit: grant.permit,
+            tool,
+            input,
+            tool_use_id,
+        })
+        .await
+    }
+
     /// Memutuskan permintaan izin agent; menunggu jawaban dev bila perlu.
     pub async fn permit_request(self: &Arc<Self>, req: PermitRequest) -> PermitAnswer {
         match self.permit_decide(&req).await {

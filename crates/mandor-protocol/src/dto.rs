@@ -1582,3 +1582,24 @@ pub struct EnvKeysView {
     pub found: bool,
     pub keys: Vec<String>,
 }
+
+/// Parameter `permit.request`: permintaan izin Claude Code apa adanya.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct PermitRequestParams {
+    pub tool_name: String,
+    pub input: serde_json::Value,
+    pub tool_use_id: String,
+}
+
+/// Jawaban `permit.request` dalam bentuk alat persetujuan Claude Code (S2).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "behavior", rename_all = "lowercase")]
+pub enum PermitDecision {
+    Allow {
+        #[serde(rename = "updatedInput")]
+        updated_input: serde_json::Value,
+    },
+    Deny {
+        message: String,
+    },
+}

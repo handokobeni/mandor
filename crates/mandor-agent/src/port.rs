@@ -123,6 +123,10 @@ pub struct LedgerServer {
 
 /// Nama server MCP ledger milik daemon.
 pub const LEDGER_SERVER_NAME: &str = "mandor";
+/// Nama server MCP alat persetujuan milik daemon (KTD-A10).
+pub const PERMIT_SERVER_NAME: &str = "mandor_permit";
+/// Alat persetujuan untuk `--permission-prompt-tool`.
+pub const PERMIT_TOOL: &str = "mcp__mandor_permit__permit";
 
 /// Allowlist reviewer ditambah perintah test repo, dan path pendamping
 /// (termasuk sumber desain) tanpa duplikat.
@@ -286,6 +290,7 @@ impl ClaudeAgent {
             plan_mode: req.plan_mode,
             review: None,
             runner: self.cfg.runner.clone(),
+            permission_prompt_tool: self.permit_enabled(req).then(|| PERMIT_TOOL.to_owned()),
         }
     }
 
@@ -397,6 +402,7 @@ impl ClaudeAgent {
                 ),
             }),
             runner: self.cfg.runner.clone(),
+            permission_prompt_tool: None,
         }
     }
 
@@ -465,6 +471,13 @@ impl ClaudeAgent {
         }
     }
 
+    /// Berkas izin giliran ini.
+    fn permit_path(&self, req: &AgentRequest) -> PathBuf {
+        self.cfg
+            .permit_dir
+            .join(format!("{}.json", Self::permit_name(req)))
+    }
+
     /// Folder catatan bukti hook giliran ini.
     fn evidence_dir(&self, req: &AgentRequest) -> PathBuf {
         self.cfg
@@ -486,10 +499,7 @@ impl ClaudeAgent {
         self.prepare_dir(&self.cfg.permit_dir, 0o2750)
             .await
             .map_err(io)?;
-        let path = self
-            .cfg
-            .permit_dir
-            .join(format!("{}.json", Self::permit_name(req)));
+        let path = self.permit_path(req);
         let evidence = file.evidence.as_ref().map(PathBuf::from);
         let mode = self.file_mode(0o640);
         let target = path.clone();
@@ -521,6 +531,15 @@ impl ClaudeAgent {
         } else {
             ReviewBrowser::Chrome
         }
+    }
+
+    /// Giliran ini memakai alat persetujuan Mandor: implementasi atau plan di
+    /// laptop dengan token `Permit` (R12, R13).
+    fn permit_enabled(&self, req: &AgentRequest) -> bool {
+        req.permit.is_some()
+            && req.review.is_none()
+            && self.cfg.ledger_server.is_some()
+            && !self.shared_with_agent()
     }
 
     /// Giliran ini memakai server MCP ledger milik daemon.
@@ -567,6 +586,23 @@ impl ClaudeAgent {
                     "env": {
                         "MANDOR_MCP_PORT": server.port.to_string(),
                         "MANDOR_MCP_TOKEN": access.token.expose(),
+                    }
+                }),
+            );
+        }
+        if let (Some(token), Some(server), true) = (
+            &req.permit,
+            &self.cfg.ledger_server,
+            self.permit_enabled(req),
+        ) {
+            picked.insert(
+                PERMIT_SERVER_NAME.to_owned(),
+                serde_json::json!({
+                    "command": server.command.display().to_string(),
+                    "args": ["mcp", "--permit"],
+                    "env": {
+                        "MANDOR_MCP_PORT": server.port.to_string(),
+                        "MANDOR_MCP_TOKEN": token.expose(),
                     }
                 }),
             );
@@ -893,6 +929,14 @@ impl AgentPort for ClaudeAgent {
             deadline,
             timed_out: false,
             agent_user: self.cfg.runner.as_ref().map(|r| r.user.clone()),
+        })
+    }
+
+    fn permit_ref(&self, req: &AgentRequest) -> Option<mandor_usecase::run_ports::PermitRef> {
+        let bytes = self.permit_file(req).to_bytes().ok()?;
+        Some(mandor_usecase::run_ports::PermitRef {
+            path: self.permit_path(req).display().to_string(),
+            sha: permit::digest(&bytes),
         })
     }
 
@@ -1330,6 +1374,7 @@ mod tests {
             ledger: None,
             design: vec![],
             review: None,
+            permit: None,
         };
         let spec = agent.spec(&req, None);
         assert_eq!(spec.mcp_config, None);
@@ -1402,6 +1447,7 @@ mod tests {
             ledger: None,
             design: vec![],
             review: None,
+            permit: None,
         }
     }
 
@@ -1618,6 +1664,84 @@ mod tests {
         assert_eq!(mode(&path), 0o600);
         laptop.write_review_state(&review).await.unwrap();
         assert_eq!(mode(&laptop.review_state_path("rv1")), 0o600);
+    }
+
+    /// U5 plan 2026-11-06-001: giliran laptop memakai alat persetujuan
+    /// Mandor; reviewer dan VM tetap `--permission-prompts none` (AE5, AE6).
+    #[tokio::test]
+    async fn alat_persetujuan_hanya_untuk_giliran_laptop() {
+        use crate::claude::command::args;
+        use mandor_usecase::review::CapabilityToken;
+        let flag = |a: &[String], f: &str| {
+            a.iter()
+                .position(|x| x == f)
+                .and_then(|i| a.get(i + 1))
+                .cloned()
+        };
+        let dir = tempfile::tempdir().unwrap();
+        let laptop = test_agent(dir.path().join("mcp"));
+        let mut req = workspace_req(dir.path().to_path_buf());
+        if let Some(ws) = req.workspace.as_mut() {
+            ws.mcp_servers.clear();
+        }
+        req.permit = Some(CapabilityToken::for_test("tok-permit"));
+        let mcp = laptop.prepare_workspace(&req).await.unwrap().unwrap();
+        let spec = laptop.spec(&req, Some(mcp.clone()));
+        let a = args(&spec);
+        assert_eq!(flag(&a, "--permission-prompts").as_deref(), Some("host"));
+        assert_eq!(
+            flag(&a, "--permission-prompt-tool").as_deref(),
+            Some("mcp__mandor_permit__permit")
+        );
+        assert!(
+            !a.iter().any(|x| x.contains("tok-permit")),
+            "token bukan di argv"
+        );
+        let config: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(&mcp).unwrap()).unwrap();
+        let server = &config["mcpServers"]["mandor_permit"];
+        assert_eq!(server["args"], serde_json::json!(["mcp", "--permit"]));
+        assert_eq!(server["env"]["MANDOR_MCP_TOKEN"], "tok-permit");
+        assert!(
+            !spec.allowed.iter().any(|t| t.contains("mandor_permit")),
+            "alat persetujuan tidak untuk agent"
+        );
+        let permit = laptop.permit_ref(&req).unwrap();
+        let args_hook = laptop.write_permit(&req).await.unwrap();
+        assert!(
+            args_hook.ends_with(&permit.sha),
+            "berkas sama dengan referensinya"
+        );
+
+        // Reviewer: tanpa alat persetujuan walau token ada.
+        let mut review = req.clone();
+        review.review = Some(ReviewRequest {
+            review_id: "rv1".to_owned(),
+            origins: vec![],
+            browser: false,
+            model: None,
+            budget_cents: 100,
+            timeout: Duration::from_secs(900),
+        });
+        let a = args(&laptop.spec(&review, None));
+        assert_eq!(flag(&a, "--permission-prompts").as_deref(), Some("none"));
+        assert!(!a.contains(&"--permission-prompt-tool".to_owned()));
+
+        // VM: semua giliran tanpa kartu.
+        let mut cfg = test_agent(dir.path().join("vm")).cfg;
+        cfg.runner = Some(crate::claude::command::AgentRunner {
+            exe: "/opt/mandord".into(),
+            user: "beni-agent".to_owned(),
+            run_dir: dir.path().to_path_buf(),
+        });
+        let vm = ClaudeAgent::new(cfg);
+        let a = args(&vm.spec(&req, None));
+        assert_eq!(flag(&a, "--permission-prompts").as_deref(), Some("none"));
+        let vm_mcp = vm.prepare_workspace(&req).await.unwrap();
+        if let Some(path) = vm_mcp {
+            let text = std::fs::read_to_string(path).unwrap();
+            assert!(!text.contains("mandor_permit"), "{text}");
+        }
     }
 
     /// KTD-A4 plan 2026-11-06-001: berkas izin giliran tanpa rahasia, 0600

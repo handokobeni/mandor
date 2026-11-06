@@ -460,6 +460,14 @@ impl FakeAgent {
 
 impl AgentPort for FakeAgent {
     type Run = FakeRun;
+
+    fn permit_ref(&self, req: &AgentRequest) -> Option<mandor_usecase::run_ports::PermitRef> {
+        Some(mandor_usecase::run_ports::PermitRef {
+            path: format!("{}/permit.json", req.worktree.display()),
+            sha: "ab".repeat(32),
+        })
+    }
+
     async fn spawn(&self, req: &AgentRequest) -> Result<FakeRun, PortError> {
         if *self.fail_spawn.lock().unwrap() {
             return Err(PortError::Transient("claude tidak ditemukan".to_owned()));

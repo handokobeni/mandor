@@ -10,12 +10,14 @@
 mod client;
 mod mcp;
 mod mcp_client;
+mod permit;
 mod relay;
 mod server;
 
 pub use client::DaemonClient;
 pub use mcp::{LedgerRpc, McpSession};
 pub use mcp_client::mcp_lines;
+pub use permit::{DaemonPermit, PERMIT_CALL_TIMEOUT, PermitRpc, permit_lines};
 pub use relay::{RelayError, relay_lines};
 pub use server::{CapabilityScope, Dispatch, ServerConfig, serve};
 
@@ -36,4 +38,20 @@ pub async fn mcp_stdio(
     token: secrecy::SecretString,
 ) -> Result<(), RelayError> {
     mcp_lines(addr, token, tokio::io::stdin(), tokio::io::stdout()).await
+}
+
+/// Server MCP alat persetujuan untuk agent (`mandord mcp --permit`).
+///
+/// # Errors
+/// [`RelayError`] bila I/O stdio gagal.
+pub async fn permit_stdio(
+    addr: std::net::SocketAddr,
+    token: secrecy::SecretString,
+) -> Result<(), RelayError> {
+    permit_lines(
+        std::sync::Arc::new(DaemonPermit::new(addr, token)),
+        tokio::io::stdin(),
+        tokio::io::stdout(),
+    )
+    .await
 }

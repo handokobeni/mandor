@@ -33,6 +33,7 @@ fn spec(bin: PathBuf, wt: &Path) -> SessionSpec {
         plan_mode: false,
         review: None,
         runner: None,
+        permission_prompt_tool: None,
     }
 }
 
@@ -329,6 +330,7 @@ async fn sesi_reviewer_dihentikan_saat_melewati_batas_waktu() {
             budget_cents: 200,
             timeout: Duration::from_millis(500),
         }),
+        permit: None,
     };
     let mut run = None;
     for _ in 0..20 {

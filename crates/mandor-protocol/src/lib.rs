@@ -41,6 +41,10 @@ pub mod method {
     pub const LEDGER_TOOL_SET_VERDICT: &str = "ledger.tool.set_verdict";
     /// Koneksi kapabilitas, peran verdict: `LedgerToolSetVisual`.
     pub const LEDGER_TOOL_SET_VISUAL: &str = "ledger.tool.set_visual";
+    /// Koneksi kapabilitas peran permit (`mandord mcp --permit`):
+    /// `PermitRequestParams` → `PermitDecision`; boleh menunggu jawaban dev
+    /// sampai 10 menit (plan 2026-11-06-001).
+    pub const PERMIT_REQUEST: &str = "permit.request";
     /// Screenshot hasil tampilan run VM (`VisualScreenshotParams` →
     /// `VisualScreenshotView`).
     pub const REVIEW_SCREENSHOT: &str = "review.screenshot";

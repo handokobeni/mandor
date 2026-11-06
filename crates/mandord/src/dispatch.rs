@@ -1020,6 +1020,24 @@ async fn approve<D: mandor_usecase::Deps>(
     ok(&json!({}))
 }
 
+/// Tujuan panggilan koneksi token kapabilitas.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ScopedRoute {
+    Permit,
+    Ledger,
+    Refused,
+}
+
+/// Token `Permit` hanya untuk meminta izin; token ledger tidak bisa meminta
+/// izin (U5 plan 2026-11-06-001). Jawaban kartu tidak pernah lewat sini.
+fn scoped_route(role: &str, name: &str) -> ScopedRoute {
+    match (role, name) {
+        ("permit", method::PERMIT_REQUEST) => ScopedRoute::Permit,
+        ("permit", _) | (_, method::PERMIT_REQUEST) => ScopedRoute::Refused,
+        _ => ScopedRoute::Ledger,
+    }
+}
+
 impl Dispatch for AppDispatch {
     async fn verify_capability(&self, token: &str) -> Option<mandor_api::CapabilityScope> {
         self.capability(token).await
@@ -1031,7 +1049,14 @@ impl Dispatch for AppDispatch {
         name: &str,
         v: Value,
     ) -> Result<Value, RpcError> {
-        self.ledger_tool_call(scope, name, v).await
+        match scoped_route(&scope.role, name) {
+            ScopedRoute::Permit => self.permit_call(scope, v).await,
+            ScopedRoute::Ledger => self.ledger_tool_call(scope, name, v).await,
+            ScopedRoute::Refused => Err(RpcError::new(
+                ErrorCode::Unauthorized,
+                format!("{name} is not available on this connection"),
+            )),
+        }
     }
 
     async fn call(&self, name: &str, v: Value) -> Result<Value, RpcError> {
@@ -1090,6 +1115,27 @@ impl Dispatch for AppDispatch {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn token_permit_dan_ledger_terpisah() {
+        use super::{ScopedRoute, scoped_route};
+        assert_eq!(
+            scoped_route("permit", "permit.request"),
+            ScopedRoute::Permit
+        );
+        assert_eq!(
+            scoped_route("permit", "ledger.tool.read"),
+            ScopedRoute::Refused
+        );
+        assert_eq!(
+            scoped_route("design", "permit.request"),
+            ScopedRoute::Refused
+        );
+        assert_eq!(
+            scoped_route("verdict", "ledger.tool.read"),
+            ScopedRoute::Ledger
+        );
+    }
+
     use super::*;
 
     #[test]

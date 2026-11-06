@@ -307,3 +307,80 @@ async fn daemon_start_membatalkan_kartu_lama() {
         ApprovalStatus::Cancelled
     );
 }
+
+/// U5: token `Permit` hanya untuk giliran implementasi dan plan di laptop,
+/// dan hanya bisa dipakai untuk meminta izin.
+mod permit_token {
+    use std::sync::atomic::Ordering;
+
+    use super::{FakeClock, FakeLark, RUN, Station, TurnKind, denied, json, setup, station};
+    use crate::common::{ready_task, vm_station};
+    use mandor_usecase::review::{CapabilityRole, CapabilityScope};
+    use mandor_usecase::{Planning, StartTarget};
+    use pretty_assertions::assert_eq;
+
+    const DAY: i64 = 24 * 60 * 60 * 1000;
+
+    fn board() -> (FakeLark, FakeClock) {
+        let lark = FakeLark::default();
+        let clock = FakeClock::default();
+        clock.set(10 * DAY);
+        lark.clock.store(10 * DAY, Ordering::SeqCst);
+        let mut t = ready_task("rec1", &["ou_me"]);
+        t.last_modified_ms = 10 * DAY;
+        lark.put(t);
+        (lark, clock)
+    }
+
+    async fn start(st: &Station, planning: Planning) {
+        st.svc
+            .start_planned(
+                "rec1",
+                &StartTarget::Repo("repo1".to_owned()),
+                None,
+                &planning,
+                &[],
+                |_| {},
+            )
+            .await
+            .unwrap();
+    }
+
+    #[tokio::test]
+    async fn giliran_laptop_mendapat_token_permit_dan_vm_tidak() {
+        let (lark, clock) = board();
+        let st = station(&lark, &clock, "ou_me");
+        start(&st, Planning::Plan { skill: None }).await;
+        let req = st.agent.last().req;
+        let token = req.permit.clone().expect("token permit giliran plan");
+        let scope = st.svc.verify_capability(token.expose()).unwrap();
+        assert_eq!(scope.role, CapabilityRole::Permit);
+        let grant = st.svc.permit_grant(&scope.run_id).unwrap();
+        assert_eq!(grant.turn, TurnKind::Plan);
+        assert!(grant.permit.path.ends_with("permit.json"));
+
+        let (lark, clock) = board();
+        let vm = vm_station(&lark, &clock, "ou_me");
+        start(&vm, Planning::Plan { skill: None }).await;
+        assert!(vm.agent.last().req.permit.is_none(), "VM tanpa kartu");
+    }
+
+    #[tokio::test]
+    async fn token_ledger_tidak_bisa_meminta_izin() {
+        let st = setup();
+        let scope = CapabilityScope {
+            run_id: RUN.to_owned(),
+            role: CapabilityRole::Design,
+        };
+        let answer = st
+            .svc
+            .permit_request_scoped(
+                &scope,
+                "Bash".to_owned(),
+                json!({"command": "ls"}),
+                "t1".to_owned(),
+            )
+            .await;
+        assert!(denied(&answer));
+    }
+}

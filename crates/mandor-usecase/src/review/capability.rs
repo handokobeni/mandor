@@ -18,11 +18,13 @@ use crate::run_ports::{AgentPort, AppRecord, AppRecords, LedgerStore, RunStore};
 const EVIDENCE_MAX: usize = 2_000;
 const TRUNCATED: &str = " [truncated]";
 
-/// Peran token: giliran plan mengisi Design, reviewer mengisi Verdict.
+/// Peran token: giliran plan mengisi Design, reviewer mengisi Verdict, dan
+/// alat persetujuan meminta izin (plan 2026-11-06-001).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum CapabilityRole {
     Design,
     Verdict,
+    Permit,
 }
 
 impl CapabilityRole {
@@ -31,6 +33,7 @@ impl CapabilityRole {
         match self {
             Self::Design => "design",
             Self::Verdict => "verdict",
+            Self::Permit => "permit",
         }
     }
 }
@@ -141,6 +144,13 @@ fn truncate_evidence(text: &str) -> String {
 /// Token yang berlaku: (token, lingkup).
 pub(crate) type Issued = Vec<(CapabilityToken, CapabilityScope)>;
 
+/// Giliran yang memegang token `Permit`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PermitGrant {
+    pub turn: mandor_domain::permit::TurnKind,
+    pub permit: crate::run_ports::PermitRef,
+}
+
 impl<D: Deps> RunService<D> {
     /// Membuat token untuk run dan peran.
     pub fn issue_capability(&self, run_id: &str, role: CapabilityRole) -> CapabilityToken {
@@ -185,6 +195,30 @@ impl<D: Deps> RunService<D> {
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
             .retain(|(_, s)| s.run_id != run_id);
+        self.permit_grants
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .remove(run_id);
+    }
+
+    /// Token `Permit` untuk giliran implementasi atau plan, beserta berkas
+    /// izin dan jenis gilirannya (KTD-A10).
+    pub(crate) fn issue_permit(&self, run_id: &str, grant: PermitGrant) -> CapabilityToken {
+        self.permit_grants
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .insert(run_id.to_owned(), grant);
+        self.issue_capability(run_id, CapabilityRole::Permit)
+    }
+
+    /// Berkas izin dan jenis giliran untuk token `Permit` run.
+    #[must_use]
+    pub fn permit_grant(&self, run_id: &str) -> Option<PermitGrant> {
+        self.permit_grants
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .get(run_id)
+            .cloned()
     }
 
     /// Buku AC untuk tool `ac_ledger_read`.

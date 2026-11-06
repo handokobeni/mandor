@@ -239,6 +239,9 @@ pub struct AgentRequest {
     pub design: Vec<crate::review::DesignRoot>,
     /// Sesi reviewer AC: hanya baca, hook mode review, batas biaya dan waktu.
     pub review: Option<ReviewRequest>,
+    /// Token alat persetujuan Mandor (giliran implementasi dan plan di
+    /// laptop, plan 2026-11-06-001).
+    pub permit: Option<crate::review::CapabilityToken>,
 }
 
 /// Bagian permintaan agent untuk sesi reviewer (KTD-29–KTD-31).
@@ -326,6 +329,10 @@ pub trait AgentPort: Send + Sync {
     /// Login Claude Code yang dipakai agent masih valid (KTD-59 plan VM).
     /// Kegagalan memeriksa berarti tidak valid.
     fn logged_in(&self) -> impl Future<Output = bool> + Send;
+    /// Berkas izin yang akan ditulis untuk permintaan ini (deterministik).
+    fn permit_ref(&self, _req: &AgentRequest) -> Option<PermitRef> {
+        None
+    }
 }
 
 /// Bahan deskripsi PR. Semua teks berasal dari Lark atau diff dan diperlakukan

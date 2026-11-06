@@ -47,6 +47,20 @@ impl<D: Deps> RunService<D> {
     ) -> Result<(), RunError> {
         let _work = self.enter_work()?;
         let expected = run.generation;
+        let mut req = req;
+        // Giliran implementasi dan plan di laptop meminta izin lewat kartu;
+        // reviewer dan semua giliran VM tidak (R12, R13).
+        if req.review.is_none() && !self.is_vm() {
+            if let Some(permit) = self.agent.permit_ref(&req) {
+                let turn = if req.plan_mode {
+                    mandor_domain::permit::TurnKind::Plan
+                } else {
+                    mandor_domain::permit::TurnKind::Implement
+                };
+                req.permit =
+                    Some(self.issue_permit(&run.id, crate::review::PermitGrant { turn, permit }));
+            }
+        }
         let handle = self.agent.spawn(&req).await?;
         run.generation += 1;
         run.state = if req.review.is_some() {

@@ -39,6 +39,9 @@ pub struct SessionSpec {
     /// Daemon VM: agent dijalankan sebagai user Linux terpisah lewat
     /// `sudo -n -u <user> mandord agent-exec` (KTD-62 plan VM).
     pub runner: Option<AgentRunner>,
+    /// Alat persetujuan Mandor (`mcp__mandor_permit__permit`); `None` berarti
+    /// `--permission-prompts none` (plan 2026-11-06-001, KTD-A10).
+    pub permission_prompt_tool: Option<String>,
 }
 
 /// Cara menjalankan agent sebagai user agent di VM.
@@ -113,8 +116,6 @@ pub fn args(spec: &SessionSpec) -> Vec<String> {
         } else {
             "acceptEdits"
         },
-        "--permission-prompts",
-        "none",
         "--setting-sources",
         "user,project",
         "--strict-mcp-config",
@@ -122,6 +123,15 @@ pub fn args(spec: &SessionSpec) -> Vec<String> {
     .into_iter()
     .map(str::to_owned)
     .collect();
+    match &spec.permission_prompt_tool {
+        Some(tool) => a.extend([
+            "--permission-prompts".to_owned(),
+            "host".to_owned(),
+            "--permission-prompt-tool".to_owned(),
+            tool.clone(),
+        ]),
+        None => a.extend(["--permission-prompts".to_owned(), "none".to_owned()]),
+    }
     if let Some(path) = &spec.mcp_config {
         a.push("--mcp-config".to_owned());
         a.push(path.display().to_string());
@@ -220,6 +230,7 @@ mod tests {
             plan_mode: false,
             review: None,
             runner: None,
+            permission_prompt_tool: None,
         }
     }
 

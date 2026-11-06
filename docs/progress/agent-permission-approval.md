@@ -50,11 +50,27 @@ Plan: `docs/plans/2026-11-06-001-feat-agent-permission-approval-plan.md`. Branch
 
 Satu push gagal di pre-push (cover-check) pada test yang tidak terekam; enam putaran test coverage berikutnya lulus. Penantian test server permit dilonggarkan (10 detik) karena paling sensitif terhadap beban instrumentasi coverage. Test login flaky yang dikenal diperbaiki di PR #20.
 
-## Uji langsung (belum)
+## Uji langsung hook dengan Claude Code asli (2026-11-06)
+
+Repo git sementara, berkas izin giliran implementasi buatan tangan, `mandord hook --permit … --permit-sha …` dari branch ini, `claude -p … --permission-prompts none` (model haiku), tanpa daemon dan app.
+
+| Perintah | Hasil | AE |
+|---|---|---|
+| `cd sub && git diff --stat` | Berjalan tanpa bertanya (izin eksplisit hook) | AE1 |
+| `git log --oneline -1 2>&1 \| tail -5` | Berjalan tanpa bertanya | AE1, R1 |
+| `git push origin HEAD` | Ditolak hook: "mandor: `git push` is run only by the daemon …" | AE2 |
+| `echo x > .githooks/pre-push` | Ditolak hook: "mandor: changing agent config or git hooks is denied" | AE10 |
+| `curl -sI https://example.com` | Hook tanpa keputusan (catatan bukti tertulis), Claude Code menolak karena sesi tanpa jalur persetujuan; dengan alat persetujuan ini menjadi kartu | R4 |
+| `echo $(date)` | Hook tanpa keputusan; Claude Code menolak "A nested command … can't be checked" | AE8 (sebagian; kartu perlu dicek dengan app) |
+| `docker ps`, `touch newfile.txt` | Berjalan: Claude Code sendiri mengizinkan perintah baca-saja dan perintah berkas di mode `acceptEdits` | — |
+
+Catatan: karena Claude Code mengizinkan `docker ps` sendiri, uji kartu di app memakai perintah lain (mis. `curl -sI https://example.com`) sebagai pengganti contoh `docker ps` di AE4/AE13.
+
+## Uji langsung dengan app (belum)
 
 Butuh daemon dan app versi branch ini di laptop, dan biner `mandord` baru di VM:
 
 1. Laptop, run kelola: `cd kelola-web && git diff`, Vitest dengan path `(app)` → berjalan tanpa kartu.
-2. Perintah di luar allowlist (mis. `docker ps`) → kartu: Allow once, Allow for this run (ulang perintah sama → tanpa kartu), Deny (ulang → ditolak langsung), biarkan 10 menit (expired, mode tolak langsung, buka tab Chat → pulih), 6 kartu bersamaan.
+2. Perintah di luar allowlist (mis. `curl -sI https://example.com`; `docker ps` diizinkan Claude Code sendiri) → kartu: Allow once, Allow for this run (ulang perintah sama → tanpa kartu), Deny (ulang → ditolak langsung), biarkan 10 menit (expired, mode tolak langsung, buka tab Chat → pulih), 6 kartu bersamaan.
 3. Notifikasi dan badge "Needs approval"; klik notifikasi membuka Chat di kartu terlama.
 4. VM: satu kartu smoke dengan `cd x && git diff` (izin eksplisit hook) dan satu perintah di luar allowlist → laporan pagi memuat penolakan.

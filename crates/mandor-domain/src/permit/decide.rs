@@ -76,6 +76,8 @@ pub trait PathFacts {
     fn canonical(&self, path: &str) -> Option<String>;
     /// Folder terdekat (dirinya atau induknya) yang memuat `.git`.
     fn repo_root(&self, dir: &str) -> Option<String>;
+    /// Entri path adalah symlink (`lstat`), termasuk yang menggantung.
+    fn is_symlink(&self, path: &str) -> bool;
 }
 
 /// Program yang membuat atau memindah path; digabung dengan pindah folder
@@ -206,7 +208,8 @@ impl Forbidden {
 }
 
 fn forbidden(path: &str, run_root: &str) -> Option<Forbidden> {
-    if is_credential_path(path) {
+    // Folder kredensial itu sendiri (`~/.ssh`), bukan hanya isinya.
+    if is_credential_path(path) || is_credential_path(&format!("{path}/")) {
         return Some(Forbidden::Credential);
     }
     // Segmen di atas akar run (mis. `~/.local/share`) bukan bagian worktree.
@@ -239,12 +242,11 @@ impl<'a, F: PathFacts> PathCheck<'a, F> {
 
     /// `Some` bila fakta path memutuskan tolak atau tanpa keputusan.
     fn run(&self, commands: &[SimpleCommand], cwd: &str) -> Option<Decision> {
-        let moves = commands
-            .iter()
-            .any(|c| is_cd(c) || !dir_targets(c).is_empty());
-        if moves && commands.iter().any(creates) {
+        // Fakta path diselesaikan sebelum perintah jalan; pembuat path di
+        // baris gabungan bisa mengubahnya untuk perintah berikutnya.
+        if commands.len() > 1 && commands.iter().any(creates) {
             return Some(Decision::Undecided(
-                "creates or moves paths and changes folder in one command".to_owned(),
+                "creates or moves paths and runs more commands in one line".to_owned(),
             ));
         }
         let Some(mut cur) = self.facts.canonical(cwd) else {
@@ -472,7 +474,10 @@ fn resolve(facts: &impl PathFacts, base: &str, raw: &str) -> Option<String> {
             continue;
         };
         let rest = &parts[i..];
-        if rest.contains(&"..") {
+        // Komponen pertama yang tidak terselesaikan bisa berupa symlink
+        // menggantung yang menunjuk ke mana saja.
+        let first = format!("{}/{}", existing.trim_end_matches('/'), rest[0]);
+        if rest.contains(&"..") || facts.is_symlink(&first) {
             return None;
         }
         let rest: Vec<&str> = rest
@@ -557,6 +562,7 @@ mod tests {
     struct Fs {
         canonical: BTreeMap<String, String>,
         repos: BTreeSet<String>,
+        dangling: BTreeSet<String>,
     }
 
     impl PathFacts for Fs {
@@ -580,6 +586,10 @@ mod tests {
             } else {
                 Some(cur)
             }
+        }
+
+        fn is_symlink(&self, path: &str) -> bool {
+            self.dangling.contains(path)
         }
 
         fn repo_root(&self, dir: &str) -> Option<String> {
@@ -641,6 +651,7 @@ mod tests {
             .iter()
             .map(|s| (*s).to_owned())
             .collect(),
+            dangling: std::iter::once("/run/kelola-api/k".to_owned()).collect(),
         }
     }
 
@@ -796,6 +807,11 @@ mod tests {
             undecided(&api("ls hooks")),
             "baca folder hook lewat symlink"
         );
+        assert!(denied(&api("ls /home/u/.ssh")), "folder kredensial");
+        assert!(denied(&api("echo x > k")), "symlink menggantung");
+        assert!(undecided(&api("cat k")));
+        assert!(undecided(&api("ln -s /home/u/.ssh x && cat x/id_rsa")));
+        assert!(undecided(&api("mkdir -p a; echo x > a/b")));
         assert!(denied(&api("echo x > nope/../x")));
     }
 

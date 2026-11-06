@@ -29,23 +29,24 @@ pub fn dangerous(command: &SimpleCommand) -> Option<String> {
     }
 }
 
-const AWK_FLAGS: &[&str] = &[
-    "-f",
-    "--file",
-    "-i",
-    "--include",
-    "-l",
-    "--load",
-    "-E",
-    "--exec",
-];
-const AWK_MARKERS: &[&str] = &["system", "|", ">", "getline"];
+/// Opsi `awk` yang memuat program, pustaka, atau ekstensi dari berkas.
+const AWK_SHORT: &[&str] = &["-f", "-i", "-l", "-E"];
+const AWK_LONG: &[&str] = &["file", "include", "load", "exec"];
+const AWK_MARKERS: &[&str] = &["system", "|", ">", "getline", "@"];
+
+/// Opsi panjang `name` (sebelum `=`) adalah singkatan salah satu `options`,
+/// seperti `getopt_long` menerimanya.
+fn long_abbrev(arg: &str, options: &[&str]) -> bool {
+    arg.strip_prefix("--").is_some_and(|long| {
+        let name = long.split('=').next().unwrap_or(long);
+        !name.is_empty() && options.iter().any(|o| o.starts_with(name))
+    })
+}
 
 fn awk(args: &[String]) -> Option<String> {
     let flagged = args.iter().any(|a| {
-        AWK_FLAGS
-            .iter()
-            .any(|f| a == f || (f.starts_with("--") && a.starts_with(&format!("{f}="))))
+        long_abbrev(a, AWK_LONG)
+            || (!a.starts_with("--") && AWK_SHORT.iter().any(|f| a.starts_with(f)))
     });
     let runs = args
         .iter()
@@ -66,8 +67,7 @@ fn find(args: &[String]) -> Option<String> {
 fn sort(args: &[String]) -> Option<String> {
     args.iter()
         .any(|a| {
-            a.starts_with("--output")
-                || a.starts_with("--compress-program")
+            long_abbrev(a, &["output", "compress-program"])
                 || (a.starts_with('-') && !a.starts_with("--") && a.contains('o'))
         })
         .then(|| "`sort -o` writes files".to_owned())
@@ -266,6 +266,11 @@ mod tests {
             "ls | tee out",
             "sort -o out f",
             "sort -uo out f",
+            "sort --out=x f",
+            "sort --compress=x f",
+            "awk -fprog.awk f",
+            "awk --fi=prog.awk f",
+            "awk '@load \"x\"' f",
             "node -e 1",
             "rg --pre cat x",
         ] {

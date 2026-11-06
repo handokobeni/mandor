@@ -20,6 +20,10 @@ pub struct ToolCall {
     pub action: Option<String>,
     /// Teks respons tool, hanya untuk `PostToolUse`.
     pub response: Option<String>,
+    /// Folder kerja agent saat tool dipanggil (`cwd` input hook).
+    pub cwd: Option<String>,
+    /// Id pemanggilan tool dari Claude Code.
+    pub tool_use_id: Option<String>,
 }
 
 /// Keputusan hook.

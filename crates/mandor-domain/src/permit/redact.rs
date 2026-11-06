@@ -192,40 +192,53 @@ fn url_userinfo(text: &str) -> String {
 /// Nilai flag sebagai kata berikutnya: `--password x`, `--token x`,
 /// `-u user:pass`/`--user user:pass`, dan `-p<rahasia>` untuk klien database.
 fn flag_values(text: &str) -> String {
-    let words: Vec<&str> = text.split(' ').collect();
-    let db = words.iter().any(|w| {
-        let prog = w.rsplit('/').next().unwrap_or(w);
-        PASSWORD_P_PROGRAMS.contains(&prog)
+    let pieces: Vec<&str> = text.split_inclusive(char::is_whitespace).collect();
+    let word = |piece: &str| piece.trim_end_matches(char::is_whitespace).to_owned();
+    let db = pieces.iter().any(|p| {
+        let w = word(p);
+        let prog = w.rsplit('/').next().unwrap_or(&w).to_owned();
+        PASSWORD_P_PROGRAMS.contains(&prog.as_str())
     });
-    let mut out: Vec<String> = Vec::with_capacity(words.len());
+    let mut out = String::with_capacity(text.len());
     let mut mask_next = false;
     let mut mask_pass = false;
-    for w in words {
-        if mask_next && !w.is_empty() {
-            out.push(MASK.to_owned());
+    for piece in pieces {
+        let w = word(piece);
+        let sep = &piece[w.len()..];
+        let masked = if w.is_empty() {
+            w
+        } else if mask_next {
             mask_next = false;
-            continue;
-        }
-        if mask_pass && !w.is_empty() {
-            out.push(match w.split_once(':') {
-                Some((user, _)) => format!("{user}:{MASK}"),
-                None => w.to_owned(),
-            });
+            MASK.to_owned()
+        } else if mask_pass {
             mask_pass = false;
-            continue;
-        }
-        let flag = w.trim_start_matches('-');
-        if w.starts_with("--") && !w.contains('=') && secret_name(flag) {
-            mask_next = true;
+            mask_after_colon(&w)
         } else if w == "-u" || w == "--user" {
             mask_pass = true;
+            w
+        } else if w.starts_with("--user=") || (w.starts_with("-u") && !w.starts_with("--")) {
+            mask_after_colon(&w)
+        } else if w.starts_with("--") && !w.contains('=') && secret_name(w.trim_start_matches('-'))
+        {
+            mask_next = true;
+            w
         } else if db && w.len() > 2 && w.starts_with("-p") && !w.starts_with("--") {
-            out.push(format!("-p{MASK}"));
-            continue;
-        }
-        out.push(w.to_owned());
+            format!("-p{MASK}")
+        } else {
+            w
+        };
+        out.push_str(&masked);
+        out.push_str(sep);
     }
-    out.join(" ")
+    out
+}
+
+/// `user:pass` → `user:***`.
+fn mask_after_colon(word: &str) -> String {
+    match word.split_once(':') {
+        Some((user, _)) => format!("{user}:{MASK}"),
+        None => word.to_owned(),
+    }
 }
 
 /// Token dengan awalan yang dikenal, mis. `ghp_…`, `AKIA…`, `sk-…`.
@@ -278,6 +291,9 @@ mod tests {
                 "git clone https://***@host/r.git",
             ),
             ("curl -u a:b https://x", "curl -u a:*** https://x"),
+            ("curl --user=a:b x", "curl --user=a:*** x"),
+            ("curl -ua:b x", "curl -ua:*** x"),
+            ("curl\t-u\ta:b x", "curl\t-u\ta:*** x"),
             ("mysql -psecret -h db", "mysql -p*** -h db"),
             ("tool --password=x", "tool --password=***"),
             ("tool --password x y", "tool --password *** y"),

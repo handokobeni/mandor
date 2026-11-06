@@ -17,8 +17,10 @@ import {
   validReason,
   NO_VISUAL,
   visualMeta,
+  blockReason,
   cantReasons,
   gateRows,
+  pruneSelection,
   visualLinks
 } from '#lib/ac-review.ts';
 import type { AcRowView } from '#lib/protocol/AcRowView.ts';
@@ -178,6 +180,23 @@ describe('hasil tampilan dengan prototype (plan 2026-11-03-002)', () => {
     expect([c.pass, c.fail, c.cant]).toEqual([2, 1, 1]);
     expect(gate([look('pass', 'differs')], 'block', false).state).toBe('blocked');
     expect(gate([look('pass', 'cant_verify')], 'block', false).state).toBe('needs_confirmation');
+  });
+
+  it('keeps a selected row that only looks different and drops rows that can no longer be sent', () => {
+    const differs = { ...look('pass', 'differs', { selectable: true }), ac_id: 'd' };
+    const fixed = { ...look('pass', 'match', { selectable: true }), ac_id: 'm' };
+    const kept = pruneSelection(new Set(['d', 'm', 'gone']), [differs, fixed]);
+    expect([...kept]).toEqual(['d']);
+  });
+
+  it('says why a row blocks push: failed behaviour, or how it looks different', () => {
+    const differs = look('pass', 'differs', {
+      evidence: 'Card renders the name.',
+      visual_detail: { ...NO_VISUAL.visual_detail, description: 'Name is red, not bold blue.' }
+    });
+    expect(blockReason(differs)).toBe('Looks different: Name is red, not bold blue.');
+    expect(blockReason(look('fail', 'match', { evidence: 'Count is wrong.' }))).toBe('Count is wrong.');
+    expect(blockReason(look('fail', 'differs', { evidence: 'Count is wrong.' }))).toBe('Count is wrong.');
   });
 
   it('lets a row that only looks different be sent to the agent', () => {

@@ -19,6 +19,7 @@
     label,
     moveFocus,
     noDesignSource,
+    pruneSelection,
     removedRows,
     reviewMeta,
     toggleSelection,
@@ -96,10 +97,10 @@
     const c = cards.find((x) => x.record_id === r.card);
     return c ? `${cardKey(c)} · ${c.title}` : 'Other';
   }
-  // Pilihan yang tidak lagi Fail dibuang (mis. setelah review baru).
+  // Pilihan yang tidak lagi bisa dikirim dibuang (mis. setelah review baru).
   $effect(() => {
-    const ids = new Set(rows.filter((r) => r.verdict === 'fail').map((r) => r.ac_id));
-    if ([...selected].some((id) => !ids.has(id))) selected = new Set([...selected].filter((id) => ids.has(id)));
+    const kept = pruneSelection(selected, rows);
+    if (kept.size !== selected.size) selected = kept;
   });
 
   const TRIGGER: Record<string, string> = {
@@ -249,7 +250,7 @@
       {/if}
       {#if selected.size > 0}
         <div class="ac-selbar">
-          <span><b>{selected.size}</b> failed AC selected</span>
+          <span><b>{selected.size}</b> AC selected</span>
           <Button variant="ghost" size="sm" onclick={() => (selected = new Set())}>Clear</Button>
           <Button size="sm" disabled={agentBusy || reviewing} onclick={send}><SendHorizontal />Send to agent</Button>
         </div>

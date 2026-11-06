@@ -57,7 +57,16 @@
   import AcReviewTab from './AcReviewTab.svelte';
   import PlanApproval from './PlanApproval.svelte';
   import GateDialogs from './GateDialogs.svelte';
-  import { activeRows, gate as acGate, gateButtonLabel, label as acLabel, tabCount } from '#lib/ac-review.ts';
+  import {
+    activeRows,
+    blockReason,
+    canSend,
+    gate as acGate,
+    gateButtonLabel,
+    gateRows,
+    label as acLabel,
+    tabCount
+  } from '#lib/ac-review.ts';
   import * as Popover from '#lib/components/ui/popover/index.ts';
   import type { PublishParams } from '#lib/protocol/PublishParams.ts';
   import type { PublishResult } from '#lib/protocol/PublishResult.ts';
@@ -167,7 +176,8 @@
   const acRows = $derived(ledger.ledger ? activeRows(ledger.ledger.rows) : []);
   const gateNow = $derived(acGate(acRows, ledger.ledger?.gate_mode ?? 'block', reviewing));
   const acCount = $derived(tabCount(acRows));
-  const failing = $derived(acRows.filter((r) => r.in_gate && !r.stale && r.verdict === 'fail'));
+  // Verdict efektif: tampilan berbeda dari prototype ikut memblokir push.
+  const failing = $derived(gateRows(acRows).fails);
 
   // Run app (Rilis 2 U13).
   let repos = $state<RepoView[]>([]);
@@ -619,12 +629,12 @@
         <Popover.Content align="end" class="gate-pop w-[360px]">
           <div class="gp-head"><Lock aria-hidden="true" /><b>Push blocked by {failing.length} AC</b></div>
           {#each failing as r (r.ac_id)}
-            <div class="gp-row"><span class="mono">{acLabel(r)}</span><span>{r.evidence ?? r.text}</span></div>
+            <div class="gp-row"><span class="mono">{acLabel(r)}</span><span>{blockReason(r)}</span></div>
           {/each}
           <div class="gp-act">
             <Button variant="ghost" size="sm" onclick={() => ((blockedOpen = false), (tab = 'ac'))}>View in AC review</Button>
             <Button variant="outline" size="sm" onclick={() => ((blockedOpen = false), (gateDialog = 'anyway'))}>Push anyway…</Button>
-            <Button size="sm" onclick={() => ((blockedOpen = false), sendFindings(failing.filter((r) => r.selectable).map((r) => r.ac_id)))}>Send to agent</Button>
+            <Button size="sm" onclick={() => ((blockedOpen = false), sendFindings(failing.filter(canSend).map((r) => r.ac_id)))}>Send to agent</Button>
           </div>
         </Popover.Content>
       </Popover.Root>

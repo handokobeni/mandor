@@ -87,6 +87,14 @@ export function gateRows(rows: AcRowView[]): { fails: AcRowView[]; cants: AcRowV
   };
 }
 
+/** Alasan baris memblokir push: bukti perilaku yang gagal, atau perbedaan
+ * tampilannya dengan prototype. */
+export function blockReason(r: AcRowView): string {
+  if (r.verdict === 'fail') return r.evidence ?? r.text;
+  const why = r.visual_detail.description;
+  return why ? `Looks different: ${why}` : 'Looks different from the prototype';
+}
+
 /** Alasan baris diminta dikonfirmasi di gerbang: bukti perilaku yang tak
  * terverifikasi dan/atau alasan tampilannya tak terverifikasi. */
 export function cantReasons(r: AcRowView): string[] {
@@ -324,6 +332,13 @@ export function toggleSelection(selected: Set<string>, r: AcRowView): Set<string
   if (next.has(r.ac_id)) next.delete(r.ac_id);
   else next.add(r.ac_id);
   return next;
+}
+
+/** Pilihan Send to agent yang masih bisa dikirim: Fail atau tampilan berbeda
+ * (baris lain dibuang, mis. setelah review baru). */
+export function pruneSelection(selected: Set<string>, rows: AcRowView[]): Set<string> {
+  const ids = new Set(rows.filter(canSend).map((r) => r.ac_id));
+  return new Set([...selected].filter((id) => ids.has(id)));
 }
 
 /** Alasan Push anyway wajib berisi selain spasi. */

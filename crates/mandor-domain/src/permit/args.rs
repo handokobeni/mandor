@@ -29,9 +29,11 @@ pub fn dangerous(command: &SimpleCommand) -> Option<String> {
     }
 }
 
-/// Opsi `awk` yang memuat program, pustaka, atau ekstensi dari berkas.
-const AWK_SHORT: &[&str] = &["-f", "-i", "-l", "-E"];
-const AWK_LONG: &[&str] = &["file", "include", "load", "exec"];
+/// Opsi `awk` yang aman, ditulis lengkap tanpa singkatan: pemisah kolom dan
+/// assignment variabel. Opsi lain
+/// (termasuk `-f`, `-i`, `-l`, `-E`, `-W`, dan gabungannya) bisa memuat
+/// program atau ekstensi.
+const AWK_SAFE_LONG: &[&str] = &["field-separator", "assign"];
 const AWK_MARKERS: &[&str] = &["system", "|", ">", "getline", "@"];
 
 /// Opsi panjang `name` (sebelum `=`) adalah singkatan salah satu `options`,
@@ -44,10 +46,32 @@ fn long_abbrev(arg: &str, options: &[&str]) -> bool {
 }
 
 fn awk(args: &[String]) -> Option<String> {
-    let flagged = args.iter().any(|a| {
-        long_abbrev(a, AWK_LONG)
-            || (!a.starts_with("--") && AWK_SHORT.iter().any(|f| a.starts_with(f)))
-    });
+    let mut i = 0;
+    let mut flagged = false;
+    while let Some(a) = args.get(i) {
+        i += 1;
+        if a == "--" {
+            break;
+        }
+        if !a.starts_with('-') || a == "-" {
+            continue;
+        }
+        let long_name = a
+            .strip_prefix("--")
+            .map(|l| l.split('=').next().unwrap_or(l));
+        if a == "-F"
+            || a == "-v"
+            || long_name.is_some_and(|n| AWK_SAFE_LONG.contains(&n) && !a.contains('='))
+        {
+            i += 1;
+        } else if !(a.starts_with("-F") && !a.starts_with("--")
+            || a.starts_with("-v") && !a.starts_with("--")
+            || long_name.is_some_and(|n| AWK_SAFE_LONG.contains(&n)))
+        {
+            flagged = true;
+            break;
+        }
+    }
     let runs = args
         .iter()
         .any(|a| AWK_MARKERS.iter().any(|m| a.contains(m)));
@@ -269,6 +293,8 @@ mod tests {
             "sort --out=x f",
             "sort --compress=x f",
             "awk -fprog.awk f",
+            "awk -W exec=x f",
+            "awk -vx=1 -nf prog.awk f",
             "awk --fi=prog.awk f",
             "awk '@load \"x\"' f",
             "node -e 1",
@@ -282,6 +308,7 @@ mod tests {
     fn argumen_biasa_aman() {
         for cmd in [
             "awk '{print $1}' f",
+            "awk -F: -v n=1 '{print $n}' f",
             "sed -n '1,80p' f",
             "sed -n 1,80p f",
             "sed 's/a/b/g' f",

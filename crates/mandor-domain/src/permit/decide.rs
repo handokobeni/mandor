@@ -68,6 +68,9 @@ pub struct Scope {
     pub members: Vec<String>,
     /// Direktori run daemon VM; `None` di laptop.
     pub vm_run_dir: Option<String>,
+    /// Folder milik daemon yang tidak boleh dibaca atau ditulis agent (mis.
+    /// folder berkas izin, KTD-A4).
+    pub private: Vec<String>,
 }
 
 /// Fakta filesystem dari pemanggil (hook atau daemon).
@@ -83,10 +86,36 @@ pub trait PathFacts {
 /// Program yang membuat atau memindah path; digabung dengan pindah folder
 /// dalam satu baris, fakta path yang diselesaikan sebelum perintah jalan
 /// tidak lagi berlaku (KTD-A6).
-const CREATORS: &[&str] = &["mkdir", "ln", "mv", "cp", "rsync", "tar", "unzip"];
-const GIT_CREATORS: &[&str] = &["init", "clone", "worktree", "submodule"];
+const CREATORS: &[&str] = &[
+    "mkdir", "ln", "mv", "cp", "rsync", "tar", "unzip", "patch", "rm", "rmdir", "install", "touch",
+    "dd", "truncate", "chmod", "tee",
+];
+/// Sub-perintah git yang membuat repo atau mengubah isi worktree (termasuk
+/// symlink yang tercatat di repo).
+const GIT_CREATORS: &[&str] = &[
+    "init",
+    "clone",
+    "worktree",
+    "submodule",
+    "checkout",
+    "switch",
+    "restore",
+    "reset",
+    "stash",
+    "apply",
+    "am",
+    "merge",
+    "pull",
+    "rebase",
+    "cherry-pick",
+    "revert",
+    "mv",
+    "rm",
+];
 const PACKAGE_MANAGERS: &[&str] = &["npm", "pnpm", "yarn", "bun", "pip", "pip3", "cargo"];
 const INSTALL_WORDS: &[&str] = &["install", "i", "add", "ci"];
+
+const PRIVATE_DENIED: &str = "mandor: the daemon's permission files are not available to the agent";
 
 /// Memutuskan satu tool call (urutan KTD-A8). `review` adalah state pagar
 /// reviewer; wajib di giliran reviewer.
@@ -142,9 +171,23 @@ pub fn decide(
     }
 }
 
-/// Pagar VM dan akar sumber desain, dengan path yang diselesaikan.
+/// Folder milik daemon, pagar VM, dan akar sumber desain, dengan path yang
+/// diselesaikan.
 fn fences(scope: &Scope, call: &ToolCall, cwd: &str, facts: &impl PathFacts) -> Option<String> {
     let lenient = |p: &str| resolve(facts, cwd, p).unwrap_or_else(|| p.to_owned());
+    for dir in &scope.private {
+        let real = canonical_or(facts, dir);
+        let named = |text: &str| text.contains(dir.trim_end_matches('/')) || text.contains(&real);
+        let touched = call
+            .paths
+            .iter()
+            .any(|p| named(p) || under(&lenient(p), &real))
+            || call.command.as_deref().is_some_and(named)
+            || call.url.as_deref().is_some_and(named);
+        if touched {
+            return Some(PRIVATE_DENIED.to_owned());
+        }
+    }
     if let Some(dir) = &scope.vm_run_dir {
         let mut resolved = call.clone();
         resolved.paths = call
@@ -225,6 +268,7 @@ struct PathCheck<'a, F> {
     facts: &'a F,
     run_root: String,
     members: Vec<String>,
+    private: Vec<String>,
 }
 
 impl<'a, F: PathFacts> PathCheck<'a, F> {
@@ -236,6 +280,11 @@ impl<'a, F: PathFacts> PathCheck<'a, F> {
                 .members
                 .iter()
                 .map(|m| canonical_or(facts, m))
+                .collect(),
+            private: scope
+                .private
+                .iter()
+                .map(|d| canonical_or(facts, d))
                 .collect(),
         }
     }
@@ -324,6 +373,9 @@ impl<'a, F: PathFacts> PathCheck<'a, F> {
                     redirect.target
                 )));
             };
+            if self.private.iter().any(|d| under(&path, d)) {
+                return Some(Decision::Deny(PRIVATE_DENIED.to_owned()));
+            }
             match forbidden(&path, &self.run_root) {
                 Some(Forbidden::Credential) => {
                     return Some(Decision::Deny(
@@ -350,6 +402,9 @@ impl<'a, F: PathFacts> PathCheck<'a, F> {
                     "path `{raw}` cannot be resolved"
                 )));
             };
+            if self.private.iter().any(|d| under(&path, d)) {
+                return Some(Decision::Deny(PRIVATE_DENIED.to_owned()));
+            }
             match forbidden(&path, &self.run_root) {
                 Some(Forbidden::Credential) => {
                     return Some(Decision::Deny(Forbidden::Credential.reason(raw)));
@@ -627,6 +682,7 @@ mod tests {
             "/home/u",
             "/home/u/.ssh",
             "/home/u/.ssh/id_rsa",
+            "/home/u/permit",
             "/dev",
             "/dev/null",
         ];
@@ -638,6 +694,7 @@ mod tests {
             ("/run/kelola-api/docs", "/outside/docs"),
             ("/run/kelola-api/hooks", "/run/kelola-api/.githooks"),
             ("/run/kelola-api/keys", "/home/u/.ssh"),
+            ("/run/kelola-api/pl", "/home/u/permit"),
         ] {
             canonical.insert(link.to_owned(), target.to_owned());
         }
@@ -682,6 +739,7 @@ mod tests {
             run_root: "/run".to_owned(),
             members: vec!["/run/kelola-api".to_owned(), "/run/kelola-web".to_owned()],
             vm_run_dir: None,
+            private: vec!["/home/u/permit".to_owned()],
         }
     }
 
@@ -812,6 +870,8 @@ mod tests {
         assert!(undecided(&api("cat k")));
         assert!(undecided(&api("ln -s /home/u/.ssh x && cat x/id_rsa")));
         assert!(undecided(&api("mkdir -p a; echo x > a/b")));
+        assert!(undecided(&api("git checkout x && cat l/id_rsa")));
+        assert!(undecided(&api("git apply p.diff; cat l/id_rsa")));
         assert!(denied(&api("echo x > nope/../x")));
     }
 
@@ -854,6 +914,26 @@ mod tests {
             &fs(),
         );
         assert!(denied(&d), "tanpa state reviewer");
+    }
+
+    #[test]
+    fn folder_berkas_izin_terlarang_bagi_agent() {
+        assert!(denied(&api("echo x > /home/u/permit/x")));
+        assert!(denied(&api("cat /home/u/permit/a.json")));
+        assert!(denied(&api("cat pl/a.json")), "lewat symlink");
+        let read = ToolCall {
+            tool_name: "Read".to_owned(),
+            paths: vec!["pl/a.json".to_owned()],
+            ..ToolCall::default()
+        };
+        let d = decide(
+            &scope(TurnKind::Implement),
+            &read,
+            "/run/kelola-api",
+            None,
+            &fs(),
+        );
+        assert!(denied(&d));
     }
 
     #[test]

@@ -19,6 +19,13 @@ export type ChatBlock =
   | { kind: 'done'; id: number; isError: boolean; text: string }
   | { kind: 'failed'; id: number; text: string };
 
+/** Alasan penolakan hook Mandor dari hasil tool `PreToolUse … mandor: …`. */
+function hookDenial(preview: string): string | null {
+  if (!preview.includes('PreToolUse')) return null;
+  const at = preview.indexOf('mandor:');
+  return at >= 0 ? preview.slice(at).trim() : null;
+}
+
 function str(v: unknown): string {
   return typeof v === 'string' ? v : '';
 }
@@ -52,7 +59,10 @@ export function toBlocks(messages: MessageView[]): ChatBlock[] {
       }
       case 'tool_result': {
         const call = calls.get(str(b.tool_use_id));
-        if (call) call.result = { isError: b.is_error === true, preview: str(b.preview) };
+        if (!call) break;
+        const denial = b.is_error === true ? hookDenial(str(b.preview)) : null;
+        if (denial) call.denied = denial;
+        else call.result = { isError: b.is_error === true, preview: str(b.preview) };
         break;
       }
       case 'permission_denied': {

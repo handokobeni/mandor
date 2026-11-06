@@ -870,3 +870,8 @@ label.gate-row:has(input:checked) { border-color: color-mix(in oklab, var(--stat
 .msg-agent .md thead th { background: var(--muted); font-weight: 600; white-space: nowrap; }
 .msg-agent .md tbody tr:last-child td { border-bottom: 0; }
 .msg-agent .md td code { white-space: nowrap; }
+
+/* Kartu persetujuan izin agent di Chat (plan 2026-11-06-001). */
+.approvals-open { max-height: 45vh; overflow: auto; border-top: 1px solid var(--border); }
+.approvals-closed { border-top: 1px solid var(--border); max-height: 30vh; overflow: auto; }
+.approvals-closed > summary { padding: 6px 16px; font-size: var(--text-sm); cursor: pointer; }

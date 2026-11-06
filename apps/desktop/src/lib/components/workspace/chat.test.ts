@@ -10,6 +10,25 @@ function msg(id: number, role: string, body: Record<string, unknown>): MessageVi
 }
 
 describe('chat workspace', () => {
+  it('penolakan hook Mandor tampil sebagai satu entri Denied dengan alasan', () => {
+    const blocks = toBlocks([
+      msg(1, 'agent', { type: 'tool_use', id: 't1', name: 'Bash', preview: 'git push' }),
+      msg(2, 'agent', {
+        type: 'tool_result',
+        tool_use_id: 't1',
+        is_error: true,
+        preview: 'PreToolUse:Bash hook error: [/opt/mandord hook]: mandor: `git push` is run only by the daemon'
+      }),
+      msg(3, 'agent', { type: 'tool_use', id: 't2', name: 'Bash', preview: 'cargo test' }),
+      msg(4, 'agent', { type: 'tool_result', tool_use_id: 't2', is_error: true, preview: 'test failed' })
+    ]);
+    const tools = blocks.find((b) => b.kind === 'tools');
+    if (tools?.kind !== 'tools') throw new Error('no tools');
+    expect(tools.calls[0].denied).toBe('mandor: `git push` is run only by the daemon');
+    expect(tools.calls[1].denied).toBeUndefined();
+    expect(tools.calls[1].result?.isError).toBe(true);
+  });
+
   it('markdown berbahaya dirender tanpa atribut atau link berbahaya', () => {
     const html = renderMarkdown(
       '<img src=x onerror="alert(1)"> [klik](javascript:alert(1)) <a href="https://ok.test">ok</a>'

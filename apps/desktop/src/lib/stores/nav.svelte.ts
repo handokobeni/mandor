@@ -19,6 +19,8 @@ class Nav {
   /** Daemon yang diatur di Settings: laptop, atau daemon VM lewat link VM. */
   target = $state<'laptop' | 'vm'>('laptop');
   paletteOpen = $state(false);
+  /** Run yang dibuka dari notifikasi kartu: tab Chat di kartu terlama yang menunggu. */
+  approvalsFor = $state<string | null>(null);
 
   board(): void {
     this.page = 'board';
@@ -28,6 +30,12 @@ class Nav {
   run(runId: string): void {
     this.page = 'board';
     workspace.open(runId);
+  }
+
+  /** Workspace run di tab Chat, digulir ke kartu persetujuan terlama (R9, R24). */
+  runApprovals(runId: string): void {
+    this.approvalsFor = runId;
+    this.run(runId);
   }
 
   /** Tab Overnight: antrean dan laporan daemon VM (U10 plan VM). */

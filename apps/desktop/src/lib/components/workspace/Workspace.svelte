@@ -33,6 +33,7 @@
   import CloseRunDialog from '#lib/components/kanban/CloseRunDialog.svelte';
   import MarkdownDoc from '#lib/components/mandor/MarkdownDoc.svelte';
   import RunStatusBadge from '#lib/components/mandor/RunStatusBadge.svelte';
+  import ApprovalBadge from '#lib/components/mandor/ApprovalBadge.svelte';
   import { copyText } from '#lib/components/mandor/copy.ts';
   import { flagIcon, runIcon } from '#lib/components/mandor/icons.ts';
   import * as Alert from '#lib/components/ui/alert/index.ts';
@@ -57,6 +58,9 @@
   import AcReviewTab from './AcReviewTab.svelte';
   import PlanApproval from './PlanApproval.svelte';
   import GateDialogs from './GateDialogs.svelte';
+  import ApprovalCard from './ApprovalCard.svelte';
+  import { oldestPending } from '#lib/approvals.ts';
+  import { ApprovalsStore } from '#lib/stores/approvals.svelte.ts';
   import {
     activeRows,
     blockReason,
@@ -172,6 +176,53 @@
   $effect(() => {
     const id = run.id;
     return untrack(() => ledger.attach(rpc, id));
+  });
+
+  // Kartu persetujuan (plan 2026-11-06-001, U7).
+  const approvals = new ApprovalsStore();
+  $effect(() => {
+    const id = run.id;
+    return untrack(() => approvals.attach(rpc, id));
+  });
+  const openCards = $derived(approvals.cards.filter((c) => c.status === 'pending'));
+  const closedCards = $derived(approvals.cards.filter((c) => c.status !== 'pending'));
+  // Jam untuk sisa waktu kartu; hanya berjalan saat ada kartu menunggu.
+  let clock = $state(Date.now());
+  $effect(() => {
+    if (approvals.pending === 0) return;
+    clock = Date.now();
+    const timer = setInterval(() => (clock = Date.now()), 1000);
+    return () => clearInterval(timer);
+  });
+  // Pengumuman sopan saat kartu baru muncul, tanpa hitung mundur (R6).
+  let announced = $state('');
+  let lastPending = 0;
+  $effect(() => {
+    const n = approvals.pending;
+    if (n > lastPending) announced = `Approval needed: ${openCards.at(-1)?.tool ?? 'tool'}`;
+    lastPending = n;
+  });
+  // Tab Chat run terlihat: mode tolak langsung berakhir (R19).
+  $effect(() => {
+    if (tab !== 'chat') return;
+    const _id = run.id;
+    const send = () => {
+      if (document.visibilityState === 'visible') void approvals.seen();
+    };
+    send();
+    document.addEventListener('visibilitychange', send);
+    return () => document.removeEventListener('visibilitychange', send);
+  });
+  // Dibuka dari notifikasi kartu: tab Chat, gulir ke kartu terlama yang menunggu.
+  $effect(() => {
+    if (nav.approvalsFor !== run.id) return;
+    const target = oldestPending(approvals.cards);
+    untrack(() => (tab = 'chat'));
+    if (!target) return;
+    nav.approvalsFor = null;
+    queueMicrotask(() =>
+      document.getElementById(`approval-${target.id}`)?.scrollIntoView({ block: 'center' })
+    );
   });
   const reviewing = $derived(run.state === 'reviewing');
   const acRows = $derived(ledger.ledger ? activeRows(ledger.ledger.rows) : []);
@@ -487,6 +538,7 @@
       <Badge variant="outline" title="Task Status in Lark"><SquareKanban />Lark: {card.status}</Badge>
     {/if}
     <RunStatusBadge state={run.state} label={runLabel(run)} />
+    <ApprovalBadge {run} />
     {#if run.branch}
       {@const branch = run.branch}
       <span class="branch-chip">
@@ -730,7 +782,10 @@
 
 <Tabs.Root bind:value={tab} class="ws-tabs">
   <Tabs.List variant="line" aria-label="Workspace">
-    <Tabs.Trigger value="chat"><MessagesSquare />Chat</Tabs.Trigger>
+    <Tabs.Trigger value="chat">
+      <MessagesSquare />Chat
+      {#if approvals.pending > 0}<span class="count mono" title="Approval requests waiting">{approvals.pending}</span>{/if}
+    </Tabs.Trigger>
     {#if planning || run.plan}
       <Tabs.Trigger value="plan"><ClipboardList />Plan</Tabs.Trigger>
     {/if}
@@ -762,6 +817,28 @@
     <!-- Chat tetap ter-mount saat pindah tab agar posisi gulir dan draft tidak hilang. -->
     <section class="ws-pane" hidden={tab !== 'chat'} aria-label="Chat">
       <ChatStream {run} />
+      <span class="sr-only" aria-live="polite">{announced}</span>
+      {#if closedCards.length > 0}
+        <details class="approvals-closed">
+          <summary class="muted">{closedCards.length} earlier approval {closedCards.length === 1 ? 'request' : 'requests'}</summary>
+          {#each closedCards as card (card.id)}
+            <ApprovalCard {card} submitting={false} note={approvals.notes[card.id]} now={clock} onanswer={() => undefined} />
+          {/each}
+        </details>
+      {/if}
+      {#if openCards.length > 0}
+        <div class="approvals-open" aria-label="Approval requests">
+          {#each openCards as card (card.id)}
+            <ApprovalCard
+              {card}
+              submitting={!!approvals.submitting[card.id]}
+              note={approvals.notes[card.id]}
+              now={clock}
+              onanswer={(a) => approvals.answer(card.id, a)}
+            />
+          {/each}
+        </div>
+      {/if}
       <Composer
         {run}
         onsend={(text, now) => act(() => rpc.request(now ? 'runs.send_now' : 'runs.send', { run_id: run.id, text }))}

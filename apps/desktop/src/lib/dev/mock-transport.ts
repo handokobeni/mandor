@@ -5,6 +5,7 @@ import type { DesignSourceView } from '#lib/protocol/DesignSourceView.ts';
 import type { ReviewerSettingsView } from '#lib/protocol/ReviewerSettingsView.ts';
 import type { CardView } from '#lib/protocol/CardView.ts';
 import type { MessageView } from '#lib/protocol/MessageView.ts';
+import type { ApprovalView } from '#lib/protocol/ApprovalView.ts';
 import type { RunView } from '#lib/protocol/RunView.ts';
 import type { Transport } from '#lib/api/client.ts';
 import type { AcRowView } from '#lib/protocol/AcRowView.ts';
@@ -66,7 +67,8 @@ function run(id: string, key: string, title: string, state: string, extra: Parti
 
 const RUNS: RunView[] = [
   run('1', 'PGS-1402', 'Filter invoices by status and date range', 'awaiting_dev', {
-    ac: { total: 5, ok: 3, failed: 1, unverified: 1, not_reviewed: 0, stale: false, design_gaps: 1 }
+    ac: { total: 5, ok: 3, failed: 1, unverified: 1, not_reviewed: 0, stale: false, design_gaps: 1 },
+    pending_approvals: 1
   }),
   run('2', 'PGS-1388', 'Map cluster markers for branch offices', 'running', { queued: ['Also run the e2e tests'] }),
   run('3', 'PGS-1379', 'Export payroll report to XLSX', 'failed', {
@@ -404,6 +406,38 @@ const workspaces: Record<string, unknown>[] = setup
       }
     ];
 
+/** Kartu persetujuan tiruan untuk run 1 (plan 2026-11-06-001). */
+let mockApprovals: ApprovalView[] = [
+  {
+    id: 'ap-1',
+    run_id: '1',
+    turn: 'implement',
+    tool: 'Bash',
+    input: { command: 'docker ps -a', description: 'Cek container yang berjalan' },
+    description: 'Cek container yang berjalan',
+    cwd: '/home/beni/.local/share/mandor/workspaces/pgs-1402/pegasus-web',
+    status: 'answered',
+    answer: 'allow_once',
+    created_at_ms: Date.now() - 20 * 60_000,
+    deadline_ms: Date.now() - 10 * 60_000,
+    closed_at_ms: Date.now() - 19 * 60_000
+  },
+  {
+    id: 'ap-2',
+    run_id: '1',
+    turn: 'implement',
+    tool: 'Bash',
+    input: { command: 'curl -s https://api.github.com/repos/x/y \u202e && echo ok', description: 'Ambil metadata repo' },
+    description: 'Ambil metadata repo',
+    cwd: '/home/beni/.local/share/mandor/workspaces/pgs-1402/pegasus-web',
+    status: 'pending',
+    answer: null,
+    created_at_ms: Date.now() - 60_000,
+    deadline_ms: Date.now() + 9 * 60_000,
+    closed_at_ms: null
+  }
+];
+
 function larkStatus(): unknown {
   return { configured, logged_in: loggedIn, open_id: loggedIn ? 'ou_7f3a91' : null, name: loggedIn ? 'Beni Handoko' : null, reauth_required: false };
 }
@@ -487,6 +521,16 @@ function handle(method: string, params: Record<string, unknown>): unknown {
     case 'runs.list':
       if (scenarioFor('1') === 'reviewing') RUNS[0].state = 'reviewing';
       return RUNS;
+    case 'approvals.list':
+      return mockApprovals.filter((a) => a.run_id === String(params.run_id));
+    case 'approvals.answer':
+      mockApprovals = mockApprovals.map((a) =>
+        a.id === params.approval_id ? { ...a, status: 'answered', answer: String(params.answer), closed_at_ms: Date.now() } : a
+      );
+      RUNS[0].pending_approvals = mockApprovals.filter((a) => a.status === 'pending').length;
+      return {};
+    case 'approvals.seen':
+      return {};
     case 'runs.messages': {
       const all = MESSAGES[String(params.run_id)] ?? [];
       return all.filter((m) => m.id > Number(params.after_id ?? 0));

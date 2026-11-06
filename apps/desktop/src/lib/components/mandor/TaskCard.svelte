@@ -33,6 +33,7 @@
   import { people } from '#lib/stores/people.svelte.ts';
   import CardFlagBadge from './CardFlagBadge.svelte';
   import RunStatusBadge from './RunStatusBadge.svelte';
+  import ApprovalBadge from './ApprovalBadge.svelte';
   import { copyText } from './copy.ts';
 
   interface Props {
@@ -123,6 +124,7 @@
         <span class="tc-owner" title="Assignee in Lark"><UserRound class="icon-sm" aria-hidden="true" />{assignees}</span>
       {/if}
       {#if card.run && !card.flag}<RunStatusBadge state={card.run.state} label={runLabel(card.run)} />{/if}
+      <ApprovalBadge run={card.run} />
       {#if card.run}
         {@const chip = acChip(card.run.ac)}
         {#if chip}

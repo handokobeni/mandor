@@ -37,7 +37,7 @@ impl Deps for Prod {
     type Prompts = ClaudePrompts;
     type Overnight = mandor_store::OvernightsStore;
     type Design = crate::design_port::DesignStore;
-    type Approvals = mandor_store::ApprovalsStore;
+    type Approvals = crate::approval_events::BroadcastApprovals;
     type Waiter = crate::approval_waiter::TokioWaiter;
     type Permits = crate::permit_facts::DiskPermits;
 }

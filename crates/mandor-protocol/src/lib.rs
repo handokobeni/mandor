@@ -106,6 +106,13 @@ pub mod method {
     /// Orang yang muncul di kartu sendiri dan papan Team, untuk pemilih reviewer.
     pub const PEOPLE_KNOWN: &str = "people.known";
     pub const RUNS_LIST: &str = "runs.list";
+    /// Kartu persetujuan run (`RunRef` → `Vec<ApprovalView>`), urut waktu
+    /// dibuat; input tersamarkan kecuali kartu Pending (plan 2026-11-06-001).
+    pub const APPROVALS_LIST: &str = "approvals.list";
+    /// Jawaban dev (`ApprovalAnswerParams`); hanya koneksi token penuh.
+    pub const APPROVALS_ANSWER: &str = "approvals.answer";
+    /// Dev membuka tab Chat run (`RunRef`): mode tolak langsung berakhir.
+    pub const APPROVALS_SEEN: &str = "approvals.seen";
     pub const RUNS_MESSAGES: &str = "runs.messages";
     pub const RUNS_START: &str = "runs.start";
     pub const RUNS_SEND: &str = "runs.send";
@@ -208,6 +215,9 @@ pub mod event {
     pub const RUN_UPDATED: &str = "run.updated";
     /// Buku AC run berubah (`LedgerRowsEvent`, baris terbaru).
     pub const LEDGER_UPDATED: &str = "ledger.updated";
+    /// Kartu persetujuan run berubah (`RunEventView`); client memuat ulang
+    /// `approvals.list`.
+    pub const APPROVALS_UPDATED: &str = "approvals.updated";
     /// Review run berubah (`RunEventView`); client memuat ulang `review.history`.
     pub const REVIEW_PROGRESS: &str = "review.progress";
     /// State run app berubah (`RunEventView`); client memuat ulang `app.status`.
@@ -325,7 +335,24 @@ pub fn ts_bindings() -> Result<Vec<(&'static str, String)>, String> {
     .chain(review_bindings()?)
     .chain(group_bindings()?)
     .chain(prototype_bindings()?)
+    .chain(approval_bindings()?)
     .collect())
+}
+
+/// Tipe kartu persetujuan (plan 2026-11-06-001).
+fn approval_bindings() -> Result<Vec<(&'static str, String)>, String> {
+    use ts_rs::{Config, TS};
+    let cfg = Config::new();
+    let one = |name: &'static str, s: Result<String, ts_rs::ExportError>| {
+        s.map(|body| (name, body)).map_err(|e| e.to_string())
+    };
+    Ok(vec![
+        one("ApprovalView.ts", ApprovalView::export_to_string(&cfg))?,
+        one(
+            "ApprovalAnswerParams.ts",
+            ApprovalAnswerParams::export_to_string(&cfg),
+        )?,
+    ])
 }
 
 /// Tipe Pick from .env dan prototype (plan 2026-11-03-002).

@@ -8,8 +8,8 @@ use serde_json::Value;
 
 use crate::run::RunService;
 use crate::run_ports::{
-    ApprovalAnswer, ApprovalCard, ApprovalStatus, ApprovalStore, ApprovalWaiter, ChatItem,
-    PermitFacts, PermitRef, RunDecision, RunStore, WaitOutcome,
+    ApprovalAnswer, ApprovalCard, ApprovalStatus, ApprovalStore, ApprovalWaiter, ChatItem, Notice,
+    NoticeKind, Notifier, PermitFacts, PermitRef, RunDecision, RunStore, WaitOutcome,
 };
 use crate::{Deps, Ids};
 
@@ -19,6 +19,8 @@ pub const APPROVAL_TIMEOUT: Duration = Duration::from_secs(10 * 60);
 pub const MAX_PENDING: usize = 5;
 /// Ukuran input terserialisasi maksimum (KTD-A15).
 pub const MAX_INPUT_BYTES: usize = 64 * 1024;
+/// Panjang maksimum isi notifikasi kartu.
+const NOTICE_MAX: usize = 200;
 
 /// Permintaan izin dari agent lewat server MCP `mandor_permit`.
 #[derive(Debug, Clone, PartialEq)]
@@ -195,6 +197,12 @@ impl<D: Deps> RunService<D> {
             deadline_ms: now.saturating_add(timeout_ms),
             closed_ms: None,
         };
+        let first = self
+            .approvals
+            .pending_approvals(&req.run_id)
+            .await
+            .map_err(|e| format!("approvals are unavailable ({e})"))?
+            == 0;
         let ticket = self.waiter.register(&card.id, &card.run_id);
         self.approvals
             .create_approval(&card)
@@ -205,6 +213,10 @@ impl<D: Deps> RunService<D> {
             &format!("Approval requested: {}", summary(&req.tool, &req.input)),
         )
         .await;
+        // Notifikasi hanya untuk kartu pertama yang menunggu (R24).
+        if first {
+            self.notify_approval(&card).await;
+        }
         let outcome = self.waiter.wait(ticket, APPROVAL_TIMEOUT).await;
         let answer = match outcome {
             WaitOutcome::Answered(a) => Some(a),
@@ -348,6 +360,39 @@ impl<D: Deps> RunService<D> {
             .cancel_approvals(None, self.now())
             .await?
             .len())
+    }
+
+    async fn notify_approval(&self, card: &ApprovalCard) {
+        let record_id = match self.runs.get(&card.run_id).await {
+            Ok(Some(run)) => run.record_id,
+            _ => String::new(),
+        };
+        let mut body = summary(&card.tool, &card.input);
+        if body.chars().count() > NOTICE_MAX {
+            body = body.chars().take(NOTICE_MAX).collect::<String>() + "…";
+        }
+        self.notifier
+            .notify(Notice {
+                kind: NoticeKind::ApprovalNeeded,
+                record_id,
+                run_id: Some(card.run_id.clone()),
+                title: "Approval needed".to_owned(),
+                body,
+            })
+            .await;
+    }
+
+    /// Koneksi terbatas mencoba menjawab kartu (KTD-A16, AE16): ditolak dan
+    /// dicatat di Chat.
+    pub async fn approval_answer_refused(&self, run_id: &str, role: &str) {
+        self.approval_note(
+            run_id,
+            &format!(
+                "A {} session tried to answer an approval request; the answer was refused.",
+                redact_text(role)
+            ),
+        )
+        .await;
     }
 
     async fn approval_note(&self, run_id: &str, text: &str) {

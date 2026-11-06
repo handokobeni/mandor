@@ -73,6 +73,7 @@ function run(id: string, state: string, extra: Partial<RunView> = {}): RunView {
     ac: null,
     cards: [],
     one_plan: false,
+    pending_approvals: 0,
     ...extra
   };
 }

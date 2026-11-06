@@ -56,7 +56,8 @@ function run(id: string, state: string): RunView {
     updated_at_ms: 0,
     ac: null,
     cards: [],
-    one_plan: false
+    one_plan: false,
+    pending_approvals: 0
   };
 }
 

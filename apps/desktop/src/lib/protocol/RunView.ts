@@ -50,4 +50,8 @@ cards: Array<GroupCardView>,
 /**
  * Run grup dengan satu plan untuk semua kartu (R25 plan grup).
  */
-one_plan: boolean, };
+one_plan: boolean, 
+/**
+ * Kartu persetujuan yang menunggu jawaban (R9).
+ */
+pending_approvals: number, };

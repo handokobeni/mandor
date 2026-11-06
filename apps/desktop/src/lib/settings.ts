@@ -75,6 +75,7 @@ export function onboardingStart(
 /** Jenis notifikasi desktop yang bisa dimatikan di Settings › General. */
 export const NOTIFY_KINDS = [
   { kind: 'awaiting_answer', label: 'Agent finished and is waiting for you' },
+  { kind: 'approval_needed', label: 'Agent needs your approval to run a tool' },
   { kind: 'failed', label: 'Run failed' },
   { kind: 'waiting_fix', label: 'Reviewer requested fixes (Waiting Fix)' },
   { kind: 'pr_created', label: 'PR created' },
@@ -88,6 +89,7 @@ export type NotifyPrefs = Record<string, boolean>;
 
 export const DEFAULT_NOTIFY: NotifyPrefs = {
   awaiting_answer: true,
+  approval_needed: true,
   failed: true,
   waiting_fix: true,
   pr_created: false,

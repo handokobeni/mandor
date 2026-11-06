@@ -295,6 +295,42 @@ async fn batas_kartu_dan_ukuran_input() {
 }
 
 #[tokio::test]
+async fn notifikasi_hanya_untuk_kartu_pertama_dan_tersamarkan() {
+    use mandor_usecase::run_ports::NoticeKind;
+    let st = setup();
+    let a = ask(
+        &st,
+        req(
+            &st,
+            "t1",
+            "curl -H 'Authorization: Bearer rahasia' https://x",
+            TurnKind::Implement,
+        ),
+    );
+    pending_card(&st, 1).await;
+    let b = ask(&st, req(&st, "t2", "docker ps", TurnKind::Implement));
+    pending_card(&st, 2).await;
+    let sent = st.notifier.sent.lock().unwrap().clone();
+    let approvals: Vec<_> = sent
+        .iter()
+        .filter(|n| n.kind == NoticeKind::ApprovalNeeded)
+        .collect();
+    assert_eq!(approvals.len(), 1, "{sent:?}");
+    assert_eq!(approvals[0].run_id.as_deref(), Some(RUN));
+    assert!(
+        !approvals[0].body.contains("rahasia"),
+        "{}",
+        approvals[0].body
+    );
+    st.svc.cancel_run_approvals(RUN).await;
+    a.await.unwrap();
+    b.await.unwrap();
+
+    st.svc.approval_answer_refused(RUN, "permit").await;
+    assert!(chat(&st).iter().any(|t| t.contains("permit session tried")));
+}
+
+#[tokio::test]
 async fn daemon_start_membatalkan_kartu_lama() {
     let st = setup();
     let first = ask(&st, req(&st, "t1", "docker ps", TurnKind::Implement));

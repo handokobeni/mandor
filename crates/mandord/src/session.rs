@@ -169,7 +169,10 @@ pub async fn start(
                     git.clone(),
                     env.cfg.home.clone(),
                 ),
-                approvals: mandor_store::ApprovalsStore::new(env.store.clone()),
+                approvals: crate::approval_events::BroadcastApprovals::new(
+                    mandor_store::ApprovalsStore::new(env.store.clone()),
+                    env.events.clone(),
+                ),
                 waiter: env.waiter.clone(),
                 permits: crate::permit_facts::DiskPermits,
             },

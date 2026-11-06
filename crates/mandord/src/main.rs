@@ -16,6 +16,7 @@
 #[cfg(unix)]
 mod agent_exec;
 mod app;
+mod approval_events;
 mod approval_waiter;
 mod apps;
 mod config;

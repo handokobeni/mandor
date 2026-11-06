@@ -178,6 +178,9 @@ pub struct RunView {
     /// Run grup dengan satu plan untuk semua kartu (R25 plan grup).
     #[serde(default)]
     pub one_plan: bool,
+    /// Kartu persetujuan yang menunggu jawaban (R9).
+    #[serde(default)]
+    pub pending_approvals: u32,
 }
 
 /// Satu kartu run grup.
@@ -1602,4 +1605,39 @@ pub enum PermitDecision {
     Deny {
         message: String,
     },
+}
+
+/// Satu kartu persetujuan untuk Chat run (R5, R10, R20).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+pub struct ApprovalView {
+    pub id: String,
+    pub run_id: String,
+    /// `implement` | `plan`.
+    pub turn: String,
+    pub tool: String,
+    /// Input tool: lengkap selama `pending`, tersamarkan setelahnya.
+    #[ts(type = "Record<string, unknown>")]
+    pub input: Value,
+    /// Deskripsi langkah dari agent, klaim yang tidak diverifikasi (R17).
+    pub description: Option<String>,
+    pub cwd: String,
+    /// `pending` | `answered` | `expired` | `cancelled`.
+    pub status: String,
+    /// `deny` | `allow_once` | `allow_run`.
+    pub answer: Option<String>,
+    #[ts(type = "number")]
+    pub created_at_ms: i64,
+    #[ts(type = "number")]
+    pub deadline_ms: i64,
+    #[ts(type = "number | null")]
+    pub closed_at_ms: Option<i64>,
+}
+
+/// Parameter `approvals.answer`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+pub struct ApprovalAnswerParams {
+    pub run_id: String,
+    pub approval_id: String,
+    /// `deny` | `allow_once` | `allow_run`.
+    pub answer: String,
 }

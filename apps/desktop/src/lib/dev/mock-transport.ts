@@ -59,6 +59,7 @@ function run(id: string, key: string, title: string, state: string, extra: Parti
     ac: null,
     cards: [],
     one_plan: false,
+    pending_approvals: 0,
     ...extra
   };
 }

@@ -714,6 +714,8 @@ pub enum NoticeKind {
     PrCreated,
     ReviewFinished,
     AppFailed,
+    /// Kartu persetujuan pertama run menunggu (plan 2026-11-06-001, R9).
+    ApprovalNeeded,
 }
 
 impl NoticeKind {
@@ -728,6 +730,7 @@ impl NoticeKind {
             Self::PrCreated => "pr_created",
             Self::ReviewFinished => "review_finished",
             Self::AppFailed => "app_failed",
+            Self::ApprovalNeeded => "approval_needed",
         }
     }
 }

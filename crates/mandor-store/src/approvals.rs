@@ -136,6 +136,27 @@ impl Store {
     }
 }
 
+impl Store {
+    /// Jumlah kartu Pending per run (satu query, untuk badge papan).
+    ///
+    /// # Errors
+    /// [`StoreError`] bila query gagal.
+    pub async fn pending_approval_counts(
+        &self,
+    ) -> Result<std::collections::HashMap<String, u32>, StoreError> {
+        let rows = sqlx::query!(
+            "SELECT run_id, COUNT(*) AS n FROM approvals WHERE status = 'pending' GROUP BY run_id"
+        )
+        .fetch_all(&self.pool)
+        .await
+        .map_err(StoreError::internal)?;
+        Ok(rows
+            .into_iter()
+            .map(|r| (r.run_id, u32::try_from(r.n).unwrap_or(u32::MAX)))
+            .collect())
+    }
+}
+
 impl ApprovalStore for ApprovalsStore {
     async fn create_approval(&self, card: &ApprovalCard) -> Result<(), PortError> {
         let turn = card.turn.as_str();

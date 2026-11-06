@@ -88,7 +88,7 @@ pub struct RunService<D: Deps> {
     /// Berkas izin per run untuk token `Permit` giliran yang berjalan.
     pub(crate) permit_grants: Mutex<HashMap<String, crate::review::PermitGrant>>,
     /// `tool_use_id` per run yang sudah diputuskan alat persetujuan.
-    pub(crate) permit_handled: Mutex<HashMap<String, std::collections::HashSet<String>>>,
+    pub(crate) permit_handled: Mutex<HashMap<String, std::collections::HashSet<(String, String)>>>,
     /// Balasan komentar yang dikenal (digabung tiap poll, tanpa duplikat).
     pub(crate) replies: Mutex<Vec<mandor_domain::Reply>>,
     /// Semua komentar Base sudah dimuat sekali sejak start; cache di atas

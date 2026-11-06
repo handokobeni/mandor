@@ -198,7 +198,7 @@ impl<D: Deps> RunService<D> {
             .filter(|d| {
                 !shown.contains(&d.tool_use_id)
                     && !carded.contains(&d.tool_use_id)
-                    && !handled.contains(&d.tool_use_id)
+                    && !handled.contains(&(d.tool_use_id.clone(), d.tool_name.clone()))
             })
             .map(|d| format!("{} `{}`", d.tool_name, d.input))
             .collect();

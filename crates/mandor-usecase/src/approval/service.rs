@@ -98,15 +98,8 @@ impl<D: Deps> RunService<D> {
 
     /// Memutuskan permintaan izin agent; menunggu jawaban dev bila perlu.
     pub async fn permit_request(self: &Arc<Self>, req: PermitRequest) -> PermitAnswer {
-        // Penolakan dari jalur ini sudah tercatat; `permission_denials` di
-        // akhir giliran tidak mencatatnya lagi (KTD-A17).
-        self.permit_handled
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .entry(req.run_id.clone())
-            .or_default()
-            .insert(req.tool_use_id.clone());
-        match self.permit_decide(&req).await {
+        let mut verified = false;
+        let answer = match self.permit_decide(&req, &mut verified).await {
             Ok(answer) => answer,
             Err(reason) => {
                 self.approval_note(
@@ -116,17 +109,34 @@ impl<D: Deps> RunService<D> {
                 .await;
                 PermitAnswer::Deny(reason)
             }
+        };
+        // Penolakan yang sudah tercatat di jalur ini, untuk panggilan yang
+        // diperiksa hook sampai selesai, tidak dicatat lagi dari
+        // `permission_denials` di akhir giliran (KTD-A17).
+        if verified && matches!(answer, PermitAnswer::Deny(_)) {
+            self.permit_handled
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .entry(req.run_id.clone())
+                .or_default()
+                .insert((req.tool_use_id.clone(), req.tool.clone()));
         }
+        answer
     }
 
     /// `Err(alasan)` untuk penolakan tanpa kartu yang dicatat di Chat.
-    async fn permit_decide(self: &Arc<Self>, req: &PermitRequest) -> Result<PermitAnswer, String> {
+    async fn permit_decide(
+        self: &Arc<Self>,
+        req: &PermitRequest,
+        verified: &mut bool,
+    ) -> Result<PermitAnswer, String> {
         if req.turn == TurnKind::Review {
             return Err("the AC reviewer cannot ask for approval".to_owned());
         }
         let Some(cwd) = self.permits.evidence(&req.permit, &req.tool_use_id).await else {
             return Err("Mandor did not finish checking this request".to_owned());
         };
+        *verified = true;
         match self
             .permits
             .recheck(&req.permit, &req.tool, &req.input, &cwd)

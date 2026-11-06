@@ -278,10 +278,11 @@ fn playwright_verdict(tool: &str, call: &ToolCall, state: &ReviewState) -> Verdi
     let Some(kind) = pw_kind(tool) else {
         return deny(&format!("`{tool}` is not available during review"));
     };
-    // Nama berkas relatif ditulis di folder kerja (worktree); berkas baru di
-    // worktree membuat hasil review usang. Tanpa nama, Playwright menyimpan
-    // hasilnya di folder output review.
-    if matches!(tool, "browser_take_screenshot" | "browser_snapshot") && !call.paths.is_empty() {
+    // Tool Playwright tidak boleh menulis atau membaca berkas sebutan agent:
+    // nama berkas relatif ditulis di folder kerja (worktree) dan membuat hasil
+    // review usang. Tanpa nama, Playwright menyimpan hasilnya di folder output
+    // review.
+    if !call.paths.is_empty() {
         return deny(&format!(
             "call `{tool}` without a filename; it is saved in the review output folder and the reply names the file"
         ));
@@ -1278,13 +1279,23 @@ mod tests {
             &page_state("http://localhost:5173/jobs"),
             &mut s,
         );
-        for tool in ["browser_take_screenshot", "browser_snapshot"] {
+        for tool in [
+            "browser_take_screenshot",
+            "browser_snapshot",
+            "browser_console_messages",
+            "browser_click",
+            "browser_wait_for",
+            "browser_resize",
+            "browser_close",
+        ] {
             let mut call = pw(tool, None);
             call.paths = vec!["app-100.png".to_owned()];
             assert!(
                 matches!(classify_review(&call, &s, &[]), Verdict::Deny(r) if r.contains("without a filename")),
                 "{tool}"
             );
+        }
+        for tool in ["browser_take_screenshot", "browser_snapshot"] {
             assert!(allows(tool, &s), "{tool}");
         }
     }

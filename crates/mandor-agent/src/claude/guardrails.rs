@@ -4,8 +4,10 @@ use std::collections::BTreeMap;
 use std::io::{Read, Write};
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 
 use mandor_domain::hook::{ToolCall, Verdict};
+use mandor_domain::permit::Decision;
 use serde_json::{Value, json};
 
 use crate::AgentError;
@@ -340,6 +342,11 @@ pub fn parse_hook_input(raw: &[u8]) -> Result<ToolCall, String> {
         tab_id: input.get("tabId").and_then(Value::as_u64),
         action: text("action"),
         response: v.get("tool_response").map(response_text),
+        cwd: v.get("cwd").and_then(Value::as_str).map(str::to_owned),
+        tool_use_id: v
+            .get("tool_use_id")
+            .and_then(Value::as_str)
+            .map(str::to_owned),
     })
 }
 
@@ -378,6 +385,66 @@ where
         Ok(Ok(Verdict::Allow)) => return 0,
         Ok(Ok(Verdict::Deny(reason)) | Err(reason)) => reason,
         Err(_) => "mandor: internal hook failure; tool call denied".to_owned(),
+    };
+    let _ = writeln!(err, "{reason}");
+    HOOK_BLOCK
+}
+
+/// Jawaban hook `PreToolUse` dengan izin eksplisit (KTD-A1).
+#[must_use]
+pub fn allow_output() -> String {
+    json!({
+        "hookSpecificOutput": {
+            "hookEventName": "PreToolUse",
+            "permissionDecision": "allow",
+            "permissionDecisionReason": "mandor: checked and on this turn's allowlist"
+        }
+    })
+    .to_string()
+}
+
+/// Hook `PreToolUse` dengan tiga keputusan (KTD-A1) dan tenggat internal
+/// (KTD-A14): membaca input, memutuskan, lalu tolak (exit 2, alasan di
+/// `err`), izinkan eksplisit (JSON di `out`, exit 0), atau tanpa keputusan
+/// (exit 0 tanpa output). Input rusak, panic, dan tenggat terlewati menolak.
+pub fn run_pre_hook<R, O, E, F>(
+    input: R,
+    out: &mut O,
+    err: &mut E,
+    deadline: Duration,
+    decide: F,
+) -> u8
+where
+    R: Read + Send + 'static,
+    O: Write,
+    E: Write,
+    F: FnOnce(&ToolCall) -> Decision + Send + 'static,
+{
+    let (tx, rx) = std::sync::mpsc::channel();
+    // Thread dibiarkan bila tenggat terlewati; proses hook segera keluar.
+    let _detached = std::thread::spawn(move || {
+        let outcome = catch_unwind(AssertUnwindSafe(|| {
+            let mut raw = Vec::new();
+            input
+                .take(HOOK_INPUT_MAX)
+                .read_to_end(&mut raw)
+                .map_err(|e| format!("cannot read hook input: {e}"))?;
+            let call = parse_hook_input(&raw)?;
+            Ok::<Decision, String>(decide(&call))
+        }));
+        let _ = tx.send(outcome);
+    });
+    let reason = match rx.recv_timeout(deadline) {
+        Ok(Ok(Ok(Decision::Allow))) => {
+            if writeln!(out, "{}", allow_output()).is_ok() {
+                return 0;
+            }
+            "mandor: cannot write the hook answer; tool call denied".to_owned()
+        }
+        Ok(Ok(Ok(Decision::Undecided(_)))) => return 0,
+        Ok(Ok(Ok(Decision::Deny(reason)) | Err(reason))) => reason,
+        Ok(Err(_)) => "mandor: internal hook failure; tool call denied".to_owned(),
+        Err(_) => "mandor: the permission check took too long; tool call denied".to_owned(),
     };
     let _ = writeln!(err, "{reason}");
     HOOK_BLOCK
@@ -473,6 +540,75 @@ mod tests {
         });
         let call = parse_hook_input(raw.to_string().as_bytes()).unwrap();
         assert_eq!(call.paths, ["app-100.png"]);
+    }
+
+    fn pre(input: &str, decision: Decision) -> (u8, String, String) {
+        let (mut out, mut err) = (Vec::new(), Vec::new());
+        let code = run_pre_hook(
+            std::io::Cursor::new(input.to_owned()),
+            &mut out,
+            &mut err,
+            Duration::from_secs(5),
+            move |_| decision,
+        );
+        (
+            code,
+            String::from_utf8_lossy(&out).into_owned(),
+            String::from_utf8_lossy(&err).into_owned(),
+        )
+    }
+
+    #[test]
+    fn hook_pre_tiga_keputusan() {
+        let (code, out, _) = pre(&bash("git diff"), Decision::Allow);
+        assert_eq!(code, 0);
+        let v: Value = serde_json::from_str(out.trim()).unwrap();
+        assert_eq!(v["hookSpecificOutput"]["permissionDecision"], "allow");
+        assert_eq!(v["hookSpecificOutput"]["hookEventName"], "PreToolUse");
+        assert_eq!(
+            pre(&bash("x"), Decision::Undecided("u".into())),
+            (0, String::new(), String::new())
+        );
+        let (code, out, err) = pre(&bash("x"), Decision::Deny("mandor: tidak".into()));
+        assert_eq!((code, out.as_str()), (HOOK_BLOCK, ""));
+        assert!(err.contains("mandor: tidak"));
+        assert_eq!(pre("{rusak", Decision::Allow).0, HOOK_BLOCK);
+    }
+
+    #[test]
+    fn hook_pre_menolak_bila_tenggat_terlewati_atau_panic() {
+        /// Input yang tidak pernah selesai dibaca.
+        struct Stuck;
+        impl Read for Stuck {
+            fn read(&mut self, _: &mut [u8]) -> std::io::Result<usize> {
+                std::thread::sleep(Duration::from_secs(5));
+                Ok(0)
+            }
+        }
+        let (mut out, mut err) = (Vec::new(), Vec::new());
+        let code = run_pre_hook(Stuck, &mut out, &mut err, Duration::from_millis(50), |_| {
+            Decision::Allow
+        });
+        assert_eq!(code, HOOK_BLOCK);
+        assert!(String::from_utf8_lossy(&err).contains("too long"));
+        let (mut out, mut err) = (Vec::new(), Vec::new());
+        let code = run_pre_hook(
+            std::io::Cursor::new(bash("ls")),
+            &mut out,
+            &mut err,
+            Duration::from_secs(5),
+            |_| panic!("simulasi"),
+        );
+        assert_eq!(code, HOOK_BLOCK);
+    }
+
+    #[test]
+    fn input_hook_membawa_cwd_dan_id_tool() {
+        let raw = json!({"tool_name": "Bash", "tool_input": {"command": "ls"},
+            "cwd": "/w/a", "tool_use_id": "toolu_1"});
+        let call = parse_hook_input(raw.to_string().as_bytes()).unwrap();
+        assert_eq!(call.cwd.as_deref(), Some("/w/a"));
+        assert_eq!(call.tool_use_id.as_deref(), Some("toolu_1"));
     }
 
     #[test]

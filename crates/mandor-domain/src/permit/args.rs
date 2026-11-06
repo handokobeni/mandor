@@ -29,11 +29,9 @@ pub fn dangerous(command: &SimpleCommand) -> Option<String> {
     }
 }
 
-/// Opsi `awk` yang aman, ditulis lengkap tanpa singkatan: pemisah kolom dan
-/// assignment variabel. Opsi lain
-/// (termasuk `-f`, `-i`, `-l`, `-E`, `-W`, dan gabungannya) bisa memuat
-/// program atau ekstensi.
-const AWK_SAFE_LONG: &[&str] = &["field-separator", "assign"];
+/// Opsi `awk` yang aman hanya `-F` dan `-v` bentuk pendek (terpisah atau
+/// ditempel); opsi lain (termasuk opsi panjang, `-f`, `-W`, dan gabungannya)
+/// bisa memuat program atau ekstensi.
 const AWK_MARKERS: &[&str] = &["system", "|", ">", "getline", "@"];
 
 /// Opsi panjang `name` (sebelum `=`) adalah singkatan salah satu `options`,
@@ -56,18 +54,9 @@ fn awk(args: &[String]) -> Option<String> {
         if !a.starts_with('-') || a == "-" {
             continue;
         }
-        let long_name = a
-            .strip_prefix("--")
-            .map(|l| l.split('=').next().unwrap_or(l));
-        if a == "-F"
-            || a == "-v"
-            || long_name.is_some_and(|n| AWK_SAFE_LONG.contains(&n) && !a.contains('='))
-        {
+        if a == "-F" || a == "-v" {
             i += 1;
-        } else if !(a.starts_with("-F") && !a.starts_with("--")
-            || a.starts_with("-v") && !a.starts_with("--")
-            || long_name.is_some_and(|n| AWK_SAFE_LONG.contains(&n)))
-        {
+        } else if !(a.starts_with("-F") || a.starts_with("-v")) || a.starts_with("--") {
             flagged = true;
             break;
         }
@@ -295,6 +284,7 @@ mod tests {
             "awk -fprog.awk f",
             "awk -W exec=x f",
             "awk -vx=1 -nf prog.awk f",
+            "awk --assign x=1 f",
             "awk --fi=prog.awk f",
             "awk '@load \"x\"' f",
             "node -e 1",

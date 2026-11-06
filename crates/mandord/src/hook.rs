@@ -14,15 +14,25 @@
 //! Sesi reviewer memakai `--review <berkas state>` (KTD-31): `PreToolUse`
 //! memutuskan dengan state pagar, dan `--post` (`PostToolUse`) mencatat tab
 //! serta alamatnya. State hilang, rusak, atau terkunci menolak.
+//!
+//! Giliran agent membawa `--permit <berkas> --permit-sha <hex>` (KTD-A4 plan
+//! 2026-11-06-001): hook memutuskan tolak, izinkan eksplisit, atau tanpa
+//! keputusan dengan berkas izin itu dan fakta path dari `cwd`, dalam tenggat
+//! 5 detik (KTD-A14). Untuk tanpa keputusan, catatan bukti `{tool_use_id,
+//! cwd}` ditulis bila giliran punya kartu (KTD-A9). Berkas hilang, rusak,
+//! atau digest tidak cocok menolak.
 
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 
-use mandor_agent::claude::guardrails::run_hook;
+use mandor_agent::claude::guardrails::{run_hook, run_pre_hook};
+use mandor_agent::claude::permit::{self, Evidence, FsFacts};
 use mandor_domain::hook::{
     DesignRoot, ToolCall, Verdict, check_design_path, classify_planning, classify_vm,
     classify_with_mcp,
 };
 use mandor_domain::hook_review::{classify_review, mark_before, record_post};
+use mandor_domain::permit::{Decision, TurnKind, decide};
 
 use crate::review_state;
 
@@ -138,6 +148,82 @@ fn canonical(raw: &str) -> String {
     resolved.map_or_else(|_| raw.to_owned(), |p| p.to_string_lossy().into_owned())
 }
 
+/// Tenggat keputusan hook (KTD-A14); `--deadline-ms` hanya untuk test.
+const DEADLINE: Duration = Duration::from_secs(5);
+
+/// `--permit <berkas> --permit-sha <hex>`.
+fn permit_args(args: &[String]) -> Option<(PathBuf, String)> {
+    let value = |flag: &str| args.windows(2).find(|w| w[0] == flag).map(|w| w[1].clone());
+    Some((PathBuf::from(value("--permit")?), value("--permit-sha")?))
+}
+
+fn deadline(args: &[String]) -> Duration {
+    args.windows(2)
+        .find(|w| w[0] == "--deadline-ms")
+        .and_then(|w| w[1].parse().ok())
+        .map_or(DEADLINE, Duration::from_millis)
+}
+
+/// Argumen hook yang dipakai keputusan dengan berkas izin.
+struct PermitHook {
+    path: PathBuf,
+    sha: String,
+    vm: Option<String>,
+    review: Option<PathBuf>,
+    origins: Vec<String>,
+}
+
+impl PermitHook {
+    fn decide(&self, call: &mandor_domain::hook::ToolCall) -> Decision {
+        let deny = |e: &str| Decision::Deny(format!("mandor: {e}; tool call denied"));
+        let file = match permit::load(&self.path, &self.sha) {
+            Ok(f) => f,
+            Err(e) => return deny(&e),
+        };
+        let private = self
+            .path
+            .parent()
+            .map(|d| vec![d.display().to_string()])
+            .unwrap_or_default();
+        let Some(scope) = file.scope(self.vm.clone(), private) else {
+            return deny("the permit file has an unknown turn");
+        };
+        let Some(cwd) = call.cwd.as_deref() else {
+            return deny("hook input has no cwd");
+        };
+        let decision = match (scope.turn, &self.review) {
+            (TurnKind::Review, Some(state_path)) => {
+                let outcome = review_state::with_locked(state_path, |state| {
+                    pin_origins(state, &self.origins);
+                    let d = decide(&scope, call, cwd, Some(state), &FsFacts);
+                    if !matches!(d, Decision::Deny(_)) {
+                        mark_before(call, state);
+                    }
+                    d
+                });
+                outcome.unwrap_or_else(|e| deny(&e))
+            }
+            (TurnKind::Review, None) | (_, Some(_)) => {
+                return deny("the permit file does not match this session");
+            }
+            _ => decide(&scope, call, cwd, None, &FsFacts),
+        };
+        match (&decision, &file.evidence) {
+            (Decision::Undecided(_), Some(dir)) => {
+                let evidence = Evidence {
+                    tool_use_id: call.tool_use_id.clone().unwrap_or_default(),
+                    cwd: cwd.to_owned(),
+                };
+                match permit::write_evidence(Path::new(dir), &evidence) {
+                    Ok(()) => decision,
+                    Err(e) => deny(&format!("cannot record the permission check ({e})")),
+                }
+            }
+            _ => decision,
+        }
+    }
+}
+
 pub fn run(args: &[String]) -> u8 {
     let allowed = allowed_mcp(args);
     let plan = planning(args);
@@ -146,8 +232,25 @@ pub fn run(args: &[String]) -> u8 {
     let origins = review_origins(args);
     let vm = vm_run_dir(args);
     let post = args.iter().any(|a| a == "--post");
-    let stdin = std::io::stdin();
     let mut stderr = std::io::stderr();
+    if let (false, Some((path, sha))) = (post, permit_args(args)) {
+        let hook = PermitHook {
+            path,
+            sha,
+            vm,
+            review,
+            origins,
+        };
+        let mut stdout = std::io::stdout();
+        return run_pre_hook(
+            std::io::stdin(),
+            &mut stdout,
+            &mut stderr,
+            deadline(args),
+            move |call| hook.decide(call),
+        );
+    }
+    let stdin = std::io::stdin();
     run_hook(stdin.lock(), &mut stderr, |call| {
         if post {
             return match &review {

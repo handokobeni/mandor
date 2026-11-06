@@ -12,7 +12,7 @@ Plan: `docs/plans/2026-11-06-001-feat-agent-permission-approval-plan.md`. Branch
 | U6 | selesai | Protokol: `ApprovalView`, `ApprovalAnswerParams`, method `approvals.list/answer/seen`, event `approvals.updated`, `RunView.pending_approvals` (satu query `pending_approval_counts` untuk daftar run dan papan). `NoticeKind::ApprovalNeeded` (`approval_needed`) hanya untuk kartu Pending pertama run, isi tersamarkan dan dipotong 200 karakter. `BroadcastApprovals` menyiarkan `approvals.updated` dan `run.updated` setelah setiap perubahan. Dispatch `dispatch/approvals.rs`: input lengkap hanya untuk kartu Pending; jawaban terlambat → `Rejected` "no longer pending". Koneksi terbatas yang memanggil `approvals.*` ditolak dan dicatat di Chat dengan peran pencobanya (AE16). Frontend: jenis notifikasi `approval_needed` di Settings, binding TS. Test: 1 usecase, 2 dispatch, 1 routing, Vitest settings. |
 | U7 | selesai | `approvals.ts` (escape karakter kontrol/bidi, isi kartu, sisa waktu, urutan, label keputusan), store `approvals.svelte.ts` (muat ulang per `approvals.updated` run ini, status "sedang dikirim" UI, jawaban terlambat "This request is no longer pending.", `approvals.seen`), `ApprovalCard.svelte` (blok input bergulir, folder, deskripsi agent berlabel tidak diverifikasi, tiga tombol tanpa fokus otomatis, live region sopan tanpa hitung mundur). Workspace: kartu menunggu di atas composer, riwayat kartu di bawah "N earlier approval requests", hitungan di tab Chat, `approvals.seen` saat tab Chat terlihat, notifikasi `approval_needed` membuka tab Chat dan menggulir ke kartu terlama (`nav.runApprovals`). Badge "Needs approval" di kartu papan, daftar run, dan header workspace tanpa mengubah kolom. Penolakan hook (`tool_result` `PreToolUse … mandor: …`) tampil sebagai satu entri Denied dengan alasan. Mock: dua kartu di PGS-1402; dicek di `/?mock` (kartu, jawaban Allow once, riwayat). Test: 7 logika, 4 store/nav, 1 chat, 1 badge. |
 | U8 | selesai | `AgentEvent::Done.denied: Vec<Denial>` (tool, `tool_use_id`, ringkasan input tersamarkan dan dipotong); parser membaca `permission_denials`, event lama tanpa daftar tetap terbaca. Codec chat menyimpan `denied`. Usecase `record_denials`: penolakan yang belum tampil (bukan kartu, bukan event `permission_denied`, bukan hasil hook Mandor yang tercatat) menjadi satu item Chat per penolakan di laptop, termasuk giliran reviewer yang event-nya tidak masuk Chat (AE5); di VM masuk `RunRecord.denials` (maks 50) lalu `ReportCard.denials` → `ReportCardView.denials` → `ReportSection` ("N requests were denied overnight", AE6). Mock VM memuat dua penolakan. Test: 2 stream, 2 usecase. |
-| U9 | sebagian | Operator prompt: bentuk gabungan, pipe, redirect, dan path berkurung kini diizinkan otomatis bila setiap bagian ada di allowlist; perintah lain memakai kartu bila sesi bisa, selain itu ditolak; bentuk yang tidak pernah otomatis disebut (test prompt diperbarui). Runbook baru `docs/runbook/agent-permissions.md`, tautan di `README.md`, plan masuk daftar rencana aktif di `CLAUDE.md`, amandemen KTD-10 di plan Rilis 1. `make check` hijau (coverage baris 90,18%). **Belum:** uji langsung laptop dan VM (butuh pemilik produk). |
+| U9 | selesai | Operator prompt: bentuk gabungan, pipe, redirect, dan path berkurung kini diizinkan otomatis bila setiap bagian ada di allowlist; perintah lain memakai kartu bila sesi bisa, selain itu ditolak; bentuk yang tidak pernah otomatis disebut (test prompt diperbarui). Runbook baru `docs/runbook/agent-permissions.md`, tautan di `README.md`, plan masuk daftar rencana aktif di `CLAUDE.md`, amandemen KTD-10 di plan Rilis 1. `make check` hijau (coverage baris 90,18%). Uji langsung laptop dan VM selesai (lihat di bawah). |
 
 ## Keputusan pelaksanaan
 
@@ -91,7 +91,21 @@ Temuan dan perbaikan dari uji ini: satu Deny dari dev tercatat dua kali di Chat,
 
 AE5, AE11, AE14 dan batas 5 kartu dibuktikan test otomatis (kartu uji tanpa AC tidak bisa direview; agent memanggil tool berurutan sehingga 5 kartu bersamaan tidak terjadi secara alami).
 
-## Uji langsung VM (belum)
+## Uji langsung VM (2026-11-06)
+
+Setelah uji, run VM ditutup dan kartu uji PGS-1575 ditandai Delivered di Base copy.
+
+Biner rilis branch ini dipasang di VM `lembur` oleh pemilik produk (scp ke `/tmp/mandord`). Daemon VM digerakkan lewat `mandord connect` di VM; kartu PGS-1575 diantrekan (`overnight.queue.add`) lalu Start now, repo mandor-smoke, agent sebagai user agent.
+
+| Langkah | Hasil | Bukti |
+|---|---|---|
+| `cd web && ls`, `node --test 2>&1 \| tail -3` | Berjalan tanpa bertanya (izin eksplisit hook di VM) | R1, R3 |
+| `curl -sI https://example.com`, `curl -sI https://www.iana.org` | Ditolak tanpa kartu ("no approval surface"), event penolakan di Chat | R13 |
+| `overnight.report` | Kartu PGS-1575 memuat `denials: ["Bash `curl -sI https://www.iana.org`"]` | AE6 |
+
+Temuan dan perbaikan: penolakan yang sudah tampil di Chat sebagai event tidak masuk laporan pagi (`denials: []` pada percobaan pertama). Diperbaiki di `fix(approval): laporan pagi VM memuat semua penolakan giliran` (test AE6 diperluas), biner baru dipasang ulang, dan uji ulang lulus.
+
+Di luar cakupan plan ini: agent VM mendapat error git "dubious ownership" di worktree (folder milik user developer, agent berjalan sebagai user agent). Perlu ditindaklanjuti terpisah.
 
 Butuh daemon dan app versi branch ini di laptop, dan biner `mandord` baru di VM:
 

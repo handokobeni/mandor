@@ -523,6 +523,14 @@ mod permit_token {
         let (lark, clock) = board();
         let vm = vm_station(&lark, &clock, "ou_me");
         start(&vm, Planning::Plan { skill: None }).await;
+        // Event penolakan tampil di Chat, tetapi laporan pagi tetap memuatnya.
+        vm.agent
+            .last()
+            .emit(mandor_domain::AgentEvent::PermissionDenied {
+                tool_name: "Bash".to_owned(),
+                tool_use_id: "t9".to_owned(),
+                reason: "no approval surface".to_owned(),
+            });
         vm.agent
             .last()
             .finish_denied(vec![denial("t9", "curl -H 'Authorization: ***' https://x")]);

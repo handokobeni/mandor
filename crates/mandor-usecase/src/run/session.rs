@@ -193,20 +193,24 @@ impl<D: Deps> RunService<D> {
             .into_iter()
             .map(|c| c.tool_use_id)
             .collect();
+        let summary = |d: &mandor_domain::Denial| format!("{} `{}`", d.tool_name, d.input);
+        // Laporan pagi VM memuat semua penolakan giliran, termasuk yang
+        // sudah tampil di Chat sebagai event (R13); VM tidak punya kartu.
+        if self.is_vm() {
+            let all: Vec<String> = denied.iter().map(summary).collect();
+            self.note_vm_denials(run_id, generation, all).await;
+            return;
+        }
         let fresh: Vec<String> = denied
-            .into_iter()
+            .iter()
             .filter(|d| {
                 !shown.contains(&d.tool_use_id)
                     && !carded.contains(&d.tool_use_id)
                     && !handled.contains(&(d.tool_use_id.clone(), d.tool_name.clone()))
             })
-            .map(|d| format!("{} `{}`", d.tool_name, d.input))
+            .map(summary)
             .collect();
         if fresh.is_empty() {
-            return;
-        }
-        if self.is_vm() {
-            self.note_vm_denials(run_id, generation, fresh).await;
             return;
         }
         for text in fresh {

@@ -6,6 +6,7 @@ import type { QueueItemView } from '#lib/protocol/QueueItemView.ts';
 import type { LoginCheck } from '#lib/protocol/LoginCheck.ts';
 import type { OvernightReportView } from '#lib/protocol/OvernightReportView.ts';
 import type { OvernightSettingsView } from '#lib/protocol/OvernightSettingsView.ts';
+import type { PublishResult } from '#lib/protocol/PublishResult.ts';
 import type { ReportCardView } from '#lib/protocol/ReportCardView.ts';
 
 export type VmBadge = 'on_vm' | 'queued';
@@ -103,6 +104,23 @@ type HeldRow = { run_id: string; outcome: string; hold_reason: string | null; ch
  * push), atau `null`. Selama kartu grup menunggu Keep/Revert (R13), keputusan
  * ada di baris kartunya.
  */
+/** Pesan hasil keputusan gerbang kartu VM: VM bisa push, me-review ulang AC
+ * yang usang atau belum di-review, atau tetap menahan kartu. */
+export function gateOutcomeMessage(key: string, r: PublishResult): { ok: boolean; text: string } {
+  switch (r.outcome) {
+    case 'published':
+      return { ok: true, text: `${key} pushed as a draft PR` };
+    case 'review_started':
+      return { ok: true, text: `${key}: the VM is reviewing the AC again` };
+    case 'blocked':
+      return { ok: false, text: `${key} is still blocked by ${r.failed.join(', ')}` };
+    case 'needs_confirmation':
+      return { ok: false, text: `${key} still needs ${r.unverified.join(', ')} confirmed` };
+    default:
+      return { ok: false, text: `${key}: the VM answered ${r.outcome}` };
+  }
+}
+
 export function heldAction<C extends HeldRow>(c: C, list: C[]): 'answer' | 'confirm' | null {
   if (c.outcome !== 'held') return null;
   if (list.some((x) => x.run_id === c.run_id && x.changed_in_lark)) return null;

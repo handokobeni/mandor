@@ -2,12 +2,24 @@
   import { toast } from 'svelte-sonner';
   import ArrowLeftRight from '@lucide/svelte/icons/arrow-left-right';
   import GitPullRequest from '@lucide/svelte/icons/git-pull-request';
+  import RotateCcw from '@lucide/svelte/icons/rotate-ccw';
   import Send from '@lucide/svelte/icons/send';
   import Undo2 from '@lucide/svelte/icons/undo-2';
   import { Button } from '#lib/components/ui/button/index.ts';
   import { Input } from '#lib/components/ui/input/index.ts';
   import { Textarea } from '#lib/components/ui/textarea/index.ts';
-  import { backInQueue, canTakeOverReport, groupCardLabel, heldAction, holdLabel, leadRow, reportGroups, usageText } from '#lib/overnight.ts';
+  import { effectiveVerdict, gateRows } from '#lib/ac-review.ts';
+  import {
+    backInQueue,
+    canTakeOverReport,
+    gateOutcomeMessage,
+    groupCardLabel,
+    heldAction,
+    holdLabel,
+    leadRow,
+    reportGroups,
+    usageText
+  } from '#lib/overnight.ts';
   import type { AcRowView } from '#lib/protocol/AcRowView.ts';
   import type { ReportCardView } from '#lib/protocol/ReportCardView.ts';
   import type { Rpc } from '#lib/rpc.ts';
@@ -64,10 +76,34 @@
     }
   }
 
+  /** Keputusan gerbang ke VM; pesan mengikuti apa yang benar-benar dilakukan
+   * VM (push, review ulang, atau tetap ditahan). */
+  async function decideGate(card: ReportCardView, ids: string[], reason: string | null): Promise<void> {
+    busy = card.run_id;
+    try {
+      const msg = gateOutcomeMessage(key(card), await overnight.decide(card.run_id, ids, reason));
+      if (msg.ok) {
+        delete gate[card.run_id];
+        delete confirmed[card.run_id];
+        delete reasons[card.run_id];
+        toast.success(msg.text);
+      } else {
+        toast.warning(msg.text);
+      }
+    } catch (err) {
+      toast.error('The VM refused', { description: err instanceof Error ? err.message : String(err) });
+    } finally {
+      busy = null;
+    }
+  }
+
   async function openGate(card: ReportCardView): Promise<void> {
     try {
       const ledger = await overnight.ledger(card.run_id);
-      gate[card.run_id] = ledger.rows.filter((r) => r.verdict === 'cant_verify' || r.verdict === 'fail');
+      // Verdict efektif: tampilan berbeda ikut gagal, tampilan tak terverifikasi
+      // ikut dikonfirmasi; baris usang hanya bisa di-review ulang.
+      const rows = gateRows(ledger.rows);
+      gate[card.run_id] = [...rows.fails, ...rows.cants];
       confirmed[card.run_id] = [];
     } catch (err) {
       toast.error('Could not load the AC', { description: err instanceof Error ? err.message : String(err) });
@@ -178,11 +214,17 @@
                   <Send />Send to review
                 </Button>
               {/if}
-              {#if c.outcome === 'held' && c.hold_reason === 'ac_gate' && !gate[c.run_id]}
-                <Button size="sm" variant="outline" onclick={() => openGate(c)}>Decide AC…</Button>
+              {#if c.outcome === 'held' && c.hold_reason === 'ac_gate'}
+                <!-- AC usang atau belum di-review: VM me-review ulang lalu push bila lolos. -->
+                <Button size="sm" disabled={busy === c.run_id} onclick={() => decideGate(c, [], null)}>
+                  <RotateCcw />Review again
+                </Button>
+                {#if !gate[c.run_id]}
+                  <Button size="sm" variant="outline" onclick={() => openGate(c)}>Decide AC…</Button>
+                {/if}
               {/if}
               {#if held === 'confirm'}
-                <Button size="sm" disabled={busy === c.run_id} onclick={() => act(c, () => overnight.decide(c.run_id, [], null), `${key(c)} pushed as a draft PR`)}>
+                <Button size="sm" disabled={busy === c.run_id} onclick={() => decideGate(c, [], null)}>
                   Confirm and push
                 </Button>
               {/if}
@@ -216,21 +258,25 @@
               <div class="gate">
                 {#each gate[c.run_id] as row (row.ac_id)}
                   <label class="gate-row">
-                    {#if row.verdict === 'cant_verify'}
+                    {#if effectiveVerdict(row) === 'cant_verify'}
                       <input type="checkbox" checked={(confirmed[c.run_id] ?? []).includes(row.ac_id)} onchange={() => toggle(c.run_id, row.ac_id)} />
                       <span><b>{row.label ?? 'AC'}</b> I checked this myself · {row.text}</span>
                     {:else}
-                      <span class="chip" data-tone="failed">Fail</span>
+                      <span class="chip" data-tone="failed">{row.verdict === 'fail' ? 'Fail' : 'Looks different'}</span>
                       <span><b>{row.label ?? 'AC'}</b> {row.text}</span>
                     {/if}
                   </label>
+                {:else}
+                  <p class="muted">No AC to decide: the results are out of date. Use Review again.</p>
                 {/each}
-                {#if gate[c.run_id].some((r) => r.verdict === 'fail')}
-                  <Textarea rows={2} placeholder="Why push even though an AC fails" bind:value={reasons[c.run_id]} />
+                {#if gate[c.run_id].length > 0}
+                  {#if gate[c.run_id].some((r) => effectiveVerdict(r) === 'fail')}
+                    <Textarea rows={2} placeholder="Why push even though an AC fails" bind:value={reasons[c.run_id]} />
+                  {/if}
+                  <Button size="sm" disabled={busy === c.run_id} onclick={() => decideGate(c, confirmed[c.run_id] ?? [], reasons[c.run_id] ?? null)}>
+                    Push and create draft PR
+                  </Button>
                 {/if}
-                <Button size="sm" disabled={busy === c.run_id} onclick={() => act(c, () => overnight.decide(c.run_id, confirmed[c.run_id] ?? [], reasons[c.run_id] ?? null), `${key(c)} pushed as a draft PR`)}>
-                  Push and create draft PR
-                </Button>
               </div>
             {/if}
           </div>

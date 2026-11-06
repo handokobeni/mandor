@@ -4,6 +4,7 @@ import type { LoginCheck } from '#lib/protocol/LoginCheck.ts';
 import type { OvernightReportView } from '#lib/protocol/OvernightReportView.ts';
 import type { ReportCardView } from '#lib/protocol/ReportCardView.ts';
 import {
+  gateOutcomeMessage,
   backInQueue,
   canActivate,
   canQueue,
@@ -339,5 +340,35 @@ describe('tampilan kartu Planned', () => {
     expect(showQueueForVm({ ...ready, statusLoaded: false }, [])).toBe(false);
     expect(showQueueForVm({ ...ready, vmRole: false }, firstPlanning)).toBe(false);
     expect(showQueueForVm({ ...ready, larkReady: false }, [])).toBe(false);
+  });
+});
+
+describe('keputusan gerbang AC kartu VM', () => {
+  const res = (outcome: string, extra: Record<string, unknown> = {}) => ({
+    outcome,
+    pr_url: null,
+    failed: [],
+    unverified: [],
+    warnings: [],
+    sync_warning: null,
+    review_id: null,
+    changed_cards: [],
+    ...extra
+  });
+
+  it('reports what the VM actually did instead of always claiming a push', () => {
+    expect(gateOutcomeMessage('PGS-1', res('published'))).toEqual({ ok: true, text: 'PGS-1 pushed as a draft PR' });
+    expect(gateOutcomeMessage('PGS-1', res('review_started'))).toEqual({
+      ok: true,
+      text: 'PGS-1: the VM is reviewing the AC again'
+    });
+    expect(gateOutcomeMessage('PGS-1', res('blocked', { failed: ['AC-1'] }))).toEqual({
+      ok: false,
+      text: 'PGS-1 is still blocked by AC-1'
+    });
+    expect(gateOutcomeMessage('PGS-1', res('needs_confirmation', { unverified: ['AC-2', 'AC-3'] }))).toEqual({
+      ok: false,
+      text: 'PGS-1 still needs AC-2, AC-3 confirmed'
+    });
   });
 });

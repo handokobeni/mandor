@@ -8,6 +8,7 @@ import type { DesignSourceView } from '#lib/protocol/DesignSourceView.ts';
 import type { HandoffResult } from '#lib/protocol/HandoffResult.ts';
 import type { LoginCheck } from '#lib/protocol/LoginCheck.ts';
 import type { OvernightQueueView } from '#lib/protocol/OvernightQueueView.ts';
+import type { PublishResult } from '#lib/protocol/PublishResult.ts';
 import type { OvernightReportView } from '#lib/protocol/OvernightReportView.ts';
 import type { OvernightSettingsView } from '#lib/protocol/OvernightSettingsView.ts';
 import type { ReportCardView } from '#lib/protocol/ReportCardView.ts';
@@ -259,8 +260,14 @@ export class OvernightStore {
   }
 
   /** Keputusan AC untuk kartu `ac_gate`: VM langsung push dan membuat PR draft (R12a). */
-  decide(runId: string, confirmed: string[], reason: string | null): Promise<void> {
-    return this.call('overnight.gate_decide', publishParams(runId, confirmed, reason));
+  /** Keputusan gerbang kartu VM. VM bisa push, me-review ulang AC yang usang
+   * atau belum di-review, atau tetap menahan kartu; hasilnya diteruskan. */
+  async decide(runId: string, confirmed: string[], reason: string | null): Promise<PublishResult> {
+    const rpc = this.rpc;
+    if (!rpc) throw new Error('The VM is not connected');
+    const res = await rpc.request<PublishResult>('overnight.gate_decide', publishParams(runId, confirmed, reason));
+    await this.refresh();
+    return res;
   }
 
   /** Jawaban untuk kartu tertahan; kartu kembali ke antrean di branch yang sama (R20). */

@@ -197,7 +197,7 @@ Tidak ada yang memblokir. Pertanyaan yang tersisa dari review dijawab spike S3�
 - KTD-A9. **Pemeriksaan ulang di daemon dan bukti pemeriksaan hook.** Untuk setiap tanpa keputusan, hook menulis catatan `{tool_use_id, cwd}` ke folder berkas izin giliran. `permit.request` hanya membuat kartu bila catatan itu ada; tanpa catatan (mis. hook terhenti) → tolak tanpa kartu (R26). Daemon memuat berkas izin yang path-nya tercatat di cakupan kapabilitas `Permit`, lalu menjalankan urutan KTD-A8 lagi dan hanya bisa menghasilkan tolak atau kartu, tidak izinkan.
 - KTD-A10. **Server MCP persetujuan terpisah, `mandor_permit`, yang paralel.** Setiap giliran implementasi dan plan di laptop mendapat server `mandord mcp --permit` dengan token peran `Permit` (run, jenis giliran, path berkas izin). Claude Code dijalankan dengan `--permission-prompts host --permission-prompt-tool mcp__mandor_permit__permit`; reviewer dan semua giliran VM tetap `none`. Server memproses setiap `tools/call` sebagai task di `JoinSet` milik sesi, dengan satu penulis stdout dan satu koneksi daemon per panggilan, sehingga beberapa kartu bisa menunggu bersamaan (R24). `permit.request` boleh menunggu sampai 11 menit; panggilan lain tetap 10 detik.
 - KTD-A11. **Kartu, izin run, dan penolakan run di SQLite.** Migrasi baru menambah tabel kartu (run, `tool_use_id`, jenis giliran, tool, input, folder, status Pending/Answered/Expired/Cancelled, keputusan, waktu) dan tabel keputusan run (run, jenis giliran nullable, hash kunci, allow/deny). Input mentah hanya disimpan selama Pending; transisi keluar Pending menimpanya dengan versi tersamarkan dalam transaksi yang sama. Setiap transisi adalah satu `UPDATE … WHERE status='pending'`; jumlah baris yang berubah menentukan pemenang, dan izin run ditulis di transaksi yang sama dengan Answered. Status "sedang dikirim" hanya ada di UI. Kartu Pending saat daemon start → Cancelled.
-- KTD-A12. **Kunci "permintaan persis sama".** Domain membangun string kanonis (nama tool + input kanonis tanpa `description` + folder kerja); adapter store meng-hash-nya dengan SHA-256 sehingga input mentah tidak tersimpan di tabel keputusan. Izin run (R7) memakai kunci + jenis giliran; penolakan run (R23) memakai kunci tanpa jenis giliran. `sha2` sudah dipakai `mandor-lark`; penggunaan baru di `mandor-store` dicatat di tabel crate `CLAUDE.md`.
+- KTD-A12. **Kunci "permintaan persis sama".** Domain membangun string kanonis (nama tool + input kanonis tanpa `description` + folder kerja); adapter store meng-hash-nya dengan SHA-256 sehingga input mentah tidak tersimpan di tabel keputusan. Izin run (R7) memakai kunci + jenis giliran; penolakan run (R23) memakai kunci tanpa jenis giliran. `sha2` sudah dipakai `mandor-lark` dan `mandor-git`; penggunaan baru di `mandor-store` ditambahkan ke baris `sha2` di tabel crate `CLAUDE.md`.
 - KTD-A13. **Penantian jawaban lewat port.** Usecase tetap tanpa tokio: port `ApprovalWaiter` (tunggu jawaban kartu dengan tenggat dan pembatalan run) diimplementasi di `mandord` dengan channel tokio dan `CancellationToken` run; jam lewat port `Clock` yang ada.
 - KTD-A14. **Tenggat internal hook.** Hook memutuskan dalam tenggat 5 detik; bila terlewati ia keluar dengan exit 2 (tolak). Batas waktu hook di `--settings` tetap 30 detik (S6).
 - KTD-A15. **Batas kartu.** Bila run sudah punya 5 kartu Pending, atau input terserialisasi lebih dari 64 KiB, permintaan ditolak langsung tanpa kartu dan tercatat di Chat.
@@ -255,7 +255,7 @@ stateDiagram-v2
 ### Assumptions
 
 - Koneksi token penuh hanya dipegang aplikasi dev; agent tidak bisa membaca `~/.mandor` (deny list `Read(~/.mandor/**)` dan hook berkas kredensial, KTD-11), dan tidak bisa menulis folder berkas izin (KTD-A4).
-- PR #19 (`feat/prototype-compare`) kemungkinan di-merge lebih dulu dan membawa migrasi 0010–0011 serta arahan bentuk perintah di operator prompt; branch ini di-rebase ke `main` sebelum PR dan migrasi barunya mengambil nomor berikutnya.
+- PR #19 (`feat/prototype-compare`) sudah di-merge ke `main` (2026-11-06) dan branch ini sudah di-rebase ke atasnya: migrasi terakhir di `main` adalah `0011_run_scope.sql`, dan arahan bentuk perintah ada di operator prompt `crates/mandor-agent/src/prompt.rs`.
 - Claude Code bisa mengirim beberapa permintaan izin bersamaan untuk tool call paralel; server persetujuan dibuat paralel (KTD-A10) sehingga keduanya ditangani.
 
 ### Sequencing
@@ -347,7 +347,7 @@ U1 dan U2 (domain murni) lebih dulu. U3 (hook) bergantung pada U1–U2. U4 (peny
 
 **Approach:** Berkas izin hilang, rusak, atau digest tidak cocok → tolak. Fakta path diselesaikan seperti KTD-A6. Untuk tanpa keputusan, hook menulis `{tool_use_id, cwd}` (berkas baru 0600/0640, tanpa mengikuti symlink) di folder berkas izin. Di reviewer, `mark_before` tetap berjalan (KTD-A8).
 
-**Patterns to follow:** argumen `--mcp`, `--design`, `--review` di `crates/mandord/src/hook.rs`; `file_mode` dan `prepare_dir` di `crates/mandor-agent/src/port.rs`; penulisan berkas aman di `crates/mandor-agent/src/screens.rs` (bila sudah di-merge dari PR #19) atau pola `create_new`.
+**Patterns to follow:** argumen `--mcp`, `--design`, `--review` di `crates/mandord/src/hook.rs`; `file_mode` dan `prepare_dir` di `crates/mandor-agent/src/port.rs`; penulisan berkas aman (`create_new`, `O_NOFOLLOW`) di `crates/mandor-agent/src/screens.rs`.
 
 **Test scenarios:**
 - `cd sub && git diff --stat` di worktree sementara → stdout JSON izinkan, exit 0.
@@ -373,7 +373,7 @@ U1 dan U2 (domain murni) lebih dulu. U3 (hook) bergantung pada U1–U2. U4 (peny
 **Dependencies:** U2
 
 **Files:**
-- `crates/mandor-store/migrations/00NN_approvals.sql` (baru; nomor berikutnya setelah `main` saat implementasi)
+- `crates/mandor-store/migrations/0012_approvals.sql` (baru)
 - `crates/mandor-store/src/approvals.rs` (baru; hash kunci dengan `sha2`), `crates/mandor-store/src/lib.rs`, `crates/mandor-store/Cargo.toml`, `.sqlx`
 - `crates/mandor-usecase/src/approval/mod.rs` (baru), `crates/mandor-usecase/src/approval/service.rs` (baru)
 - `crates/mandor-usecase/src/run_ports.rs` (port `ApprovalStore`, `ApprovalWaiter`, `PermitFacts` di bundel `Deps`)

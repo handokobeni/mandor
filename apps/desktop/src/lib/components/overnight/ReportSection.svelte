@@ -2,6 +2,7 @@
   import { toast } from 'svelte-sonner';
   import ArrowLeftRight from '@lucide/svelte/icons/arrow-left-right';
   import GitPullRequest from '@lucide/svelte/icons/git-pull-request';
+  import ListChecks from '@lucide/svelte/icons/list-checks';
   import RotateCcw from '@lucide/svelte/icons/rotate-ccw';
   import Send from '@lucide/svelte/icons/send';
   import Undo2 from '@lucide/svelte/icons/undo-2';
@@ -25,6 +26,7 @@
   import type { Rpc } from '#lib/rpc.ts';
   import { nav } from '#lib/stores/nav.svelte.ts';
   import { overnight } from '#lib/stores/overnight.svelte.ts';
+  import VmAcResults from './VmAcResults.svelte';
   import { runs } from '#lib/stores/runs.svelte.ts';
 
   let { laptop, laptopDaemonId }: { laptop: Rpc; laptopDaemonId: string | null } = $props();
@@ -40,6 +42,8 @@
   let reasons = $state<Record<string, string>>({});
   /** Alasan Keep per kartu grup yang berubah di Lark. */
   let keepReasons = $state<Record<string, string>>({});
+  /** Kartu yang hasil AC-nya sedang dibuka (dimuat dari daemon VM). */
+  let results = $state<Record<string, boolean>>({});
 
   /** Keep atau Revert kartu grup yang berubah di Lark (R13); VM mengantre grup lagi. */
   async function decideCard(c: ReportCardView, decision: 'keep' | 'revert'): Promise<void> {
@@ -209,6 +213,9 @@
             {/if}
 
             <div class="actions">
+              <Button size="sm" variant="ghost" aria-expanded={!!results[c.run_id]} onclick={() => (results[c.run_id] = !results[c.run_id])}>
+                <ListChecks />{results[c.run_id] ? 'Hide AC results' : 'AC results'}
+              </Button>
               {#if c.outcome === 'draft'}
                 <Button size="sm" disabled={busy === c.run_id} onclick={() => act(c, () => overnight.sendToReview(c.run_id), `${key(c)} sent to review`)}>
                   <Send />Send to review
@@ -252,6 +259,10 @@
               </div>
             {/if}
 
+            {/if}
+
+            {#if lead && results[c.run_id]}
+              <VmAcResults runId={c.run_id} taskKey={key(c)} />
             {/if}
 
             {#if lead && gate[c.run_id] && c.outcome === 'held' && c.hold_reason === 'ac_gate' && !backInQueue(c, overnight.queuedIds)}

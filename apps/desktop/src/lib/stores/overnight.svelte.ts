@@ -9,6 +9,7 @@ import type { HandoffResult } from '#lib/protocol/HandoffResult.ts';
 import type { LoginCheck } from '#lib/protocol/LoginCheck.ts';
 import type { OvernightQueueView } from '#lib/protocol/OvernightQueueView.ts';
 import type { PublishResult } from '#lib/protocol/PublishResult.ts';
+import type { VisualScreenshotView } from '#lib/protocol/VisualScreenshotView.ts';
 import type { OvernightReportView } from '#lib/protocol/OvernightReportView.ts';
 import type { OvernightSettingsView } from '#lib/protocol/OvernightSettingsView.ts';
 import type { ReportCardView } from '#lib/protocol/ReportCardView.ts';
@@ -280,6 +281,15 @@ export class OvernightStore {
     const rpc = this.rpc;
     if (!rpc) throw new Error('The VM is not connected');
     return rpc.request<AcLedgerView>('ledger.get', { run_id: runId });
+  }
+
+  /** Screenshot hasil tampilan baris AC kartu VM sebagai data URL; berkasnya
+   * hanya ada di daemon VM (R26). */
+  async screenshot(runId: string, acId: string, index: number): Promise<string> {
+    const rpc = this.rpc;
+    if (!rpc) throw new Error('The VM is not connected');
+    const view = await rpc.request<VisualScreenshotView>('review.screenshot', { run_id: runId, ac_id: acId, index });
+    return view.data_url;
   }
 
   /** "Send to review" untuk PR draft (R23). */

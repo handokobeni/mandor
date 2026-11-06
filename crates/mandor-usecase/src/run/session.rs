@@ -4,6 +4,7 @@
 //! generasinya masih yang tersimpan, sehingga event giliran lama tidak menimpa
 //! giliran baru (perbaikan bug race stop→send).
 
+use crate::run_ports::ApprovalStore as _;
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
@@ -112,6 +113,9 @@ impl<D: Deps> RunService<D> {
         let mut stats = ReviewEnd::default();
         let mut tracker = mandor_domain::UsageTracker::default();
         let mut limited = false;
+        // Penolakan yang sudah tampil di Chat lewat event stream (KTD-A17).
+        let mut shown = std::collections::HashSet::new();
+        let mut denied = Vec::new();
         while let Some(event) = handle.next_event().await {
             observe(&event, &mut end, &mut stats);
             // Batas siklus VM dihitung per pesan agar bisa berhenti di tengah
@@ -120,8 +124,16 @@ impl<D: Deps> RunService<D> {
                 limited = true;
                 handle.stopper().stop().await;
             }
-            self.record_event(&run_id, generation, event).await;
+            let denial_id = shown_denial(&event);
+            if let AgentEvent::Done { denied: d, .. } = &event {
+                denied.clone_from(d);
+            }
+            if self.record_event(&run_id, generation, event).await {
+                shown.extend(denial_id);
+            }
         }
+        self.record_denials(&run_id, generation, denied, &shown)
+            .await;
         let finished = if limited {
             self.hold_for_limit(&run_id, generation).await
         } else {
@@ -134,13 +146,14 @@ impl<D: Deps> RunService<D> {
 
     /// Menyimpan event agent ke chat run. Pemakaian per pesan dan sesi reviewer
     /// tidak masuk chat pelaksana; progres review lewat buku AC.
-    async fn record_event(&self, run_id: &str, generation: i64, event: AgentEvent) {
+    /// `true` bila event tersimpan di chat.
+    async fn record_event(&self, run_id: &str, generation: i64, event: AgentEvent) -> bool {
         if matches!(event, AgentEvent::MessageUsage { .. }) {
-            return;
+            return false;
         }
         match self.current_state(run_id, generation).await {
             Some(current) if current != RunState::Reviewing => {}
-            _ => return,
+            _ => return false,
         }
         if let Err(e) = self
             .runs
@@ -148,6 +161,68 @@ impl<D: Deps> RunService<D> {
             .await
         {
             tracing::warn!(run_id, error = %e, "gagal menyimpan event agent");
+            return false;
+        }
+        true
+    }
+
+    /// Penolakan Claude Code yang belum tampil (bukan kartu, bukan event
+    /// penolakan, bukan hasil hook): satu item Chat di laptop, atau catatan
+    /// laporan pagi di VM (KTD-A17, R13, R22).
+    async fn record_denials(
+        &self,
+        run_id: &str,
+        generation: i64,
+        denied: Vec<mandor_domain::Denial>,
+        shown: &std::collections::HashSet<String>,
+    ) {
+        if denied.is_empty() {
+            return;
+        }
+        let carded: std::collections::HashSet<String> = self
+            .approvals
+            .approvals(run_id)
+            .await
+            .unwrap_or_default()
+            .into_iter()
+            .map(|c| c.tool_use_id)
+            .collect();
+        let fresh: Vec<String> = denied
+            .into_iter()
+            .filter(|d| !shown.contains(&d.tool_use_id) && !carded.contains(&d.tool_use_id))
+            .map(|d| format!("{} `{}`", d.tool_name, d.input))
+            .collect();
+        if fresh.is_empty() {
+            return;
+        }
+        if self.is_vm() {
+            self.note_vm_denials(run_id, generation, fresh).await;
+            return;
+        }
+        for text in fresh {
+            let item =
+                ChatItem::System(format!("Denied by Claude Code's permission rules: {text}"));
+            if let Err(e) = self.runs.append(run_id, &item, self.now()).await {
+                tracing::warn!(run_id, error = %e, "penolakan tidak tercatat");
+            }
+        }
+    }
+
+    /// Penolakan run VM untuk laporan pagi, dibatasi agar run tidak membengkak.
+    async fn note_vm_denials(&self, run_id: &str, generation: i64, fresh: Vec<String>) {
+        const KEPT: usize = 50;
+        let Ok(Some(mut run)) = self.runs.get(run_id).await else {
+            return;
+        };
+        if run.generation != generation {
+            return;
+        }
+        run.denials.extend(fresh);
+        let over = run.denials.len().saturating_sub(KEPT);
+        run.denials.drain(..over);
+        let expected = run.generation;
+        if let Err(e) = self.runs.save(&run, expected, self.now()).await {
+            tracing::warn!(run_id, error = %e, "penolakan VM tidak tercatat");
         }
     }
 
@@ -458,6 +533,22 @@ pub(super) fn follow_design_rows(
 
 pub(super) fn rejected(message: String) -> RunError {
     RunError::Port(PortError::Rejected(message))
+}
+
+/// `tool_use_id` penolakan yang tampil di Chat lewat event ini: event
+/// penolakan, atau hasil tool dari hook Mandor.
+fn shown_denial(event: &AgentEvent) -> Option<String> {
+    match event {
+        AgentEvent::PermissionDenied { tool_use_id, .. } => Some(tool_use_id.clone()),
+        AgentEvent::ToolResult {
+            tool_use_id,
+            is_error: true,
+            preview,
+        } if preview.starts_with("PreToolUse:") && preview.contains("mandor:") => {
+            Some(tool_use_id.clone())
+        }
+        _ => None,
+    }
 }
 
 /// Mencatat hasil giliran dan pemakaian dari satu event agent.

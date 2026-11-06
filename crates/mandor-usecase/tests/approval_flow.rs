@@ -349,7 +349,9 @@ async fn daemon_start_membatalkan_kartu_lama() {
 mod permit_token {
     use std::sync::atomic::Ordering;
 
-    use super::{FakeClock, FakeLark, RUN, Station, TurnKind, denied, json, setup, station};
+    use super::{
+        ChatItem, FakeClock, FakeLark, RUN, Station, TurnKind, denied, json, setup, station,
+    };
     use crate::common::{ready_task, vm_station};
     use mandor_usecase::review::{CapabilityRole, CapabilityScope};
     use mandor_usecase::{Planning, StartTarget};
@@ -399,6 +401,64 @@ mod permit_token {
         let vm = vm_station(&lark, &clock, "ou_me");
         start(&vm, Planning::Plan { skill: None }).await;
         assert!(vm.agent.last().req.permit.is_none(), "VM tanpa kartu");
+    }
+
+    fn denial(id: &str, input: &str) -> mandor_domain::Denial {
+        mandor_domain::Denial {
+            tool_name: "Bash".to_owned(),
+            tool_use_id: id.to_owned(),
+            input: input.to_owned(),
+        }
+    }
+
+    #[tokio::test]
+    async fn penolakan_stream_tercatat_sekali_di_chat_laptop() {
+        let (lark, clock) = board();
+        let st = station(&lark, &clock, "ou_me");
+        start(&st, Planning::Plan { skill: None }).await;
+        let run = st.agent.last();
+        run.emit(mandor_domain::AgentEvent::PermissionDenied {
+            tool_name: "Bash".to_owned(),
+            tool_use_id: "t1".to_owned(),
+            reason: "hook".to_owned(),
+        });
+        run.finish_denied(vec![denial("t1", "git push"), denial("t2", "docker ps")]);
+        crate::common::run_fakes::eventually(|| {
+            st.runs
+                .chat
+                .lock()
+                .unwrap()
+                .iter()
+                .any(|(_, i)| matches!(i, ChatItem::System(t) if t.contains("docker ps")))
+        })
+        .await;
+        let notes: Vec<String> = st
+            .runs
+            .chat
+            .lock()
+            .unwrap()
+            .iter()
+            .filter_map(|(_, i)| match i {
+                ChatItem::System(t) if t.starts_with("Denied by Claude Code") => Some(t.clone()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(notes.len(), 1, "t1 sudah tampil sebagai event: {notes:?}");
+    }
+
+    #[tokio::test]
+    async fn ae6_penolakan_vm_masuk_laporan_pagi() {
+        let (lark, clock) = board();
+        let vm = vm_station(&lark, &clock, "ou_me");
+        start(&vm, Planning::Plan { skill: None }).await;
+        vm.agent
+            .last()
+            .finish_denied(vec![denial("t9", "curl -H 'Authorization: ***' https://x")]);
+        crate::common::run_fakes::eventually(|| !vm.runs.only().denials.is_empty()).await;
+        assert_eq!(
+            vm.runs.only().denials,
+            ["Bash `curl -H 'Authorization: ***' https://x`"]
+        );
     }
 
     #[tokio::test]

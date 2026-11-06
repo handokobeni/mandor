@@ -1465,6 +1465,9 @@ pub struct ReportCardView {
     pub entered_waiting_fix: bool,
     /// Sumber desain yang gagal diperbarui saat kartu dimulai.
     pub design_notes: Vec<String>,
+    /// Penolakan izin agent semalam, tersamarkan (plan 2026-11-06-001, R13).
+    #[serde(default)]
+    pub denials: Vec<String>,
     /// Keadaan kartu di grupnya: `committed`, `active`, `pending`, `removed`;
     /// `None` untuk kartu tunggal.
     pub group_card: Option<String>,

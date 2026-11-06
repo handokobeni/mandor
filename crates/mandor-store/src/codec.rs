@@ -215,11 +215,16 @@ pub(crate) fn chat_to_json(
                     result,
                     num_turns,
                     denials,
+                    denied,
                     cost_usd,
                     limit,
                 } => {
+                    let denied: Vec<_> = denied
+                        .iter()
+                        .map(|d| json!({"tool_name": d.tool_name, "tool_use_id": d.tool_use_id, "input": d.input}))
+                        .collect();
                     json!({"type": "done", "is_error": is_error, "result": result, "num_turns": num_turns,
-                           "denials": denials, "cost_usd": cost_usd, "limit": limit})
+                           "denials": denials, "denied": denied, "cost_usd": cost_usd, "limit": limit})
                 }
                 E::Failed { message } => json!({"type": "failed", "message": message}),
                 E::MessageUsage { message_id, usage } => json!({

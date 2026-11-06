@@ -93,6 +93,7 @@ function rc(over: Partial<ReportCardView>): ReportCardView {
     ac_cant_verify: 0,
     entered_waiting_fix: false,
     design_notes: [],
+    denials: ['Bash `docker compose up -d`', 'WebFetch `https://docs.example.com/api`'],
     group_card: null,
     changed_in_lark: false,
     ...over

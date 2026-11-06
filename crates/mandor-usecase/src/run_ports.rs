@@ -441,6 +441,9 @@ pub struct RunRecord {
     /// Sumber desain yang gagal diperbarui saat kartu VM dimulai (R12 plan
     /// 2026-10-30-001); untuk laporan pagi.
     pub design_notes: Vec<String>,
+    /// Penolakan izin agent di run VM, tersamarkan; untuk laporan pagi
+    /// (plan 2026-11-06-001, R13).
+    pub denials: Vec<String>,
     /// Cara grup VM dimulai; grup "Start now" tidak berjeda karena jam lembur
     /// (R21 plan grup, KTD-G12).
     pub vm_start: VmStart,
@@ -496,6 +499,7 @@ impl RunRecord {
             hold: None,
             entered_waiting_fix_ms: None,
             design_notes: Vec::new(),
+            denials: Vec::new(),
             draft_pending: None,
             vm_start: VmStart::Window,
             one_plan: None,

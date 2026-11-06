@@ -12,7 +12,7 @@ Plan: `docs/plans/2026-11-06-001-feat-agent-permission-approval-plan.md`. Branch
 | U6 | selesai | Protokol: `ApprovalView`, `ApprovalAnswerParams`, method `approvals.list/answer/seen`, event `approvals.updated`, `RunView.pending_approvals` (satu query `pending_approval_counts` untuk daftar run dan papan). `NoticeKind::ApprovalNeeded` (`approval_needed`) hanya untuk kartu Pending pertama run, isi tersamarkan dan dipotong 200 karakter. `BroadcastApprovals` menyiarkan `approvals.updated` dan `run.updated` setelah setiap perubahan. Dispatch `dispatch/approvals.rs`: input lengkap hanya untuk kartu Pending; jawaban terlambat → `Rejected` "no longer pending". Koneksi terbatas yang memanggil `approvals.*` ditolak dan dicatat di Chat dengan peran pencobanya (AE16). Frontend: jenis notifikasi `approval_needed` di Settings, binding TS. Test: 1 usecase, 2 dispatch, 1 routing, Vitest settings. |
 | U7 | selesai | `approvals.ts` (escape karakter kontrol/bidi, isi kartu, sisa waktu, urutan, label keputusan), store `approvals.svelte.ts` (muat ulang per `approvals.updated` run ini, status "sedang dikirim" UI, jawaban terlambat "This request is no longer pending.", `approvals.seen`), `ApprovalCard.svelte` (blok input bergulir, folder, deskripsi agent berlabel tidak diverifikasi, tiga tombol tanpa fokus otomatis, live region sopan tanpa hitung mundur). Workspace: kartu menunggu di atas composer, riwayat kartu di bawah "N earlier approval requests", hitungan di tab Chat, `approvals.seen` saat tab Chat terlihat, notifikasi `approval_needed` membuka tab Chat dan menggulir ke kartu terlama (`nav.runApprovals`). Badge "Needs approval" di kartu papan, daftar run, dan header workspace tanpa mengubah kolom. Penolakan hook (`tool_result` `PreToolUse … mandor: …`) tampil sebagai satu entri Denied dengan alasan. Mock: dua kartu di PGS-1402; dicek di `/?mock` (kartu, jawaban Allow once, riwayat). Test: 7 logika, 4 store/nav, 1 chat, 1 badge. |
 | U8 | selesai | `AgentEvent::Done.denied: Vec<Denial>` (tool, `tool_use_id`, ringkasan input tersamarkan dan dipotong); parser membaca `permission_denials`, event lama tanpa daftar tetap terbaca. Codec chat menyimpan `denied`. Usecase `record_denials`: penolakan yang belum tampil (bukan kartu, bukan event `permission_denied`, bukan hasil hook Mandor yang tercatat) menjadi satu item Chat per penolakan di laptop, termasuk giliran reviewer yang event-nya tidak masuk Chat (AE5); di VM masuk `RunRecord.denials` (maks 50) lalu `ReportCard.denials` → `ReportCardView.denials` → `ReportSection` ("N requests were denied overnight", AE6). Mock VM memuat dua penolakan. Test: 2 stream, 2 usecase. |
-| U9 | belum | |
+| U9 | sebagian | Operator prompt: bentuk gabungan, pipe, redirect, dan path berkurung kini diizinkan otomatis bila setiap bagian ada di allowlist; perintah lain memakai kartu bila sesi bisa, selain itu ditolak; bentuk yang tidak pernah otomatis disebut (test prompt diperbarui). Runbook baru `docs/runbook/agent-permissions.md`, tautan di `README.md`, plan masuk daftar rencana aktif di `CLAUDE.md`, amandemen KTD-10 di plan Rilis 1. `make check` hijau (coverage baris 90,18%). **Belum:** uji langsung laptop dan VM (butuh pemilik produk). |
 
 ## Keputusan pelaksanaan
 
@@ -25,3 +25,32 @@ Plan: `docs/plans/2026-11-06-001-feat-agent-permission-approval-plan.md`. Branch
 
 - Kandidat path yang tidak bisa diselesaikan (mis. `..` setelah komponen yang belum ada) menjadi tanpa keputusan, bukan tolak: kandidat sering bukan path (pola grep, nama branch). Folder kerja, target `cd`/`-C`/`--dir`, dan target redirect yang tidak bisa diselesaikan tetap ditolak (KTD-A6, R26).
 - Kandidat path di luar run tidak membatalkan izin otomatis; R16 hanya memeriksa path terlarang R11. Batas run berlaku untuk folder kerja dan target pindah folder (R15).
+
+## Bukti contoh penerimaan
+
+| AE | Bukti otomatis |
+|---|---|
+| AE1 | `permit::decide::tests::ae1_…`, integrasi hook `tiga_keputusan_dan_bukti_pemeriksaan` |
+| AE2 | `decide::tests::ae2_dan_r11_…`, usecase `ae2_larangan_keras_…` |
+| AE3 | usecase `ae3_izin_run_berlaku_untuk_permintaan_persis_sama` |
+| AE4 | usecase `ae4_expired_menyalakan_tolak_langsung_sampai_chat_dibuka` |
+| AE5 | `record_denials` (giliran reviewer tidak mencatat event di Chat, jadi penolakan ditulis sebagai item Chat); adapter `alat_persetujuan_hanya_untuk_giliran_laptop` (reviewer `none`); uji langsung belum |
+| AE6 | usecase `ae6_penolakan_vm_masuk_laporan_pagi`, adapter VM `none` |
+| AE7 | `decide::tests::tool_selain_bash_tanpa_keputusan`; kartu WebFetch menampilkan URL (`approvals.test.ts`); uji langsung belum |
+| AE8 | `decide::tests::argumen_berbahaya_tanpa_keputusan` (`echo $(docker ps)`) |
+| AE9, AE15 | `decide::tests::ae9_ae15_…` |
+| AE10 | `decide::tests::ae10_r16_…` |
+| AE11 | integrasi hook `tenggat_internal_terlewati_menolak`, input rusak → exit 2 |
+| AE12 | usecase `ae12_…`, store `transisi_keluar_pending_atomik…`, UI "This request is no longer pending." |
+| AE13 | usecase `ae13_deny_berlaku_lintas_giliran` |
+| AE14 | usecase `ae14_izin_giliran_implementasi_tidak_berlaku_di_plan` |
+| AE16 | dispatch `token_permit_dan_ledger_terpisah`, usecase `approval_answer_refused` |
+
+## Uji langsung (belum)
+
+Butuh daemon dan app versi branch ini di laptop, dan biner `mandord` baru di VM:
+
+1. Laptop, run kelola: `cd kelola-web && git diff`, Vitest dengan path `(app)` → berjalan tanpa kartu.
+2. Perintah di luar allowlist (mis. `docker ps`) → kartu: Allow once, Allow for this run (ulang perintah sama → tanpa kartu), Deny (ulang → ditolak langsung), biarkan 10 menit (expired, mode tolak langsung, buka tab Chat → pulih), 6 kartu bersamaan.
+3. Notifikasi dan badge "Needs approval"; klik notifikasi membuka Chat di kartu terlama.
+4. VM: satu kartu smoke dengan `cd x && git diff` (izin eksplisit hook) dan satu perintah di luar allowlist → laporan pagi memuat penolakan.

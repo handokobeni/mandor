@@ -3,7 +3,12 @@
 //! hook dan daemon.
 
 pub mod allowlist;
+pub mod args;
+pub mod decide;
+pub mod redact;
 pub mod shell;
 
 pub use allowlist::BashAllowlist;
+pub use decide::{Decision, PathFacts, Scope, TurnKind, decide, request_key};
+pub use redact::{redact_json, redact_text};
 pub use shell::{Redirect, SimpleCommand, Unparseable, parse};

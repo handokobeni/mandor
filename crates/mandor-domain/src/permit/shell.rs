@@ -213,7 +213,11 @@ impl<'a> Lexer<'a> {
             '(' | ')' => return reject("subshell or grouping"),
             '{' | '}' => return reject("brace expansion or grouping"),
             '*' | '?' | '[' | ']' => return reject("glob pattern"),
-            '~' => return reject("tilde expansion"),
+            // Tilde hanya diekspansi di awal kata atau setelah `=`/`:`;
+            // `HEAD~3` adalah teks biasa.
+            '~' if !self.word.started || self.word.text.ends_with(['=', ':']) => {
+                return reject("tilde expansion");
+            }
             '#' if !self.word.started => return reject("comment"),
             '=' => {
                 if self.word.plain_prefix
@@ -492,6 +496,14 @@ mod tests {
         ] {
             assert!(parse(cmd).is_err(), "{cmd:?} should be unparseable");
         }
+    }
+
+    #[test]
+    fn tilde_di_tengah_kata_adalah_teks() {
+        assert_eq!(words("git log HEAD~3"), [vec!["git", "log", "HEAD~3"]]);
+        assert!(parse("ls ~").is_err());
+        assert!(parse("cat --file=~/x").is_err());
+        assert!(parse("cat a:~/x").is_err());
     }
 
     #[test]

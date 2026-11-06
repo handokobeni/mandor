@@ -744,3 +744,226 @@ fn drain_dan_undrain_tanpa_sesi_lark() {
     stop(home.path());
     let _ = daemon.wait();
 }
+
+fn web_app(port: u16, url: Option<&str>) -> Value {
+    json!({"test_mode": "web", "setup_command": null, "start_command": "pnpm dev", "port": port,
+           "app_url": url, "env_keys": [], "browser_tests": true, "auto_restart": false,
+           "unattended_login": false})
+}
+
+/// Plan 2026-11-03-002, U2 (R5–R8, AE4): sumber desain yang bisa dijalankan.
+#[test]
+fn rpc_sumber_desain_prototype_divalidasi_port_dan_host() {
+    let home = tempfile::tempdir().unwrap();
+    let mut daemon = serve(home.path());
+    let token = wait_for_info(home.path())["token"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let root = tempfile::tempdir().unwrap();
+    let repo = test_repo(root.path());
+    let proto = root.path().join("kelola-web-prototype");
+    std::fs::create_dir_all(&proto).unwrap();
+    std::fs::write(proto.join(".env"), "KELOLA_API_MODE=demo\n").unwrap();
+    let proto_s = proto.to_str().unwrap();
+    let add = |id: u64, port: u16, url: Option<&str>| {
+        rpc(
+            id,
+            "design_sources.add",
+            &json!({"name": format!("p{id}"), "path": proto_s, "app": web_app(port, url)}),
+        )
+    };
+
+    let replies = connect_roundtrip(
+        home.path(),
+        &[
+            hello(&token),
+            rpc(2, "repos.add", &json!({"path": repo.to_str().unwrap()})),
+            rpc(
+                3,
+                "repos.update",
+                &json!({"id": "app-web", "gh_profile": null, "companions": [], "trusted_reviewers": [],
+                        "extra_allowed": [], "app": web_app(3000, Some("http://localhost:3000"))}),
+            ),
+            add(4, 3000, None),
+            add(5, 3001, Some("http://localhost:3001")),
+            add(6, 3001, None),
+            rpc(
+                7,
+                "design_sources.add",
+                &json!({"name": "tanpa-start", "path": proto_s,
+                        "app": {"test_mode": "web", "setup_command": null, "start_command": null,
+                                "port": 3002, "app_url": null, "env_keys": [], "browser_tests": true,
+                                "auto_restart": false, "unattended_login": false}}),
+            ),
+            add(8, 3001, None),
+            rpc(
+                9,
+                "repos.update",
+                &json!({"id": "app-web", "gh_profile": null, "companions": [], "trusted_reviewers": [],
+                        "extra_allowed": [], "app": web_app(3001, Some("http://localhost:3001"))}),
+            ),
+        ],
+    );
+    assert!(replies[2]["error"].is_null(), "{}", replies[2]);
+    assert_eq!(replies[3]["error"]["code"], "rejected", "port 3000 bentrok");
+    assert!(
+        replies[3]["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("app-web")
+    );
+    assert_eq!(
+        replies[4]["error"]["code"], "rejected",
+        "host sama dengan app"
+    );
+    let added = &replies[5]["result"];
+    assert_eq!(added["app"]["port"], 3001);
+    assert_eq!(added["app"]["app_url"], "http://127.0.0.1:3001");
+    assert_eq!(
+        replies[6]["error"]["code"], "rejected",
+        "butuh start command"
+    );
+    assert_eq!(
+        replies[7]["error"]["code"], "rejected",
+        "bentrok prototype lain"
+    );
+    assert_eq!(
+        replies[8]["error"]["code"], "rejected",
+        "repo bentrok prototype"
+    );
+    let id = added["id"].as_str().unwrap().to_owned();
+
+    let replies = connect_roundtrip(
+        home.path(),
+        &[
+            hello(&token),
+            rpc(2, "app.env_keys", &json!({"design_source_id": id})),
+            rpc(
+                3,
+                "design_sources.update",
+                &json!({"id": id, "name": "plain", "path": proto_s, "app": null}),
+            ),
+            rpc(4, "design_sources.list", &Value::Null),
+        ],
+    );
+    assert_eq!(
+        replies[1]["result"],
+        json!({"found": true, "keys": ["KELOLA_API_MODE"]})
+    );
+    assert!(replies[2]["result"]["app"].is_null(), "{}", replies[2]);
+    assert!(replies[3]["result"][0]["app"].is_null());
+    stop(home.path());
+    let _ = daemon.wait();
+}
+
+/// Plan 2026-11-03-002, R15/R28: revisi prototype dilihat dan dikonfirmasi
+/// tanpa Run app (dipakai untuk VM dari laptop).
+#[test]
+fn rpc_revisi_prototype_dilihat_dan_dikonfirmasi() {
+    let home = tempfile::tempdir().unwrap();
+    let mut daemon = serve(home.path());
+    let token = wait_for_info(home.path())["token"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let root = tempfile::tempdir().unwrap();
+    let proto = root.path().join("kelola-web-prototype");
+    std::fs::create_dir_all(&proto).unwrap();
+    std::fs::write(proto.join("page.tsx"), "a").unwrap();
+    let proto_s = proto.to_str().unwrap();
+    let replies = connect_roundtrip(
+        home.path(),
+        &[
+            hello(&token),
+            rpc(
+                2,
+                "design_sources.add",
+                &json!({"name": "proto", "path": proto_s, "app": web_app(3005, None)}),
+            ),
+        ],
+    );
+    let id = replies[1]["result"]["id"].as_str().unwrap().to_owned();
+
+    let replies = connect_roundtrip(
+        home.path(),
+        &[
+            hello(&token),
+            rpc(2, "design_sources.revision", &json!({"id": id})),
+        ],
+    );
+    let rev = replies[1]["result"]["current"].as_str().unwrap().to_owned();
+    assert!(rev.starts_with("files:"), "{}", replies[1]);
+    assert!(replies[1]["result"]["confirmed"].is_null());
+
+    let replies = connect_roundtrip(
+        home.path(),
+        &[
+            hello(&token),
+            rpc(
+                2,
+                "design_sources.confirm",
+                &json!({"id": id, "revision": "files:lain"}),
+            ),
+            rpc(
+                3,
+                "design_sources.confirm",
+                &json!({"id": id, "revision": rev}),
+            ),
+            rpc(4, "design_sources.revision", &json!({"id": id})),
+        ],
+    );
+    assert_eq!(
+        replies[1]["error"]["code"], "rejected",
+        "revisi basi ditolak"
+    );
+    assert!(replies[2]["error"].is_null(), "{}", replies[2]);
+    assert_eq!(replies[3]["result"]["confirmed"], rev.as_str());
+    stop(home.path());
+    let _ = daemon.wait();
+}
+
+/// Pick from .env untuk sumber desain yang belum disimpan: path harus lolos
+/// pemeriksaan sumber desain (plan 2026-11-03-002, R5).
+#[test]
+fn rpc_nama_kunci_env_dari_path_sumber_desain_baru() {
+    let home = tempfile::tempdir().unwrap();
+    let mut daemon = serve(home.path());
+    let token = wait_for_info(home.path())["token"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let root = tempfile::tempdir().unwrap();
+    let proto = root.path().join("proto");
+    std::fs::create_dir_all(&proto).unwrap();
+    std::fs::write(proto.join(".env"), "KELOLA_API_MODE=demo\n").unwrap();
+    let state = home.path().join(".mandor");
+    let replies = connect_roundtrip(
+        home.path(),
+        &[
+            hello(&token),
+            rpc(
+                2,
+                "app.env_keys",
+                &json!({"design_path": proto.to_str().unwrap()}),
+            ),
+            rpc(3, "app.env_keys", &json!({"design_path": "relatif/x"})),
+            rpc(
+                4,
+                "app.env_keys",
+                &json!({"design_path": state.to_str().unwrap()}),
+            ),
+        ],
+    );
+    assert_eq!(
+        replies[1]["result"],
+        json!({"found": true, "keys": ["KELOLA_API_MODE"]})
+    );
+    assert_eq!(replies[2]["error"]["code"], "rejected");
+    assert_eq!(
+        replies[3]["error"]["code"], "rejected",
+        "folder data Mandor ditolak"
+    );
+    stop(home.path());
+    let _ = daemon.wait();
+}

@@ -169,6 +169,13 @@ user developer (`handoko_ben`) dari SSH-in-browser, lalu cek `ssh lembur whoami`
    (fetch lalu fast-forward saja, dengan token `gh` daemon dan konfigurasi git
    yang diperketat). Folder yang `.git`-nya bukan milik user developer tidak
    di-pull. Pull yang gagal tidak menghentikan kartu; laporan pagi mencatatnya.
+
+   Prototype yang bisa dijalankan (mis. Next.js) butuh Node dan pnpm di VM, dan
+   port prototype harus di rentang port developer. Karena folder di-pull
+   sebelum kartu dimulai, VM hanya menyalakan prototype pada revisi yang sudah
+   Anda konfirmasi lewat **Prototype code** di daftar ini. Bila revisi berubah
+   setelah pull dan belum dikonfirmasi, baris tampilan menjadi Can't verify dan
+   kartu ditahan sampai Anda mengonfirmasi lalu me-review ulang.
 5. **Plan siang, lembur malam**: di panel plan yang menunggu persetujuan,
    **Approve & queue for VM** memilih repo dan sumber desain di VM. Laptop
    mem-push branch kartu, VM mengantre kartu, lalu klaim pindah ke VM dan run

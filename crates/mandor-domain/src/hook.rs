@@ -10,7 +10,7 @@ pub struct ToolCall {
     pub tool_name: String,
     /// `tool_input.command` untuk Bash.
     pub command: Option<String>,
-    /// `file_path`, `path`, atau `notebook_path`.
+    /// `file_path`, `path`, `notebook_path`, atau `filename` (tool browser).
     pub paths: Vec<String>,
     /// `tool_input.url` (tool browser `navigate`).
     pub url: Option<String>,

@@ -6,12 +6,13 @@
 
 use std::sync::{Arc, PoisonError};
 
+use mandor_domain::ac_ledger::{Visual, valid_page_path};
 use mandor_domain::{AcRow, Design, Verdict};
 use secrecy::{ExposeSecret, SecretString};
 
 use crate::ports::{Deps, Ids};
 use crate::run::RunService;
-use crate::run_ports::LedgerStore;
+use crate::run_ports::{AgentPort, AppRecord, AppRecords, LedgerStore, RunStore};
 
 /// Batas panjang bukti reviewer per AC.
 const EVIDENCE_MAX: usize = 2_000;
@@ -97,6 +98,26 @@ impl From<crate::PortError> for LedgerToolError {
     fn from(e: crate::PortError) -> Self {
         Self::Storage(e.to_string())
     }
+}
+
+/// Laporan tampilan satu baris dari reviewer (alat `ac_set_visual`).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct VisualReport {
+    pub description: Option<String>,
+    pub app_path: Option<String>,
+    pub prototype_path: Option<String>,
+    /// Nama berkas salinan daemon (run VM); diisi dispatch setelah diperiksa.
+    pub screenshots: Vec<String>,
+}
+
+/// Anggota prototype yang menyala di record app: `(url, revisi)`.
+fn running_prototype(rec: &AppRecord) -> Option<(String, String)> {
+    rec.members
+        .iter()
+        .filter(|m| {
+            m.prototype.is_some() && m.state == mandor_domain::app_run::AppRunState::Running
+        })
+        .find_map(|m| Some((m.url.clone()?, rec.snapshot.get(&m.repo_id)?.clone())))
 }
 
 /// Perbandingan byte dalam waktu yang tidak bergantung pada isi.
@@ -233,6 +254,114 @@ impl<D: Deps> RunService<D> {
             // saat review dimulai.
         })
         .await
+    }
+
+    /// URL dan revisi prototype yang sedang menyala untuk run ini, bila ada.
+    pub(crate) async fn running_prototype(&self, run_id: &str) -> Option<(String, String)> {
+        if self.apps.app_owner().await.ok().flatten().as_deref() != Some(run_id) {
+            return None;
+        }
+        running_prototype(&self.apps.app_record(run_id).await.ok().flatten()?)
+    }
+
+    /// URL prototype yang bisa dibandingkan reviewer untuk run ini (R16).
+    pub async fn visual_prototype_url(&self, run_id: &str) -> Option<String> {
+        self.running_prototype(run_id).await.map(|(url, _)| url)
+    }
+
+    /// Tool `ac_set_visual` (peran Verdict): hasil perbandingan tampilan satu
+    /// baris yang ada di desain, dengan revisi prototype yang menyala (R17,
+    /// R21). Keputusan dev (Accepted, Checked manually) tidak bisa ditulis
+    /// agent (R25).
+    ///
+    /// # Errors
+    /// Peran salah, AC tidak dikenal atau tidak dibandingkan, nilai atau path
+    /// tidak diizinkan, prototype tidak menyala, atau penyimpanan gagal.
+    pub async fn ledger_set_visual(
+        &self,
+        scope: &CapabilityScope,
+        ac_id: &str,
+        result: Visual,
+        report: VisualReport,
+    ) -> Result<Vec<AcRow>, LedgerToolError> {
+        if scope.role != CapabilityRole::Verdict {
+            return Err(LedgerToolError::WrongRole);
+        }
+        if !matches!(result, Visual::Match | Visual::Differs | Visual::CantVerify) {
+            return Err(LedgerToolError::NotAllowed(result.as_str()));
+        }
+        let paths = [&report.app_path, &report.prototype_path];
+        if paths.into_iter().flatten().any(|p| !valid_page_path(p)) {
+            return Err(LedgerToolError::NotAllowed("page path"));
+        }
+        let Some((_, rev)) = self.running_prototype(&scope.run_id).await else {
+            return Err(LedgerToolError::NotAllowed(
+                "no prototype is running for this run",
+            ));
+        };
+        let rows = self.reviews.ac_rows(&scope.run_id).await?;
+        if rows.iter().any(|r| r.ac_id == ac_id && !r.compares_look()) {
+            return Err(LedgerToolError::NotAllowed("ac not in the design"));
+        }
+        let screenshots = self
+            .keep_screenshots(&scope.run_id, ac_id, &report.screenshots)
+            .await;
+        self.update_row(&scope.run_id, ac_id, |r| {
+            r.visual = result;
+            let d = &mut r.visual_detail;
+            d.description = report
+                .description
+                .as_deref()
+                .map(truncate_evidence)
+                .filter(|t| !t.is_empty());
+            d.app_path = report.app_path;
+            d.prototype_path = report.prototype_path;
+            d.prototype_rev = Some(rev);
+            d.screenshots = screenshots;
+        })
+        .await
+    }
+
+    /// Salinan screenshot reviewer untuk run VM; laptop tidak menyimpannya
+    /// (R21). Salinan yang gagal hanya dicatat; hasil tampilan tetap disimpan.
+    async fn keep_screenshots(&self, run_id: &str, ac_id: &str, names: &[String]) -> Vec<String> {
+        if names.is_empty() || !self.is_vm() {
+            return Vec::new();
+        }
+        let review_id = match self.runs.get(run_id).await {
+            Ok(Some(run)) => run.review_id.unwrap_or_default(),
+            _ => return Vec::new(),
+        };
+        match self
+            .agent
+            .keep_screenshots(&review_id, run_id, ac_id, names)
+            .await
+        {
+            Ok(kept) => kept,
+            Err(e) => {
+                tracing::warn!(run_id, ac_id, error = %e, "screenshot tampilan tidak disimpan");
+                Vec::new()
+            }
+        }
+    }
+
+    /// Isi screenshot ke-`index` hasil tampilan baris `ac_id` (run VM).
+    ///
+    /// # Errors
+    /// Baris atau screenshot tidak ada, atau berkas tidak terbaca.
+    pub async fn visual_screenshot(
+        &self,
+        run_id: &str,
+        ac_id: &str,
+        index: usize,
+    ) -> Result<Vec<u8>, crate::RunError> {
+        let rows = self.reviews.ac_rows(run_id).await?;
+        let name = rows
+            .iter()
+            .find(|r| r.ac_id == ac_id)
+            .and_then(|r| r.visual_detail.screenshots.get(index).cloned())
+            .ok_or(crate::RunError::NotFound("screenshot"))?;
+        Ok(self.agent.screenshot(run_id, &name).await?)
     }
 
     async fn update_row(

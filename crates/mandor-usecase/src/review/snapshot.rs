@@ -5,6 +5,7 @@ use std::collections::BTreeMap;
 use mandor_domain::ac_ledger::mark_stale;
 
 use crate::ports::Deps;
+use crate::review::DesignSources;
 use crate::run::{RunError, RunService};
 use crate::run_ports::{GitPort, LedgerStore, RunRecord};
 
@@ -21,6 +22,21 @@ impl<D: Deps> RunService<D> {
         for m in self.members(run).await? {
             let tree = self.git.snapshot(&m.worktree).await?;
             out.insert(m.repo.id, tree);
+        }
+        // Revisi prototype ikut: prototype yang berubah membuat hasil
+        // tampilan usang seperti kode yang berubah (R22 plan 2026-11-03-002).
+        for root in &run.design {
+            let Ok(Some(p)) = self.design.prototype(&root.id).await else {
+                continue;
+            };
+            match self.design.revision(&p.path).await {
+                Ok(rev) => {
+                    out.insert(format!("prototype:{}", p.id), rev);
+                }
+                Err(e) => {
+                    tracing::warn!(run_id = %run.id, prototype = %p.name, error = %e, "revisi prototype tidak terbaca");
+                }
+            }
         }
         Ok(out)
     }

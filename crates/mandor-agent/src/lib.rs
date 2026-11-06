@@ -5,6 +5,7 @@ pub mod backend;
 pub mod claude;
 pub mod port;
 pub mod prompt;
+mod screens;
 pub mod skills;
 
 pub use backend::{AgentBackend, AgentRun, ClaudeBackend, RunEvent, RunStopper};

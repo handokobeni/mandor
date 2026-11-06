@@ -360,3 +360,32 @@ async fn skill_reviewer_run_bertahan_di_penyimpanan() {
     let got = RunsStore::new(s).get("run1").await.unwrap().unwrap();
     assert_eq!(got.reviewer_skill.as_deref(), Some("ac-check"));
 }
+
+/// Plan 2026-11-03-002, U4: hasil tampilan bertahan, baris lama tidak dibandingkan.
+#[tokio::test]
+async fn hasil_tampilan_baris_ac_bertahan() {
+    use mandor_domain::ac_ledger::{Visual, VisualDetail};
+    let dir = tempfile::tempdir().unwrap();
+    let s = open(&dir).await;
+    with_run(&s, "r1").await;
+    let mut a = ac("a", Verdict::Pass);
+    a.visual = Visual::Accepted;
+    a.visual_detail = VisualDetail {
+        description: Some("tombol biru di prototype".to_owned()),
+        app_path: Some("/jabatan".to_owned()),
+        prototype_path: Some("/jabatan".to_owned()),
+        prototype_rev: Some("git:abc".to_owned()),
+        screenshots: vec!["a-app.png".to_owned()],
+        decision_reason: Some("warna baru".to_owned()),
+        decided_by: Some("Beni".to_owned()),
+    };
+    let b = ac("b", Verdict::Fail);
+    s.save_ac_rows("r1", &[a.clone(), b.clone()]).await.unwrap();
+    let got = s.ac_rows("r1").await.unwrap();
+    assert_eq!(got, [a, b]);
+    assert_eq!(got[1].visual, Visual::NotCompared);
+    assert_eq!(
+        s.active_ac_rows().await.unwrap()[0].1.visual,
+        Visual::Accepted
+    );
+}

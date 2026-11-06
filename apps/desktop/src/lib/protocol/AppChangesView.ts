@@ -11,4 +11,12 @@ snapshot: string, files: Array<string>,
 /**
  * Manifest paket, lockfile, skrip, dan berkas perintah start.
  */
-flagged: Array<string>, };
+flagged: Array<string>, 
+/**
+ * Nama sumber desain bila entri ini prototype.
+ */
+prototype: string | null, 
+/**
+ * Prototype dengan revisi yang sudah dikonfirmasi; tidak perlu ditampilkan.
+ */
+confirmed: boolean, };

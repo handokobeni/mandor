@@ -304,6 +304,25 @@ pub trait AgentPort: Send + Sync {
     fn reap(&self, pid: u32) -> impl Future<Output = ()> + Send;
     /// Membersihkan berkas milik sesi reviewer (state pagar browser).
     fn end_review(&self, review_id: &str) -> impl Future<Output = ()> + Send;
+    /// Menyalin screenshot `names` dari folder output browser review ke
+    /// simpanan daemon untuk run itu (plan 2026-11-03-002, KTD-P8); hanya
+    /// berkas biasa di folder itu, dibatasi ukuran dan jenisnya. Mengembalikan
+    /// nama salinan; kosong bila review tanpa browser headless.
+    fn keep_screenshots(
+        &self,
+        review_id: &str,
+        run_id: &str,
+        ac_id: &str,
+        names: &[String],
+    ) -> impl Future<Output = Result<Vec<String>, PortError>> + Send;
+    /// Isi salinan screenshot `name` milik run.
+    fn screenshot(
+        &self,
+        run_id: &str,
+        name: &str,
+    ) -> impl Future<Output = Result<Vec<u8>, PortError>> + Send;
+    /// Menghapus salinan screenshot run (R26).
+    fn forget_run(&self, run_id: &str) -> impl Future<Output = ()> + Send;
     /// Login Claude Code yang dipakai agent masih valid (KTD-59 plan VM).
     /// Kegagalan memeriksa berarti tidak valid.
     fn logged_in(&self) -> impl Future<Output = bool> + Send;
@@ -810,6 +829,18 @@ pub struct AppMember {
     /// Folder repo asli: sumber `.env` (tidak pernah disalin ke worktree).
     pub repo_path: PathBuf,
     pub settings: mandor_domain::app_run::AppSettings,
+    /// Sumber desain bila anggota ini prototype; `worktree` dan `repo_path`
+    /// adalah folder sumber (KTD-P3).
+    pub prototype: Option<PrototypeRef>,
+}
+
+/// Sumber desain milik anggota prototype.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PrototypeRef {
+    pub id: String,
+    pub name: String,
+    /// Revisi yang terakhir dikonfirmasi dev (R15, R28).
+    pub confirmed: Option<String>,
 }
 
 /// Proses app milik daemon (KTD-36). Satu langkah per panggilan sehingga
@@ -853,6 +884,8 @@ pub struct AppMemberRecord {
     pub url: Option<String>,
     pub pgid: Option<u32>,
     pub state: mandor_domain::app_run::AppRunState,
+    /// Nama sumber desain bila anggota ini prototype (plan 2026-11-03-002).
+    pub prototype: Option<String>,
 }
 
 /// State app milik satu run.
@@ -897,6 +930,9 @@ pub struct ReviewFacts {
     pub reason: Option<String>,
     /// URL app kanonik yang boleh dibuka.
     pub app_urls: Vec<String>,
+    /// Prototype yang menyala untuk perbandingan tampilan (plan
+    /// 2026-11-03-002, R16); hanya bila browser tersedia.
+    pub prototype_url: Option<String>,
 }
 
 /// Bahan pesan pertama reviewer.

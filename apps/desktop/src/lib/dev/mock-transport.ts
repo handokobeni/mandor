@@ -11,7 +11,7 @@ import type { AcRowView } from '#lib/protocol/AcRowView.ts';
 import type { AppRunView } from '#lib/protocol/AppRunView.ts';
 import { activeRows, gate } from '#lib/ac-review.ts';
 import { background } from '#lib/stores/background.svelte.ts';
-import { history, ledger, scenarioFor, scenarioRows } from './mock-ac.ts';
+import { history, ledger, mockShot, scenarioFor, scenarioRows } from './mock-ac.ts';
 
 /** State Run app tiruan per run. */
 const APP = new Map<string, AppRunView>();
@@ -20,7 +20,7 @@ function appView(runId: string, state: string): AppRunView {
   return {
     run_id: runId,
     state,
-    members: [{ repo_id: 'pegasus-web', url: 'http://localhost:5173', state }],
+    members: [{ repo_id: 'pegasus-web', url: 'http://localhost:5173', state, prototype: null, browser_tests: true }],
     database_confirmed: false,
     login_confirmed: false,
     error: state === 'failed' ? 'pegasus-web: the app exited (code 1) before opening its port' : null
@@ -151,8 +151,8 @@ const GROUP_REASON = 'In group PGS-1401–PGS-1404';
 
 // Sumber desain dan setelan reviewer tiruan (Rilis 2 U14).
 let designSources: DesignSourceView[] = [
-  { id: 'ds1', name: 'pegasus-mock', kind: 'folder', path: '/home/beni/work/pegasus-mock', ready: true, status: 'Ready' },
-  { id: 'ds2', name: 'old-figma-export', kind: 'folder', path: '/home/beni/old/figma', ready: false, status: 'Path missing' }
+  { id: 'ds1', name: 'pegasus-mock', kind: 'folder', path: '/home/beni/work/pegasus-mock', ready: true, status: 'Ready', app: null },
+  { id: 'ds2', name: 'old-figma-export', kind: 'folder', path: '/home/beni/old/figma', ready: false, status: 'Path missing', app: null }
 ];
 let reviewer: ReviewerSettingsView = { model: null, budget_cents: 200, timeout_secs: 900 };
 
@@ -668,7 +668,9 @@ function handle(method: string, params: Record<string, unknown>): unknown {
           repo_id: 'pegasus-web',
           snapshot: 'tree-mock',
           files: ['src/routes/invoices/Filters.svelte', 'package.json', 'src/lib/api/invoices.ts'],
-          flagged: ['package.json']
+          flagged: ['package.json'],
+          prototype: null,
+          confirmed: false
         }
       ];
     case 'app.stop': {
@@ -706,17 +708,33 @@ function handle(method: string, params: Record<string, unknown>): unknown {
     }
     case 'design_sources.list':
       return designSources;
+    case 'design_sources.revision':
+      return { current: 'git:4f2a9c1', confirmed: 'git:1b7e3d0', files: ['src/app/(app)/jabatan/page.tsx'] };
+    case 'design_sources.confirm': {
+      const p = params as { revision: string };
+      return { current: p.revision, confirmed: p.revision, files: [] };
+    }
     case 'design_sources.test':
       return { ready: true, status: 'Ready' };
     case 'design_sources.add': {
-      const p = params as { name: string; path: string };
-      const s = { id: `ds${designSources.length + 1}`, name: p.name, kind: 'folder', path: p.path, ready: true, status: 'Ready' };
+      const p = params as { name: string; path: string; app: DesignSourceView['app'] };
+      const s: DesignSourceView = {
+        id: `ds${designSources.length + 1}`,
+        name: p.name,
+        kind: 'folder',
+        path: p.path,
+        ready: true,
+        status: 'Ready',
+        app: p.app ?? null
+      };
       designSources = [...designSources, s];
       return s;
     }
     case 'design_sources.update': {
-      const p = params as { id: string; name: string; path: string };
-      designSources = designSources.map((s) => (s.id === p.id ? { ...s, name: p.name, path: p.path } : s));
+      const p = params as { id: string; name: string; path: string; app: DesignSourceView['app'] };
+      designSources = designSources.map((s) =>
+        s.id === p.id ? { ...s, name: p.name, path: p.path, app: p.app ?? null } : s
+      );
       return designSources.find((s) => s.id === p.id) ?? null;
     }
     case 'design_sources.remove':
@@ -730,6 +748,8 @@ function handle(method: string, params: Record<string, unknown>): unknown {
     case 'system.chrome_check':
       chromeConnected = true;
       return { connected: true, detail: '', checked_at_ms: Date.now() };
+    case 'review.screenshot':
+      return { data_url: mockShot(Number(params.index)) };
     case 'ledger.get': {
       const id = String(params.run_id);
       return ledger(id, acRows(id), scenarioFor(id));

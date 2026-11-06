@@ -8,8 +8,10 @@ pub mod settings;
 mod snapshot;
 
 pub use capability::{
-    CapabilityRole, CapabilityScope, CapabilityToken, LedgerAccess, LedgerToolError,
+    CapabilityRole, CapabilityScope, CapabilityToken, LedgerAccess, LedgerToolError, VisualReport,
 };
-pub use design::{DesignCheck, DesignRoot, DesignSources, PathProbe, SourceCheck, check_source};
+pub use design::{
+    DesignCheck, DesignRoot, DesignSources, PathProbe, Prototype, SourceCheck, check_source,
+};
 pub use ledger::LedgerRefresh;
 pub use service::{AppReadiness, BrowserDriver, Confirmations, ReviewReadiness};

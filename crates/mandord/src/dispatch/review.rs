@@ -3,9 +3,9 @@
 use mandor_domain::{Design, Verdict};
 use mandor_protocol::{
     AcLedgerView, ChromeCheckParams, ChromeCheckView, ErrorCode, LedgerToolInfo,
-    LedgerToolSetDesign, LedgerToolSetVerdict, ReadinessConfirmations, ReviewFindings,
-    ReviewReadinessView, ReviewStart, ReviewVerdictView, ReviewView, ReviewerSettingsView,
-    RpcError, RunRef, method,
+    LedgerToolSetDesign, LedgerToolSetVerdict, LedgerToolSetVisual, ReadinessConfirmations,
+    ReviewFindings, ReviewReadinessView, ReviewStart, ReviewVerdictView, ReviewView,
+    ReviewerSettingsView, RpcError, RunRef, method,
 };
 use mandor_usecase::review::{CapabilityRole, CapabilityScope, LedgerToolError};
 use mandor_usecase::run_ports::{ReviewRecord, ReviewTrigger, ReviewerSettings};
@@ -28,6 +28,13 @@ pub(super) enum LedgerTool {
         ac_id: String,
         verdict: Verdict,
         evidence: Option<String>,
+    },
+    /// `report.screenshots`: nama berkas dari reviewer; adapter agent
+    /// memeriksanya sebelum disalin (run VM, KTD-P8).
+    SetVisual {
+        ac_id: String,
+        result: mandor_domain::ac_ledger::Visual,
+        report: mandor_usecase::review::VisualReport,
     },
 }
 
@@ -55,11 +62,55 @@ pub(super) fn ledger_tool(name: &str, v: Value) -> Result<LedgerTool, RpcError> 
                 evidence: p.evidence,
             })
         }
+        method::LEDGER_TOOL_SET_VISUAL => {
+            let p: LedgerToolSetVisual = params(v)?;
+            let result = mandor_domain::ac_ledger::Visual::parse(&p.result)
+                .ok_or_else(|| invalid("result", &p.result))?;
+            Ok(LedgerTool::SetVisual {
+                ac_id: p.ac_id,
+                result,
+                report: mandor_usecase::review::VisualReport {
+                    description: p.description,
+                    app_path: p.app_path,
+                    prototype_path: p.prototype_path,
+                    screenshots: p.screenshots,
+                },
+            })
+        }
         other => Err(RpcError::new(
             ErrorCode::Unauthorized,
             format!("{other} is not available on this connection"),
         )),
     }
+}
+
+/// `review.screenshot`: screenshot hasil tampilan run VM sebagai data URL.
+async fn screenshot_call(s: &crate::session::LarkSession, v: Value) -> Result<Value, RpcError> {
+    let p: mandor_protocol::VisualScreenshotParams = params(v)?;
+    let index = usize::try_from(p.index).unwrap_or(usize::MAX);
+    let bytes = s
+        .runs
+        .visual_screenshot(&p.run_id, &p.ac_id, index)
+        .await
+        .map_err(run_error)?;
+    ok(&mandor_protocol::VisualScreenshotView {
+        data_url: data_url(&bytes),
+    })
+}
+
+/// Gambar sebagai data URL; jenis dari magic bytes (salinan sudah diperiksa
+/// adapter agent).
+fn data_url(bytes: &[u8]) -> String {
+    use base64::Engine;
+    let mime = if bytes.starts_with(b"\x89PNG") {
+        "image/png"
+    } else {
+        "image/jpeg"
+    };
+    format!(
+        "data:{mime};base64,{}",
+        base64::engine::general_purpose::STANDARD.encode(bytes)
+    )
 }
 
 fn invalid(field: &str, value: &str) -> RpcError {
@@ -203,9 +254,12 @@ impl AppDispatch {
         let s = self.session().await?;
         let rows = match tool {
             LedgerTool::Info => {
+                let visual = scope.role == CapabilityRole::Verdict
+                    && s.runs.visual_prototype_url(&scope.run_id).await.is_some();
                 return ok(&LedgerToolInfo {
                     run_id: scope.run_id,
                     role: scope.role.as_str().to_owned(),
+                    visual,
                 });
             }
             LedgerTool::Read => s.runs.ledger_read(&scope).await,
@@ -225,6 +279,15 @@ impl AppDispatch {
             } => {
                 s.runs
                     .ledger_set_verdict(&scope, &ac_id, verdict, evidence.as_deref())
+                    .await
+            }
+            LedgerTool::SetVisual {
+                ac_id,
+                result,
+                report,
+            } => {
+                s.runs
+                    .ledger_set_visual(&scope, &ac_id, result, report)
                     .await
             }
         }
@@ -290,6 +353,7 @@ impl AppDispatch {
             method::REVIEW_SEND_FINDINGS,
             method::SETTINGS_REVIEWER_GET,
             method::SETTINGS_REVIEWER_SET,
+            method::REVIEW_SCREENSHOT,
         ]
         .contains(&name)
     }
@@ -297,6 +361,7 @@ impl AppDispatch {
     pub(super) async fn review_call(&self, name: &str, v: Value) -> Result<Value, RpcError> {
         let s = self.session().await?;
         match name {
+            method::REVIEW_SCREENSHOT => screenshot_call(&s, v).await,
             method::LEDGER_GET => {
                 let p: RunRef = params(v)?;
                 let r = s.runs.refresh_ledger(&p.run_id).await.map_err(run_error)?;
@@ -432,6 +497,31 @@ mod tests {
         )
         .unwrap_err();
         assert_eq!(bad.code, ErrorCode::InvalidParams);
+        let t = ledger_tool(
+            method::LEDGER_TOOL_SET_VISUAL,
+            serde_json::json!({"ac_id": "rec1", "result": "differs", "description": "biru",
+                               "app_path": "/a", "prototype_path": "/b"}),
+        )
+        .unwrap();
+        assert_eq!(
+            t,
+            LedgerTool::SetVisual {
+                ac_id: "rec1".to_owned(),
+                result: mandor_domain::ac_ledger::Visual::Differs,
+                report: mandor_usecase::review::VisualReport {
+                    description: Some("biru".to_owned()),
+                    app_path: Some("/a".to_owned()),
+                    prototype_path: Some("/b".to_owned()),
+                    screenshots: Vec::new(),
+                },
+            }
+        );
+        let bad = ledger_tool(
+            method::LEDGER_TOOL_SET_VISUAL,
+            serde_json::json!({"ac_id": "rec1", "result": "beda"}),
+        )
+        .unwrap_err();
+        assert_eq!(bad.code, ErrorCode::InvalidParams);
         let denied = ledger_tool(method::STATUS, Value::Null).unwrap_err();
         assert_eq!(denied.code, ErrorCode::Unauthorized);
         assert_eq!(
@@ -489,5 +579,11 @@ mod tests {
         let v = ac_row_view(&r);
         assert_eq!(v.design, "follow_design");
         assert!(!v.in_gate && !v.selectable);
+    }
+
+    #[test]
+    fn screenshot_menjadi_data_url_sesuai_jenisnya() {
+        assert_eq!(data_url(b"\x89PNGx"), "data:image/png;base64,iVBOR3g=");
+        assert!(data_url(&[0xFF, 0xD8, 0xFF]).starts_with("data:image/jpeg;base64,"));
     }
 }

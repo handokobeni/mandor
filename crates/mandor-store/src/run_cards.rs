@@ -41,11 +41,14 @@ struct CommitJson {
 pub(crate) async fn ensure_free(
     conn: &mut SqliteConnection,
     record_id: &str,
+    scope: Option<&str>,
 ) -> Result<(), StoreError> {
     let taken = sqlx::query_scalar!(
         "SELECT COUNT(*) FROM run_cards c JOIN runs r ON r.id = c.run_id
-         WHERE c.record_id = ? AND c.open = 1 AND r.closed = 0",
-        record_id
+         WHERE c.record_id = ? AND c.open = 1 AND r.closed = 0 AND (? IS NULL OR r.scope = ?)",
+        record_id,
+        scope,
+        scope
     )
     .fetch_one(&mut *conn)
     .await
@@ -60,10 +63,13 @@ pub(crate) async fn ensure_free(
 pub(crate) async fn ensure_no_single_run(
     conn: &mut SqliteConnection,
     record_id: &str,
+    scope: Option<&str>,
 ) -> Result<(), StoreError> {
     let taken = sqlx::query_scalar!(
-        "SELECT COUNT(*) FROM runs WHERE record_id = ? AND closed = 0",
-        record_id
+        "SELECT COUNT(*) FROM runs WHERE record_id = ? AND closed = 0 AND (? IS NULL OR scope = ?)",
+        record_id,
+        scope,
+        scope
     )
     .fetch_one(&mut *conn)
     .await
@@ -168,12 +174,15 @@ pub(crate) async fn read_cards(
 pub(crate) async fn open_group_of(
     conn: &mut SqliteConnection,
     record_id: &str,
+    scope: Option<&str>,
 ) -> Result<Option<String>, StoreError> {
     sqlx::query_scalar!(
         "SELECT c.run_id FROM run_cards c JOIN runs r ON r.id = c.run_id
-         WHERE c.record_id = ? AND c.open = 1 AND r.closed = 0
+         WHERE c.record_id = ? AND c.open = 1 AND r.closed = 0 AND (? IS NULL OR r.scope = ?)
          ORDER BY r.created_at_ms DESC LIMIT 1",
-        record_id
+        record_id,
+        scope,
+        scope
     )
     .fetch_optional(&mut *conn)
     .await

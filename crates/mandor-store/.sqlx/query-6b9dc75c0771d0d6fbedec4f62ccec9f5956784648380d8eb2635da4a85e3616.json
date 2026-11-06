@@ -1,170 +1,170 @@
 {
   "db_name": "SQLite",
-  "query": "SELECT a.run_id, a.ac_id, a.label, a.text, a.design, a.design_note, a.verdict,\n                    a.evidence, a.stale, a.status, a.reason, a.decided_by, a.card\n             FROM ac_rows a JOIN runs r ON r.id = a.run_id\n             WHERE r.closed = 0 ORDER BY a.run_id, a.position",
+  "query": "SELECT id, repo_id, record_id, state, state_json, generation, branch,\n                    worktree_path, session_id, pid, pr_url, created_at_ms, updated_at_ms\n             FROM runs WHERE closed = 0 AND (? IS NULL OR scope = ?) ORDER BY created_at_ms",
   "describe": {
     "columns": [
       {
-        "name": "run_id",
+        "name": "id",
         "ordinal": 0,
         "type_info": "Text",
         "origin": {
           "Table": {
-            "table": "ac_rows",
-            "name": "run_id"
+            "table": "runs",
+            "name": "id"
           }
         }
       },
       {
-        "name": "ac_id",
+        "name": "repo_id",
         "ordinal": 1,
         "type_info": "Text",
         "origin": {
           "Table": {
-            "table": "ac_rows",
-            "name": "ac_id"
+            "table": "runs",
+            "name": "repo_id"
           }
         }
       },
       {
-        "name": "label",
+        "name": "record_id",
         "ordinal": 2,
         "type_info": "Text",
         "origin": {
           "Table": {
-            "table": "ac_rows",
-            "name": "label"
+            "table": "runs",
+            "name": "record_id"
           }
         }
       },
       {
-        "name": "text",
+        "name": "state",
         "ordinal": 3,
         "type_info": "Text",
         "origin": {
           "Table": {
-            "table": "ac_rows",
-            "name": "text"
+            "table": "runs",
+            "name": "state"
           }
         }
       },
       {
-        "name": "design",
+        "name": "state_json",
         "ordinal": 4,
         "type_info": "Text",
         "origin": {
           "Table": {
-            "table": "ac_rows",
-            "name": "design"
+            "table": "runs",
+            "name": "state_json"
           }
         }
       },
       {
-        "name": "design_note",
+        "name": "generation",
         "ordinal": 5,
-        "type_info": "Text",
+        "type_info": "Integer",
         "origin": {
           "Table": {
-            "table": "ac_rows",
-            "name": "design_note"
+            "table": "runs",
+            "name": "generation"
           }
         }
       },
       {
-        "name": "verdict",
+        "name": "branch",
         "ordinal": 6,
         "type_info": "Text",
         "origin": {
           "Table": {
-            "table": "ac_rows",
-            "name": "verdict"
+            "table": "runs",
+            "name": "branch"
           }
         }
       },
       {
-        "name": "evidence",
+        "name": "worktree_path",
         "ordinal": 7,
         "type_info": "Text",
         "origin": {
           "Table": {
-            "table": "ac_rows",
-            "name": "evidence"
+            "table": "runs",
+            "name": "worktree_path"
           }
         }
       },
       {
-        "name": "stale",
+        "name": "session_id",
         "ordinal": 8,
-        "type_info": "Integer",
-        "origin": {
-          "Table": {
-            "table": "ac_rows",
-            "name": "stale"
-          }
-        }
-      },
-      {
-        "name": "status",
-        "ordinal": 9,
         "type_info": "Text",
         "origin": {
           "Table": {
-            "table": "ac_rows",
-            "name": "status"
+            "table": "runs",
+            "name": "session_id"
           }
         }
       },
       {
-        "name": "reason",
+        "name": "pid",
+        "ordinal": 9,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "runs",
+            "name": "pid"
+          }
+        }
+      },
+      {
+        "name": "pr_url",
         "ordinal": 10,
         "type_info": "Text",
         "origin": {
           "Table": {
-            "table": "ac_rows",
-            "name": "reason"
+            "table": "runs",
+            "name": "pr_url"
           }
         }
       },
       {
-        "name": "decided_by",
+        "name": "created_at_ms",
         "ordinal": 11,
-        "type_info": "Text",
+        "type_info": "Integer",
         "origin": {
           "Table": {
-            "table": "ac_rows",
-            "name": "decided_by"
+            "table": "runs",
+            "name": "created_at_ms"
           }
         }
       },
       {
-        "name": "card",
+        "name": "updated_at_ms",
         "ordinal": 12,
-        "type_info": "Text",
+        "type_info": "Integer",
         "origin": {
           "Table": {
-            "table": "ac_rows",
-            "name": "card"
+            "table": "runs",
+            "name": "updated_at_ms"
           }
         }
       }
     ],
     "parameters": {
-      "Right": 0
+      "Right": 2
     },
     "nullable": [
       false,
       false,
-      true,
       false,
       false,
-      true,
-      false,
-      true,
       false,
       false,
       true,
       true,
-      true
+      true,
+      true,
+      true,
+      false,
+      false
     ]
   },
-  "hash": "924a27691a58da39e42827539defd3cab532affed8c9eb577b9cef7bc08d0fc8"
+  "hash": "6b9dc75c0771d0d6fbedec4f62ccec9f5956784648380d8eb2635da4a85e3616"
 }

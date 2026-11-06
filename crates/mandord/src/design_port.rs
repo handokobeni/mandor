@@ -7,9 +7,11 @@ use std::path::{Path, PathBuf};
 use mandor_git::Git;
 use mandor_store::{DesignSourceRow, Store};
 use mandor_usecase::PortError;
-use mandor_usecase::review::{DesignCheck, DesignRoot, DesignSources, SourceCheck};
+use mandor_usecase::review::{DesignCheck, DesignRoot, DesignSources, Prototype, SourceCheck};
 
-use crate::dispatch::design::{check, folder_path};
+use crate::dispatch::design::{
+    check, confirmed_revision, folder_path, prototype_app, with_confirmed_revision,
+};
 
 /// Batas waktu memeriksa berkas sumber desain.
 const FS_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
@@ -105,6 +107,49 @@ impl DesignSources for DesignStore {
             }
         }
         Ok(out)
+    }
+
+    async fn prototype(&self, id: &str) -> Result<Option<Prototype>, PortError> {
+        let rows = self
+            .store
+            .design_sources()
+            .await
+            .map_err(|e| PortError::Storage(e.to_string()))?;
+        Ok(rows.into_iter().find(|r| r.id == id).and_then(|row| {
+            Some(Prototype {
+                app: prototype_app(&row)?,
+                confirmed: confirmed_revision(&row),
+                path: PathBuf::from(folder_path(&row)),
+                id: row.id,
+                name: row.name,
+            })
+        }))
+    }
+
+    async fn revision(&self, path: &Path) -> Result<String, PortError> {
+        Ok(self.git.folder_revision(path).await?)
+    }
+
+    async fn changes_since(&self, path: &Path, from: &str) -> Result<Vec<String>, PortError> {
+        Ok(self.git.folder_changes(path, from).await?)
+    }
+
+    async fn confirm(&self, id: &str, revision: &str) -> Result<(), PortError> {
+        let rows = self
+            .store
+            .design_sources()
+            .await
+            .map_err(|e| PortError::Storage(e.to_string()))?;
+        let row = rows
+            .iter()
+            .find(|r| r.id == id)
+            .ok_or_else(|| PortError::Rejected("the design source was removed".to_owned()))?;
+        let config = with_confirmed_revision(row, revision)
+            .ok_or_else(|| PortError::Storage("design source config is unreadable".to_owned()))?;
+        self.store
+            .update_design_source(id, &row.name, &config)
+            .await
+            .map_err(|e| PortError::Storage(e.to_string()))
     }
 
     async fn ids_named(&self, names: &[String]) -> Result<Vec<String>, PortError> {
@@ -226,5 +271,43 @@ mod tests {
             without_urls("fetch failed: unable to access 'https://github.com/a/b.git/': timeout"),
             "fetch failed: unable to access <remote> timeout"
         );
+    }
+
+    #[tokio::test]
+    async fn prototype_dibaca_dari_setelan_sumber_dan_revisi_dikonfirmasi() {
+        let dir = tempfile::tempdir().unwrap();
+        let a = adapter(dir.path()).await;
+        let proto = dir.path().join("proto");
+        std::fs::create_dir_all(proto.join("src")).unwrap();
+        std::fs::write(proto.join("src/page.tsx"), "a").unwrap();
+        let mut r = row("d1", "kelola-web-prototype", &proto);
+        r.config_json = serde_json::json!({
+            "path": proto,
+            "app": {"test_mode": "web", "start_command": "pnpm dev", "port": 3001,
+                    "app_url": "http://127.0.0.1:3001", "env_keys": ["KELOLA_API_MODE"]}
+        })
+        .to_string();
+        a.store.insert_design_source(&r).await.unwrap();
+        a.store
+            .insert_design_source(&row("d2", "biasa", &proto))
+            .await
+            .unwrap();
+
+        assert!(a.prototype("d2").await.unwrap().is_none(), "folder biasa");
+        assert!(a.prototype("hilang").await.unwrap().is_none());
+        let p = a.prototype("d1").await.unwrap().unwrap();
+        assert_eq!(p.name, "kelola-web-prototype");
+        assert_eq!(p.path, proto);
+        assert_eq!(p.app.port, Some(3001));
+        assert_eq!(p.app.env_keys, ["KELOLA_API_MODE"]);
+        assert_eq!(p.confirmed, None);
+
+        let rev = a.revision(&proto).await.unwrap();
+        assert!(rev.starts_with("files:"), "{rev}");
+        a.confirm("d1", &rev).await.unwrap();
+        let p = a.prototype("d1").await.unwrap().unwrap();
+        assert_eq!(p.confirmed.as_deref(), Some(rev.as_str()));
+        assert_eq!(p.app.port, Some(3001), "setelan app tetap");
+        assert!(a.confirm("hilang", &rev).await.is_err());
     }
 }

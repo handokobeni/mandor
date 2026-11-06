@@ -560,6 +560,7 @@ impl AppDispatch {
             None => mandor_store::app_settings_of(&current.settings),
         };
         app_run::check_app_port(self.app.cfg.vm_agent.as_ref().map(|v| v.ports), &app)?;
+        self.check_repo_port(&app).await?;
         let gate_mode = match p.gate_mode.as_deref() {
             None => current
                 .settings

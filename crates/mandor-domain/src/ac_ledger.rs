@@ -114,6 +114,68 @@ impl Verdict {
     }
 }
 
+/// Hasil perbandingan tampilan app run dengan prototype (plan 2026-11-03-002,
+/// R20, KTD-P5).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+pub enum Visual {
+    /// Tidak dibandingkan (run tanpa prototype, atau baris di luar desain).
+    #[default]
+    NotCompared,
+    Match,
+    Differs,
+    CantVerify,
+    /// Perbedaan diterima dev lewat Push anyway, dengan alasan.
+    Accepted,
+    /// Can't verify yang dikonfirmasi dev.
+    CheckedManually,
+}
+
+impl Visual {
+    #[must_use]
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::NotCompared => "not_compared",
+            Self::Match => "match",
+            Self::Differs => "differs",
+            Self::CantVerify => "cant_verify",
+            Self::Accepted => "accepted",
+            Self::CheckedManually => "checked_manually",
+        }
+    }
+
+    #[must_use]
+    pub fn parse(s: &str) -> Option<Self> {
+        Some(match s {
+            "not_compared" => Self::NotCompared,
+            "match" => Self::Match,
+            "differs" => Self::Differs,
+            "cant_verify" => Self::CantVerify,
+            "accepted" => Self::Accepted,
+            "checked_manually" => Self::CheckedManually,
+            _ => return None,
+        })
+    }
+}
+
+/// Rincian hasil tampilan dan keputusan dev atasnya; keputusan disimpan
+/// terpisah dari keputusan perilaku (KTD-P5).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct VisualDetail {
+    /// Deskripsi perbedaan dari reviewer (teks biasa).
+    pub description: Option<String>,
+    /// Path halaman app yang dibandingkan, mis. `/jabatan`.
+    pub app_path: Option<String>,
+    pub prototype_path: Option<String>,
+    /// Revisi prototype saat dibandingkan (R21, R22).
+    pub prototype_rev: Option<String>,
+    /// Nama berkas screenshot salinan daemon (run VM saja).
+    pub screenshots: Vec<String>,
+    /// Alasan dev menerima perbedaan (Accepted).
+    pub decision_reason: Option<String>,
+    /// Pemutus Accepted atau Checked manually.
+    pub decided_by: Option<String>,
+}
+
 /// Status baris terhadap AC di tracker.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum RowStatus {
@@ -172,6 +234,9 @@ pub struct AcRow {
     pub decided_by: Option<String>,
     /// Kartu asal AC di run grup (`record_id`); `None` untuk run tunggal.
     pub card: Option<String>,
+    /// Hasil perbandingan tampilan dengan prototype (R20).
+    pub visual: Visual,
+    pub visual_detail: VisualDetail,
 }
 
 impl AcRow {
@@ -191,6 +256,8 @@ impl AcRow {
             reason: None,
             decided_by: None,
             card: None,
+            visual: Visual::NotCompared,
+            visual_detail: VisualDetail::default(),
         }
     }
 
@@ -206,10 +273,51 @@ impl AcRow {
         self.status != RowStatus::Removed && self.design != Design::FollowDesign
     }
 
-    /// Boleh dipilih untuk Send to agent (R17).
+    /// Boleh dipilih untuk Send to agent (R17): perilaku gagal atau tampilan
+    /// berbeda dari prototype (R23 plan 2026-11-03-002).
     #[must_use]
     pub fn selectable(&self) -> bool {
-        self.in_gate() && self.verdict == Verdict::Fail && !self.stale
+        self.in_gate()
+            && !self.stale
+            && (self.verdict == Verdict::Fail || self.visual == Visual::Differs)
+    }
+
+    /// Baris yang tampilannya dibandingkan dengan prototype: di gerbang dan
+    /// ada di desain (In design atau Partly). AC menang atas desain untuk
+    /// baris Conflicts dan Missing (R17–R19 plan 2026-11-03-002).
+    #[must_use]
+    pub fn compares_look(&self) -> bool {
+        self.in_gate() && matches!(self.design, Design::InDesign | Design::Partly)
+    }
+
+    /// Verdict gabungan perilaku dan tampilan untuk hitungan dan laporan:
+    /// perilaku lulus tetapi tampilan berbeda dihitung gagal, tampilan yang
+    /// tidak bisa dipastikan dihitung Can't verify (R20).
+    #[must_use]
+    pub fn effective_verdict(&self) -> Verdict {
+        match (self.verdict, self.visual) {
+            (Verdict::Pass | Verdict::CheckedManually, Visual::Differs) => Verdict::Fail,
+            (Verdict::Pass | Verdict::CheckedManually, Visual::CantVerify) => Verdict::CantVerify,
+            (v, _) => v,
+        }
+    }
+
+    /// Hasil tampilan dikosongkan untuk review baru; keputusan dev atasnya
+    /// disimpan agar [`restore_decisions`] bisa memulihkannya (R25).
+    fn reset_visual(&mut self) {
+        let decided = matches!(self.visual, Visual::Accepted | Visual::CheckedManually);
+        let keep = decided.then(|| {
+            (
+                self.visual_detail.decision_reason.take(),
+                Some(self.visual_detail.decided_by.take().unwrap_or_default()),
+            )
+        });
+        self.visual = Visual::NotCompared;
+        self.visual_detail = VisualDetail::default();
+        if let Some((reason, by)) = keep {
+            self.visual_detail.decision_reason = reason;
+            self.visual_detail.decided_by = by;
+        }
     }
 }
 
@@ -287,6 +395,22 @@ pub fn mark_stale(rows: &mut [AcRow]) {
     }
 }
 
+/// Batas panjang path halaman dari reviewer.
+const PAGE_PATH_MAX: usize = 512;
+
+/// Path halaman dari reviewer aman dipakai sebagai link relatif ke app atau
+/// prototype: diawali satu `/`, tanpa `@`, `\`, atau karakter kontrol
+/// (KTD-P6).
+#[must_use]
+pub fn valid_page_path(path: &str) -> bool {
+    path.starts_with('/')
+        && !path.starts_with("//")
+        && path.len() <= PAGE_PATH_MAX
+        && !path
+            .chars()
+            .any(|c| c == '@' || c == '\\' || c.is_control())
+}
+
 /// Alasan AC yang tidak dilaporkan reviewer (KTD-38).
 pub const NOT_REPORTED: &str = "reviewer did not report";
 
@@ -299,6 +423,7 @@ pub fn reset_for_review(rows: &mut [AcRow]) {
         r.stale = false;
         r.reason = None;
         r.decided_by = None;
+        r.reset_visual();
     }
 }
 
@@ -320,6 +445,7 @@ pub fn reset_for_group_review(rows: &mut [AcRow]) {
             r.reason = None;
             r.decided_by = None;
         }
+        r.reset_visual();
     }
 }
 
@@ -345,6 +471,32 @@ pub fn restore_decisions(rows: &mut [AcRow]) {
         if r.decided_by.as_deref() == Some("") {
             r.decided_by = None;
         }
+    }
+    for r in rows.iter_mut().filter(|r| r.in_gate()) {
+        restore_visual_decision(r);
+    }
+}
+
+/// Keputusan tampilan tetap selama hasil reviewer sama dengan hasil yang
+/// diputuskan: Accepted untuk Differs, Checked manually untuk Can't verify
+/// (R25). Hasil lain menggugurkannya.
+fn restore_visual_decision(r: &mut AcRow) {
+    let d = &mut r.visual_detail;
+    if d.decided_by.is_none() || matches!(r.visual, Visual::Accepted | Visual::CheckedManually) {
+        return;
+    }
+    let restored = match (d.decision_reason.is_some(), r.visual) {
+        (true, Visual::Differs) => Visual::Accepted,
+        (false, Visual::CantVerify) => Visual::CheckedManually,
+        _ => {
+            d.decision_reason = None;
+            d.decided_by = None;
+            return;
+        }
+    };
+    r.visual = restored;
+    if d.decided_by.as_deref() == Some("") {
+        d.decided_by = None;
     }
 }
 
@@ -374,7 +526,7 @@ impl ReviewCounts {
     pub fn of(rows: &[AcRow]) -> Self {
         let mut c = Self::default();
         for r in rows.iter().filter(|r| r.in_gate()) {
-            match r.verdict {
+            match r.effective_verdict() {
                 Verdict::Pass | Verdict::CheckedManually => c.pass += 1,
                 Verdict::Fail | Verdict::FixInProgress => c.fail += 1,
                 Verdict::CantVerify => c.cant_verify += 1,
@@ -703,5 +855,96 @@ mod tests {
             .and_then(|n| n.parse().ok())
             .unwrap_or(0);
         assert_eq!(shown + more, 300);
+    }
+
+    // --- Hasil tampilan (plan 2026-11-03-002, U4) ---
+
+    fn visual_row(verdict: Verdict, v: Visual) -> AcRow {
+        let mut r = AcRow::new("rec1", Some("AC-1"), "teks", RowStatus::Active);
+        r.verdict = verdict;
+        r.visual = v;
+        r
+    }
+
+    #[test]
+    fn baris_tampilan_berbeda_bisa_dikirim_ke_agent() {
+        assert!(visual_row(Verdict::Pass, Visual::Differs).selectable());
+        assert!(!visual_row(Verdict::Pass, Visual::Match).selectable());
+        let mut follow = visual_row(Verdict::Pass, Visual::Differs);
+        follow.design = Design::FollowDesign;
+        assert!(!follow.selectable());
+    }
+
+    #[test]
+    fn keputusan_tampilan_bertahan_bila_hasil_sama_untuk_run_tunggal_dan_grup() {
+        for group in [false, true] {
+            let mut r = visual_row(Verdict::Pass, Visual::Accepted);
+            r.visual_detail.decision_reason = Some("warna baru".to_owned());
+            r.visual_detail.decided_by = Some("Beni".to_owned());
+            r.visual_detail.description = Some("tombol biru".to_owned());
+            let mut rows = vec![r];
+            if group {
+                reset_for_group_review(&mut rows);
+            } else {
+                reset_for_review(&mut rows);
+            }
+            assert_eq!(rows[0].visual, Visual::NotCompared, "group={group}");
+            assert_eq!(rows[0].visual_detail.description, None);
+            let mut again = rows.clone();
+            again[0].verdict = Verdict::Pass;
+            again[0].visual = Visual::Differs;
+            restore_decisions(&mut again);
+            assert_eq!(again[0].visual, Visual::Accepted, "group={group}");
+            assert_eq!(again[0].visual_detail.decided_by.as_deref(), Some("Beni"));
+
+            let mut changed = rows.clone();
+            changed[0].verdict = Verdict::Pass;
+            changed[0].visual = Visual::Match;
+            restore_decisions(&mut changed);
+            assert_eq!(changed[0].visual, Visual::Match);
+            assert_eq!(changed[0].visual_detail.decision_reason, None);
+        }
+    }
+
+    #[test]
+    fn keputusan_tampilan_tidak_menjadi_skipped_untuk_kegagalan_perilaku_baru() {
+        let mut r = visual_row(Verdict::Pass, Visual::Accepted);
+        r.visual_detail.decision_reason = Some("warna baru".to_owned());
+        r.visual_detail.decided_by = Some("Beni".to_owned());
+        let mut rows = vec![r];
+        reset_for_group_review(&mut rows);
+        rows[0].verdict = Verdict::Fail;
+        rows[0].visual = Visual::Differs;
+        restore_decisions(&mut rows);
+        assert_eq!(rows[0].verdict, Verdict::Fail);
+        assert_eq!(rows[0].visual, Visual::Accepted);
+    }
+
+    #[test]
+    fn baris_follow_design_tidak_membawa_hasil_tampilan() {
+        let mut r = visual_row(Verdict::Pass, Visual::Differs);
+        r.design = Design::FollowDesign;
+        let mut rows = vec![r];
+        reset_for_review(&mut rows);
+        assert_eq!(
+            rows[0].visual,
+            Visual::Differs,
+            "di luar gerbang tidak disentuh"
+        );
+        assert!(!rows[0].in_gate());
+        assert_eq!(Visual::parse("differs"), Some(Visual::Differs));
+        assert_eq!(Visual::CheckedManually.as_str(), "checked_manually");
+    }
+
+    #[test]
+    fn hitungan_review_memperhitungkan_tampilan() {
+        let rows = [
+            visual_row(Verdict::Pass, Visual::Differs),
+            visual_row(Verdict::Pass, Visual::CantVerify),
+            visual_row(Verdict::Pass, Visual::Accepted),
+            visual_row(Verdict::Fail, Visual::Match),
+        ];
+        let c = ReviewCounts::of(&rows);
+        assert_eq!((c.pass, c.fail, c.cant_verify), (1, 2, 1));
     }
 }

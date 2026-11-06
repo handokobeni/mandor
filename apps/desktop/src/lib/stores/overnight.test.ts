@@ -25,6 +25,10 @@ class FakeVm implements Rpc {
     this.calls.push([method, params]);
     if (this.fail.has(method)) throw new Error(`${method} refused`);
     switch (method) {
+      case 'review.screenshot':
+        return { data_url: 'data:image/png;base64,AAAA' } as T;
+      case 'overnight.gate_decide':
+        return { outcome: 'review_started', pr_url: null, failed: [], unverified: [], warnings: [], sync_warning: null, review_id: 'rv1', changed_cards: [] } as T;
       case 'overnight.queue.list':
         return {
           items: this.queue.map((id) => ({
@@ -174,9 +178,17 @@ describe('antrean VM', () => {
 });
 
 describe('aksi kartu VM', () => {
+  it('screenshot hasil tampilan kartu VM dimuat dari daemon VM', async () => {
+    const [store, vm] = await attached();
+    expect(await store.screenshot('run-vm', 'ac1', 1)).toBe('data:image/png;base64,AAAA');
+    expect(vm.calls.find(([m]) => m === 'review.screenshot')?.[1]).toEqual({ run_id: 'run-vm', ac_id: 'ac1', index: 1 });
+  });
+
   it('keputusan AC memanggil overnight.gate_decide dengan keputusan dev', async () => {
     const [store, vm] = await attached();
-    await store.decide('run-vm', ['ac2'], null);
+    const res = await store.decide('run-vm', ['ac2'], null);
+    // Hasil VM diteruskan: push, review ulang, atau tetap ditahan.
+    expect(res.outcome).toBe('review_started');
     expect(vm.calls.find(([m]) => m === 'overnight.gate_decide')?.[1]).toEqual({
       run_id: 'run-vm',
       confirmed: ['ac2']

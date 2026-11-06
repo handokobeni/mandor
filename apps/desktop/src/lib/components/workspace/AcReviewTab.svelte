@@ -19,6 +19,7 @@
     label,
     moveFocus,
     noDesignSource,
+    pruneSelection,
     removedRows,
     reviewMeta,
     toggleSelection,
@@ -47,8 +48,21 @@
     onfile: (path: string) => void;
     /** Kartu run grup; baris AC dikelompokkan per kartu. Kosong untuk run tunggal. */
     cards?: GroupCardView[];
+    /** URL app dan prototype yang menyala (link halaman di hasil tampilan). */
+    urls?: { app: string | null; prototype: string | null };
   }
-  let { taskKey, store, reviewing, agentBusy, now, onreview, onsend, onfile, cards = [] }: Props = $props();
+  let {
+    taskKey,
+    store,
+    reviewing,
+    agentBusy,
+    now,
+    onreview,
+    onsend,
+    onfile,
+    cards = [],
+    urls = { app: null, prototype: null }
+  }: Props = $props();
 
   let focusIdx = $state(0);
   let expanded = $state<Record<string, boolean>>({});
@@ -83,10 +97,10 @@
     const c = cards.find((x) => x.record_id === r.card);
     return c ? `${cardKey(c)} · ${c.title}` : 'Other';
   }
-  // Pilihan yang tidak lagi Fail dibuang (mis. setelah review baru).
+  // Pilihan yang tidak lagi bisa dikirim dibuang (mis. setelah review baru).
   $effect(() => {
-    const ids = new Set(rows.filter((r) => r.verdict === 'fail').map((r) => r.ac_id));
-    if ([...selected].some((id) => !ids.has(id))) selected = new Set([...selected].filter((id) => ids.has(id)));
+    const kept = pruneSelection(selected, rows);
+    if (kept.size !== selected.size) selected = kept;
   });
 
   const TRIGGER: Record<string, string> = {
@@ -236,7 +250,7 @@
       {/if}
       {#if selected.size > 0}
         <div class="ac-selbar">
-          <span><b>{selected.size}</b> failed AC selected</span>
+          <span><b>{selected.size}</b> AC selected</span>
           <Button variant="ghost" size="sm" onclick={() => (selected = new Set())}>Clear</Button>
           <Button size="sm" disabled={agentBusy || reviewing} onclick={send}><SendHorizontal />Send to agent</Button>
         </div>
@@ -271,6 +285,8 @@
           onfocus={() => (focusIdx = i)}
           onkey={(e) => onkey(e, r)}
           {onfile}
+          {urls}
+          onscreenshot={(i) => store.screenshot(r.ac_id, i)}
         />
       {/each}
       {#each removed as r (r.ac_id)}

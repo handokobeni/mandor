@@ -7,10 +7,11 @@ use std::sync::Arc;
 use mandor_domain::app_run::{AppRunState, is_flagged_change};
 
 use crate::ports::{Clock, Deps, PortError};
+use crate::review::DesignSources;
 use crate::run::{RunError, RunService};
 use crate::run_ports::{
-    AppMember, AppMemberRecord, AppProcesses, AppRecord, AppRecords, GitPort, Notifier, Repos,
-    RunStore, Spawner,
+    AppMember, AppMemberRecord, AppProcesses, AppRecord, AppRecords, GitPort, Notifier,
+    PrototypeRef, Repos, RunStore, Spawner,
 };
 
 /// Berkas yang berubah di satu repo sejak app terakhir dijalankan (atau sejak
@@ -23,6 +24,16 @@ pub struct AppChanges {
     pub files: Vec<String>,
     /// Manifest paket, lockfile, skrip, dan berkas perintah start.
     pub flagged: Vec<String>,
+    /// Nama sumber desain bila entri ini prototype.
+    pub prototype: Option<String>,
+    /// Prototype dengan revisi yang sudah dikonfirmasi dev; client tidak
+    /// perlu menampilkannya lagi (R15).
+    pub confirmed: bool,
+}
+
+/// Kunci anggota prototype di peta snapshot dan log app.
+fn prototype_key(source_id: &str) -> String {
+    format!("prototype:{source_id}")
 }
 
 /// Batas restart app otomatis sebelum review (setup dan menunggu port).
@@ -69,6 +80,7 @@ fn starting_record(
                 url: m.settings.canonical_url(),
                 pgid: None,
                 state: AppRunState::Off,
+                prototype: m.prototype.as_ref().map(|p| p.name.clone()),
             })
             .collect(),
         snapshot,
@@ -84,14 +96,16 @@ fn rejected(message: &str) -> RunError {
 }
 
 impl<D: Deps> RunService<D> {
-    /// Anggota run yang punya perintah start dan port.
+    /// Anggota run yang punya perintah start dan port, lalu prototype dari
+    /// sumber desain run yang bisa dijalankan (KTD-P3). Setelan prototype
+    /// dibaca langsung dari sumber desain daemon.
     async fn app_members(&self, run_id: &str) -> Result<Vec<AppMember>, RunError> {
         let run = self
             .runs
             .get(run_id)
             .await?
             .ok_or(RunError::NotFound("run"))?;
-        Ok(self
+        let mut out: Vec<AppMember> = self
             .members(&run)
             .await?
             .into_iter()
@@ -101,8 +115,65 @@ impl<D: Deps> RunService<D> {
                 worktree: m.worktree,
                 repo_path: m.repo.path.clone(),
                 settings: m.repo.app,
+                prototype: None,
             })
-            .collect())
+            .collect();
+        if out.is_empty() {
+            return Ok(out);
+        }
+        for root in &run.design {
+            if let Some(p) = self.design.prototype(&root.id).await? {
+                out.push(AppMember {
+                    repo_id: prototype_key(&p.id),
+                    worktree: p.path.clone(),
+                    repo_path: p.path,
+                    settings: p.app,
+                    prototype: Some(PrototypeRef {
+                        id: p.id,
+                        name: p.name,
+                        confirmed: p.confirmed,
+                    }),
+                });
+            }
+        }
+        Ok(out)
+    }
+
+    /// Snapshot kode repo, atau revisi folder untuk prototype.
+    async fn member_revision(&self, m: &AppMember) -> Result<String, PortError> {
+        if m.prototype.is_some() {
+            self.design.revision(&m.worktree).await
+        } else {
+            self.git.snapshot(&m.worktree).await
+        }
+    }
+
+    /// Entri konfirmasi untuk prototype: berkas yang berubah sejak revisi
+    /// yang terakhir dikonfirmasi (R15).
+    async fn prototype_changes(
+        &self,
+        m: &AppMember,
+        p: &PrototypeRef,
+    ) -> Result<AppChanges, RunError> {
+        let snapshot = self.design.revision(&m.worktree).await?;
+        let confirmed = p.confirmed.as_deref() == Some(snapshot.as_str());
+        let files = match p.confirmed.as_deref() {
+            Some(from) if !confirmed => self.design.changes_since(&m.worktree, from).await?,
+            _ => Vec::new(),
+        };
+        let flagged = files
+            .iter()
+            .filter(|f| is_flagged_change(f, &m.settings))
+            .cloned()
+            .collect();
+        Ok(AppChanges {
+            repo_id: m.repo_id.clone(),
+            snapshot,
+            files,
+            flagged,
+            prototype: Some(p.name.clone()),
+            confirmed,
+        })
     }
 
     /// State app run itu; `Off` bila belum pernah dijalankan.
@@ -145,6 +216,10 @@ impl<D: Deps> RunService<D> {
         let last = self.app_status(run_id).await?.snapshot;
         let mut out = Vec::with_capacity(members.len());
         for m in members {
+            if let Some(p) = &m.prototype {
+                out.push(self.prototype_changes(&m, p).await?);
+                continue;
+            }
             let snapshot = self.git.snapshot(&m.worktree).await?;
             let repo = self
                 .repos
@@ -169,6 +244,8 @@ impl<D: Deps> RunService<D> {
                 snapshot,
                 files,
                 flagged,
+                prototype: None,
+                confirmed: false,
             });
         }
         Ok(out)
@@ -205,7 +282,7 @@ impl<D: Deps> RunService<D> {
         }
         let mut snapshot = BTreeMap::new();
         for m in &members {
-            let current = self.git.snapshot(&m.worktree).await?;
+            let current = self.member_revision(m).await?;
             if confirmed.get(&m.repo_id) != Some(&current) {
                 return Err(rejected(
                     "The code changed since you checked it; review the changes again",
@@ -219,6 +296,12 @@ impl<D: Deps> RunService<D> {
             AppRunState::SettingUp | AppRunState::Starting | AppRunState::WaitingForPort
         ) {
             return Err(RunError::InvalidState("the app is starting"));
+        }
+        // Dev baru saja melihat dan mengonfirmasi revisi prototype (R15).
+        for m in &members {
+            if let (Some(p), Some(rev)) = (&m.prototype, snapshot.get(&m.repo_id)) {
+                self.design.confirm(&p.id, rev).await?;
+            }
         }
         self.stop_other_app(run_id).await?;
         self.apps.stop(run_id).await;
@@ -263,11 +346,20 @@ impl<D: Deps> RunService<D> {
         run_id: &str,
         snapshot: &BTreeMap<String, String>,
     ) -> Result<(), String> {
-        let members = self.app_members(run_id).await.map_err(|e| e.to_string())?;
+        let members = self
+            .confirmed_members(run_id)
+            .await
+            .map_err(|e| e.to_string())?;
         let prev = self.app_status(run_id).await.map_err(|e| e.to_string())?;
         let wanted = members
             .iter()
-            .filter_map(|m| Some((m.repo_id.clone(), snapshot.get(&m.repo_id)?.clone())))
+            .filter_map(|m| {
+                let rev = match &m.prototype {
+                    Some(p) => p.confirmed.clone()?,
+                    None => snapshot.get(&m.repo_id)?.clone(),
+                };
+                Some((m.repo_id.clone(), rev))
+            })
             .collect();
         // Di laptop syarat restart sudah menjamin tidak ada app run lain; di
         // VM app kartu sebelumnya dihentikan di sini.
@@ -309,6 +401,29 @@ impl<D: Deps> RunService<D> {
         }
     }
 
+    /// Anggota untuk restart tanpa konfirmasi: prototype hanya ikut bila
+    /// revisi foldernya sama dengan revisi yang terakhir dikonfirmasi dev
+    /// (R15 di laptop, R28 di VM).
+    async fn confirmed_members(&self, run_id: &str) -> Result<Vec<AppMember>, RunError> {
+        let mut out = Vec::new();
+        for m in self.app_members(run_id).await? {
+            let keep = match &m.prototype {
+                None => true,
+                Some(p) => match self.design.revision(&m.worktree).await {
+                    Ok(rev) => p.confirmed.as_deref() == Some(rev.as_str()),
+                    Err(e) => {
+                        tracing::warn!(run_id, prototype = %p.name, error = %e, "revisi prototype tidak terbaca");
+                        false
+                    }
+                },
+            };
+            if keep {
+                out.push(m);
+            }
+        }
+        Ok(out)
+    }
+
     /// App run lain yang menyala dihentikan dan ditandai `StoppedByOtherRun`.
     async fn stop_other_app(&self, run_id: &str) -> Result<(), RunError> {
         let Some(other) = self.apps.app_owner().await?.filter(|o| o != run_id) else {
@@ -330,11 +445,20 @@ impl<D: Deps> RunService<D> {
         Ok(())
     }
 
-    /// Menyalakan anggota berurutan; anggota yang gagal menghentikan semuanya
-    /// dan anggota berikutnya tidak dinyalakan (R27).
+    /// Menyalakan anggota berurutan; anggota repo yang gagal menghentikan
+    /// semuanya dan anggota berikutnya tidak dinyalakan (R27). Prototype
+    /// yang gagal hanya menandai dirinya sendiri (KTD-P3).
     async fn start_members(&self, mut rec: AppRecord, members: Vec<AppMember>) {
         for (i, m) in members.iter().enumerate() {
-            if let Err(e) = self.start_member(&mut rec, i, m).await {
+            let outcome = self.start_member(&mut rec, i, m).await;
+            if let (Err(e), Some(p)) = (&outcome, &m.prototype) {
+                rec.members[i].state = AppRunState::Failed;
+                rec.members[i].pgid = None;
+                rec.error = Some(format!("{}: {e}", p.name));
+                self.save_quietly(&rec).await;
+                continue;
+            }
+            if let Err(e) = outcome {
                 self.apps.stop(&rec.run_id).await;
                 rec.state = AppRunState::Failed;
                 rec.members[i].state = AppRunState::Failed;
@@ -404,9 +528,9 @@ impl<D: Deps> RunService<D> {
         Ok(())
     }
 
-    /// Kode repo masih sama dengan snapshot yang dikonfirmasi dev.
+    /// Kode repo (atau revisi prototype) masih sama dengan yang dikonfirmasi dev.
     async fn ensure_unchanged(&self, rec: &AppRecord, m: &AppMember) -> Result<(), PortError> {
-        let current = self.git.snapshot(&m.worktree).await?;
+        let current = self.member_revision(m).await?;
         if rec.snapshot.get(&m.repo_id) == Some(&current) {
             Ok(())
         } else {

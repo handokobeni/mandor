@@ -120,6 +120,7 @@ pub fn default_allowed() -> Vec<String> {
         "Bash(yarn *)",
         "Bash(node *)",
         "Bash(go *)",
+        "Bash(gofmt *)",
         "Bash(python3 *)",
         "Bash(pytest*)",
         "Bash(ls*)",
@@ -326,7 +327,7 @@ pub fn parse_hook_input(raw: &[u8]) -> Result<ToolCall, String> {
         .get("command")
         .and_then(Value::as_str)
         .map(str::to_owned);
-    let paths = ["file_path", "path", "notebook_path"]
+    let paths = ["file_path", "path", "notebook_path", "filename"]
         .iter()
         .filter_map(|k| input.get(*k).and_then(Value::as_str).map(str::to_owned))
         .collect();
@@ -464,6 +465,17 @@ mod tests {
     }
 
     #[test]
+    fn nama_berkas_tool_browser_ikut_dibaca_sebagai_path() {
+        // Screenshot Playwright bernama relatif ditulis di worktree.
+        let raw = json!({
+            "tool_name": "mcp__playwright__browser_take_screenshot",
+            "tool_input": {"filename": "app-100.png", "fullPage": true}
+        });
+        let call = parse_hook_input(raw.to_string().as_bytes()).unwrap();
+        assert_eq!(call.paths, ["app-100.png"]);
+    }
+
+    #[test]
     fn input_rusak_dan_panic_sama_sama_menolak() {
         assert_eq!(hook("{bukan json").0, HOOK_BLOCK);
         assert_eq!(hook("{}").0, HOOK_BLOCK);
@@ -525,6 +537,8 @@ mod tests {
             "Bash(echo *)",
             "Bash(sed *)",
             "Bash(sort *)",
+            // Formatter Go hanya menulis berkas di worktree, seperti `cargo fmt`.
+            "Bash(gofmt *)",
         ] {
             assert!(default_allowed().contains(&safe.to_owned()), "{safe}");
         }

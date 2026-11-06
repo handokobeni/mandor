@@ -5,7 +5,7 @@
   import FileCode from '@lucide/svelte/icons/file-code';
   import Play from '@lucide/svelte/icons/play';
   import TriangleAlert from '@lucide/svelte/icons/triangle-alert';
-  import { confirmModel } from '#lib/app-run.ts';
+  import { confirmModel, confirmedPrototypes } from '#lib/app-run.ts';
   import * as Alert from '#lib/components/ui/alert/index.ts';
   import { Button } from '#lib/components/ui/button/index.ts';
   import * as Dialog from '#lib/components/ui/dialog/index.ts';
@@ -25,6 +25,7 @@
   let { taskKey, changes, envKeys, otherRun, oncancel, onconfirm, onfile }: Props = $props();
 
   const repos = $derived(confirmModel(changes));
+  const prototypes = $derived(confirmedPrototypes(changes));
 </script>
 
 <Dialog.Root open onOpenChange={(o) => !o && oncancel()}>
@@ -47,7 +48,7 @@
     <div class="grid gap-3" style="max-height:360px;overflow:auto">
       {#each repos as r (r.repo_id)}
         <div class="grid gap-1.5">
-          <span class="text-sm font-medium">{r.repo_id}
+          <span class="text-sm font-medium">{r.label}
             <span class="muted font-normal">· {r.files.length} changed file{r.files.length === 1 ? '' : 's'}</span></span>
           {#if r.files.length === 0}
             <span class="muted text-[length:var(--text-sm)]">No changes since the app last ran.</span>
@@ -55,9 +56,13 @@
             <ul class="grid gap-1">
               {#each r.files as f (f)}
                 <li class="flex items-center gap-2">
-                  <button class="ev-file" onclick={() => onfile(f)} title="Open in Changes">
-                    <FileCode class="icon-sm" aria-hidden="true" /><span>{f}</span>
-                  </button>
+                  {#if r.prototype}
+                    <span class="ev-file"><FileCode class="icon-sm" aria-hidden="true" /><span>{f}</span></span>
+                  {:else}
+                    <button class="ev-file" onclick={() => onfile(f)} title="Open in Changes">
+                      <FileCode class="icon-sm" aria-hidden="true" /><span>{f}</span>
+                    </button>
+                  {/if}
                   {#if r.flagged.has(f)}
                     <span class="chip" data-tone="warning"><TriangleAlert aria-hidden="true" />Runs code at start</span>
                   {/if}
@@ -70,6 +75,12 @@
               .env keys passed: <span class="mono">{(envKeys[r.repo_id] ?? []).join(', ')}</span> (values are never shown)
             </span>
           {/if}
+        </div>
+      {/each}
+      {#each prototypes as name (name)}
+        <div class="grid gap-1.5">
+          <span class="text-sm font-medium">{name} (prototype)</span>
+          <span class="muted text-[length:var(--text-sm)]">Starts too, from the revision you already confirmed.</span>
         </div>
       {/each}
     </div>

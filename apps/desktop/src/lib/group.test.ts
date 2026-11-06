@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { NO_VISUAL } from '#lib/ac-review.ts';
 import {
   candidatesParams,
   groupFooter,
@@ -38,6 +39,7 @@ function cand(id: string, blocked: string | null = null): GroupCandidateView {
 
 function row(ac: string, cardId: string | null): AcRowView {
   return {
+    ...NO_VISUAL,
     ac_id: ac,
     label: ac.toUpperCase(),
     text: 'x',

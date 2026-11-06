@@ -38,7 +38,7 @@ export function appControlLabel(app: AppRunView | null): string {
   if (!appStarting(app.state)) {
     if (app.state === 'failed') {
       const failed = app.members.find((m) => m.state === 'failed');
-      return failed ? `${meta.label} · ${failed.repo_id}` : meta.label;
+      return failed ? `${meta.label} · ${memberName(failed)}` : meta.label;
     }
     return meta.label;
   }
@@ -46,7 +46,22 @@ export function appControlLabel(app: AppRunView | null): string {
   if (i < 0) return meta.label;
   const m = app.members[i];
   const count = app.members.length > 1 ? ` (${i + 1} of ${app.members.length})` : '';
-  return `${appStateMeta(m.state).label} ${m.repo_id}${count}`;
+  return `${appStateMeta(m.state).label} ${memberName(m)}${count}`;
+}
+
+/** Nama anggota: nama sumber desain untuk prototype, selain itu id repo. */
+function memberName(m: { repo_id: string; prototype: string | null }): string {
+  return m.prototype ?? m.repo_id;
+}
+
+/** URL app (repo pertama) dan URL prototype yang menyala, terpisah. */
+export function appUrls(app: AppRunView | null): { app: string | null; prototype: string | null } {
+  if (!app || app.state !== 'running') return { app: null, prototype: null };
+  const running = app.members.filter((m) => m.url && m.state === 'running');
+  const repos = running.filter((m) => m.prototype === null);
+  // Workspace berisi API dan web: link app menunjuk repo yang diuji browser.
+  const repo = repos.find((m) => m.browser_tests) ?? repos[0];
+  return { app: repo?.url ?? null, prototype: running.find((m) => m.prototype !== null)?.url ?? null };
 }
 
 /** Tombol kontrol: jalankan, hentikan, atau lihat log. */
@@ -153,18 +168,44 @@ export function cantVerifyReason(items: ReadinessItem[]): string | null {
 
 export interface ConfirmRepo {
   repo_id: string;
+  /** Judul di dialog: id repo, atau nama sumber desain untuk prototype. */
+  label: string;
   snapshot: string;
   files: string[];
   flagged: Set<string>;
+  /** Prototype: berkasnya di folder sumber desain, bukan di tab Changes run. */
+  prototype: boolean;
 }
 
 /** Model dialog konfirmasi Run app: berkas berubah per repo, yang ditandai di atas. */
 export function confirmModel(changes: AppChangesView[]): ConfirmRepo[] {
-  return changes.map((c) => {
-    const flagged = new Set(c.flagged);
-    const files = [...c.files].sort((a, b) => Number(flagged.has(b)) - Number(flagged.has(a)) || a.localeCompare(b));
-    return { repo_id: c.repo_id, snapshot: c.snapshot, files, flagged };
-  });
+  // Prototype dengan revisi yang sudah dikonfirmasi tidak perlu dilihat lagi (R15).
+  return changes
+    .filter((c) => !c.confirmed)
+    .map((c) => {
+      const flagged = new Set(c.flagged);
+      const files = [...c.files].sort((a, b) => Number(flagged.has(b)) - Number(flagged.has(a)) || a.localeCompare(b));
+      const label = c.prototype ? `${c.prototype} (prototype)` : c.repo_id;
+      return { repo_id: c.repo_id, label, snapshot: c.snapshot, files, flagged, prototype: c.prototype !== null };
+    });
+}
+
+/** Kunci `.env` yang diteruskan per anggota app: repo run, dan prototype
+ * dengan kunci anggota `prototype:<id>` (nilai tidak pernah ditampilkan). */
+export function envKeyMap(
+  repos: { id: string; app: { env_keys: string[] } }[],
+  sources: { id: string; app: { env_keys: string[] } | null }[],
+  memberIds: string[]
+): Record<string, string[]> {
+  const out: Record<string, string[]> = {};
+  for (const r of repos) if (memberIds.includes(r.id)) out[r.id] = r.app.env_keys;
+  for (const d of sources) if (d.app) out[`prototype:${d.id}`] = d.app.env_keys;
+  return out;
+}
+
+/** Prototype yang ikut jalan pada revisi terkonfirmasi tanpa perlu dilihat lagi. */
+export function confirmedPrototypes(changes: AppChangesView[]): string[] {
+  return changes.flatMap((c) => (c.confirmed && c.prototype ? [c.prototype] : []));
 }
 
 /** Snapshot yang dikirim ke `app.run`. */

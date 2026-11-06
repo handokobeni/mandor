@@ -57,7 +57,16 @@
   import AcReviewTab from './AcReviewTab.svelte';
   import PlanApproval from './PlanApproval.svelte';
   import GateDialogs from './GateDialogs.svelte';
-  import { activeRows, gate as acGate, gateButtonLabel, label as acLabel, tabCount } from '#lib/ac-review.ts';
+  import {
+    activeRows,
+    blockReason,
+    canSend,
+    gate as acGate,
+    gateButtonLabel,
+    gateRows,
+    label as acLabel,
+    tabCount
+  } from '#lib/ac-review.ts';
   import * as Popover from '#lib/components/ui/popover/index.ts';
   import type { PublishParams } from '#lib/protocol/PublishParams.ts';
   import type { PublishResult } from '#lib/protocol/PublishResult.ts';
@@ -67,9 +76,10 @@
   import QueueForVm from './QueueForVm.svelte';
   import { appRun } from '#lib/stores/app-run.svelte.ts';
   import { runs } from '#lib/stores/runs.svelte.ts';
-  import { snapshots } from '#lib/app-run.ts';
+  import { appUrls, envKeyMap, snapshots } from '#lib/app-run.ts';
   import type { AppChangesView } from '#lib/protocol/AppChangesView.ts';
   import type { AppLogView } from '#lib/protocol/AppLogView.ts';
+  import type { DesignSourceView } from '#lib/protocol/DesignSourceView.ts';
   import type { RepoView } from '#lib/protocol/RepoView.ts';
   import type { ReviewReadinessView } from '#lib/protocol/ReviewReadinessView.ts';
   import AppLogsDrawer from './AppLogsDrawer.svelte';
@@ -167,10 +177,12 @@
   const acRows = $derived(ledger.ledger ? activeRows(ledger.ledger.rows) : []);
   const gateNow = $derived(acGate(acRows, ledger.ledger?.gate_mode ?? 'block', reviewing));
   const acCount = $derived(tabCount(acRows));
-  const failing = $derived(acRows.filter((r) => r.in_gate && !r.stale && r.verdict === 'fail'));
+  // Verdict efektif: tampilan berbeda dari prototype ikut memblokir push.
+  const failing = $derived(gateRows(acRows).fails);
 
   // Run app (Rilis 2 U13).
   let repos = $state<RepoView[]>([]);
+  let designSources = $state<DesignSourceView[]>([]);
   let appChanges = $state<AppChangesView[] | null>(null);
   let appLogs = $state<AppLogView[] | null>(null);
   let readiness = $state<{ view: ReviewReadinessView; trigger: 'manual' | 'push' } | null>(null);
@@ -185,13 +197,18 @@
         .request<RepoView[]>('repos.list')
         .then((r) => (repos = r))
         .catch(() => (repos = []));
+      // Kunci `.env` prototype untuk dialog Run app.
+      void rpc
+        .request<DesignSourceView[]>('design_sources.list')
+        .then((d) => (designSources = d))
+        .catch(() => (designSources = []));
     });
   });
   const memberIds = $derived(run.repos.map((r) => r.repo_id));
   const runnable = $derived(
     repos.some((r) => memberIds.includes(r.id) && !!r.app.start_command && r.app.port !== null)
   );
-  const envKeys = $derived(Object.fromEntries(repos.filter((r) => memberIds.includes(r.id)).map((r) => [r.id, r.app.env_keys])));
+  const envKeys = $derived(envKeyMap(repos, designSources, memberIds));
   const ownerRun = $derived(appRun.otherOwner(run.id));
   const ownerKey = $derived(ownerRun ? (runs.byId(ownerRun.run_id)?.key ?? 'another run') : null);
 
@@ -619,12 +636,12 @@
         <Popover.Content align="end" class="gate-pop w-[360px]">
           <div class="gp-head"><Lock aria-hidden="true" /><b>Push blocked by {failing.length} AC</b></div>
           {#each failing as r (r.ac_id)}
-            <div class="gp-row"><span class="mono">{acLabel(r)}</span><span>{r.evidence ?? r.text}</span></div>
+            <div class="gp-row"><span class="mono">{acLabel(r)}</span><span>{blockReason(r)}</span></div>
           {/each}
           <div class="gp-act">
             <Button variant="ghost" size="sm" onclick={() => ((blockedOpen = false), (tab = 'ac'))}>View in AC review</Button>
             <Button variant="outline" size="sm" onclick={() => ((blockedOpen = false), (gateDialog = 'anyway'))}>Push anyway…</Button>
-            <Button size="sm" onclick={() => ((blockedOpen = false), sendFindings(failing.filter((r) => r.selectable).map((r) => r.ac_id)))}>Send to agent</Button>
+            <Button size="sm" onclick={() => ((blockedOpen = false), sendFindings(failing.filter(canSend).map((r) => r.ac_id)))}>Send to agent</Button>
           </div>
         </Popover.Content>
       </Popover.Root>
@@ -803,6 +820,7 @@
           onsend={sendFindings}
           onfile={(p) => void openFile(p)}
           cards={run.cards}
+          urls={appRun.current?.run_id === run.id ? appUrls(appRun.current) : { app: null, prototype: null }}
         />
       </section>
     {/if}

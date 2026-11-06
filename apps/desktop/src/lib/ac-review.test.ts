@@ -14,12 +14,22 @@ import {
   shownVerdict,
   tabCount,
   toggleSelection,
-  validReason
+  validReason,
+  NO_VISUAL,
+  visualMeta,
+  blockReason,
+  nextZoom,
+  shotLabels,
+  cantReasons,
+  gateRows,
+  pruneSelection,
+  visualLinks
 } from '#lib/ac-review.ts';
 import type { AcRowView } from '#lib/protocol/AcRowView.ts';
 
 function row(id: string, verdict: string, extra: Partial<AcRowView> = {}): AcRowView {
   return {
+    ...NO_VISUAL,
     ac_id: id,
     label: `AC-${id}`,
     text: `teks ${id}`,
@@ -160,5 +170,97 @@ describe('acTitle', () => {
     expect(acTitle('AC-1 — Fibonacci\nGiven pengguna membuka halaman\nWhen …')).toBe('AC-1 — Fibonacci');
     expect(acTitle('  Satu baris saja  ')).toBe('Satu baris saja');
     expect(acTitle('\nGiven tanpa judul')).toBe('Given tanpa judul');
+  });
+});
+
+describe('hasil tampilan dengan prototype (plan 2026-11-03-002)', () => {
+  const look = (verdict: string, visual: string, extra: Partial<AcRowView> = {}) =>
+    row('v', verdict, { ...NO_VISUAL, visual, ...extra });
+
+  it('counts a passing row that looks different as failed and a row whose look was not verified as cant verify', () => {
+    const c = counts([look('pass', 'differs'), look('pass', 'cant_verify'), look('pass', 'accepted'), look('pass', 'match')]);
+    expect([c.pass, c.fail, c.cant]).toEqual([2, 1, 1]);
+    expect(gate([look('pass', 'differs')], 'block', false).state).toBe('blocked');
+    expect(gate([look('pass', 'cant_verify')], 'block', false).state).toBe('needs_confirmation');
+  });
+
+  it('keeps a selected row that only looks different and drops rows that can no longer be sent', () => {
+    const differs = { ...look('pass', 'differs', { selectable: true }), ac_id: 'd' };
+    const fixed = { ...look('pass', 'match', { selectable: true }), ac_id: 'm' };
+    const kept = pruneSelection(new Set(['d', 'm', 'gone']), [differs, fixed]);
+    expect([...kept]).toEqual(['d']);
+  });
+
+  it('says why a row blocks push: failed behaviour, or how it looks different', () => {
+    const differs = look('pass', 'differs', {
+      evidence: 'Card renders the name.',
+      visual_detail: { ...NO_VISUAL.visual_detail, description: 'Name is red, not bold blue.' }
+    });
+    expect(blockReason(differs)).toBe('Looks different: Name is red, not bold blue.');
+    expect(blockReason(look('fail', 'match', { evidence: 'Count is wrong.' }))).toBe('Count is wrong.');
+    expect(blockReason(look('fail', 'differs', { evidence: 'Count is wrong.' }))).toBe('Count is wrong.');
+  });
+
+  it('lets a row that only looks different be sent to the agent', () => {
+    expect(canSend(look('pass', 'differs', { selectable: true }))).toBe(true);
+    expect(canSend(look('pass', 'match', { selectable: false }))).toBe(false);
+  });
+
+  it('labels the look chip and hides it when the row was not compared', () => {
+    expect(visualMeta('differs')?.label).toBe('Looks different');
+    expect(visualMeta('accepted')?.label).toBe('Difference accepted');
+    expect(visualMeta('not_compared')).toBeNull();
+  });
+
+  it('collects rows the gate dialog lists for push anyway and manual checks', () => {
+    const rows = [look('pass', 'differs'), { ...look('cant_verify', 'match'), ac_id: 'c' }, { ...look('pass', 'cant_verify'), ac_id: 'd' }];
+    expect(gateRows(rows).fails.map((r) => r.ac_id)).toEqual(['v']);
+    expect(gateRows(rows).cants.map((r) => r.ac_id)).toEqual(['c', 'd']);
+  });
+
+  it('explains why the gate asks: behaviour evidence or the reason the look was not verified', () => {
+    const lookOnly = look('pass', 'cant_verify', {
+      evidence: 'Code renders the marker.',
+      visual_detail: { ...NO_VISUAL.visual_detail, description: 'Demo data has no critical job.' }
+    });
+    expect(cantReasons(lookOnly)).toEqual(['Look not verified: Demo data has no critical job.']);
+    expect(cantReasons(look('pass', 'cant_verify'))).toEqual(['Look not verified']);
+    const both = look('cant_verify', 'cant_verify', {
+      evidence: 'Needs a database.',
+      visual_detail: { ...NO_VISUAL.visual_detail, description: 'Prototype page missing.' }
+    });
+    expect(cantReasons(both)).toEqual(['Needs a database.', 'Look not verified: Prototype page missing.']);
+    expect(cantReasons(look('cant_verify', 'match', { evidence: 'Needs a database.' }))).toEqual(['Needs a database.']);
+  });
+
+  it('builds page links on the running app and prototype only for same-origin paths', () => {
+    const r = look('pass', 'differs', {
+      visual_detail: { ...NO_VISUAL.visual_detail, app_path: '/jabatan?x=1', prototype_path: '/proto/jabatan' }
+    });
+    expect(visualLinks(r, 'http://localhost:3000', 'http://127.0.0.1:3001')).toEqual({
+      app: 'http://localhost:3000/jabatan?x=1',
+      prototype: 'http://127.0.0.1:3001/proto/jabatan'
+    });
+    const bad = look('pass', 'differs', {
+      visual_detail: { ...NO_VISUAL.visual_detail, app_path: '//evil.example/x', prototype_path: '/a' }
+    });
+    expect(visualLinks(bad, 'http://localhost:3000', null)).toEqual({ app: null, prototype: null });
+  });
+});
+
+describe('penampil screenshot tampilan', () => {
+  it('names the two screenshots app and prototype, others by number', () => {
+    expect(shotLabels(2)).toEqual(['App page', 'Prototype page']);
+    expect(shotLabels(3)).toEqual(['Screenshot 1', 'Screenshot 2', 'Screenshot 3']);
+    expect(shotLabels(1)).toEqual(['Screenshot 1']);
+  });
+
+  it('zooms in fixed steps from fit or actual size and stays in range', () => {
+    expect(nextZoom('fit', 1)).toBe(1);
+    expect(nextZoom('fit', -1)).toBe(0.5);
+    expect(nextZoom(1, 1)).toBe(1.5);
+    expect(nextZoom(1.5, -1)).toBe(1);
+    expect(nextZoom(4, 1)).toBe(4);
+    expect(nextZoom(0.25, -1)).toBe(0.25);
   });
 });

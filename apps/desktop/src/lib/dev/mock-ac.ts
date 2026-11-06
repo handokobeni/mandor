@@ -3,6 +3,7 @@
 // reviewing, failed, tracker, pass, no_ac, no_source.
 
 import type { AcLedgerView } from '#lib/protocol/AcLedgerView.ts';
+import { NO_VISUAL } from '#lib/ac-review.ts';
 import type { AcRowView } from '#lib/protocol/AcRowView.ts';
 import type { ReviewView } from '#lib/protocol/ReviewView.ts';
 
@@ -17,6 +18,7 @@ const TEXT: [string, string][] = [
 function row(i: number, verdict: string, extra: Partial<AcRowView> = {}): AcRowView {
   const [lbl, text] = TEXT[i];
   return {
+    ...NO_VISUAL,
     ac_id: `ac${i + 1}`,
     label: lbl,
     text,
@@ -57,8 +59,24 @@ const EVIDENCE: Record<string, string> = {
 
 function current(): AcRowView[] {
   return [
-    designed(0, 'pass', { evidence: EVIDENCE.pass1 }),
-    designed(1, 'pass', { evidence: EVIDENCE.pass2 }),
+    designed(0, 'pass', {
+      evidence: EVIDENCE.pass1,
+      visual: 'match',
+      visual_detail: { ...NO_VISUAL.visual_detail, app_path: '/invoices', prototype_path: '/invoices' }
+    }),
+    designed(1, 'pass', {
+      evidence: EVIDENCE.pass2,
+      selectable: true,
+      visual: 'differs',
+      visual_detail: {
+        ...NO_VISUAL.visual_detail,
+        description: 'The date range sits below the status chips; the prototype puts it on the same row, right-aligned.',
+        app_path: '/invoices',
+        prototype_path: '/invoices',
+        prototype_rev: 'git:4f2a9c1',
+        screenshots: ['ac-2-0.png', 'ac-2-1.png']
+      }
+    }),
     designed(2, 'fail', { evidence: EVIDENCE.fail3 }),
     designed(3, 'cant_verify', { evidence: EVIDENCE.cant4 }),
     designed(4, 'pass', { evidence: EVIDENCE.pass5 })
@@ -153,4 +171,12 @@ export function history(runId: string, scenario: string): ReviewView[] {
     ];
   }
   return [base];
+}
+
+/** Screenshot tiruan 1440x900 untuk penampil di mode mock. */
+export function mockShot(index: number): string {
+  const label = index === 0 ? 'App page' : 'Prototype page';
+  const fill = index === 0 ? '#e8efe9' : '#efe9e3';
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="1440" height="900"><rect width="1440" height="900" fill="${fill}"/><rect x="420" y="80" width="600" height="380" rx="16" fill="#fff" stroke="#ccc"/><text x="460" y="150" font-family="sans-serif" font-size="36">${label}</text><text x="460" y="220" font-family="monospace" font-size="20">Small text stays sharp at 100%: 373,15 K</text></svg>`;
+  return `data:image/svg+xml;base64,${btoa(svg)}`;
 }

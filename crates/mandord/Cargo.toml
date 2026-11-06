@@ -12,6 +12,7 @@ name = "mandord"
 path = "src/main.rs"
 
 [dependencies]
+base64 = { version = "0.23", default-features = false, features = ["alloc"] }
 mandor-domain.workspace = true
 mandor-usecase.workspace = true
 mandor-proc.workspace = true

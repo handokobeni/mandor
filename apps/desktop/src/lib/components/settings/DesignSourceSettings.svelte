@@ -12,6 +12,7 @@
   import type { DesignSourceView } from '#lib/protocol/DesignSourceView.ts';
   import type { Rpc } from '#lib/rpc.ts';
   import DesignSourceDialog from './DesignSourceDialog.svelte';
+  import PrototypeRevisionDialog from './PrototypeRevisionDialog.svelte';
 
   interface Props {
     rpc: Rpc;
@@ -23,6 +24,7 @@
 
   let sources = $state<DesignSourceView[] | null>(null);
   let editing = $state<DesignSourceView | 'new' | null>(null);
+  let revising = $state<DesignSourceView | null>(null);
 
   async function load(): Promise<void> {
     try {
@@ -86,12 +88,14 @@
             <div class="si-txt">
               <div class="si-name">{s.name}</div>
               <div class="si-loc mono">{s.path}</div>
+              {#if s.app}<div class="si-loc">Runnable prototype · {s.app.app_url ?? `port ${s.app.port}`}</div>{/if}
               <div class="muted si-kind">Code repo or folder</div>
             </div>
             <span class="si-status" data-tone={s.ready ? 'ok' : 'failed'}>
               {#if s.ready}<CircleCheck class="icon-sm" aria-hidden="true" />{:else}<CircleX class="icon-sm" aria-hidden="true" />{/if}{s.status}
             </span>
             <span class="si-act">
+              {#if s.app}<Button variant="ghost" size="xs" onclick={() => (revising = s)}>Prototype code</Button>{/if}
               <Button variant="ghost" size="xs" onclick={() => (editing = s)}>Edit</Button>
               <Button variant="ghost" size="icon-xs" aria-label="Remove {s.name}" onclick={() => remove(s)}><Trash /></Button>
             </span>
@@ -101,6 +105,10 @@
     {/if}
   </div>
 </section>
+
+{#if revising}
+  <PrototypeRevisionDialog {rpc} source={revising} onclose={() => (revising = null)} />
+{/if}
 
 {#if editing}
   <DesignSourceDialog

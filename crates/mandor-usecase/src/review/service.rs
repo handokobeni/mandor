@@ -183,6 +183,41 @@ impl<D: Deps> RunService<D> {
     }
 
     /// Kartu VM yang tertahan di gerbang AC.
+    /// Run memakai sumber desain yang bisa dijalankan (R16 plan 2026-11-03-002).
+    pub(crate) async fn expects_prototype(&self, run: &RunRecord) -> bool {
+        for root in &run.design {
+            if matches!(
+                crate::review::DesignSources::prototype(&self.design, &root.id).await,
+                Ok(Some(_))
+            ) {
+                return true;
+            }
+        }
+        false
+    }
+
+    /// Akhir review normal: baris di desain yang tampilannya tidak
+    /// dibandingkan menjadi Can't verify dengan alasannya (R24, R28). Run
+    /// tanpa prototype tidak berubah (R16).
+    async fn fill_uncompared_looks(&self, run: &RunRecord, rows: &mut [mandor_domain::AcRow]) {
+        use mandor_domain::ac_ledger::Visual;
+        if !self.expects_prototype(run).await {
+            return;
+        }
+        let reason = if self.running_prototype(&run.id).await.is_some() {
+            "The reviewer did not compare this page with the prototype"
+        } else {
+            "The prototype was not running at a confirmed revision"
+        };
+        for r in rows
+            .iter_mut()
+            .filter(|r| r.compares_look() && r.visual == Visual::NotCompared)
+        {
+            r.visual = Visual::CantVerify;
+            r.visual_detail.description = Some(reason.to_owned());
+        }
+    }
+
     fn held_at_ac_gate(&self, run: &RunRecord) -> bool {
         self.is_vm()
             && run.state == RunState::Held
@@ -245,8 +280,20 @@ impl<D: Deps> RunService<D> {
                 database: app.as_ref().is_some_and(|a| a.database_confirmed),
                 login: app.as_ref().is_some_and(|a| a.login_confirmed),
             },
+            prototype_url: app.as_ref().and_then(|a| {
+                a.members
+                    .iter()
+                    .find(|m| m.prototype.is_some() && m.state == AppRunState::Running)
+                    .and_then(|m| m.url.clone())
+            }),
             app_urls: app
-                .map(|a| a.members.into_iter().filter_map(|m| m.url).collect())
+                .map(|a| {
+                    a.members
+                        .into_iter()
+                        .filter(|m| m.prototype.is_none())
+                        .filter_map(|m| m.url)
+                        .collect()
+                })
                 .unwrap_or_default(),
         })
     }
@@ -314,6 +361,7 @@ impl<D: Deps> RunService<D> {
             ReviewStatus::Cancelled
         } else if end.ok {
             fill_unreported(&mut rows);
+            self.fill_uncompared_looks(&run, &mut rows).await;
             restore_decisions(&mut rows);
             self.reviews.save_ac_rows(&run.id, &rows).await?;
             ReviewStatus::Finished
@@ -487,9 +535,9 @@ impl<D: Deps> RunService<D> {
         }
         let mut rows = self.reviews.ac_rows(run_id).await?;
         for id in ac_ids {
-            let ok = rows
-                .iter()
-                .any(|r| &r.ac_id == id && r.selectable() && r.verdict == Verdict::Fail);
+            // Perilaku gagal, atau tampilan berbeda dari prototype (R23 plan
+            // 2026-11-03-002).
+            let ok = rows.iter().any(|r| &r.ac_id == id && r.selectable());
             if !ok {
                 return Err(rejected("Only failed criteria can be sent to the agent"));
             }
@@ -512,6 +560,9 @@ impl<D: Deps> RunService<D> {
         .await?;
         for r in rows.iter_mut().filter(|r| ac_ids.contains(&r.ac_id)) {
             r.verdict = Verdict::FixInProgress;
+            if r.visual == mandor_domain::ac_ledger::Visual::Differs {
+                r.visual = mandor_domain::ac_ledger::Visual::NotCompared;
+            }
         }
         self.reviews.save_ac_rows(run_id, &rows).await?;
         Ok(())
@@ -523,7 +574,14 @@ fn review_request(
     facts: &ReviewFacts,
     settings: &crate::run_ports::ReviewerSettings,
 ) -> ReviewRequest {
-    let origins = facts.app_urls.iter().filter_map(|u| origin_of(u)).collect();
+    // Browser reviewer hanya boleh membuka app run dan prototype (R19 plan
+    // 2026-11-03-002).
+    let origins = facts
+        .app_urls
+        .iter()
+        .chain(&facts.prototype_url)
+        .filter_map(|u| origin_of(u))
+        .collect();
     ReviewRequest {
         review_id: review_id.to_owned(),
         origins,
@@ -574,6 +632,8 @@ pub struct ReviewReadiness {
     pub other_owner: Option<String>,
     pub confirmed: Confirmations,
     pub app_urls: Vec<String>,
+    /// URL prototype yang menyala untuk run ini (plan 2026-11-03-002).
+    pub prototype_url: Option<String>,
 }
 
 /// Browser reviewer menurut peran daemon.
@@ -671,6 +731,7 @@ impl ReviewReadiness {
             } else {
                 Vec::new()
             },
+            prototype_url: self.prototype_url.clone().filter(|_| reason.is_none()),
         }
     }
 }

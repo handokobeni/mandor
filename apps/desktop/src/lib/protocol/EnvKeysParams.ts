@@ -4,4 +4,8 @@
  * Sumber `.env` untuk Pick from .env: tepat satu dari repo atau sumber
  * desain (plan `2026-11-03-002`, KTD-P1).
  */
-export type EnvKeysParams = { repo_id: string | null, design_source_id: string | null, };
+export type EnvKeysParams = { repo_id: string | null, design_source_id: string | null, 
+/**
+ * Folder sumber desain yang belum disimpan (dialog Add source).
+ */
+design_path: string | null, };

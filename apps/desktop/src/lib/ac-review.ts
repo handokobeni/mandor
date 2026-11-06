@@ -7,6 +7,20 @@ import type { AcRowView } from '#lib/protocol/AcRowView.ts';
 import type { PublishParams } from '#lib/protocol/PublishParams.ts';
 import type { Tone } from '#lib/board.ts';
 
+/** Baris tanpa hasil tampilan (run tanpa prototype); dipakai fixture dan mock. */
+export const NO_VISUAL: Pick<AcRowView, 'visual' | 'visual_detail'> = {
+  visual: 'not_compared',
+  visual_detail: {
+    description: null,
+    app_path: null,
+    prototype_path: null,
+    prototype_rev: null,
+    screenshots: [],
+    decision_reason: null,
+    decided_by: null
+  }
+};
+
 export interface ChipMeta {
   label: string;
   tone: Tone | 'pr';
@@ -35,6 +49,84 @@ export const VERDICT_META: Record<string, ChipMeta> = {
 /** Verdict yang ditampilkan: baris Follow design tidak dinilai terhadap AC. */
 export function shownVerdict(r: AcRowView): string {
   return r.design === 'follow_design' ? 'follows_design' : r.verdict;
+}
+
+/**
+ * Verdict untuk hitungan dan gerbang, sama dengan daemon: perilaku lulus
+ * tetapi tampilan berbeda dihitung gagal, tampilan yang tidak bisa dipastikan
+ * dihitung Can't verify (plan 2026-11-03-002, R20).
+ */
+export function effectiveVerdict(r: AcRowView): string {
+  const v = shownVerdict(r);
+  if (v === 'pass' || v === 'checked_manually') {
+    if (r.visual === 'differs') return 'fail';
+    if (r.visual === 'cant_verify') return 'cant_verify';
+  }
+  return v;
+}
+
+export const VISUAL_META: Record<string, ChipMeta> = {
+  match: { label: 'Looks like the prototype', tone: 'ok' },
+  differs: { label: 'Looks different', tone: 'failed' },
+  cant_verify: { label: 'Look not verified', tone: 'warning' },
+  accepted: { label: 'Difference accepted', tone: 'muted' },
+  checked_manually: { label: 'Look checked', tone: 'ok' }
+};
+
+/** Chip hasil tampilan; `null` bila baris tidak dibandingkan. */
+export function visualMeta(visual: string): ChipMeta | null {
+  return VISUAL_META[visual] ?? null;
+}
+
+/** Baris yang ditawarkan dialog gerbang: gagal (Push anyway) dan Can't verify (cek manual). */
+export function gateRows(rows: AcRowView[]): { fails: AcRowView[]; cants: AcRowView[] } {
+  const live = rows.filter((r) => r.in_gate && !r.stale && r.status !== 'removed');
+  return {
+    fails: live.filter((r) => effectiveVerdict(r) === 'fail'),
+    cants: live.filter((r) => effectiveVerdict(r) === 'cant_verify')
+  };
+}
+
+/** Alasan baris memblokir push: bukti perilaku yang gagal, atau perbedaan
+ * tampilannya dengan prototype. */
+export function blockReason(r: AcRowView): string {
+  if (r.verdict === 'fail') return r.evidence ?? r.text;
+  const why = r.visual_detail.description;
+  return why ? `Looks different: ${why}` : 'Looks different from the prototype';
+}
+
+/** Alasan baris diminta dikonfirmasi di gerbang: bukti perilaku yang tak
+ * terverifikasi dan/atau alasan tampilannya tak terverifikasi. */
+export function cantReasons(r: AcRowView): string[] {
+  const out: string[] = [];
+  if (r.verdict === 'cant_verify' && r.evidence) out.push(r.evidence);
+  if (r.visual === 'cant_verify') {
+    const why = r.visual_detail.description;
+    out.push(why ? `Look not verified: ${why}` : 'Look not verified');
+  }
+  return out;
+}
+
+/** Link halaman yang dibandingkan reviewer; hanya path dengan origin yang sama (KTD-P6). */
+export function visualLinks(
+  r: AcRowView,
+  appUrl: string | null,
+  prototypeUrl: string | null
+): { app: string | null; prototype: string | null } {
+  const link = (path: string | null, base: string | null): string | null => {
+    if (!path || !base) return null;
+    try {
+      const origin = new URL(base).origin;
+      const url = new URL(path, origin);
+      return url.origin === origin && path.startsWith('/') && !path.startsWith('//') ? url.href : null;
+    } catch {
+      return null;
+    }
+  };
+  return {
+    app: link(r.visual_detail.app_path, appUrl),
+    prototype: link(r.visual_detail.prototype_path, prototypeUrl)
+  };
 }
 
 /** Judul AC: baris pertama yang tidak kosong (teks bisa memuat skenario Gherkin). */
@@ -92,7 +184,7 @@ export function counts(rows: AcRowView[]): Counts {
   for (const r of activeRows(rows)) {
     c.total++;
     if (r.stale) c.stale++;
-    switch (shownVerdict(r)) {
+    switch (effectiveVerdict(r)) {
       case 'pass':
         c.pass++;
         c.ok++;
@@ -202,9 +294,12 @@ export function tabCount(rows: AcRowView[]): { text: string; failed: number } | 
   return { text: `${c.ok}/${c.total}`, failed: c.fail };
 }
 
-/** Baris Fail yang masih berlaku boleh dikirim ke agent; Follow design dan Pass tidak. */
+/**
+ * Baris Fail, atau yang tampilannya berbeda dari prototype, yang masih berlaku
+ * boleh dikirim ke agent; Follow design dan Pass tidak.
+ */
 export function canSend(r: AcRowView): boolean {
-  return r.selectable && r.verdict === 'fail' && !r.stale && r.status !== 'removed';
+  return r.selectable && (r.verdict === 'fail' || r.visual === 'differs') && !r.stale && r.status !== 'removed';
 }
 
 /** Penanda baris dari data tracker. */
@@ -237,6 +332,13 @@ export function toggleSelection(selected: Set<string>, r: AcRowView): Set<string
   if (next.has(r.ac_id)) next.delete(r.ac_id);
   else next.add(r.ac_id);
   return next;
+}
+
+/** Pilihan Send to agent yang masih bisa dikirim: Fail atau tampilan berbeda
+ * (baris lain dibuang, mis. setelah review baru). */
+export function pruneSelection(selected: Set<string>, rows: AcRowView[]): Set<string> {
+  const ids = new Set(rows.filter(canSend).map((r) => r.ac_id));
+  return new Set([...selected].filter((id) => ids.has(id)));
 }
 
 /** Alasan Push anyway wajib berisi selain spasi. */
@@ -281,4 +383,22 @@ export function noDesignSource(ledger: Pick<AcLedgerView, 'design_sources'>): bo
  */
 export function reviewMeta(rows: AcRowView[]): string {
   return rows.some((r) => r.verdict !== 'not_reviewed') ? 'Verdicts from the VM review' : 'No review yet';
+}
+
+/** Label screenshot tampilan: reviewer menyimpan halaman app lalu prototype. */
+export function shotLabels(n: number): string[] {
+  if (n === 2) return ['App page', 'Prototype page'];
+  return Array.from({ length: n }, (_, i) => `Screenshot ${i + 1}`);
+}
+
+/** Tingkat zoom penampil screenshot; 1 = ukuran asli (piksel tajam). */
+export const ZOOM_STEPS = [0.25, 0.5, 0.75, 1, 1.5, 2, 3, 4] as const;
+
+/** Zoom berikutnya dari `fit` atau tingkat sekarang, dibatasi rentang. */
+export function nextZoom(current: 'fit' | number, dir: 1 | -1): number {
+  if (current === 'fit') return dir > 0 ? 1 : 0.5;
+  const i = ZOOM_STEPS.findIndex((z) => z >= current);
+  const at = i === -1 ? ZOOM_STEPS.length - 1 : i;
+  const next = Math.min(ZOOM_STEPS.length - 1, Math.max(0, at + dir));
+  return ZOOM_STEPS[next];
 }

@@ -64,6 +64,14 @@ pengaturan.
 Bila status menunjukkan "Lark session expired", refresh token sudah tidak
 berlaku: login ulang.
 
+**Berganti Base** (mis. dari Base copy untuk uji ke Base sungguhan): ganti
+`app_token` dan ID tabel lalu simpan. Setiap run terikat Base tempat ia
+dimulai. Run Base lain tidak tampil, tidak diperiksa klaimnya, dan tidak
+menghalangi kartu dengan `record_id` sama di Base aktif (Base copy berbagi
+`record_id` dengan Base aslinya). Saat kembali ke Base itu, run-nya tampil
+lagi apa adanya. Run yang terlanjur diparkir (claim lost atau stopped) pulih
+sendiri ke menunggu dev bila klaim kartunya ternyata masih milik daemon ini.
+
 ## 4. Repo dan profil gh
 
 1. Login `gh` di mesin tempat daemon berjalan (WSL bila memakai Windows):

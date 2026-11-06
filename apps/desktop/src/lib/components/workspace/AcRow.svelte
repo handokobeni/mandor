@@ -5,11 +5,22 @@
   import ChevronRight from '@lucide/svelte/icons/chevron-right';
   import FileCode from '@lucide/svelte/icons/file-code';
   import Wrench from '@lucide/svelte/icons/wrench';
-  import { canSend, DESIGN_META, evidenceParts, label, rowMarks, shownVerdict } from '#lib/ac-review.ts';
+  import {
+    canSend,
+    DESIGN_META,
+    evidenceParts,
+    label,
+    rowMarks,
+    shotLabels,
+    shownVerdict,
+    visualLinks,
+    visualMeta
+  } from '#lib/ac-review.ts';
   import { Button } from '#lib/components/ui/button/index.ts';
   import { Checkbox } from '#lib/components/ui/checkbox/index.ts';
   import type { AcRowView } from '#lib/protocol/AcRowView.ts';
   import AcChip from './AcChip.svelte';
+  import ScreenshotViewer from './ScreenshotViewer.svelte';
 
   interface Props {
     row: AcRowView;
@@ -24,6 +35,10 @@
     onfocus: () => void;
     onkey: (e: KeyboardEvent) => void;
     onfile: (path: string) => void;
+    /** URL app dan prototype yang menyala, untuk link halaman yang dibandingkan. */
+    urls?: { app: string | null; prototype: string | null };
+    /** Memuat screenshot hasil tampilan (run VM) sebagai data URL. */
+    onscreenshot?: (index: number) => Promise<string>;
   }
   let {
     row,
@@ -37,8 +52,23 @@
     onselect,
     onfocus,
     onkey,
-    onfile
+    onfile,
+    urls = { app: null, prototype: null },
+    onscreenshot
   }: Props = $props();
+
+  let shots = $state<string[] | null>(null);
+  /** Screenshot yang dibuka di penampil besar. */
+  let viewing = $state<number | null>(null);
+  let shotError = $state<string | null>(null);
+  async function loadShots(): Promise<void> {
+    if (!onscreenshot) return;
+    try {
+      shots = await Promise.all(row.visual_detail.screenshots.map((_, i) => onscreenshot(i)));
+    } catch (err) {
+      shotError = err instanceof Error ? err.message : String(err);
+    }
+  }
 
   let el = $state<HTMLDivElement | null>(null);
   $effect(() => {
@@ -46,6 +76,8 @@
   });
 
   const verdict = $derived(shownVerdict(row));
+  const look = $derived(visualMeta(row.visual));
+  const links = $derived(visualLinks(row, urls.app, urls.prototype));
   const selectable = $derived(!readonly && canSend(row));
   const fixing = $derived(!readonly && row.verdict === 'fix_in_progress');
   const pending = $derived(reviewing && row.in_gate && row.verdict === 'not_reviewed');
@@ -103,7 +135,10 @@
   <span class="ac-c ac-d" role="gridcell">
     {#if !noSource}<AcChip kind="design" value={row.design} />{/if}
   </span>
-  <span class="ac-c ac-v" role="gridcell"><AcChip kind="verdict" value={verdict} stale={row.stale} {pending} /></span>
+  <span class="ac-c ac-v" role="gridcell">
+    <AcChip kind="verdict" value={verdict} stale={row.stale} {pending} />
+    {#if look && !pending}<AcChip kind="visual" value={row.visual} />{/if}
+  </span>
   <span class="ac-c ac-x" role="gridcell">
     <Button variant="ghost" size="icon-xs" tabindex={-1} aria-label="{expanded ? 'Collapse' : 'Expand'} {label(row)}" onclick={onexpand}>
       {#if expanded}<ChevronDown />{:else}<ChevronRight />{/if}
@@ -137,6 +172,54 @@
           </p>
         {/if}
       </div>
+      {#if look}
+        <div class="ev-col">
+          <div class="ev-h">Look vs prototype</div>
+          <p class="ev-lead">{look.label}</p>
+          {#if row.visual_detail.decided_by !== null && (row.visual === 'accepted' || row.visual === 'checked_manually')}
+            <p>By {row.visual_detail.decided_by}{#if row.visual_detail.decision_reason}: {row.visual_detail.decision_reason}{/if}</p>
+          {/if}
+          {#if row.visual_detail.description}<p class="ev-text">{row.visual_detail.description}</p>{/if}
+          {#if row.visual_detail.screenshots.length > 0 && onscreenshot}
+            {#if shots}
+              <div class="ev-shots">
+                {#each shots as src, i (i)}
+                  <button type="button" class="ev-shot" onclick={() => (viewing = i)} title="Open full size">
+                    <img {src} alt="{shotLabels(shots.length)[i]} of {label(row)}" />
+                    <span class="ev-shot-label">{shotLabels(shots.length)[i]}</span>
+                  </button>
+                {/each}
+              </div>
+              {#if viewing !== null}
+                <ScreenshotViewer {shots} title={label(row)} bind:index={viewing} onclose={() => (viewing = null)} />
+              {/if}
+            {:else}
+              <p>
+                <button type="button" class="link" onclick={() => void loadShots()}
+                  >Show {row.visual_detail.screenshots.length} screenshot{row.visual_detail.screenshots.length === 1
+                    ? ''
+                    : 's'}</button
+                >
+                {#if shotError}<span class="field-error">{shotError}</span>{/if}
+              </p>
+            {/if}
+          {/if}
+          {#if row.visual_detail.app_path || row.visual_detail.prototype_path}
+            <p class="ev-links">
+              {#if links.app}<a href={links.app} target="_blank" rel="noopener noreferrer">App page</a>{:else if row.visual_detail.app_path}<span
+                  class="muted"
+                  title="Run the app to open this page">App page</span
+                >{/if}
+              <span class="mono muted">{row.visual_detail.app_path ?? ''}</span>
+              {#if links.prototype}<a href={links.prototype} target="_blank" rel="noopener noreferrer">Prototype page</a
+                >{:else if row.visual_detail.prototype_path}<span class="muted" title="Run the app to open this page"
+                  >Prototype page</span
+                >{/if}
+              <span class="mono muted">{row.visual_detail.prototype_path ?? ''}</span>
+            </p>
+          {/if}
+        </div>
+      {/if}
       <div class="ev-col">
         <div class="ev-h">Design</div>
         {#if noSource}

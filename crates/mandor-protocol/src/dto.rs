@@ -724,6 +724,10 @@ pub struct AppMemberView {
     /// URL app kanonik: alamat login dev dan origin reviewer.
     pub url: Option<String>,
     pub state: String,
+    /// Nama sumber desain bila anggota ini prototype (plan 2026-11-03-002).
+    pub prototype: Option<String>,
+    /// Repo Web yang diuji reviewer dengan browser: link app di UI.
+    pub browser_tests: bool,
 }
 
 /// State app milik run.
@@ -748,6 +752,10 @@ pub struct AppChangesView {
     pub files: Vec<String>,
     /// Manifest paket, lockfile, skrip, dan berkas perintah start.
     pub flagged: Vec<String>,
+    /// Nama sumber desain bila entri ini prototype.
+    pub prototype: Option<String>,
+    /// Prototype dengan revisi yang sudah dikonfirmasi; tidak perlu ditampilkan.
+    pub confirmed: bool,
 }
 
 /// Parameter `app.run`.
@@ -933,6 +941,45 @@ pub struct RunEventView {
     pub run_id: String,
 }
 
+fn not_compared() -> String {
+    "not_compared".to_owned()
+}
+
+/// Rincian hasil tampilan baris AC (plan 2026-11-03-002, R21).
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, TS)]
+pub struct VisualDetailView {
+    /// Deskripsi perbedaan dari reviewer.
+    #[serde(default)]
+    pub description: Option<String>,
+    #[serde(default)]
+    pub app_path: Option<String>,
+    #[serde(default)]
+    pub prototype_path: Option<String>,
+    #[serde(default)]
+    pub prototype_rev: Option<String>,
+    /// Berkas screenshot salinan daemon (run VM saja).
+    #[serde(default)]
+    pub screenshots: Vec<String>,
+    #[serde(default)]
+    pub decision_reason: Option<String>,
+    #[serde(default)]
+    pub decided_by: Option<String>,
+}
+
+/// Parameter `review.screenshot`: screenshot ke-`index` baris AC.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+pub struct VisualScreenshotParams {
+    pub run_id: String,
+    pub ac_id: String,
+    pub index: u32,
+}
+
+/// Screenshot sebagai data URL gambar.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+pub struct VisualScreenshotView {
+    pub data_url: String,
+}
+
 /// Satu baris buku AC (Rilis 2).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
 pub struct AcRowView {
@@ -959,6 +1006,12 @@ pub struct AcRowView {
     /// Kartu asal AC di run grup (`record_id`, kunci ada di `RunView.cards`);
     /// `None` untuk run tunggal.
     pub card: Option<String>,
+    /// Hasil tampilan terhadap prototype: `not_compared`, `match`, `differs`,
+    /// `cant_verify`, `accepted`, `checked_manually` (plan 2026-11-03-002).
+    #[serde(default = "not_compared")]
+    pub visual: String,
+    #[serde(default)]
+    pub visual_detail: VisualDetailView,
 }
 
 /// Hasil `ledger.get`: buku AC run setelah refresh dari tracker.
@@ -1116,6 +1169,8 @@ pub struct DesignSourceView {
     pub ready: bool,
     /// `Ready`, `Path missing`, `Not a folder`, atau alasan penolakan.
     pub status: String,
+    /// Setelan app prototype; `null` untuk folder biasa (plan 2026-11-03-002, R6).
+    pub app: Option<RepoAppView>,
 }
 
 /// Parameter `design_sources.add`.
@@ -1123,6 +1178,9 @@ pub struct DesignSourceView {
 pub struct DesignSourceAdd {
     pub name: String,
     pub path: String,
+    /// Isi untuk "Runnable prototype".
+    #[serde(default)]
+    pub app: Option<RepoAppView>,
 }
 
 /// Parameter `design_sources.update`.
@@ -1131,6 +1189,25 @@ pub struct DesignSourceUpdate {
     pub id: String,
     pub name: String,
     pub path: String,
+    /// `null` mematikan "Runnable prototype".
+    #[serde(default)]
+    pub app: Option<RepoAppView>,
+}
+
+/// Revisi prototype: saat ini, yang terakhir dikonfirmasi, dan berkas yang
+/// berubah di antaranya (plan 2026-11-03-002, R15, R28).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+pub struct PrototypeRevisionView {
+    pub current: String,
+    pub confirmed: Option<String>,
+    pub files: Vec<String>,
+}
+
+/// Parameter `design_sources.confirm`: revisi yang ditampilkan ke dev.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+pub struct PrototypeConfirm {
+    pub id: String,
+    pub revision: String,
 }
 
 /// Parameter `design_sources.remove`.
@@ -1158,6 +1235,10 @@ pub struct LedgerToolInfo {
     pub run_id: String,
     /// `design` atau `verdict`.
     pub role: String,
+    /// Prototype run ini menyala; reviewer mendapat `ac_set_visual`
+    /// (plan 2026-11-03-002, R16).
+    #[serde(default)]
+    pub visual: bool,
 }
 
 /// Parameter `ledger.tool.set_design`.
@@ -1178,6 +1259,23 @@ pub struct LedgerToolSetVerdict {
     pub verdict: String,
     #[serde(default)]
     pub evidence: Option<String>,
+}
+
+/// Parameter `ledger.tool.set_visual` (plan 2026-11-03-002, KTD-P6).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct LedgerToolSetVisual {
+    pub ac_id: String,
+    /// `match`, `differs`, atau `cant_verify`.
+    pub result: String,
+    #[serde(default)]
+    pub description: Option<String>,
+    #[serde(default)]
+    pub app_path: Option<String>,
+    #[serde(default)]
+    pub prototype_path: Option<String>,
+    /// Nama berkas screenshot di folder output browser (run VM).
+    #[serde(default)]
+    pub screenshots: Vec<String>,
 }
 
 /// Parameter `runs.handoff`.
@@ -1472,6 +1570,9 @@ pub struct EnvKeysParams {
     pub repo_id: Option<String>,
     #[serde(default)]
     pub design_source_id: Option<String>,
+    /// Folder sumber desain yang belum disimpan (dialog Add source).
+    #[serde(default)]
+    pub design_path: Option<String>,
 }
 
 /// Nama kunci `.env` di folder asli; nilai tidak pernah dikirim.

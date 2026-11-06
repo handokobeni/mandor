@@ -12,6 +12,19 @@ pub struct DesignRoot {
     pub path: PathBuf,
 }
 
+/// Prototype yang bisa dijalankan dari sumber desain (plan 2026-11-03-002,
+/// KTD-P2, KTD-P4).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Prototype {
+    pub id: String,
+    pub name: String,
+    /// Folder sumber: tempat prototype dijalankan dan sumber `.env`-nya.
+    pub path: PathBuf,
+    pub app: mandor_domain::app_run::AppSettings,
+    /// Revisi folder yang terakhir dikonfirmasi dev (R15, R28).
+    pub confirmed: Option<String>,
+}
+
 /// Sumber desain pilihan yang sudah disiapkan adapter (plan 2026-10-30-001,
 /// KTD-8).
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -59,6 +72,32 @@ pub trait DesignSources: Send + Sync {
         &self,
         names: &[String],
     ) -> impl std::future::Future<Output = Result<Vec<String>, crate::ports::PortError>> + Send;
+
+    /// Prototype sumber `id`, bila sumber itu bisa dijalankan.
+    fn prototype(
+        &self,
+        id: &str,
+    ) -> impl std::future::Future<Output = Result<Option<Prototype>, crate::ports::PortError>> + Send;
+
+    /// Revisi folder saat ini, hanya baca (KTD-P4).
+    fn revision(
+        &self,
+        path: &Path,
+    ) -> impl std::future::Future<Output = Result<String, crate::ports::PortError>> + Send;
+
+    /// Berkas yang berubah sejak revisi `from`; kosong bila tidak diketahui.
+    fn changes_since(
+        &self,
+        path: &Path,
+        from: &str,
+    ) -> impl std::future::Future<Output = Result<Vec<String>, crate::ports::PortError>> + Send;
+
+    /// Menyimpan revisi yang dikonfirmasi dev untuk sumber `id` (R15).
+    fn confirm(
+        &self,
+        id: &str,
+        revision: &str,
+    ) -> impl std::future::Future<Output = Result<(), crate::ports::PortError>> + Send;
 }
 
 /// Hasil pemeriksaan berkas oleh adapter.

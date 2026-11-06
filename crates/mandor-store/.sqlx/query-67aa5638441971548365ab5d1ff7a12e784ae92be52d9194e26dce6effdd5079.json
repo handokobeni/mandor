@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "SELECT c.run_id FROM run_cards c JOIN runs r ON r.id = c.run_id\n         WHERE c.record_id = ? AND c.open = 1 AND r.closed = 0\n         ORDER BY r.created_at_ms DESC LIMIT 1",
+  "query": "SELECT c.run_id FROM run_cards c JOIN runs r ON r.id = c.run_id\n         WHERE c.record_id = ? AND c.open = 1 AND r.closed = 0 AND (? IS NULL OR r.scope = ?)\n         ORDER BY r.created_at_ms DESC LIMIT 1",
   "describe": {
     "columns": [
       {
@@ -16,11 +16,11 @@
       }
     ],
     "parameters": {
-      "Right": 1
+      "Right": 3
     },
     "nullable": [
       false
     ]
   },
-  "hash": "f5dbcde81753cb95e19e5316736c67587b202f1ecfe7c047a5e111bb5821357f"
+  "hash": "67aa5638441971548365ab5d1ff7a12e784ae92be52d9194e26dce6effdd5079"
 }

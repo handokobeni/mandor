@@ -125,6 +125,96 @@ impl AppSettings {
     }
 }
 
+/// Pemakai port lain di daemon yang sama: app repo atau prototype (R8).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PortUse {
+    /// Nama repo atau sumber desain.
+    pub owner: String,
+    pub port: u16,
+}
+
+/// Pemakai lain yang sudah memakai `port`, bila ada (R8).
+#[must_use]
+pub fn port_conflict(port: Option<u16>, others: &[PortUse]) -> Option<&PortUse> {
+    let port = port?;
+    others.iter().find(|u| u.port == port)
+}
+
+/// Alasan URL prototype ditolak (R7).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+pub enum PrototypeUrlError {
+    #[error("The prototype URL must be a local address such as http://127.0.0.1:<port>")]
+    NotLoopback,
+    #[error("The prototype URL must use the prototype's port")]
+    PortMismatch,
+    #[error(
+        "The prototype URL must use a host no app's login cookies can reach: not the host of any app (cookies ignore the port) or a subdomain of it, for example http://mock.localhost:<port>"
+    )]
+    SameHostAsApp,
+}
+
+/// URL prototype harus loopback, memakai `port`, dan host-nya berbeda dari
+/// host URL app repo, karena cookie terikat host, bukan port (R7).
+///
+/// # Errors
+/// [`PrototypeUrlError`] dengan alasan untuk dev.
+pub fn check_prototype_url(
+    url: &str,
+    port: u16,
+    app_urls: &[String],
+) -> Result<(), PrototypeUrlError> {
+    let (host, url_port) = host_port(url).ok_or(PrototypeUrlError::NotLoopback)?;
+    if !is_loopback(&host) {
+        return Err(PrototypeUrlError::NotLoopback);
+    }
+    if url_port != port {
+        return Err(PrototypeUrlError::PortMismatch);
+    }
+    if app_urls
+        .iter()
+        .filter_map(|u| host_port(u))
+        .any(|(app, _)| shares_cookies(&app, &host))
+    {
+        return Err(PrototypeUrlError::SameHostAsApp);
+    }
+    Ok(())
+}
+
+fn host_port(url: &str) -> Option<(String, u16)> {
+    let origin = crate::hook_review::origin_of(url)?;
+    let authority = origin.split_once("://")?.1;
+    let (host, port) = authority.rsplit_once(':')?;
+    Some((host.to_owned(), port.parse().ok()?))
+}
+
+/// `localhost` dan subdomainnya (`*.localhost`, RFC 6761) selalu loopback.
+fn is_localhost_name(host: &str) -> bool {
+    host == "localhost"
+        || host
+            .strip_suffix(".localhost")
+            .is_some_and(|sub| !sub.is_empty() && !sub.starts_with('.'))
+}
+
+fn is_loopback(host: &str) -> bool {
+    is_localhost_name(host) || host == "[::1]" || host.starts_with("127.")
+}
+
+/// Prototype di `proto` bisa menerima cookie app di `app`: host sama
+/// (cookie terikat host, bukan port), subdomain host app (cookie
+/// `Domain=<app>`), atau induk host app. Host satu label seperti `localhost`
+/// diperlakukan Chromium sebagai sufiks publik: cookie `Domain=localhost`
+/// menjadi host-only dan `x.localhost` tidak bisa menulis cookie untuk
+/// `localhost`, jadi keduanya tidak berbagi cookie lintas subdomain.
+fn shares_cookies(app: &str, proto: &str) -> bool {
+    let under = |child: &str, parent: &str| {
+        parent.contains('.')
+            && child
+                .strip_suffix(parent)
+                .is_some_and(|rest| rest.ends_with('.'))
+    };
+    proto == app || under(proto, app) || under(app, proto)
+}
+
 /// Lockfile yang menentukan kapan perintah setup perlu dijalankan ulang.
 pub const LOCKFILES: &[&str] = &[
     "bun.lock",
@@ -361,5 +451,97 @@ mod tests {
     fn nama_kunci_env_melewati_nilai_berkutip_multi_baris() {
         let text = "KEY=\"-----BEGIN KEY-----\nABCDEF==\nQUOTE=palsu\n-----END KEY-----\"\nNEXT='satu\nX=dua'\nLAST=ok\nONE=\"utuh\"\n";
         assert_eq!(env_key_names(text), ["KEY", "NEXT", "LAST", "ONE"]);
+    }
+
+    #[test]
+    fn url_prototype_loopback_port_sama_dan_host_beda_dari_app() {
+        let apps = ["http://localhost:3000".to_owned()];
+        assert_eq!(
+            check_prototype_url("http://127.0.0.1:3001", 3001, &apps),
+            Ok(())
+        );
+        assert_eq!(
+            check_prototype_url("http://[::1]:3001/x", 3001, &apps),
+            Ok(())
+        );
+        assert_eq!(
+            check_prototype_url("http://example.com:3001", 3001, &apps),
+            Err(PrototypeUrlError::NotLoopback)
+        );
+        assert_eq!(
+            check_prototype_url("http://127.0.0.1:3002", 3001, &apps),
+            Err(PrototypeUrlError::PortMismatch)
+        );
+        assert_eq!(
+            check_prototype_url("http://LOCALHOST:3001", 3001, &apps),
+            Err(PrototypeUrlError::SameHostAsApp)
+        );
+        assert_eq!(
+            check_prototype_url("bukan-url", 3001, &apps),
+            Err(PrototypeUrlError::NotLoopback)
+        );
+    }
+
+    #[test]
+    fn subdomain_localhost_lokal_dan_cookie_hanya_turun_ke_subdomain() {
+        // App multi-tenant memakai subdomain `*.localhost` (selalu loopback).
+        // Chrome di Windows tidak menjangkau 127.0.0.1 milik WSL, jadi
+        // prototype perlu bisa memakai nama localhost juga.
+        let tenant = ["http://stagingintegro.localhost:3000".to_owned()];
+        let plain = ["http://localhost:3000".to_owned()];
+        let ok = |url: &str, apps: &[String]| check_prototype_url(url, 3001, apps);
+        assert_eq!(ok("http://127.0.0.1:3001", &tenant), Ok(()));
+        // `localhost` adalah sufiks publik bagi browser: subdomain tidak
+        // bisa menulis cookie `Domain=localhost`, jadi induk dan saudara aman.
+        assert_eq!(ok("http://localhost:3001", &tenant), Ok(()));
+        assert_eq!(ok("http://mock.localhost:3001", &tenant), Ok(()));
+        // Cookie `Domain=<host app>` terkirim ke subdomain host app.
+        assert_eq!(
+            ok("http://mock.stagingintegro.localhost:3001", &tenant),
+            Err(PrototypeUrlError::SameHostAsApp)
+        );
+        // Cookie `Domain=localhost` dijadikan host-only oleh Chromium, jadi
+        // subdomain `localhost` tidak menerimanya; port lain di host yang
+        // sama tetap menerima cookie.
+        assert_eq!(ok("http://mock.localhost:3001", &plain), Ok(()));
+        assert_eq!(
+            ok("http://localhost:3001", &plain),
+            Err(PrototypeUrlError::SameHostAsApp)
+        );
+        assert_eq!(
+            ok("http://STAGINGINTEGRO.localhost:3001", &tenant),
+            Err(PrototypeUrlError::SameHostAsApp)
+        );
+        assert_eq!(
+            ok(
+                "http://mock.localhost:3001",
+                &["http://127.0.0.1:3000".to_owned()]
+            ),
+            Ok(())
+        );
+        assert_eq!(
+            ok("http://localhost.example.com:3001", &tenant),
+            Err(PrototypeUrlError::NotLoopback)
+        );
+    }
+
+    #[test]
+    fn port_bentrok_dengan_pemakai_lain() {
+        let others = [
+            PortUse {
+                owner: "kelola-web".to_owned(),
+                port: 3000,
+            },
+            PortUse {
+                owner: "kelola-api".to_owned(),
+                port: 8080,
+            },
+        ];
+        assert_eq!(
+            port_conflict(Some(3000), &others).map(|u| u.owner.as_str()),
+            Some("kelola-web")
+        );
+        assert!(port_conflict(Some(3001), &others).is_none());
+        assert!(port_conflict(None, &others).is_none());
     }
 }

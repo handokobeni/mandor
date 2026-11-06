@@ -7,7 +7,8 @@
 use std::future::Future;
 
 use mandor_protocol::{
-    LedgerToolInfo, LedgerToolSetDesign, LedgerToolSetVerdict, RpcError, method,
+    LedgerToolInfo, LedgerToolSetDesign, LedgerToolSetVerdict, LedgerToolSetVisual, RpcError,
+    method,
 };
 use serde_json::{Value, json};
 
@@ -81,7 +82,12 @@ impl<R: LedgerRpc> McpSession<R> {
         let mut tools = vec![read_tool()];
         match role.as_str() {
             "design" => tools.push(design_tool()),
-            "verdict" => tools.push(verdict_tool()),
+            "verdict" => {
+                tools.push(verdict_tool());
+                if self.info.as_ref().is_some_and(|i| i.visual) {
+                    tools.push(visual_tool());
+                }
+            }
             _ => {}
         }
         Ok(json!({ "tools": tools }))
@@ -101,6 +107,10 @@ impl<R: LedgerRpc> McpSession<R> {
             },
             "ac_set_verdict" => match serde_json::from_value::<LedgerToolSetVerdict>(args) {
                 Ok(p) => self.call_with(method::LEDGER_TOOL_SET_VERDICT, &p).await,
+                Err(e) => return tool_error(&format!("invalid arguments: {e}")),
+            },
+            "ac_set_visual" => match serde_json::from_value::<LedgerToolSetVisual>(args) {
+                Ok(p) => self.call_with(method::LEDGER_TOOL_SET_VISUAL, &p).await,
                 Err(e) => return tool_error(&format!("invalid arguments: {e}")),
             },
             other => return tool_error(&format!("unknown tool: {other}")),
@@ -174,6 +184,26 @@ fn verdict_tool() -> Value {
     })
 }
 
+fn visual_tool() -> Value {
+    json!({
+        "name": "ac_set_visual",
+        "description": "Record how one acceptance criterion's page looks next to the running design prototype: match, differs, or cant_verify. Only for criteria whose Design is in_design or partly, and only the parts that are in the design. Give a short plain-text description of any difference and the page paths you compared (app_path and prototype_path, each starting with /). Ignore data content. Never paste page data or secrets.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "ac_id": {"type": "string", "description": "ac_id from ac_ledger_read"},
+                "result": {"type": "string", "enum": ["match", "differs", "cant_verify"]},
+                "description": {"type": "string"},
+                "app_path": {"type": "string", "description": "Path on the app, e.g. /jabatan"},
+                "prototype_path": {"type": "string", "description": "Path on the prototype"},
+                "screenshots": {"type": "array", "items": {"type": "string"}, "description": "Screenshot file names you saved with the browser tool (overnight reviews only)"},
+            },
+            "required": ["ac_id", "result", "description", "app_path", "prototype_path"],
+            "additionalProperties": false,
+        },
+    })
+}
+
 fn tool_error(message: &str) -> Value {
     json!({"content": [{"type": "text", "text": message}], "isError": true})
 }
@@ -202,7 +232,10 @@ mod tests {
                 .unwrap_or_else(std::sync::PoisonError::into_inner)
                 .push((method.to_owned(), params.clone()));
             match method {
-                "ledger.tool.info" => Ok(json!({"run_id": "run1", "role": self.role})),
+                "ledger.tool.info" => Ok(match self.role.strip_suffix("+visual") {
+                    Some(role) => json!({"run_id": "run1", "role": role, "visual": true}),
+                    None => json!({"run_id": "run1", "role": self.role}),
+                }),
                 "ledger.tool.read" => Ok(json!([{"ac_id": "ac1"}])),
                 "ledger.tool.set_verdict" if self.role == "design" => Err(RpcError::new(
                     ErrorCode::Unauthorized,
@@ -322,5 +355,42 @@ mod tests {
                 .unwrap_or_default()
                 .contains("ac1")
         );
+    }
+
+    /// Plan 2026-11-03-002, U5: `ac_set_visual` hanya untuk reviewer run yang
+    /// prototype-nya menyala (AE7).
+    #[tokio::test]
+    async fn alat_tampilan_hanya_bila_prototype_menyala() {
+        let fake = rpc("verdict+visual");
+        let mut s = McpSession::new(&fake);
+        let list = ask(
+            &mut s,
+            json!({"jsonrpc":"2.0","id":1,"method":"tools/list"}),
+        )
+        .await;
+        let names: Vec<String> = list["result"]["tools"]
+            .as_array()
+            .cloned()
+            .unwrap_or_default()
+            .iter()
+            .filter_map(|t| t["name"].as_str().map(str::to_owned))
+            .collect();
+        assert_eq!(names, ["ac_ledger_read", "ac_set_verdict", "ac_set_visual"]);
+        let out = ask(
+            &mut s,
+            json!({"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"ac_set_visual","arguments":{
+                "ac_id":"ac1","result":"differs","description":"tombol biru","app_path":"/jabatan",
+                "prototype_path":"/jabatan"}}}),
+        )
+        .await;
+        assert_eq!(out["result"]["isError"], false, "{out}");
+        let calls = fake
+            .calls
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let (method, params) = calls.last().cloned().unwrap_or_default();
+        assert_eq!(method, "ledger.tool.set_visual");
+        assert_eq!(params["result"], "differs");
+        assert_eq!(params["screenshots"], json!([]));
     }
 }

@@ -40,7 +40,7 @@ Pagar yang berlaku selama review:
 | App URL | Opsional. Alamat tempat Anda login (cookie login terikat ke host ini) |
 | .env keys | Nama kunci yang diteruskan dari `.env` repo. Nilai tidak pernah ditampilkan dan tidak disalin ke worktree. Tombol **Pick from .env** membaca nama kunci dari `.env` folder repo asli (di mesin daemon target, laptop atau VM) sebagai daftar centang; kunci tersimpan yang sudah tidak ada di `.env` tetap tampil dengan tanda "not in .env" |
 | Browser testing | Izinkan reviewer menguji app di browser (run satu repo). Run workspace memakai setelan workspace |
-| Restart the app before reviews | Opsional, bawaan mati. Bila app run ini menjalankan kode lama, Mandor menyalakannya ulang dari kode terbaru sebelum review berbrowser, termasuk review otomatis setelah Waiting Fix. Kode agent berjalan dengan kunci `.env` terpilih **tanpa** konfirmasi perubahan, jadi aktifkan hanya untuk repo dengan kredensial lokal/dev |
+| Restart the app before reviews | Opsional, bawaan mati. Bila app run ini menjalankan kode lama, Mandor menyalakannya ulang dari kode terbaru sebelum review berbrowser, termasuk review otomatis setelah Waiting Fix. Kode agent berjalan dengan kunci `.env` terpilih **tanpa** konfirmasi perubahan, jadi aktifkan hanya untuk repo dengan kredensial lokal/dev. Tampil untuk semua repo Web, juga saat Browser testing mati, karena run workspace (mis. api + web) baru di-restart bila semua repo Web-nya menyalakan setelan ini |
 | Push & PR gate | Use workspace, Block, atau Warn. Run multi-repo memakai yang paling ketat |
 
 Catatan:
@@ -64,6 +64,27 @@ Konfirmasi login dipertahankan karena cookie di browser tetap ada. Bila app butu
 ## 4. Sumber desain
 
 **Settings → Design sources → Add source**: nama dan path folder (atau repo lokal) berisi desain, mis. prototipe HTML atau ekspor desain. Mandor hanya membaca folder ini, dan agent tidak bisa menulis ke dalamnya. Sumber yang path-nya hilang ditandai **Path missing** dan tidak bisa dipilih di Start.
+
+### Prototype yang bisa dijalankan (perbandingan tampilan)
+
+Bila desain berupa app (mis. `kelola-web-prototype`, Next.js di branch `prototype`), nyalakan **Runnable prototype** di dialog sumber desain:
+
+| Field | Isi |
+|---|---|
+| Setup command | Opsional, mis. `pnpm install`; jalan saat lockfile berubah |
+| Start command | Mis. `pnpm dev --port 3001` |
+| Port | Harus berbeda dari port app repo mana pun dan prototype lain (di VM: dalam rentang port developer) |
+| URL | Alamat lokal yang **tidak terjangkau cookie login app mana pun**: bukan host app repo mana pun di daemon ini (cookie mengabaikan port) dan bukan subdomainnya. Paling aman nama sendiri seperti `http://mock.localhost:3001`. Di WSL, Chrome di Windows menjangkau nama `localhost`/`*.localhost` tetapi belum tentu `127.0.0.1` |
+| .env keys | Kunci dari `.env` folder prototype; **Pick from .env** tersedia setelah sumber disimpan |
+
+Perilakunya:
+
+- Run yang memakai sumber ini menyalakan prototype bersama app repo saat **Run app**, dari folder sumber apa adanya (tanpa `git pull`). Tombol **Open prototype** muncul di samping URL app. Prototype yang gagal menyala tidak menghentikan app repo.
+- Kode prototype dijalankan hanya pada revisi yang Anda konfirmasi. Dialog Run app menampilkan berkas yang berubah sejak konfirmasi terakhir. Untuk mengonfirmasi tanpa Run app (mis. prototype di VM), buka **Prototype code** di daftar sumber desain.
+- Reviewer AC membandingkan halaman app dan prototype pada viewport 1440×900 untuk baris AC yang **In design** atau **Partly**. Isi data diabaikan; hanya bagian yang ada di desain yang dibandingkan. Baris Conflicts dan Missing dinilai dari perilaku AC saja, baris Follow design tetap di luar review.
+- Hasil tampilan tampil sebagai chip kedua (Looks like the prototype, Looks different, Look not verified) dengan deskripsi dan link halaman. Tampilan yang berbeda menahan push seperti AC gagal; **Push anyway** dengan alasan menerima perbedaan, dan keputusan itu bertahan selama review berikutnya menemukan perbedaan yang sama. Baris yang hanya berbeda tampilannya bisa dikirim ke agent.
+- Prototype yang berubah setelah review membuat hasil review usang, sehingga Push & PR memulai review baru.
+- Run VM menyimpan screenshot kedua sisi (tombol **Show screenshots** di detail baris); screenshot dihapus saat run ditutup. Laptop tidak menyimpan screenshot.
 
 ## 5. View "Design gaps" di Lark
 

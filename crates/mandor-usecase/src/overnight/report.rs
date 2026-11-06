@@ -172,7 +172,7 @@ impl<D: Deps> RunService<D> {
                 let count = |v: Verdict| {
                     let n = rows
                         .iter()
-                        .filter(|r| r.verdict == v)
+                        .filter(|r| r.effective_verdict() == v)
                         .filter(|r| {
                             group.is_none() || r.card.as_deref() == Some(record_id.as_str())
                         })

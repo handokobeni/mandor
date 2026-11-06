@@ -195,6 +195,7 @@ async fn pengaturan_app_repo_dan_state_app_per_run() {
             url: Some("http://localhost:5173".to_owned()),
             pgid: Some(4242),
             state: AppRunState::Running,
+            prototype: None,
         }],
         snapshot: [("repo1".to_owned(), "t1".to_owned())].into(),
         setup_hashes: [("repo1".to_owned(), "h1".to_owned())].into(),
@@ -243,4 +244,41 @@ async fn setelan_workspace_uji_browser_dan_mode_gerbang() {
         repos.repo("repo1").await.unwrap().unwrap().gate_mode,
         Some(GateMode::Block)
     );
+}
+
+#[tokio::test]
+async fn run_terikat_base_asal_dan_tak_terlihat_dari_base_lain() {
+    // Base copy berbagi record_id dengan Base aslinya; run satu Base tidak
+    // boleh dibaca, dicocokkan, atau menghalangi kartu di Base lain.
+    let (s, _d) = open().await;
+    let lama = RunsStore::new(s.clone());
+    lama.create(&run("lama"), 1).await.unwrap();
+
+    let copy = RunsStore::scoped(s.clone(), "copy/tbl1".to_owned());
+    // Run tanpa Base (sebelum migrasi) diadopsi Base yang aktif saat itu.
+    assert_eq!(copy.adopt_unscoped().await.unwrap(), 1);
+    let real = RunsStore::scoped(s.clone(), "real/tbl1".to_owned());
+    assert_eq!(real.adopt_unscoped().await.unwrap(), 0);
+
+    assert_eq!(copy.list_active().await.unwrap().len(), 1);
+    assert!(real.list_active().await.unwrap().is_empty());
+    assert!(real.active_for("rec1").await.unwrap().is_none());
+    assert!(real.latest_for("rec1").await.unwrap().is_none());
+    assert_eq!(
+        copy.active_for("rec1").await.unwrap().map(|r| r.id),
+        Some("lama".to_owned())
+    );
+
+    // Kartu yang sama di Base lain bisa dimulai tanpa konflik.
+    real.create(&run("baru"), 2).await.unwrap();
+    assert_eq!(
+        real.active_for("rec1").await.unwrap().map(|r| r.id),
+        Some("baru".to_owned())
+    );
+    assert_eq!(
+        copy.create(&run("kedua"), 3).await.unwrap_err(),
+        PortError::Conflict
+    );
+    // Store tanpa Base (status, keep-awake) tetap melihat semua run.
+    assert_eq!(lama.list_active().await.unwrap().len(), 2);
 }

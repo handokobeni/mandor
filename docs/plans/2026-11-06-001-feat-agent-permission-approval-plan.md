@@ -15,7 +15,7 @@ execution: code
 
 - **Objective:** Agent Mandor tidak lagi kena penolakan otomatis untuk perintah aman, dan setiap permintaan izin lain sampai ke dev sebagai kartu persetujuan di Chat run.
 - **Product authority:** pemilik produk Mandor (handokobeni). Keputusan di dokumen ini disetujui 2026-11-06.
-- **Open blockers:** spike S1 dan S2 di Outstanding Questions harus membuktikan kedua mekanisme Claude Code sebelum desain teknis dikunci.
+- **Open blockers:** tidak ada. Spike S1 dan S2 (2026-11-06) membuktikan kedua mekanisme Claude Code; hasilnya di Dependencies / Assumptions.
 
 ---
 
@@ -61,7 +61,7 @@ Tanpa layar persetujuan, permintaan itu otomatis ditolak ("no approval surface i
 **Kartu persetujuan**
 
 - R4. Permintaan izin Claude Code di giliran implementasi dan plan muncul sebagai kartu di Chat run, untuk semua jenis tool (Bash, web, dan lainnya).
-- R5. Kartu menampilkan tool, perintah atau target lengkap, folder kerja, dan alasan Claude Code meminta izin.
+- R5. Kartu menampilkan tool, perintah atau target lengkap, folder kerja, dan deskripsi langkah dari agent.
 - R6. Kartu punya tiga pilihan: Allow once, Allow for this run, dan Deny.
 - R7. Allow for this run hanya berlaku untuk permintaan yang persis sama, sampai run ditutup, dan bertahan saat daemon restart.
 - R8. Kartu yang tidak dijawab dalam 10 menit ditolak otomatis dan ditandai expired; agent menerima penolakan dan melanjutkan.
@@ -117,16 +117,16 @@ Tanpa layar persetujuan, permintaan itu otomatis ditolak ("no approval surface i
 
 ### Dependencies / Assumptions
 
-- Claude Code yang terpasang (2.1.318) punya `--permission-prompts host` dan `--permission-prompt-tool`; opsi ini terlihat di `claude --help`, perilakunya di mode `-p` stream-json belum dibuktikan (S2).
-- Hook `PreToolUse` yang menjawab izinkan diasumsikan melewati heuristik "cd lalu git" Claude Code; belum dibuktikan (S1).
-- Server MCP per run yang sudah ada (alat ledger) bisa menampung alat persetujuan.
+Hasil spike dengan Claude Code 2.1.318 di mode `-p` stream-json, `--permission-mode acceptEdits`, model haiku, di repo uji sementara:
+
+- S1. Tanpa jawaban hook, `cd sub && git diff --stat` ditolak ("changes directory before a version-control command"). Dengan hook `PreToolUse` yang menjawab `permissionDecision: allow`, perintah yang sama berjalan. R1 bisa dibangun di atas hook.
+- S1b. Hook yang menjawab `allow` untuk `git push` tetap ditolak bila `Bash(git push*)` ada di `--disallowedTools`. Deny list Claude Code tetap lapis kedua di bawah hook Mandor.
+- S2. Dengan `--permission-prompts host` dan `--permission-prompt-tool` ke tool MCP, permintaan izin sampai ke tool berisi `tool_name`, input lengkap (termasuk `description` dari agent), dan `tool_use_id`. Jawaban `{"behavior":"allow","updatedInput":...}` menjalankan perintah; `{"behavior":"deny","message":...}` meneruskan pesan itu ke agent.
+- S2b. Alasan Claude Code meminta izin tidak dikirim ke tool, sehingga kartu memakai deskripsi dari agent (R5).
+- S2c. Claude Code menunggu jawaban tool paling tidak 11 menit (jeda 150 detik dan 660 detik sama-sama berhasil). Batas 10 menit di R8 dipegang Mandor.
+- Server MCP per run yang sudah ada (alat ledger) diasumsikan bisa menampung alat persetujuan.
 
 ### Outstanding Questions
-
-**Resolve Before Planning**
-
-- S1. Spike: apakah jawaban izinkan dari hook `PreToolUse` membuat Claude Code menjalankan `cd x && git diff`, `git -C`, pipe, dan path berisi `( )` di mode `-p` tanpa meminta persetujuan? Bila tidak, R1 butuh mekanisme lain.
-- S2. Spike: apakah `--permission-prompts host` dengan `--permission-prompt-tool` bekerja di mode `-p` stream-json, dan berapa lama Claude Code menunggu jawaban tool sebelum menyerah (menentukan apakah batas 10 menit di R8 bisa dipegang)?
 
 **Deferred to Planning**
 

@@ -298,7 +298,8 @@ mod tests {
             serde_json::from_str(&replies.next_line().await.unwrap().unwrap()).unwrap();
         assert_eq!(tools["result"]["tools"][0]["name"], "permit");
         // Ketiga panggilan sampai di daemon sebelum satu pun dijawab.
-        for _ in 0..200 {
+        // Batas longgar: test berjalan di bawah instrumentasi coverage.
+        for _ in 0..2_000 {
             if fake.seen.lock().unwrap().len() == 3 {
                 break;
             }

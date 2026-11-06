@@ -34,7 +34,7 @@ Plan: `docs/plans/2026-11-06-001-feat-agent-permission-approval-plan.md`. Branch
 | AE2 | `decide::tests::ae2_dan_r11_…`, usecase `ae2_larangan_keras_…` |
 | AE3 | usecase `ae3_izin_run_berlaku_untuk_permintaan_persis_sama` |
 | AE4 | usecase `ae4_expired_menyalakan_tolak_langsung_sampai_chat_dibuka` |
-| AE5 | `record_denials` (giliran reviewer tidak mencatat event di Chat, jadi penolakan ditulis sebagai item Chat); adapter `alat_persetujuan_hanya_untuk_giliran_laptop` (reviewer `none`); uji langsung belum |
+| AE5 | usecase `review_flow::covers_ae5_penolakan_reviewer_tercatat_satu_item_chat_tanpa_kartu`; adapter `alat_persetujuan_hanya_untuk_giliran_laptop` (reviewer `none`) |
 | AE6 | usecase `ae6_penolakan_vm_masuk_laporan_pagi`, adapter VM `none` |
 | AE7 | `decide::tests::tool_selain_bash_tanpa_keputusan`; kartu WebFetch menampilkan URL (`approvals.test.ts`); uji langsung belum |
 | AE8 | `decide::tests::argumen_berbahaya_tanpa_keputusan` (`echo $(docker ps)`) |
@@ -45,6 +45,10 @@ Plan: `docs/plans/2026-11-06-001-feat-agent-permission-approval-plan.md`. Branch
 | AE13 | usecase `ae13_deny_berlaku_lintas_giliran` |
 | AE14 | usecase `ae14_izin_giliran_implementasi_tidak_berlaku_di_plan` |
 | AE16 | dispatch `token_permit_dan_ledger_terpisah`, usecase `approval_answer_refused` |
+
+## Catatan kestabilan
+
+Satu push gagal di pre-push (cover-check) pada test yang tidak terekam; enam putaran test coverage berikutnya lulus. Penantian test server permit dilonggarkan (10 detik) karena paling sensitif terhadap beban instrumentasi coverage. Test login flaky yang dikenal diperbaiki di PR #20.
 
 ## Uji langsung (belum)
 

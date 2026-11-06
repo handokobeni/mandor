@@ -13,7 +13,7 @@ execution: code
 
 ## Goal Capsule
 
-- **Objective:** Agent Mandor tidak lagi kena penolakan otomatis untuk perintah aman, dan setiap permintaan izin lain sampai ke dev sebagai kartu persetujuan di Chat run.
+- **Objective:** Agent Mandor tidak lagi kena penolakan otomatis untuk perintah aman, dan setiap permintaan izin lain di giliran implementasi dan plan di laptop sampai ke dev sebagai kartu persetujuan di Chat run.
 - **Product authority:** pemilik produk Mandor (handokobeni). Keputusan di dokumen ini disetujui 2026-11-06.
 - **Open blockers:** tidak ada. Spike S1 dan S2 (2026-11-06) membuktikan kedua mekanisme Claude Code; hasilnya di Dependencies / Assumptions.
 
@@ -23,7 +23,7 @@ execution: code
 
 ### Summary
 
-Hook Mandor mengizinkan secara eksplisit perintah yang lolos pemeriksaan Mandor dan setiap bagiannya ada di allowlist sesi. Permintaan izin lain dari Claude Code muncul sebagai kartu persetujuan di Chat run (Allow once, Allow for this run, Deny) dan ditolak otomatis setelah 10 menit. Larangan keras Mandor tetap ditolak tanpa ditanya.
+Hook Mandor mengizinkan secara eksplisit perintah yang lolos pemeriksaan Mandor dan setiap bagiannya ada di allowlist sesi. Permintaan izin lain dari Claude Code di giliran implementasi dan plan di laptop muncul sebagai kartu persetujuan di Chat run (Allow once, Allow for this run, Deny) dan ditolak otomatis setelah 10 menit. Larangan keras Mandor tetap ditolak tanpa ditanya.
 
 ### Problem Frame
 
@@ -38,10 +38,14 @@ Tanpa layar persetujuan, permintaan itu otomatis ditolak ("no approval surface i
 
 ### Key Decisions
 
-- **Dua lapis: izin otomatis untuk yang aman, kartu untuk sisanya.** Kartu untuk setiap permintaan akan memunculkan `cd x && git diff` puluhan kali per run, sehingga dev lelah dan asal menyetujui. Hook Mandor sudah memeriksa setiap perintah, jadi ia yang memutuskan perintah aman; kartu hanya untuk yang tidak dikenal.
+- **Dua lapis: izin otomatis untuk yang aman, kartu untuk sisanya.** Kartu untuk setiap permintaan akan memunculkan `cd x && git diff` puluhan kali per run, sehingga dev lelah dan asal menyetujui. Hook Mandor yang memutuskan perintah aman; kartu hanya untuk yang tidak dikenal.
+- **Izin otomatis hanya untuk yang bisa diurai penuh.** Dengan izin eksplisit, hook Mandor menggantikan pemeriksaan bawaan Claude Code untuk perintah itu, jadi hook harus tahu persis setiap program yang dijalankan. Bentuk yang menyembunyikan program lain tidak pernah diizinkan otomatis.
+- **Gagal memeriksa berarti tolak, bukan kartu.** Hook tetap fail-closed (KTD-10): bug atau input rusak tidak boleh berubah menjadi kartu yang bisa di-Allow.
 - **Larangan keras tidak bisa dibuka dari kartu.** Pagar KTD-10/KTD-11 dan aturan lembur tetap mutlak. Tombol Allow tidak pernah muncul untuk permintaan yang ditolak hook Mandor.
-- **Izin dari kartu paling lama berlaku sampai run ditutup.** Izin permanen tetap lewat Settings › Repos › Extra agent allowlist, supaya perluasan permanen selalu disengaja.
-- **Tanpa jawaban berarti tolak.** Batas 10 menit menjaga run tidak menggantung saat dev tidak di depan layar.
+- **Input mentah adalah isi utama kartu.** Deskripsi dari agent bisa menyesatkan (prompt injection dari data Lark), jadi dev menilai dari perintah sebenarnya.
+- **Izin dari kartu paling lama berlaku sampai run ditutup, untuk permintaan persis sama.** Izin permanen tetap lewat Settings › Repos › Extra agent allowlist, supaya perluasan permanen selalu disengaja.
+- **Tanpa jawaban berarti tolak, dan run tidak menunggu berulang.** Batas 10 menit per kartu; setelah satu kartu expired, permintaan berikutnya langsung ditolak sampai dev kembali.
+- **Setiap penolakan terlihat.** Penolakan di laptop tercatat di Chat dan penolakan di VM tercatat di laporan pagi, supaya dev tahu kenapa agent mengambil jalan lain.
 - **Reviewer AC dan VM tetap tanpa kartu.** Review harus selesai tanpa ditunggu, dan lembur di VM tidak ada orangnya.
 
 ### Actors
@@ -54,66 +58,81 @@ Tanpa layar persetujuan, permintaan itu otomatis ditolak ("no approval surface i
 
 **Izin otomatis untuk perintah aman**
 
-- R1. Perintah yang lolos pemeriksaan Mandor dan setiap bagiannya cocok dengan allowlist sesi berjalan tanpa persetujuan, termasuk bentuk gabungan, pipe, redirect, dan path berisi `( ) [ ]`.
+- R1. Perintah yang lolos pemeriksaan Mandor dan setiap program di dalamnya cocok dengan allowlist giliran itu berjalan tanpa persetujuan, termasuk bentuk gabungan, pipe, redirect, dan path berisi `( ) [ ]`.
 - R2. Izin otomatis tidak pernah berlaku untuk perintah yang ditolak hook Mandor.
 - R3. Izin otomatis berlaku di giliran implementasi, plan, dan reviewer, dengan aturan hanya-baca plan dan reviewer tetap berlaku.
+- R14. Perintah yang tidak bisa diurai penuh menjadi program-program sederhana tidak pernah diizinkan otomatis; ini mencakup substitusi perintah (`$(…)`, backtick), substitusi proses (`<(…)`), `eval`, `sh -c`/`bash -c`, `xargs`, `env` sebagai pembungkus, dan here-doc.
+- R15. Bentuk `cd <dir> && …`, `git -C <dir>`, dan `--dir <dir>` hanya diizinkan otomatis bila foldernya di dalam worktree run dan bukan repo git bersarang.
+- R16. Target redirect dan argumen path dari perintah yang diizinkan otomatis diperiksa terhadap path terlarang yang sama dengan R11.
 
 **Kartu persetujuan**
 
-- R4. Permintaan izin Claude Code di giliran implementasi dan plan muncul sebagai kartu di Chat run, untuk semua jenis tool (Bash, web, dan lainnya).
-- R5. Kartu menampilkan tool, perintah atau target lengkap, folder kerja, dan deskripsi langkah dari agent.
-- R6. Kartu punya tiga pilihan: Allow once, Allow for this run, dan Deny.
-- R7. Allow for this run hanya berlaku untuk permintaan yang persis sama, sampai run ditutup, dan bertahan saat daemon restart.
-- R8. Kartu yang tidak dijawab dalam 10 menit ditolak otomatis dan ditandai expired; agent menerima penolakan dan melanjutkan.
-- R9. Saat kartu muncul, run tampil menunggu persetujuan di daftar run dan board, dan dev menerima notifikasi sesuai preferensi notifikasi yang ada.
-- R10. Kartu yang sudah dijawab atau expired tetap tercatat di Chat bersama keputusannya.
+- R4. Permintaan izin Claude Code di giliran implementasi dan plan di laptop muncul sebagai kartu di Chat run, untuk semua jenis tool (Bash, web, dan lainnya).
+- R5. Isi utama kartu adalah input tool apa adanya (perintah, URL, atau pasangan kunci-nilai), lengkap tanpa dipotong, dengan karakter kontrol dan bidi di-escape, ditambah folder kerja.
+- R17. Deskripsi langkah dari agent tampil terpisah dengan label bahwa itu klaim agent yang tidak diverifikasi Mandor.
+- R6. Kartu punya tiga pilihan berurutan Deny, Allow once, dan "Allow this exact request for this run"; tidak ada tombol yang fokus atau terpicu otomatis saat kartu muncul.
+- R7. Allow for this run berlaku untuk tool, input persis, dan folder kerja yang sama, sampai run ditutup, termasuk giliran berikutnya dan setelah daemon restart.
+- R18. Jawaban hanya diterima untuk kartu yang masih menunggu di run itu, dan izin selalu menjalankan input asli tanpa perubahan.
+- R8. Kartu yang tidak dijawab dalam 10 menit ditolak otomatis dan ditandai expired; kartu yang menunggu menampilkan sisa waktunya.
+- R19. Setelah satu kartu expired, permintaan izin berikutnya di run itu langsung ditolak tanpa kartu dan tercatat di Chat, sampai dev menjawab sebuah kartu atau membuka run itu.
+- R20. Kartu punya status menunggu, sedang dikirim, dijawab, expired, dan dibatalkan (run berhenti, ditutup, atau daemon restart saat kartu menunggu); hanya kartu menunggu yang punya tombol, dan jawaban terlambat menampilkan pemberitahuan bahwa kartu sudah tidak berlaku.
+- R9. Saat kartu menunggu, run mendapat badge "Needs approval" di daftar run dan board tanpa pindah kolom, tab Chat menampilkan jumlah kartu menunggu, dan notifikasi (sesuai preferensi yang ada) menyebut tool dan perintahnya lalu membuka Chat run di kartu itu.
+- R10. Kartu yang sudah dijawab, expired, atau dibatalkan tetap tercatat di Chat bersama keputusannya.
 
-**Batas**
+**Batas dan keterlihatan**
 
-- R11. Larangan keras ditolak tanpa kartu: `git push`, `git commit`, `git remote`, `gh`, berkas kredensial, penulisan ke `.claude`, `.git`, `.husky`, `.githooks`, dan perubahan status Lark melewati Waiting Review.
+- R11. Larangan keras ditolak tanpa kartu: `git push`, `git commit`, `git remote`, `gh`, berkas kredensial, penulisan ke `.claude`, `.git`, `.husky`, `.githooks`, dan perubahan status Lark yang melewati Waiting Review.
+- R21. Bila hook gagal memeriksa (error internal, input rusak, batas waktu), permintaan ditolak tanpa kartu, sesuai sifat fail-closed KTD-10.
 - R12. Giliran reviewer AC tidak memunculkan kartu; permintaan di luar allowlist tetap ditolak otomatis.
-- R13. Di daemon VM tidak ada kartu; permintaan ditolak otomatis dan tercatat di laporan pagi.
+- R22. Setiap penolakan di laptop (larangan keras, penolakan reviewer, expired, dan penolakan langsung R19) tercatat ringkas di Chat run dengan tool, perintah, dan alasan, tanpa tombol.
+- R13. Di daemon VM tidak ada kartu; permintaan ditolak otomatis dan tercatat di laporan pagi kartu itu dengan perintah dan alasannya.
 
 ### Key Flows
 
 - F1. Perintah aman dengan bentuk yang biasanya ditolak
   - **Trigger:** agent menjalankan `cd kelola-web && git diff -- src/app/(app)/x.tsx`.
-  - **Steps:** hook Mandor memeriksa setiap bagian, semua ada di allowlist, hook mengizinkan; Claude Code menjalankannya tanpa bertanya.
+  - **Steps:** hook Mandor mengurai perintah, foldernya di dalam worktree, setiap program ada di allowlist, hook mengizinkan; Claude Code menjalankannya tanpa bertanya.
   - **Outcome:** tidak ada kartu dan tidak ada penolakan.
-  - **Covered by:** R1, R2
+  - **Covered by:** R1, R2, R15
 - F2. Perintah di luar allowlist
   - **Trigger:** agent di giliran implementasi menjalankan `docker compose up -d db`.
-  - **Steps:** hook tidak menolak dan tidak mengizinkan; Claude Code meminta izin; kartu muncul di Chat run dan notifikasi dikirim; dev memilih Allow for this run; agent melanjutkan; permintaan yang sama berikutnya di run itu berjalan tanpa kartu.
+  - **Steps:** hook selesai memeriksa, tidak ada larangan, tapi `docker` tidak di allowlist, jadi hook tidak memberi keputusan; Claude Code meminta izin; kartu muncul di Chat run, run mendapat badge, notifikasi dikirim; dev memilih Allow this exact request for this run; agent melanjutkan; permintaan yang persis sama berikutnya di run itu berjalan tanpa kartu.
   - **Outcome:** perintah berjalan atas keputusan dev.
-  - **Covered by:** R4, R5, R6, R7, R9
+  - **Covered by:** R4, R5, R6, R7, R9, R18
 - F3. Dev tidak menjawab
   - **Trigger:** kartu muncul saat dev tidak di depan layar.
-  - **Steps:** 10 menit berlalu; kartu ditandai expired; agent menerima penolakan.
-  - **Outcome:** run tidak menggantung; kartu tercatat di Chat.
-  - **Covered by:** R8, R10
+  - **Steps:** 10 menit berlalu; kartu ditandai expired; agent menerima penolakan; permintaan berikutnya di run itu langsung ditolak dan tercatat sampai dev kembali.
+  - **Outcome:** run tidak menggantung berulang; semua penolakan tercatat di Chat.
+  - **Covered by:** R8, R10, R19, R22
 
 ### Acceptance Examples
 
 - AE1. **Covers R1, R3.** Given giliran plan, when agent menjalankan `cd kelola-api && git log --oneline -5`, then perintah berjalan tanpa kartu dan tanpa penolakan.
-- AE2. **Covers R2, R11.** Given giliran implementasi, when agent menjalankan `cd repo && git push origin HEAD`, then perintah ditolak dengan alasan Mandor dan tidak ada kartu.
-- AE3. **Covers R6, R7.** Given dev memilih Allow for this run untuk `jq . package.json`, when agent menjalankan `jq . package.json` lagi di run yang sama, then perintah berjalan tanpa kartu; when agent menjalankan `jq .name package.json`, then kartu baru muncul.
-- AE4. **Covers R8.** Given kartu untuk `docker ps` tidak dijawab, when 10 menit berlalu, then kartu ditandai expired dan agent menerima penolakan.
-- AE5. **Covers R12.** Given giliran reviewer AC, when reviewer menjalankan perintah di luar allowlist, then perintah ditolak otomatis tanpa kartu.
-- AE6. **Covers R13.** Given kartu VM saat lembur, when agent meminta izin untuk perintah di luar allowlist, then permintaan ditolak dan tercatat di laporan pagi kartu itu.
-- AE7. **Covers R4.** Given giliran implementasi, when agent memakai WebFetch ke situs dokumentasi, then kartu muncul dengan URL lengkap sebagai target.
+- AE2. **Covers R2, R11, R22.** Given giliran implementasi, when agent menjalankan `cd repo && git push origin HEAD`, then perintah ditolak dengan alasan Mandor, tidak ada kartu, dan penolakannya tercatat di Chat.
+- AE3. **Covers R6, R7.** Given dev memilih Allow this exact request for this run untuk `jq . package.json`, when agent menjalankan `jq . package.json` lagi di folder yang sama, then perintah berjalan tanpa kartu; when agent menjalankan `jq .name package.json`, then kartu baru muncul.
+- AE4. **Covers R8, R19.** Given kartu untuk `docker ps` tidak dijawab, when 10 menit berlalu, then kartu ditandai expired dan agent menerima penolakan; when agent lalu meminta izin untuk `jq . a.json`, then permintaan itu langsung ditolak tanpa kartu dan tercatat di Chat.
+- AE5. **Covers R12, R22.** Given giliran reviewer AC, when reviewer menjalankan perintah di luar allowlist, then perintah ditolak otomatis tanpa kartu dan tercatat di Chat.
+- AE6. **Covers R13.** Given agent di daemon VM saat lembur, when agent meminta izin untuk perintah di luar allowlist, then permintaan ditolak otomatis tanpa kartu dan tercatat di laporan pagi kartu itu.
+- AE7. **Covers R4, R5.** Given giliran implementasi, when agent memakai WebFetch ke situs dokumentasi, then kartu muncul dengan URL lengkap sebagai isi utama.
+- AE8. **Covers R14.** Given giliran implementasi, when agent menjalankan `echo $(docker ps)`, then perintah tidak diizinkan otomatis dan kartu muncul.
+- AE9. **Covers R15.** Given worktree run memuat folder `fixtures/repo` yang berisi `.git` sendiri, when agent menjalankan `cd fixtures/repo && git status`, then perintah tidak diizinkan otomatis dan kartu muncul.
+- AE10. **Covers R16, R11.** Given giliran implementasi, when agent menjalankan `echo x > .githooks/pre-push`, then perintah ditolak dengan alasan Mandor tanpa kartu.
+- AE11. **Covers R21.** Given input hook rusak atau hook melewati batas waktunya, when agent menjalankan perintah apa pun, then perintah ditolak tanpa kartu.
+- AE12. **Covers R18, R20.** Given kartu sudah expired, when dev menekan Allow dari tampilan lama, then jawaban ditolak dan kartu menampilkan bahwa ia sudah tidak berlaku.
 
 ### Success Criteria
 
 - Run laptop di workspace kelola tidak lagi menampilkan penolakan "no approval surface" untuk perintah yang ada di allowlist.
-- Setiap permintaan izin di laptop terlihat oleh dev sebagai kartu atau berjalan karena izin otomatis; tidak ada penolakan yang dev tidak ketahui.
-- Larangan keras tetap ditolak di semua giliran, terbukti oleh test.
+- Setiap permintaan izin di laptop terlihat oleh dev sebagai kartu, berjalan karena izin otomatis, atau tercatat sebagai penolakan di Chat.
+- Larangan keras dan bentuk perintah di R14–R16 tetap ditolak atau tidak diizinkan otomatis di semua giliran, terbukti oleh test.
 
 ### Scope Boundaries
 
 - Izin permanen dari kartu ("Always allow in this repo") tidak dibangun.
 - Kartu di giliran reviewer AC tidak dibangun.
-- Persetujuan untuk kartu VM (mis. dijawab pagi hari lalu kartu dilanjutkan) tidak dibangun.
-- Allow berbasis pola (mis. `docker *`) dari kartu tidak dibangun; Allow for this run hanya untuk permintaan persis sama.
+- Persetujuan untuk permintaan di VM (mis. dijawab pagi hari lalu kartu dilanjutkan) tidak dibangun.
+- Allow berbasis pola atau program (mis. `docker *`) dari kartu tidak dibangun; Allow for this run hanya untuk permintaan persis sama.
+- Daftar izin yang sudah diberi di run dan pencabutannya tidak dibangun di rilis ini.
 
 ### Dependencies / Assumptions
 
@@ -122,16 +141,23 @@ Hasil spike dengan Claude Code 2.1.318 di mode `-p` stream-json, `--permission-m
 - S1. Tanpa jawaban hook, `cd sub && git diff --stat` ditolak ("changes directory before a version-control command"). Dengan hook `PreToolUse` yang menjawab `permissionDecision: allow`, perintah yang sama berjalan. R1 bisa dibangun di atas hook.
 - S1b. Hook yang menjawab `allow` untuk `git push` tetap ditolak bila `Bash(git push*)` ada di `--disallowedTools`. Deny list Claude Code tetap lapis kedua di bawah hook Mandor.
 - S2. Dengan `--permission-prompts host` dan `--permission-prompt-tool` ke tool MCP, permintaan izin sampai ke tool berisi `tool_name`, input lengkap (termasuk `description` dari agent), dan `tool_use_id`. Jawaban `{"behavior":"allow","updatedInput":...}` menjalankan perintah; `{"behavior":"deny","message":...}` meneruskan pesan itu ke agent.
-- S2b. Alasan Claude Code meminta izin tidak dikirim ke tool, sehingga kartu memakai deskripsi dari agent (R5).
+- S2b. Alasan Claude Code meminta izin tidak dikirim ke tool, sehingga kartu memakai input mentah dan deskripsi dari agent (R5, R17).
 - S2c. Claude Code menunggu jawaban tool paling tidak 11 menit (jeda 150 detik dan 660 detik sama-sama berhasil). Batas 10 menit di R8 dipegang Mandor.
-- Server MCP per run yang sudah ada (alat ledger) diasumsikan bisa menampung alat persetujuan.
+
+Keadaan kode yang mempengaruhi planning (dari review dokumen):
+
+- Hook Mandor sekarang hanya mencari kata terlarang dan menghasilkan dua keputusan (tidak keberatan atau tolak); ia belum mengurai perintah per program dan belum menerima allowlist giliran. R1 dan R14–R16 butuh keputusan ketiga (izinkan eksplisit) dan pengurai yang lebih ketat.
+- Server MCP Mandor sekarang hanya terpasang di giliran reviewer dan plan yang punya sumber desain, dengan token kapabilitas berperan Design/Verdict, dan jembatan MCP ke daemon membatasi satu panggilan 10 detik. Alat persetujuan butuh server MCP di setiap giliran implementasi dan plan di laptop, peran kapabilitas sendiri, dan panggilan yang boleh menunggu sampai 10 menit.
 
 ### Outstanding Questions
 
 **Deferred to Planning**
 
-- Bagaimana kartu persetujuan dan jawabannya disimpan supaya Allow for this run bertahan saat daemon restart (R7).
-- Bagaimana permintaan di VM dicatat di laporan pagi (R13).
+- S3. Spike ulang di `--permission-mode default` (dipakai giliran plan): apakah izin dari hook dan `--permission-prompts host` berperilaku sama seperti di `acceptEdits`?
+- Apakah jawaban `allow` dari hook juga melewati `--allowedTools` untuk tool selain Bash (WebFetch, MCP), dan bagaimana itu membatasi R1.
+- Bagaimana kartu dan izin disimpan supaya Allow for this run bertahan saat daemon restart (R7), dan bagaimana kartu yang menunggu saat restart ditandai dibatalkan (R20).
+- Bagaimana penolakan di VM dicatat di laporan pagi (R13).
+- Apakah alat persetujuan bisa dipanggil langsung oleh agent untuk membuat kartu sendiri, dan bagaimana mencegahnya.
 
 ### Sources / Research
 
@@ -139,4 +165,4 @@ Hasil spike dengan Claude Code 2.1.318 di mode `-p` stream-json, `--permission-m
 - `crates/mandor-agent/src/claude/command.rs`: argumen `claude` (`--permission-mode`, `--permission-prompts none`, allowlist).
 - `crates/mandor-agent/src/claude/guardrails.rs`, `crates/mandor-domain/src/hook.rs`, `crates/mandor-domain/src/hook_review.rs`: hook dan allowlist per giliran.
 - Commit `c4f0b2e` di `feat/prototype-compare`: arahan bentuk perintah di operator prompt.
-- `docs/progress/env-picker-prototype-compare.md`: penolakan yang teramati di uji langsung PGS-1402.
+- `docs/progress/env-picker-prototype-compare.md` (branch `feat/prototype-compare`, PR #19): penolakan yang teramati di uji langsung PGS-1402.

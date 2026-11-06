@@ -1,6 +1,6 @@
 # Progres: Izin agent tanpa penolakan diam-diam
 
-Plan: `docs/plans/2026-11-06-001-feat-agent-permission-approval-plan.md`. Branch `feat/agent-permission-approval`.
+Plan: `docs/plans/2026-11-06-001-feat-agent-permission-approval-plan.md`. Branch `feat/agent-permission-approval`, PR #21 (belum di-merge).
 
 | Unit | Status | Catatan |
 |---|---|---|

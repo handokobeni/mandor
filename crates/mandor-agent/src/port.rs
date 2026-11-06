@@ -1390,6 +1390,8 @@ mod tests {
         }
         assert!(spec.allowed.contains(&"Read".to_owned()));
         assert!(spec.allowed.contains(&"Bash(git diff*)".to_owned()));
+        // Formatter bisa menulis berkas: tidak untuk giliran plan.
+        assert!(!spec.allowed.contains(&"Bash(gofmt *)".to_owned()));
         let argv = format!("{:?}", spec.allowed);
         assert!(!argv.contains("tok-rahasia"));
     }

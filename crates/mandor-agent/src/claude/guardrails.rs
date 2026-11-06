@@ -120,6 +120,7 @@ pub fn default_allowed() -> Vec<String> {
         "Bash(yarn *)",
         "Bash(node *)",
         "Bash(go *)",
+        "Bash(gofmt *)",
         "Bash(python3 *)",
         "Bash(pytest*)",
         "Bash(ls*)",
@@ -525,6 +526,8 @@ mod tests {
             "Bash(echo *)",
             "Bash(sed *)",
             "Bash(sort *)",
+            // Formatter Go hanya menulis berkas di worktree, seperti `cargo fmt`.
+            "Bash(gofmt *)",
         ] {
             assert!(default_allowed().contains(&safe.to_owned()), "{safe}");
         }

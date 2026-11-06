@@ -184,20 +184,59 @@ pub fn is_flagged_change(path: &str, settings: &AppSettings) -> bool {
 #[must_use]
 pub fn parse_env(text: &str) -> Vec<(String, String)> {
     text.lines()
-        .filter_map(|line| {
-            let line = line.trim();
-            if line.is_empty() || line.starts_with('#') {
-                return None;
-            }
-            let line = line.strip_prefix("export ").unwrap_or(line).trim_start();
-            let (key, value) = line.split_once('=')?;
-            let key = key.trim();
-            let valid = !key.is_empty()
-                && key.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
-                && !key.starts_with(|c: char| c.is_ascii_digit());
-            valid.then(|| (key.to_owned(), env_value(value.trim())))
-        })
+        .filter_map(env_line)
+        .map(|(key, value)| (key.to_owned(), env_value(value.trim())))
         .collect()
+}
+
+/// Nama kunci `.env` saja, unik dan berurutan sesuai berkas (R1, KTD-P1).
+/// Baris lanjutan nilai berkutip multi-baris (mis. kunci PEM) dilewati
+/// sampai kutip penutup, sehingga potongan nilai tidak pernah terbaca
+/// sebagai kunci.
+#[must_use]
+pub fn env_key_names(text: &str) -> Vec<String> {
+    let mut names: Vec<String> = Vec::new();
+    let mut open: Option<char> = None;
+    for line in text.lines() {
+        if let Some(quote) = open {
+            if line.contains(quote) {
+                open = None;
+            }
+            continue;
+        }
+        let Some((key, value)) = env_line(line) else {
+            continue;
+        };
+        open = unclosed_quote(value.trim());
+        if !names.iter().any(|n| n == key) {
+            names.push(key.to_owned());
+        }
+    }
+    names
+}
+
+/// Kutip pembuka nilai yang tidak ditutup di baris yang sama.
+fn unclosed_quote(value: &str) -> Option<char> {
+    ['"', '\''].into_iter().find(|&q| {
+        value
+            .strip_prefix(q)
+            .is_some_and(|inner| !inner.contains(q))
+    })
+}
+
+/// Kunci valid dan nilai mentah satu baris `.env`.
+fn env_line(line: &str) -> Option<(&str, &str)> {
+    let line = line.trim();
+    if line.is_empty() || line.starts_with('#') {
+        return None;
+    }
+    let line = line.strip_prefix("export ").unwrap_or(line).trim_start();
+    let (key, value) = line.split_once('=')?;
+    let key = key.trim();
+    let valid = !key.is_empty()
+        && key.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
+        && !key.starts_with(|c: char| c.is_ascii_digit());
+    valid.then_some((key, value))
 }
 
 fn env_value(raw: &str) -> String {
@@ -310,5 +349,17 @@ mod tests {
             assert!(is_flagged_change(flagged, &s), "{flagged}");
         }
         assert!(!is_flagged_change("src/App.svelte", &s));
+    }
+
+    #[test]
+    fn nama_kunci_env_tanpa_nilai_unik_dan_berurutan() {
+        let text = "A=1\n# B=2\n\nexport C=3\nA=4\n9X=5\nbukan baris\n";
+        assert_eq!(env_key_names(text), ["A", "C"]);
+    }
+
+    #[test]
+    fn nama_kunci_env_melewati_nilai_berkutip_multi_baris() {
+        let text = "KEY=\"-----BEGIN KEY-----\nABCDEF==\nQUOTE=palsu\n-----END KEY-----\"\nNEXT='satu\nX=dua'\nLAST=ok\nONE=\"utuh\"\n";
+        assert_eq!(env_key_names(text), ["KEY", "NEXT", "LAST", "ONE"]);
     }
 }

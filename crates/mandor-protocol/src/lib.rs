@@ -69,6 +69,8 @@ pub mod method {
     pub const APP_CONFIRM: &str = "app.confirm";
     /// Log app per repo (`RunRef` → `Vec<AppLogView>`).
     pub const APP_LOGS: &str = "app.logs";
+    /// Nama kunci `.env` folder asli (`EnvKeysParams` → `EnvKeysView`).
+    pub const APP_ENV_KEYS: &str = "app.env_keys";
     /// Sumber desain terdaftar (`Vec<DesignSourceView>`).
     pub const DESIGN_SOURCES_LIST: &str = "design_sources.list";
     /// `DesignSourceAdd` → `DesignSourceView`.
@@ -367,6 +369,8 @@ fn group_bindings() -> Result<Vec<(&'static str, String)>, String> {
             "CleanupSettingsView.ts",
             CleanupSettingsView::export_to_string(&cfg),
         )?,
+        one("EnvKeysParams.ts", EnvKeysParams::export_to_string(&cfg))?,
+        one("EnvKeysView.ts", EnvKeysView::export_to_string(&cfg))?,
         one(
             "PrepareForVmParams.ts",
             PrepareForVmParams::export_to_string(&cfg),

@@ -38,7 +38,7 @@ Pagar yang berlaku selama review:
 | Start command | Wajib untuk Web, mis. `bun run dev` |
 | Port | Port yang dibuka app, mis. `5173`. Port yang sudah dipakai program lain membuat app Failed |
 | App URL | Opsional. Alamat tempat Anda login (cookie login terikat ke host ini) |
-| .env keys | Nama kunci yang diteruskan dari `.env` repo. Nilai tidak pernah ditampilkan dan tidak disalin ke worktree |
+| .env keys | Nama kunci yang diteruskan dari `.env` repo. Nilai tidak pernah ditampilkan dan tidak disalin ke worktree. Tombol **Pick from .env** membaca nama kunci dari `.env` folder repo asli (di mesin daemon target, laptop atau VM) sebagai daftar centang; kunci tersimpan yang sudah tidak ada di `.env` tetap tampil dengan tanda "not in .env" |
 | Browser testing | Izinkan reviewer menguji app di browser (run satu repo). Run workspace memakai setelan workspace |
 | Restart the app before reviews | Opsional, bawaan mati. Bila app run ini menjalankan kode lama, Mandor menyalakannya ulang dari kode terbaru sebelum review berbrowser, termasuk review otomatis setelah Waiting Fix. Kode agent berjalan dengan kunci `.env` terpilih **tanpa** konfirmasi perubahan, jadi aktifkan hanya untuk repo dengan kredensial lokal/dev |
 | Push & PR gate | Use workspace, Block, atau Warn. Run multi-repo memakai yang paling ketat |

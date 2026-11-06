@@ -682,6 +682,11 @@ function handle(method: string, params: Record<string, unknown>): unknown {
       if (typeof params.login === 'boolean') a.login_confirmed = params.login;
       return a;
     }
+    case 'app.env_keys':
+      return {
+        found: true,
+        keys: ['KELOLA_API_URL', 'KELOLA_API_MODE', 'KELOLA_APP_HOSTS', 'KELOLA_APP_BASE_URL', 'NEXT_PUBLIC_DEMO_TODAY']
+      };
     case 'app.logs':
       return [{ repo_id: 'pegasus-web', text: '$ pnpm dev\n  VITE v6 ready in 412 ms\n  ➜  Local: http://localhost:5173/' }];
     case 'review.readiness': {

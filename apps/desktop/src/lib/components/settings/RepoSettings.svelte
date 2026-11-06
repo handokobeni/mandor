@@ -11,6 +11,7 @@
   import type { Rpc } from '#lib/rpc.ts';
   import { lark, type LarkStore } from '#lib/stores/lark.svelte.ts';
   import AddRepoDialog from './AddRepoDialog.svelte';
+  import EnvKeyPicker from './EnvKeyPicker.svelte';
   import Field from './Field.svelte';
   import ListEditor from './ListEditor.svelte';
   import ReviewerPicker from './ReviewerPicker.svelte';
@@ -64,6 +65,7 @@
   const appErrors = $derived(edit && tried ? validateRepoApp(edit.app) : {});
 
   let adding = $state(false);
+  let picking = $state(false);
   let removing = $state<RepoView | null>(null);
 
   function message(err: unknown): string {
@@ -234,6 +236,21 @@
                 dev credentials only.
               </p>
               <ListEditor list="env" label=".env keys" placeholder="VITE_API_URL" bind:items={edit.app.envKeys} />
+              <div>
+                <Button variant="outline" size="sm" onclick={() => (picking = true)}>Pick from .env</Button>
+              </div>
+              {#if picking}
+                <EnvKeyPicker
+                  {rpc}
+                  target={{ repo_id: repo.id }}
+                  saved={edit.app.envKeys}
+                  oncancel={() => (picking = false)}
+                  onpick={(keys) => {
+                    if (edit) edit.app.envKeys = keys;
+                    picking = false;
+                  }}
+                />
+              {/if}
               {#if appErrors.envKeys}<p class="field-error">{appErrors.envKeys}</p>{/if}
             </div>
           {/if}

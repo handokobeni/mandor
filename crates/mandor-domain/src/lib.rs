@@ -15,6 +15,7 @@ pub mod hook;
 pub mod hook_review;
 pub mod kanban;
 pub mod overnight;
+pub mod permit;
 pub mod planned;
 pub mod power;
 pub mod push_gate;

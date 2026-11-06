@@ -272,6 +272,14 @@ impl<'a> Lexer<'a> {
             if fd.is_empty() {
                 return reject("`>&` without a descriptor");
             }
+            // `>&1x` di bash berarti redirect ke berkas `1x`, bukan descriptor.
+            if self
+                .chars
+                .peek()
+                .is_some_and(|c| !matches!(c, ' ' | '\t' | '\n' | ';' | '|' | '&' | '<' | '>'))
+            {
+                return reject("`>&` followed by a file name");
+            }
             return Ok(());
         }
         if self.chars.peek() == Some(&'|') {
@@ -424,6 +432,11 @@ mod tests {
                 }
             ]
         );
+        assert!(
+            parse("echo x >&1x").is_err(),
+            "berkas tersembunyi di balik >&"
+        );
+        assert!(parse("echo x >&2; echo y 2>&1|tail").is_ok());
         let all = parse("make 2> err.txt &> both.txt").unwrap();
         assert_eq!(all[0].words, ["make"]);
         assert_eq!(all[0].redirects.len(), 2);

@@ -109,6 +109,57 @@ mod ownership {
     }
 
     #[tokio::test]
+    async fn run_parkir_pulih_bila_klaim_ternyata_masih_milik_kita() {
+        // Mis. dev sempat berganti Base: heartbeat membaca kartu di Base lain
+        // lalu memarkir run, padahal klaim di Base asal tetap milik kita.
+        let (lark, clock) = base();
+        lark.edit("rec1", |t| {
+            t.claim = Some(Claim {
+                open_id: "ou_b".to_owned(),
+                ts_ms: NOW,
+                nonce: "x".to_owned(),
+            });
+        });
+        let st = station(&lark, &clock, "ou_me");
+        let mut r = RunRecord::new("a".to_owned(), "repo1".to_owned(), "rec1".to_owned());
+        r.state = RunState::AwaitingDev;
+        st.runs.insert(r);
+        assert_eq!(st.svc.heartbeat_all().await.unwrap(), ["a"]);
+        assert_eq!(st.runs.only().state, RunState::Orphaned);
+
+        lark.edit("rec1", |t| {
+            t.claim = Some(Claim {
+                open_id: "ou_me".to_owned(),
+                ts_ms: NOW,
+                nonce: "n".to_owned(),
+            });
+        });
+        assert!(st.svc.heartbeat_all().await.unwrap().is_empty());
+        assert_eq!(st.runs.only().state, RunState::AwaitingDev);
+    }
+
+    #[tokio::test]
+    async fn run_stopped_pulih_bila_kartu_kembali_dengan_klaim_kita() {
+        let (lark, clock) = base();
+        let st = station(&lark, &clock, "ou_me");
+        let mut r = RunRecord::new("a".to_owned(), "repo1".to_owned(), "rec1".to_owned());
+        r.state = RunState::Stopped;
+        st.runs.insert(r);
+        // Tanpa klaim kita run tetap berhenti.
+        assert!(st.svc.heartbeat_all().await.unwrap().is_empty());
+        assert_eq!(st.runs.only().state, RunState::Stopped);
+        lark.edit("rec1", |t| {
+            t.claim = Some(Claim {
+                open_id: "ou_me".to_owned(),
+                ts_ms: NOW,
+                nonce: "n".to_owned(),
+            });
+        });
+        st.svc.heartbeat_all().await.unwrap();
+        assert_eq!(st.runs.only().state, RunState::AwaitingDev);
+    }
+
+    #[tokio::test]
     async fn record_dihapus_menghentikan_run_menjadi_stopped() {
         let (lark, clock) = base();
         lark.edit("rec1", |t| {

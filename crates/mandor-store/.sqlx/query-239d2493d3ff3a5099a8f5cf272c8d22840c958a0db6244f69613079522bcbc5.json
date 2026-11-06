@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "UPDATE runs SET scope = ? WHERE scope IS NULL",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": []
+  },
+  "hash": "239d2493d3ff3a5099a8f5cf272c8d22840c958a0db6244f69613079522bcbc5"
+}

@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "SELECT id FROM runs WHERE record_id = ? ORDER BY created_at_ms DESC LIMIT 1",
+  "query": "SELECT id FROM runs WHERE record_id = ? AND closed = 0 AND (? IS NULL OR scope = ?)\n             ORDER BY created_at_ms DESC LIMIT 1",
   "describe": {
     "columns": [
       {
@@ -16,11 +16,11 @@
       }
     ],
     "parameters": {
-      "Right": 1
+      "Right": 3
     },
     "nullable": [
       false
     ]
   },
-  "hash": "f3e30daf4685c5844a2dfe3c21974e9b8d3ad39a05f772eb464d0e1d003c8445"
+  "hash": "ba261d12b283ba5f73dbb07aa4bafec4e7a7ad7f0db188fba71739ccb48889e1"
 }

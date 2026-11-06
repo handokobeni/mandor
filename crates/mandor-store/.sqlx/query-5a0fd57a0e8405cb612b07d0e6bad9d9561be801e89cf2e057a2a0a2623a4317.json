@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "SELECT COUNT(*) FROM run_cards c JOIN runs r ON r.id = c.run_id\n         WHERE c.record_id = ? AND c.open = 1 AND r.closed = 0",
+  "query": "SELECT COUNT(*) FROM runs WHERE record_id = ? AND closed = 0 AND (? IS NULL OR scope = ?)",
   "describe": {
     "columns": [
       {
@@ -11,11 +11,11 @@
       }
     ],
     "parameters": {
-      "Right": 1
+      "Right": 3
     },
     "nullable": [
       false
     ]
   },
-  "hash": "075dc4ac0f2c336596932002975f44cdfd85be596d77fa5db55dc6cf0e721bb7"
+  "hash": "5a0fd57a0e8405cb612b07d0e6bad9d9561be801e89cf2e057a2a0a2623a4317"
 }

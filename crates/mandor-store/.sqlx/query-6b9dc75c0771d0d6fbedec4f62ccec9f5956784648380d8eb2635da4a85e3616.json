@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "SELECT id, repo_id, record_id, state, state_json, generation, branch,\n                    worktree_path, session_id, pid, pr_url, created_at_ms, updated_at_ms\n             FROM runs WHERE closed = 0 ORDER BY created_at_ms",
+  "query": "SELECT id, repo_id, record_id, state, state_json, generation, branch,\n                    worktree_path, session_id, pid, pr_url, created_at_ms, updated_at_ms\n             FROM runs WHERE closed = 0 AND (? IS NULL OR scope = ?) ORDER BY created_at_ms",
   "describe": {
     "columns": [
       {
@@ -148,7 +148,7 @@
       }
     ],
     "parameters": {
-      "Right": 0
+      "Right": 2
     },
     "nullable": [
       false,
@@ -166,5 +166,5 @@
       false
     ]
   },
-  "hash": "55520254b5924ff83a8ad6f221c2db7e848118722e27e04db37596d985b41efe"
+  "hash": "6b9dc75c0771d0d6fbedec4f62ccec9f5956784648380d8eb2635da4a85e3616"
 }

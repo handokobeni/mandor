@@ -55,10 +55,13 @@ impl<D: Deps> RunService<D> {
     pub async fn heartbeat_all(self: &Arc<Self>) -> Result<Vec<String>, RunError> {
         let mut orphaned = Vec::new();
         for mut run in self.runs.list_active().await? {
+            let cards = self.runs.cards(&run.id).await?;
             if matches!(run.state, RunState::Orphaned | RunState::Stopped) {
+                if cards.is_empty() {
+                    self.restore_if_held(&mut run).await?;
+                }
                 continue;
             }
-            let cards = self.runs.cards(&run.id).await?;
             if !cards.is_empty() {
                 if let Some(id) = self.heartbeat_group(&mut run, cards).await? {
                     orphaned.push(id);
@@ -144,6 +147,28 @@ impl<D: Deps> RunService<D> {
     }
 
     /// Menghentikan run karena klaim hilang dan memberi tahu dev.
+    /// Run yang diparkir karena klaimnya tampak hilang dipulihkan bila klaim
+    /// kartu ternyata masih dipegang daemon ini, mis. setelah dev sempat
+    /// berganti Base dan kembali. Agent sudah dihentikan, jadi run kembali
+    /// menunggu dev.
+    async fn restore_if_held(&self, run: &mut RunRecord) -> Result<(), RunError> {
+        match self.sync.heartbeat(&run.record_id).await {
+            Ok(Heartbeat::Fresh | Heartbeat::Renewed) => {
+                let expected = run.generation;
+                let parked = run.state;
+                run.generation += 1;
+                run.state = RunState::AwaitingDev;
+                self.runs.save(run, expected, self.now()).await?;
+                tracing::info!(run_id = %run.id, ?parked, "klaim masih milik daemon ini; run dipulihkan");
+            }
+            Ok(Heartbeat::Lost(_)) => {}
+            Err(e) => {
+                tracing::warn!(record_id = %run.record_id, error = %e, "cek klaim run parkir gagal");
+            }
+        }
+        Ok(())
+    }
+
     async fn stop_for_loss(&self, run: &mut RunRecord, loss: ClaimLoss) -> Result<(), RunError> {
         if let Some(stopper) = self.take_stopper(&run.id) {
             crate::run_ports::Stopper::stop(&stopper).await;

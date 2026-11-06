@@ -121,7 +121,8 @@ pub async fn start(
         }
     }
     let scope = format!("{}/{}", settings.app_token, settings.table_id);
-    let tasks = TaskStore::new(env.store.clone(), scope);
+    let tasks = TaskStore::new(env.store.clone(), scope.clone());
+    let run_store = scoped_runs(env.store.clone(), scope).await;
     let agent = build_agent(env.cfg, env.rpc_port).await?;
     let mut git_cfg = GitConfig::new(env.cfg.workspaces_dir());
     git_cfg.gh_bin.clone_from(&env.cfg.gh_bin);
@@ -146,7 +147,7 @@ pub async fn start(
             RunPorts {
                 git: GitAdapter::new(git.clone()),
                 agent: agent.clone(),
-                runs: BroadcastRuns::new(RunsStore::new(env.store.clone()), env.events.clone()),
+                runs: BroadcastRuns::new(run_store, env.events.clone()),
                 notifier: DaemonNotifier::new(env.store.clone(), env.events.clone()),
                 spawner: TrackerSpawner::new(env.tracker.clone()),
                 repos: ReposStore::new(env.store.clone()),
@@ -191,6 +192,19 @@ pub async fn start(
     });
     env.tracker.spawn(run_loop(Arc::clone(&session)));
     Ok(session)
+}
+
+/// Store run milik Base aktif. Run hanya dibaca di Base asalnya karena Base
+/// copy berbagi `record_id`: heartbeat ke Base lain akan salah memarkir run.
+/// Run lama tanpa Base diadopsi Base ini.
+async fn scoped_runs(store: mandor_store::Store, scope: String) -> RunsStore {
+    let runs = RunsStore::scoped(store, scope);
+    if let Some(adopted) = warn_err(runs.adopt_unscoped().await, "adopsi Base run lama gagal") {
+        if adopted > 0 {
+            tracing::info!(adopted, "run lama diikat ke Base aktif");
+        }
+    }
+    runs
 }
 
 /// Mencatat error dan mengembalikan `None`; untuk pekerjaan latar yang tidak fatal.

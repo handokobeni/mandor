@@ -285,12 +285,41 @@ struct StoredCleanup {
 #[derive(Debug, Clone)]
 pub struct RunsStore {
     store: Store,
+    /// Base aktif (`app_token/table_id`); `None` = semua run (status,
+    /// keep-awake).
+    scope: Option<String>,
 }
 
 impl RunsStore {
+    /// Semua run tanpa memandang Base.
     #[must_use]
     pub fn new(store: Store) -> Self {
-        Self { store }
+        Self { store, scope: None }
+    }
+
+    /// Run milik satu Base saja: run Base lain tidak dibaca, dicocokkan, atau
+    /// diperiksa klaimnya, karena Base copy berbagi `record_id`.
+    #[must_use]
+    pub fn scoped(store: Store, scope: String) -> Self {
+        Self {
+            store,
+            scope: Some(scope),
+        }
+    }
+
+    /// Run tanpa Base (dibuat sebelum run mengingat Base) diadopsi Base ini.
+    ///
+    /// # Errors
+    /// Kegagalan database.
+    pub async fn adopt_unscoped(&self) -> Result<u64, StoreError> {
+        let Some(scope) = &self.scope else {
+            return Ok(0);
+        };
+        let done = sqlx::query!("UPDATE runs SET scope = ? WHERE scope IS NULL", scope)
+            .execute(&self.store.pool)
+            .await
+            .map_err(StoreError::internal)?;
+        Ok(done.rows_affected())
     }
 }
 
@@ -416,6 +445,7 @@ impl RunsStore {
     async fn insert_run(
         conn: &mut sqlx::SqliteConnection,
         r: &RunRecord,
+        scope: Option<&str>,
         now_ms: i64,
     ) -> Result<(), StoreError> {
         let state = r.state.as_str();
@@ -423,8 +453,9 @@ impl RunsStore {
         let worktree = r.worktree.as_ref().map(|p| p.display().to_string());
         sqlx::query!(
             "INSERT INTO runs (id, repo_id, record_id, state, state_json, generation, branch,
-                               worktree_path, session_id, pid, pr_url, created_at_ms, updated_at_ms)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                               worktree_path, session_id, pid, pr_url, created_at_ms, updated_at_ms,
+                               scope)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             r.id,
             r.repo_id,
             r.record_id,
@@ -437,7 +468,8 @@ impl RunsStore {
             r.pid,
             r.pr_url,
             now_ms,
-            now_ms
+            now_ms,
+            scope
         )
         .execute(&mut *conn)
         .await
@@ -454,8 +486,8 @@ impl RunStore for RunsStore {
             .begin()
             .await
             .map_err(StoreError::internal)?;
-        run_cards::ensure_free(&mut tx, &r.record_id).await?;
-        Self::insert_run(&mut tx, r, now_ms).await?;
+        run_cards::ensure_free(&mut tx, &r.record_id, self.scope.as_deref()).await?;
+        Self::insert_run(&mut tx, r, self.scope.as_deref(), now_ms).await?;
         tx.commit().await.map_err(StoreError::internal)?;
         Ok(())
     }
@@ -473,10 +505,10 @@ impl RunStore for RunsStore {
             .await
             .map_err(StoreError::internal)?;
         for c in cards {
-            run_cards::ensure_free(&mut tx, &c.record_id).await?;
-            run_cards::ensure_no_single_run(&mut tx, &c.record_id).await?;
+            run_cards::ensure_free(&mut tx, &c.record_id, self.scope.as_deref()).await?;
+            run_cards::ensure_no_single_run(&mut tx, &c.record_id, self.scope.as_deref()).await?;
         }
-        Self::insert_run(&mut tx, r, now_ms).await?;
+        Self::insert_run(&mut tx, r, self.scope.as_deref(), now_ms).await?;
         run_cards::write_cards(&mut tx, &r.id, cards).await?;
         tx.commit().await.map_err(StoreError::internal)?;
         Ok(())
@@ -525,8 +557,11 @@ impl RunStore for RunsStore {
 
     async fn latest_for(&self, record_id: &str) -> Result<Option<RunRecord>, PortError> {
         let id = sqlx::query_scalar!(
-            "SELECT id FROM runs WHERE record_id = ? ORDER BY created_at_ms DESC LIMIT 1",
-            record_id
+            "SELECT id FROM runs WHERE record_id = ? AND (? IS NULL OR scope = ?)
+             ORDER BY created_at_ms DESC LIMIT 1",
+            record_id,
+            self.scope,
+            self.scope
         )
         .fetch_optional(&self.store.pool)
         .await
@@ -544,14 +579,19 @@ impl RunStore for RunsStore {
             .acquire()
             .await
             .map_err(StoreError::internal)?;
-        if let Some(id) = run_cards::open_group_of(&mut conn, record_id).await? {
+        if let Some(id) =
+            run_cards::open_group_of(&mut conn, record_id, self.scope.as_deref()).await?
+        {
             drop(conn);
             return Ok(self.fetch(&id).await?);
         }
         drop(conn);
         let id = sqlx::query_scalar!(
-            "SELECT id FROM runs WHERE record_id = ? AND closed = 0 ORDER BY created_at_ms DESC LIMIT 1",
-            record_id
+            "SELECT id FROM runs WHERE record_id = ? AND closed = 0 AND (? IS NULL OR scope = ?)
+             ORDER BY created_at_ms DESC LIMIT 1",
+            record_id,
+            self.scope,
+            self.scope
         )
         .fetch_optional(&self.store.pool)
         .await
@@ -592,7 +632,9 @@ impl RunStore for RunsStore {
             Row,
             "SELECT id, repo_id, record_id, state, state_json, generation, branch,
                     worktree_path, session_id, pid, pr_url, created_at_ms, updated_at_ms
-             FROM runs WHERE closed = 0 ORDER BY created_at_ms"
+             FROM runs WHERE closed = 0 AND (? IS NULL OR scope = ?) ORDER BY created_at_ms",
+            self.scope,
+            self.scope
         )
         .fetch_all(&self.store.pool)
         .await

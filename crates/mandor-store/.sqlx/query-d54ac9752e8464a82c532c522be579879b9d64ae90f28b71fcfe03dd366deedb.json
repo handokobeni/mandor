@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "UPDATE approvals SET status = ?, answer = ?, input_json = ?, closed_ms = ?\n             WHERE id = ? AND status = 'pending'",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 5
+    },
+    "nullable": []
+  },
+  "hash": "d54ac9752e8464a82c532c522be579879b9d64ae90f28b71fcfe03dd366deedb"
+}

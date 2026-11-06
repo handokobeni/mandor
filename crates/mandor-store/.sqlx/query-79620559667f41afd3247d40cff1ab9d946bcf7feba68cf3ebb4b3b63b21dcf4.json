@@ -1,0 +1,38 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT run_id, input_json FROM approvals WHERE id = ? AND status = 'pending'",
+  "describe": {
+    "columns": [
+      {
+        "name": "run_id",
+        "ordinal": 0,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "approvals",
+            "name": "run_id"
+          }
+        }
+      },
+      {
+        "name": "input_json",
+        "ordinal": 1,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "approvals",
+            "name": "input_json"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false,
+      false
+    ]
+  },
+  "hash": "79620559667f41afd3247d40cff1ab9d946bcf7feba68cf3ebb4b3b63b21dcf4"
+}

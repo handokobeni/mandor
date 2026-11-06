@@ -464,11 +464,12 @@ fn dir_targets(command: &SimpleCommand) -> Vec<&str> {
 }
 
 /// Program yang hanya membaca path argumennya (argumen berbahaya sudah
-/// disaring [`dangerous`]).
+/// disaring [`dangerous`]). Program yang bisa menulis ke argumen posisional
+/// (mis. `uniq in out`, `file -C`) tidak termasuk.
 const READ_ONLY: &[&str] = &[
-    "cat", "head", "tail", "wc", "grep", "rg", "ls", "find", "diff", "jq", "sort", "uniq", "cut",
-    "tr", "echo", "printf", "pwd", "test", "which", "basename", "dirname", "awk", "sed", "file",
-    "stat", "du", "realpath", "readlink", "true",
+    "cat", "head", "tail", "wc", "grep", "rg", "ls", "find", "diff", "jq", "sort", "cut", "tr",
+    "echo", "printf", "pwd", "test", "which", "basename", "dirname", "awk", "sed", "stat", "du",
+    "realpath", "readlink", "true",
 ];
 const GIT_READ_ONLY: &[&str] = &[
     "status",

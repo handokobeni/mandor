@@ -77,6 +77,9 @@ pub struct RunService<D: Deps> {
     pub(crate) apps: D::Apps,
     pub(crate) overnight: D::Overnight,
     pub(crate) design: D::Design,
+    pub(crate) approvals: D::Approvals,
+    pub(crate) waiter: D::Waiter,
+    pub(crate) permits: D::Permits,
     /// Waktu sinkron AC terakhir yang berhasil per run (dibangun ulang saat
     /// refresh berikutnya setelah restart).
     pub(crate) ledger_synced: Mutex<HashMap<String, i64>>,
@@ -119,6 +122,9 @@ pub struct RunPorts<D: Deps> {
     pub apps: D::Apps,
     pub overnight: D::Overnight,
     pub design: D::Design,
+    pub approvals: D::Approvals,
+    pub waiter: D::Waiter,
+    pub permits: D::Permits,
 }
 
 impl<D: Deps> std::fmt::Debug for RunPorts<D> {
@@ -143,6 +149,9 @@ impl<D: Deps> RunService<D> {
             apps: ports.apps,
             overnight: ports.overnight,
             design: ports.design,
+            approvals: ports.approvals,
+            waiter: ports.waiter,
+            permits: ports.permits,
             ledger_synced: Mutex::new(HashMap::new()),
             capabilities: crate::review::capability::empty(),
             replies: Mutex::new(Vec::new()),

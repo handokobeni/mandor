@@ -364,6 +364,7 @@ impl<D: Deps> RunService<D> {
     /// Run tidak ada atau penyimpanan gagal.
     pub async fn close_run(self: &Arc<Self>, run_id: &str) -> Result<(), RunError> {
         let run = self.load(run_id).await?;
+        self.cancel_run_approvals(run_id).await;
         if let Some(stopper) = self.take_stopper(run_id) {
             crate::run_ports::Stopper::stop(&stopper).await;
         }

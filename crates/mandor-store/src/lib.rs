@@ -5,6 +5,7 @@
 
 mod ac_ledger;
 mod app_port;
+mod approvals;
 mod codec;
 mod design_sources;
 mod error;
@@ -30,6 +31,7 @@ use std::time::Duration;
 use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePool, SqlitePoolOptions};
 
 pub use app_port::AppStateStore;
+pub use approvals::ApprovalsStore;
 pub use design_sources::DesignSourceRow;
 pub use error::StoreError;
 pub use messages::Message;

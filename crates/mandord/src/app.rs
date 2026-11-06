@@ -37,6 +37,8 @@ pub struct App {
     pub apps: Arc<crate::apps::ProcApps>,
     /// Gerbang drain untuk pembaruan; hidup sepanjang daemon, bukan sesi Lark.
     pub drain: Arc<mandor_usecase::run::DrainGate>,
+    /// Penunggu kartu persetujuan; hidup sepanjang daemon, bukan sesi Lark.
+    pub waiter: crate::approval_waiter::TokioWaiter,
     /// Status keep-awake dari pemantau (KTD-45).
     pub power: crate::power::PowerStatus,
     settings: RwLock<Option<LarkSettings>>,
@@ -69,6 +71,7 @@ impl App {
         Self {
             apps,
             drain: Arc::default(),
+            waiter: crate::approval_waiter::TokioWaiter::default(),
             power,
             cfg,
             store,
@@ -138,6 +141,7 @@ impl App {
             rpc_port: self.rpc_port,
             apps: &self.apps,
             drain: &self.drain,
+            waiter: &self.waiter,
         };
         let s = session::start(&env, settings, me).await?;
         *self.session.write().await = Some(s);

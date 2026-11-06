@@ -80,6 +80,8 @@ pub struct SessionEnv<'a> {
     pub apps: &'a Arc<crate::apps::ProcApps>,
     /// Gerbang drain milik daemon (KTD-52).
     pub drain: &'a Arc<mandor_usecase::run::DrainGate>,
+    /// Penunggu kartu persetujuan milik daemon.
+    pub waiter: &'a crate::approval_waiter::TokioWaiter,
 }
 
 /// Klien Lark dari pengaturan.
@@ -167,11 +169,19 @@ pub async fn start(
                     git.clone(),
                     env.cfg.home.clone(),
                 ),
+                approvals: mandor_store::ApprovalsStore::new(env.store.clone()),
+                waiter: env.waiter.clone(),
+                permits: crate::permit_facts::DiskPermits,
             },
         )
         .with_drain_gate(Arc::clone(env.drain)),
     );
     warn_err(runs.reap_apps().await, "pembersihan app yatim gagal");
+    // Kartu Pending dari proses sebelumnya tidak punya penunggu (KTD-A11).
+    warn_err(
+        runs.cancel_stale_approvals().await,
+        "kartu persetujuan lama tidak dibatalkan",
+    );
     if let Some(marked) = warn_err(runs.reconcile().await, "rekonsiliasi run gagal") {
         if !marked.is_empty() {
             tracing::info!(?marked, "run terputus ditandai gagal");

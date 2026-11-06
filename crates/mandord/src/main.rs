@@ -16,6 +16,7 @@
 #[cfg(unix)]
 mod agent_exec;
 mod app;
+mod approval_waiter;
 mod apps;
 mod config;
 mod connect;
@@ -28,6 +29,7 @@ mod install;
 mod login;
 mod logins;
 mod mcp;
+mod permit_facts;
 mod power;
 mod prereq;
 mod prod;

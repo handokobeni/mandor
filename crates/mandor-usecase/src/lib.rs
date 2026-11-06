@@ -2,6 +2,7 @@
 //! adapter mengimplementasikannya. Lihat `CLAUDE.md`.
 
 pub mod app_run;
+pub mod approval;
 mod hash;
 mod notify;
 pub mod overnight;

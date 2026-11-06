@@ -37,6 +37,9 @@ impl Deps for Prod {
     type Prompts = ClaudePrompts;
     type Overnight = mandor_store::OvernightsStore;
     type Design = crate::design_port::DesignStore;
+    type Approvals = mandor_store::ApprovalsStore;
+    type Waiter = crate::approval_waiter::TokioWaiter;
+    type Permits = crate::permit_facts::DiskPermits;
 }
 
 pub fn now_ms() -> i64 {

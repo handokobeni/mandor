@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO approval_decisions (run_id, key_hash, turn, kind, created_ms)\n                 VALUES (?, ?, ?, ?, ?)\n                 ON CONFLICT(run_id, key_hash) DO UPDATE SET kind = excluded.kind",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 5
+    },
+    "nullable": []
+  },
+  "hash": "e4bc8cbe5697dfea899b9236e8d72fab51d52af494403b5fd875b1bf30b7c7df"
+}

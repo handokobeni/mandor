@@ -384,3 +384,21 @@ export function noDesignSource(ledger: Pick<AcLedgerView, 'design_sources'>): bo
 export function reviewMeta(rows: AcRowView[]): string {
   return rows.some((r) => r.verdict !== 'not_reviewed') ? 'Verdicts from the VM review' : 'No review yet';
 }
+
+/** Label screenshot tampilan: reviewer menyimpan halaman app lalu prototype. */
+export function shotLabels(n: number): string[] {
+  if (n === 2) return ['App page', 'Prototype page'];
+  return Array.from({ length: n }, (_, i) => `Screenshot ${i + 1}`);
+}
+
+/** Tingkat zoom penampil screenshot; 1 = ukuran asli (piksel tajam). */
+export const ZOOM_STEPS = [0.25, 0.5, 0.75, 1, 1.5, 2, 3, 4] as const;
+
+/** Zoom berikutnya dari `fit` atau tingkat sekarang, dibatasi rentang. */
+export function nextZoom(current: 'fit' | number, dir: 1 | -1): number {
+  if (current === 'fit') return dir > 0 ? 1 : 0.5;
+  const i = ZOOM_STEPS.findIndex((z) => z >= current);
+  const at = i === -1 ? ZOOM_STEPS.length - 1 : i;
+  const next = Math.min(ZOOM_STEPS.length - 1, Math.max(0, at + dir));
+  return ZOOM_STEPS[next];
+}

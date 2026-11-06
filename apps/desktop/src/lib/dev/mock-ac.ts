@@ -73,7 +73,8 @@ function current(): AcRowView[] {
         description: 'The date range sits below the status chips; the prototype puts it on the same row, right-aligned.',
         app_path: '/invoices',
         prototype_path: '/invoices',
-        prototype_rev: 'git:4f2a9c1'
+        prototype_rev: 'git:4f2a9c1',
+        screenshots: ['ac-2-0.png', 'ac-2-1.png']
       }
     }),
     designed(2, 'fail', { evidence: EVIDENCE.fail3 }),
@@ -170,4 +171,12 @@ export function history(runId: string, scenario: string): ReviewView[] {
     ];
   }
   return [base];
+}
+
+/** Screenshot tiruan 1440x900 untuk penampil di mode mock. */
+export function mockShot(index: number): string {
+  const label = index === 0 ? 'App page' : 'Prototype page';
+  const fill = index === 0 ? '#e8efe9' : '#efe9e3';
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="1440" height="900"><rect width="1440" height="900" fill="${fill}"/><rect x="420" y="80" width="600" height="380" rx="16" fill="#fff" stroke="#ccc"/><text x="460" y="150" font-family="sans-serif" font-size="36">${label}</text><text x="460" y="220" font-family="monospace" font-size="20">Small text stays sharp at 100%: 373,15 K</text></svg>`;
+  return `data:image/svg+xml;base64,${btoa(svg)}`;
 }

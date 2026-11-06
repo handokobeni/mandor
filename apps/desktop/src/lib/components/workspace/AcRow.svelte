@@ -11,6 +11,7 @@
     evidenceParts,
     label,
     rowMarks,
+    shotLabels,
     shownVerdict,
     visualLinks,
     visualMeta
@@ -19,6 +20,7 @@
   import { Checkbox } from '#lib/components/ui/checkbox/index.ts';
   import type { AcRowView } from '#lib/protocol/AcRowView.ts';
   import AcChip from './AcChip.svelte';
+  import ScreenshotViewer from './ScreenshotViewer.svelte';
 
   interface Props {
     row: AcRowView;
@@ -56,6 +58,8 @@
   }: Props = $props();
 
   let shots = $state<string[] | null>(null);
+  /** Screenshot yang dibuka di penampil besar. */
+  let viewing = $state<number | null>(null);
   let shotError = $state<string | null>(null);
   async function loadShots(): Promise<void> {
     if (!onscreenshot) return;
@@ -179,8 +183,16 @@
           {#if row.visual_detail.screenshots.length > 0 && onscreenshot}
             {#if shots}
               <div class="ev-shots">
-                {#each shots as src, i (i)}<img {src} alt="Screenshot {i + 1} of {label(row)}" />{/each}
+                {#each shots as src, i (i)}
+                  <button type="button" class="ev-shot" onclick={() => (viewing = i)} title="Open full size">
+                    <img {src} alt="{shotLabels(shots.length)[i]} of {label(row)}" />
+                    <span class="ev-shot-label">{shotLabels(shots.length)[i]}</span>
+                  </button>
+                {/each}
               </div>
+              {#if viewing !== null}
+                <ScreenshotViewer {shots} title={label(row)} bind:index={viewing} onclose={() => (viewing = null)} />
+              {/if}
             {:else}
               <p>
                 <button type="button" class="link" onclick={() => void loadShots()}

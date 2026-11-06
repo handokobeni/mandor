@@ -18,6 +18,8 @@ import {
   NO_VISUAL,
   visualMeta,
   blockReason,
+  nextZoom,
+  shotLabels,
   cantReasons,
   gateRows,
   pruneSelection,
@@ -243,5 +245,22 @@ describe('hasil tampilan dengan prototype (plan 2026-11-03-002)', () => {
       visual_detail: { ...NO_VISUAL.visual_detail, app_path: '//evil.example/x', prototype_path: '/a' }
     });
     expect(visualLinks(bad, 'http://localhost:3000', null)).toEqual({ app: null, prototype: null });
+  });
+});
+
+describe('penampil screenshot tampilan', () => {
+  it('names the two screenshots app and prototype, others by number', () => {
+    expect(shotLabels(2)).toEqual(['App page', 'Prototype page']);
+    expect(shotLabels(3)).toEqual(['Screenshot 1', 'Screenshot 2', 'Screenshot 3']);
+    expect(shotLabels(1)).toEqual(['Screenshot 1']);
+  });
+
+  it('zooms in fixed steps from fit or actual size and stays in range', () => {
+    expect(nextZoom('fit', 1)).toBe(1);
+    expect(nextZoom('fit', -1)).toBe(0.5);
+    expect(nextZoom(1, 1)).toBe(1.5);
+    expect(nextZoom(1.5, -1)).toBe(1);
+    expect(nextZoom(4, 1)).toBe(4);
+    expect(nextZoom(0.25, -1)).toBe(0.25);
   });
 });

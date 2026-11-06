@@ -11,7 +11,7 @@ import type { AcRowView } from '#lib/protocol/AcRowView.ts';
 import type { AppRunView } from '#lib/protocol/AppRunView.ts';
 import { activeRows, gate } from '#lib/ac-review.ts';
 import { background } from '#lib/stores/background.svelte.ts';
-import { history, ledger, scenarioFor, scenarioRows } from './mock-ac.ts';
+import { history, ledger, mockShot, scenarioFor, scenarioRows } from './mock-ac.ts';
 
 /** State Run app tiruan per run. */
 const APP = new Map<string, AppRunView>();
@@ -748,6 +748,8 @@ function handle(method: string, params: Record<string, unknown>): unknown {
     case 'system.chrome_check':
       chromeConnected = true;
       return { connected: true, detail: '', checked_at_ms: Date.now() };
+    case 'review.screenshot':
+      return { data_url: mockShot(Number(params.index)) };
     case 'ledger.get': {
       const id = String(params.run_id);
       return ledger(id, acRows(id), scenarioFor(id));

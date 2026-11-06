@@ -33,6 +33,7 @@ describe('kartu persetujuan', () => {
     expect(visible('ls ‮gnp.exe')).toBe('ls \\u{202e}gnp.exe');
     expect(visible('a\u0007b\tc')).toBe('a\\u{7}b\tc');
     expect(visible('baris\nkedua')).toBe('baris\nkedua');
+    expect(visible('a\u2028b\u3164c\u{E0041}d')).toBe('a\\u{2028}b\\u{3164}c\\u{e0041}d');
   });
 
   it('input panjang tampil utuh', () => {
@@ -44,6 +45,9 @@ describe('kartu persetujuan', () => {
     const text = inputText(card({ tool: 'WebFetch', input: { url: 'https://docs.x/a', prompt: 'p' } }));
     expect(text).toContain('"url": "https://docs.x/a"');
     expect(inputText(card())).toBe('docker ps');
+    const bg = inputText(card({ input: { command: 'make dev', run_in_background: true } }));
+    expect(bg).toContain('make dev');
+    expect(bg).toContain('"run_in_background": true');
   });
 
   it('sisa waktu dari tenggat berhenti di 0', () => {

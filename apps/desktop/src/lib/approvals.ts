@@ -2,8 +2,10 @@
 
 import type { ApprovalView } from '#lib/protocol/ApprovalView.ts';
 
-/** Karakter kontrol (selain baris baru dan tab) dan pengatur arah teks. */
-const HIDDEN = /[\u0000-\u0008\u000B-\u001F\u007F-\u009F؜​-‏‪-‮⁦-⁩﻿]/g;
+/** Karakter kontrol, format (termasuk pengatur arah teks), pemisah baris
+ * Unicode, area pribadi, belum terdefinisi, dan pengisi Hangul yang tampak
+ * kosong; baris baru dan tab tetap. */
+const HIDDEN = /(?![\n\t])[\p{Cc}\p{Cf}\p{Zl}\p{Zp}\p{Co}\p{Cn}\u115F\u1160\u3164\uFFA0]/gu;
 
 /** Teks dengan karakter tersembunyi ditulis sebagai `\u{..}` agar terlihat (R5). */
 export function visible(text: string): string {
@@ -13,8 +15,13 @@ export function visible(text: string): string {
 /** Isi utama kartu: perintah Bash apa adanya, selain itu pasangan kunci-nilai. */
 export function inputText(card: ApprovalView): string {
   const input = card.input as Record<string, unknown>;
-  if (card.tool === 'Bash' && typeof input.command === 'string') return visible(input.command);
   const { description: _ignored, ...rest } = input;
+  if (card.tool === 'Bash' && typeof input.command === 'string') {
+    const { command, ...other } = rest;
+    // Kunci lain (mis. `run_in_background`) ikut tampil agar dev melihat semuanya.
+    const extra = Object.keys(other).length > 0 ? `\n\n${JSON.stringify(other, null, 2)}` : '';
+    return visible(`${String(command)}${extra}`);
+  }
   return visible(JSON.stringify(rest, null, 2));
 }
 

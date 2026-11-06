@@ -21,9 +21,9 @@ export type ChatBlock =
 
 /** Alasan penolakan hook Mandor dari hasil tool `PreToolUse … mandor: …`. */
 function hookDenial(preview: string): string | null {
-  if (!preview.includes('PreToolUse')) return null;
-  const at = preview.indexOf('mandor:');
-  return at >= 0 ? preview.slice(at).trim() : null;
+  // Hanya format pesan hook Claude Code di awal hasil, bukan teks di tengah keluaran.
+  const m = preview.match(/^PreToolUse:\S+ hook error: \[[^\]]*\]: (mandor: [\s\S]*)$/);
+  return m ? m[1].trim() : null;
 }
 
 function str(v: unknown): string {

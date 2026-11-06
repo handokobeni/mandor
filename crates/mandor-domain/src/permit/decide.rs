@@ -395,7 +395,16 @@ impl<'a, F: PathFacts> PathCheck<'a, F> {
                 }
                 None => {}
             }
+            // Izin otomatis hanya menulis di dalam worktree run; folder
+            // pendamping dan sumber desain di luar run tetap lewat kartu.
+            if redirect.write && path != "/dev/null" && !under(&path, &self.run_root) {
+                return Some(Decision::Undecided(format!(
+                    "`{}` is outside this run's worktree",
+                    redirect.target
+                )));
+            }
         }
+        let writes = creates(command);
         for raw in path_candidates(command) {
             let Some(path) = resolve(self.facts, base, raw) else {
                 return Some(Decision::Undecided(format!(
@@ -415,6 +424,11 @@ impl<'a, F: PathFacts> PathCheck<'a, F> {
                     )));
                 }
                 None => {}
+            }
+            if writes && !under(&path, &self.run_root) {
+                return Some(Decision::Undecided(format!(
+                    "`{raw}` is outside this run's worktree"
+                )));
             }
         }
         None
@@ -847,6 +861,13 @@ mod tests {
         assert!(undecided(&api("mkdir x && cd x && git status")));
         assert!(undecided(&api("ln -s /etc l && cd l")));
         assert_eq!(api("mkdir -p src/new"), Decision::Allow);
+        assert!(
+            undecided(&api("mkdir -p /outside/new")),
+            "tulis di luar run"
+        );
+        assert!(undecided(&api("echo x > /outside/docs/a.md")));
+        assert!(undecided(&api("echo x > ../../outside/a")));
+        assert_eq!(api("echo x > src/new.txt"), Decision::Allow);
     }
 
     #[test]

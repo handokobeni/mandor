@@ -6,6 +6,7 @@ import {
   cantVerifyReason,
   confirmModel,
   confirmedPrototypes,
+  envKeyMap,
   missingCount,
   readinessItems,
   snapshots
@@ -112,6 +113,21 @@ describe('prototype di Run app (plan 2026-11-03-002)', () => {
   it('names prototypes that start again at their confirmed revision', () => {
     expect(confirmedPrototypes([web, proto(true)])).toEqual(['kelola-web-prototype']);
     expect(confirmedPrototypes([web, proto(false)])).toEqual([]);
+  });
+
+  it('marks prototype entries so their files are not linked to the Changes tab', () => {
+    const m = confirmModel([web, proto(false)]);
+    expect(m.map((r) => r.prototype)).toEqual([false, true]);
+  });
+
+  it('lists .env keys for the run repos and for prototypes by member key', () => {
+    const repo = (id: string, keys: string[]) => ({ id, app: { env_keys: keys } });
+    const keys = envKeyMap(
+      [repo('web', ['API_URL']), repo('other', ['X'])],
+      [{ id: 'd1', app: { env_keys: ['KELOLA_API_MODE'] } }, { id: 'd2', app: null }],
+      ['web']
+    );
+    expect(keys).toEqual({ web: ['API_URL'], 'prototype:d1': ['KELOLA_API_MODE'] });
   });
 
   it('labels a changed prototype with its design source name', () => {

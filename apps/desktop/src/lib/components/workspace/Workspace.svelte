@@ -76,9 +76,10 @@
   import QueueForVm from './QueueForVm.svelte';
   import { appRun } from '#lib/stores/app-run.svelte.ts';
   import { runs } from '#lib/stores/runs.svelte.ts';
-  import { appUrls, snapshots } from '#lib/app-run.ts';
+  import { appUrls, envKeyMap, snapshots } from '#lib/app-run.ts';
   import type { AppChangesView } from '#lib/protocol/AppChangesView.ts';
   import type { AppLogView } from '#lib/protocol/AppLogView.ts';
+  import type { DesignSourceView } from '#lib/protocol/DesignSourceView.ts';
   import type { RepoView } from '#lib/protocol/RepoView.ts';
   import type { ReviewReadinessView } from '#lib/protocol/ReviewReadinessView.ts';
   import AppLogsDrawer from './AppLogsDrawer.svelte';
@@ -181,6 +182,7 @@
 
   // Run app (Rilis 2 U13).
   let repos = $state<RepoView[]>([]);
+  let designSources = $state<DesignSourceView[]>([]);
   let appChanges = $state<AppChangesView[] | null>(null);
   let appLogs = $state<AppLogView[] | null>(null);
   let readiness = $state<{ view: ReviewReadinessView; trigger: 'manual' | 'push' } | null>(null);
@@ -195,13 +197,18 @@
         .request<RepoView[]>('repos.list')
         .then((r) => (repos = r))
         .catch(() => (repos = []));
+      // Kunci `.env` prototype untuk dialog Run app.
+      void rpc
+        .request<DesignSourceView[]>('design_sources.list')
+        .then((d) => (designSources = d))
+        .catch(() => (designSources = []));
     });
   });
   const memberIds = $derived(run.repos.map((r) => r.repo_id));
   const runnable = $derived(
     repos.some((r) => memberIds.includes(r.id) && !!r.app.start_command && r.app.port !== null)
   );
-  const envKeys = $derived(Object.fromEntries(repos.filter((r) => memberIds.includes(r.id)).map((r) => [r.id, r.app.env_keys])));
+  const envKeys = $derived(envKeyMap(repos, designSources, memberIds));
   const ownerRun = $derived(appRun.otherOwner(run.id));
   const ownerKey = $derived(ownerRun ? (runs.byId(ownerRun.run_id)?.key ?? 'another run') : null);
 

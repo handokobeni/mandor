@@ -56,9 +56,13 @@
             <ul class="grid gap-1">
               {#each r.files as f (f)}
                 <li class="flex items-center gap-2">
-                  <button class="ev-file" onclick={() => onfile(f)} title="Open in Changes">
-                    <FileCode class="icon-sm" aria-hidden="true" /><span>{f}</span>
-                  </button>
+                  {#if r.prototype}
+                    <span class="ev-file"><FileCode class="icon-sm" aria-hidden="true" /><span>{f}</span></span>
+                  {:else}
+                    <button class="ev-file" onclick={() => onfile(f)} title="Open in Changes">
+                      <FileCode class="icon-sm" aria-hidden="true" /><span>{f}</span>
+                    </button>
+                  {/if}
                   {#if r.flagged.has(f)}
                     <span class="chip" data-tone="warning"><TriangleAlert aria-hidden="true" />Runs code at start</span>
                   {/if}

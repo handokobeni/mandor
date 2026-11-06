@@ -173,6 +173,8 @@ export interface ConfirmRepo {
   snapshot: string;
   files: string[];
   flagged: Set<string>;
+  /** Prototype: berkasnya di folder sumber desain, bukan di tab Changes run. */
+  prototype: boolean;
 }
 
 /** Model dialog konfirmasi Run app: berkas berubah per repo, yang ditandai di atas. */
@@ -184,8 +186,21 @@ export function confirmModel(changes: AppChangesView[]): ConfirmRepo[] {
       const flagged = new Set(c.flagged);
       const files = [...c.files].sort((a, b) => Number(flagged.has(b)) - Number(flagged.has(a)) || a.localeCompare(b));
       const label = c.prototype ? `${c.prototype} (prototype)` : c.repo_id;
-      return { repo_id: c.repo_id, label, snapshot: c.snapshot, files, flagged };
+      return { repo_id: c.repo_id, label, snapshot: c.snapshot, files, flagged, prototype: c.prototype !== null };
     });
+}
+
+/** Kunci `.env` yang diteruskan per anggota app: repo run, dan prototype
+ * dengan kunci anggota `prototype:<id>` (nilai tidak pernah ditampilkan). */
+export function envKeyMap(
+  repos: { id: string; app: { env_keys: string[] } }[],
+  sources: { id: string; app: { env_keys: string[] } | null }[],
+  memberIds: string[]
+): Record<string, string[]> {
+  const out: Record<string, string[]> = {};
+  for (const r of repos) if (memberIds.includes(r.id)) out[r.id] = r.app.env_keys;
+  for (const d of sources) if (d.app) out[`prototype:${d.id}`] = d.app.env_keys;
+  return out;
 }
 
 /** Prototype yang ikut jalan pada revisi terkonfirmasi tanpa perlu dilihat lagi. */

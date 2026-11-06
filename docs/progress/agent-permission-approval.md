@@ -66,7 +66,32 @@ Repo git sementara, berkas izin giliran implementasi buatan tangan, `mandord hoo
 
 Catatan: karena Claude Code mengizinkan `docker ps` sendiri, uji kartu di app memakai perintah lain (mis. `curl -sI https://example.com`) sebagai pengganti contoh `docker ps` di AE4/AE13.
 
-## Uji langsung dengan app (belum)
+## Uji langsung laptop dengan daemon (2026-11-06)
+
+Daemon branch ini (`target/debug/mandord serve`) digerakkan lewat RPC (`mandord connect`) tanpa app, Lark login asli, Base copy. Kartu uji PGS-1575 "TEST Mandor izin agent – kartu persetujuan (abaikan)" dibuat di Base copy dengan izin pemilik produk, run giliran implementasi di repo mandor-smoke, agent Claude Code asli.
+
+| Langkah | Hasil | Bukti |
+|---|---|---|
+| `git log --oneline -3 2>&1 \| tail -3` | Berjalan tanpa kartu | AE1 |
+| `curl -sI https://example.com` | Kartu muncul; `runs.list` `pending_approvals: 1`; notifikasi `approval_needed` "Approval needed" berisi perintah | R4, R9 |
+| Jawaban lewat koneksi token `Permit` agent (WebSocket `hello` dengan token dari konfigurasi MCP) | `unauthorized`, kartu tetap menunggu, Chat: "A permit session tried to answer…" | AE16 |
+| Allow this exact request for this run | `curl` berjalan dengan input asli; jawaban kedua untuk kartu yang sama → "no longer pending" | R18, AE12 |
+| `git push origin HEAD` | Agent menolak sendiri (aturan operator prompt); terbukti ditolak hook di uji Claude Code asli | AE2 |
+| Giliran berikut: `curl -sI https://example.com` lagi | Berjalan tanpa kartu | AE3 |
+| `curl -sI https://example.org` → Deny, lalu permintaan sama | Kartu → Deny; permintaan kedua ditolak langsung "you denied this exact request earlier in this run" | AE13 |
+| `curl -sI https://example.net` tidak dijawab | Expired setelah 10 menit; `curl -sI https://www.iana.org` berikutnya ditolak langsung (mode tolak langsung) | AE4, R19 |
+| `approvals.seen` | "Approval requests resumed."; permintaan berikutnya menjadi kartu lagi, Allow once berjalan | R19 |
+| Daemon restart saat kartu `www.rfc-editor.org` menunggu | Kartu → cancelled, Chat "Waiting approval requests were cancelled." | R20 |
+| `cd fixtures/repo && git status` (repo bersarang di worktree) | Kartu, tidak diizinkan otomatis | AE9 |
+| `cd docs-link && git log` (symlink ke folder di luar run) | Kartu | AE15 |
+| `echo $(date)` | Kartu | AE8 |
+| WebFetch `https://example.com` | Kartu dengan URL sebagai isi | AE7 |
+
+Temuan dan perbaikan dari uji ini: satu Deny dari dev tercatat dua kali di Chat, dan penolakan langsung tercatat ulang dari `permission_denials` di akhir giliran. Diperbaiki di `fix(approval): satu keputusan kartu tercatat sekali di Chat` (test usecase baru); uji AE7–AE15 setelah perbaikan mencatat setiap Deny tepat satu kali. Penanda "sudah tercatat" lalu dipersempit (review keamanan): hanya setelah penolakan tercatat, untuk panggilan dengan bukti hook, dicocokkan `tool_use_id` dan nama tool.
+
+AE5, AE11, AE14 dan batas 5 kartu dibuktikan test otomatis (kartu uji tanpa AC tidak bisa direview; agent memanggil tool berurutan sehingga 5 kartu bersamaan tidak terjadi secara alami).
+
+## Uji langsung VM (belum)
 
 Butuh daemon dan app versi branch ini di laptop, dan biner `mandord` baru di VM:
 

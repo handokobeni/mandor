@@ -404,7 +404,9 @@ impl<'a, F: PathFacts> PathCheck<'a, F> {
                 )));
             }
         }
-        let writes = creates(command);
+        // Gagal-tertutup: selain program baca-saja, setiap kandidat path bisa
+        // menjadi target tulis.
+        let writes = !read_only(command);
         for raw in path_candidates(command) {
             let Some(path) = resolve(self.facts, base, raw) else {
                 return Some(Decision::Undecided(format!(
@@ -459,6 +461,42 @@ fn dir_targets(command: &SimpleCommand) -> Vec<&str> {
         i += 1;
     }
     out
+}
+
+/// Program yang hanya membaca path argumennya (argumen berbahaya sudah
+/// disaring [`dangerous`]).
+const READ_ONLY: &[&str] = &[
+    "cat", "head", "tail", "wc", "grep", "rg", "ls", "find", "diff", "jq", "sort", "uniq", "cut",
+    "tr", "echo", "printf", "pwd", "test", "which", "basename", "dirname", "awk", "sed", "file",
+    "stat", "du", "realpath", "readlink", "true",
+];
+const GIT_READ_ONLY: &[&str] = &[
+    "status",
+    "diff",
+    "log",
+    "show",
+    "blame",
+    "ls-files",
+    "rev-parse",
+    "grep",
+    "branch",
+];
+
+fn read_only(command: &SimpleCommand) -> bool {
+    let Some((first, args)) = command.words.split_first() else {
+        return true;
+    };
+    let prog = program_name(first);
+    if prog == "git" {
+        let mut skip = false;
+        let sub = args.iter().find(|a| {
+            let take = !skip && !a.starts_with('-');
+            skip = matches!(a.as_str(), "-C" | "--git-dir" | "--work-tree");
+            take
+        });
+        return sub.is_some_and(|s| GIT_READ_ONLY.contains(&s.as_str()));
+    }
+    READ_ONLY.contains(&prog)
 }
 
 fn creates(command: &SimpleCommand) -> bool {
@@ -868,6 +906,16 @@ mod tests {
         assert!(undecided(&api("echo x > /outside/docs/a.md")));
         assert!(undecided(&api("echo x > ../../outside/a")));
         assert_eq!(api("echo x > src/new.txt"), Decision::Allow);
+        assert!(
+            undecided(&api("npx x --out=/outside/a")),
+            "tulis lewat opsi"
+        );
+        assert!(undecided(&api("cp -t /outside src/a.ts")));
+        assert_eq!(
+            api("cat /outside/docs/x.md"),
+            Decision::Allow,
+            "baca di luar run"
+        );
     }
 
     #[test]

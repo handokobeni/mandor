@@ -524,6 +524,54 @@ impl ClaudeAgent {
         ))
     }
 
+    /// Konfigurasi git user agent di VM (`<run_dir>/gitconfig`, dipakai
+    /// `agent-exec` lewat `GIT_CONFIG_GLOBAL`): identitas agent, tanpa
+    /// credential helper, tanpa fsmonitor, dan `safe.directory` untuk path persis
+    /// worktree dan repo sumber run. Agent berjalan sebagai user lain, jadi tanpa
+    /// ini git menolak worktree milik user developer ("dubious ownership").
+    /// Entri run lain yang path-nya masih ada dipertahankan. Di laptop tidak
+    /// melakukan apa pun.
+    ///
+    /// # Errors
+    /// [`PortError::Storage`] bila berkas tidak bisa ditulis atau path tidak valid.
+    pub async fn write_agent_gitconfig(&self, req: &AgentRequest) -> Result<(), PortError> {
+        let Some(runner) = &self.cfg.runner else {
+            return Ok(());
+        };
+        let mut paths: Vec<PathBuf> = vec![req.worktree.clone(), req.repo.path.clone()];
+        if let Some(ws) = &req.workspace {
+            for (repo, wt) in &ws.repos {
+                paths.push(wt.clone());
+                paths.push(repo.path.clone());
+            }
+        }
+        let target = runner.run_dir.join("gitconfig");
+        let mode = self.file_mode(0o640);
+        let write = tokio::task::spawn_blocking(move || {
+            let mut safe: Vec<String> = std::fs::read_to_string(&target)
+                .map(|old| safe_directories(&old))
+                .unwrap_or_default()
+                .into_iter()
+                .filter(|p| Path::new(p).exists())
+                .collect();
+            for p in paths {
+                let p = p.display().to_string();
+                if !safe.contains(&p) {
+                    safe.push(p);
+                }
+            }
+            let body = agent_gitconfig(&safe)?;
+            review_state::write_atomic(&target, body.as_bytes(), mode).map_err(|e| e.to_string())
+        });
+        match tokio::time::timeout(FILE_TIMEOUT, write).await {
+            Ok(Ok(written)) => written.map_err(PortError::Storage),
+            Ok(Err(e)) => Err(PortError::Storage(e.to_string())),
+            Err(_) => Err(PortError::Storage(
+                "writing the agent git config timed out".to_owned(),
+            )),
+        }
+    }
+
     /// Browser reviewer: Playwright headless bila daemon VM menyediakannya.
     fn review_browser(&self) -> ReviewBrowser {
         if self.cfg.headless_browser.is_some() {
@@ -915,6 +963,7 @@ impl AgentPort for ClaudeAgent {
             self.write_review_state(review).await?;
         }
         let permit = self.write_permit(req).await?;
+        self.write_agent_gitconfig(req).await?;
         let mut spec = self.spec(req, mcp_config);
         spec.hook_command.push_str(&permit);
         let run = AgentRun::start(&ClaudeBackend, &spec, &req.message, 0)
@@ -1115,6 +1164,41 @@ fn selected_servers(
 }
 
 /// Nama berkas aman dari path folder kerja.
+/// Isi `gitconfig` user agent VM. Path dikutip dan di-escape; path dengan
+/// baris baru ditolak.
+fn agent_gitconfig(safe: &[String]) -> Result<String, String> {
+    let mut out = String::from(
+        "[user]\n\tname = mandor agent\n\temail = agent@mandor.invalid\n\
+         [credential]\n\thelper =\n\
+         [core]\n\tfsmonitor = false\n\
+         [safe]\n",
+    );
+    for p in safe {
+        if p.contains(['\n', '\r']) {
+            return Err(format!("path with a line break: {p:?}"));
+        }
+        let quoted = p.replace('\\', "\\\\").replace('"', "\\\"");
+        out.push_str("\tdirectory = \"");
+        out.push_str(&quoted);
+        out.push_str("\"\n");
+    }
+    Ok(out)
+}
+
+/// Entri `safe.directory` dari `gitconfig` yang ditulis [`agent_gitconfig`].
+fn safe_directories(text: &str) -> Vec<String> {
+    text.lines()
+        .filter_map(|l| l.trim().strip_prefix("directory = "))
+        .map(|v| {
+            let v = v
+                .strip_prefix('"')
+                .and_then(|v| v.strip_suffix('"'))
+                .unwrap_or(v);
+            v.replace("\\\"", "\"").replace("\\\\", "\\")
+        })
+        .collect()
+}
+
 /// Folder kosong khusus daemon (0700): isi lama dihapus, symlink ditolak.
 fn fresh_private_dir(dir: &Path) -> std::io::Result<()> {
     match std::fs::symlink_metadata(dir) {
@@ -1664,6 +1748,69 @@ mod tests {
         assert_eq!(mode(&path), 0o600);
         laptop.write_review_state(&review).await.unwrap();
         assert_eq!(mode(&laptop.review_state_path("rv1")), 0o600);
+    }
+
+    /// Agent VM berjalan sebagai user lain: git menolak worktree dan repo
+    /// milik user developer ("dubious ownership") kecuali path-nya tercatat
+    /// di `safe.directory` berkas `GIT_CONFIG_GLOBAL` agent (`<run_dir>/gitconfig`).
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn konfigurasi_git_agent_vm_mencantumkan_worktree_dan_repo_run() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let runs = dir.path().join("runs");
+        std::fs::create_dir_all(&runs).unwrap();
+        let mut cfg = test_agent(dir.path().join("mcp")).cfg;
+        cfg.runner = Some(crate::claude::command::AgentRunner {
+            exe: "/opt/mandord".into(),
+            user: "beni-agent".to_owned(),
+            run_dir: runs.clone(),
+        });
+        let vm = ClaudeAgent::new(cfg);
+        // Entri lama yang path-nya masih ada dipertahankan (run lain), yang
+        // sudah hilang dibuang.
+        let other = dir.path().join("wt-lain");
+        std::fs::create_dir_all(&other).unwrap();
+        std::fs::write(
+            runs.join("gitconfig"),
+            format!(
+                "[safe]\n\tdirectory = \"{}\"\n\tdirectory = \"/hilang/x\"\n",
+                other.display()
+            ),
+        )
+        .unwrap();
+        let mut req = workspace_req("/src/kelola-v2".into());
+        req.worktree = dir.path().join("wt \"x\"");
+        vm.write_agent_gitconfig(&req).await.unwrap();
+        let path = runs.join("gitconfig");
+        let text = std::fs::read_to_string(&path).unwrap();
+        for want in [
+            "\tname = mandor agent",
+            "\thelper =",
+            "\tfsmonitor = false",
+            "\tdirectory = \"/wt/kelola-v2-x/kelola-api\"",
+            "\tdirectory = \"/wt/kelola-v2-x/kelola-web\"",
+            "\tdirectory = \"/src/kelola-api\"",
+            "\tdirectory = \"/src/kelola-web\"",
+        ] {
+            assert!(text.contains(want), "{want}\n{text}");
+        }
+        assert!(text.contains(&format!("\tdirectory = \"{}\"", other.display())));
+        assert!(!text.contains("/hilang/x"), "{text}");
+        assert!(
+            text.contains(&format!("{}/wt \\\"x\\\"\"", dir.path().display())),
+            "kutip di path di-escape: {text}"
+        );
+        assert!(!text.contains("directory = *"), "tanpa wildcard");
+        assert_eq!(
+            std::fs::metadata(&path).unwrap().permissions().mode() & 0o777,
+            0o640
+        );
+
+        // Laptop: agent berjalan sebagai user developer, tidak ada berkas.
+        let laptop = test_agent(dir.path().join("laptop"));
+        laptop.write_agent_gitconfig(&req).await.unwrap();
+        assert!(!dir.path().join("laptop/gitconfig").exists());
     }
 
     /// U5 plan 2026-11-06-001: giliran laptop memakai alat persetujuan

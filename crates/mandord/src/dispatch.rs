@@ -33,6 +33,7 @@ use crate::views::{
 };
 
 mod app_run;
+mod approvals;
 mod cleanup;
 pub(crate) mod design;
 mod group;
@@ -267,6 +268,7 @@ impl AppDispatch {
         let now = now_ms();
         let team = s.sync.team_board();
         let summaries = self.ac_summaries().await?;
+        let pending = self.pending_approvals().await;
         let mut cards: Vec<_> = cached
             .iter()
             .map(|c| {
@@ -275,6 +277,7 @@ impl AppDispatch {
                 apply_holder(&mut card, &c.task, s.sync.identity());
                 if let (Some(view), Some(r)) = (card.run.as_mut(), run) {
                     view.ac = summaries.get(&r.id).cloned();
+                    view.pending_approvals = pending.get(&r.id).copied().unwrap_or(0);
                 }
                 if let Some(cards) = run.and_then(|r| groups.get(&r.id)) {
                     apply_group(&mut card, cards);
@@ -315,15 +318,28 @@ impl AppDispatch {
         let summaries = self.ac_summaries().await?;
         let active = s.runs.active_runs().await.map_err(run_error)?;
         let mut groups = group::group_views(&s, &active).await?;
+        let pending = self.pending_approvals().await;
         let mut out = Vec::new();
         for r in active {
             let task = s.sync.cached(&r.record_id).await.map_err(sync_error)?;
             let mut view = run_view(&r, task.as_ref().map(|c| &c.task));
             view.ac = summaries.get(&r.id).cloned();
             view.cards = groups.remove(&r.id).unwrap_or_default();
+            view.pending_approvals = pending.get(&r.id).copied().unwrap_or(0);
             out.push(view);
         }
         ok(&out)
+    }
+
+    /// Kartu persetujuan Pending per run; badge hanya pelengkap, jadi error
+    /// penyimpanan dicatat dan dianggap nol.
+    async fn pending_approvals(&self) -> HashMap<String, u32> {
+        self.app
+            .store
+            .pending_approval_counts()
+            .await
+            .inspect_err(|e| tracing::warn!(error = %e, "jumlah kartu persetujuan tidak terbaca"))
+            .unwrap_or_default()
     }
 
     /// Ringkasan buku AC semua run aktif (satu query).
@@ -831,6 +847,12 @@ impl AppDispatch {
     }
 
     async fn run_action(&self, name: &str, v: Value) -> Result<Value, RpcError> {
+        if matches!(
+            name,
+            method::APPROVALS_LIST | method::APPROVALS_ANSWER | method::APPROVALS_SEEN
+        ) {
+            return self.approvals_call(name, v).await;
+        }
         if !RUN_METHODS.contains(&name) {
             return Err(RpcError::new(
                 ErrorCode::MethodNotFound,
@@ -1020,6 +1042,29 @@ async fn approve<D: mandor_usecase::Deps>(
     ok(&json!({}))
 }
 
+/// Tujuan panggilan koneksi token kapabilitas.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ScopedRoute {
+    Permit,
+    Ledger,
+    /// Method kartu persetujuan: hanya untuk koneksi token penuh (KTD-A16).
+    Approvals,
+    Refused,
+}
+
+/// Token `Permit` hanya untuk meminta izin; token ledger tidak bisa meminta
+/// izin (U5 plan 2026-11-06-001). Jawaban kartu tidak pernah lewat sini.
+fn scoped_route(role: &str, name: &str) -> ScopedRoute {
+    match (role, name) {
+        (_, method::APPROVALS_LIST | method::APPROVALS_ANSWER | method::APPROVALS_SEEN) => {
+            ScopedRoute::Approvals
+        }
+        ("permit", method::PERMIT_REQUEST) => ScopedRoute::Permit,
+        ("permit", _) | (_, method::PERMIT_REQUEST) => ScopedRoute::Refused,
+        _ => ScopedRoute::Ledger,
+    }
+}
+
 impl Dispatch for AppDispatch {
     async fn verify_capability(&self, token: &str) -> Option<mandor_api::CapabilityScope> {
         self.capability(token).await
@@ -1031,7 +1076,15 @@ impl Dispatch for AppDispatch {
         name: &str,
         v: Value,
     ) -> Result<Value, RpcError> {
-        self.ledger_tool_call(scope, name, v).await
+        match scoped_route(&scope.role, name) {
+            ScopedRoute::Permit => self.permit_call(scope, v).await,
+            ScopedRoute::Approvals => Err(self.approvals_refused(scope, name).await),
+            ScopedRoute::Ledger => self.ledger_tool_call(scope, name, v).await,
+            ScopedRoute::Refused => Err(RpcError::new(
+                ErrorCode::Unauthorized,
+                format!("{name} is not available on this connection"),
+            )),
+        }
     }
 
     async fn call(&self, name: &str, v: Value) -> Result<Value, RpcError> {
@@ -1090,6 +1143,33 @@ impl Dispatch for AppDispatch {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn token_permit_dan_ledger_terpisah() {
+        use super::{ScopedRoute, scoped_route};
+        assert_eq!(
+            scoped_route("permit", "permit.request"),
+            ScopedRoute::Permit
+        );
+        assert_eq!(
+            scoped_route("permit", "ledger.tool.read"),
+            ScopedRoute::Refused
+        );
+        assert_eq!(
+            scoped_route("design", "permit.request"),
+            ScopedRoute::Refused
+        );
+        assert_eq!(
+            scoped_route("verdict", "ledger.tool.read"),
+            ScopedRoute::Ledger
+        );
+        for role in ["permit", "design", "verdict"] {
+            assert_eq!(
+                scoped_route(role, "approvals.answer"),
+                ScopedRoute::Approvals
+            );
+        }
+    }
+
     use super::*;
 
     #[test]

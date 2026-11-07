@@ -75,6 +75,8 @@ pub struct ReportCard {
     pub entered_waiting_fix: bool,
     /// Sumber desain yang gagal diperbarui saat kartu dimulai.
     pub design_notes: Vec<String>,
+    /// Penolakan izin agent, tersamarkan (R13 plan 2026-11-06-001).
+    pub denials: Vec<String>,
     /// Keadaan kartu di grupnya; `None` untuk kartu tunggal.
     pub group: Option<GroupCardStatus>,
     /// Kartu grup ter-commit yang berubah di Lark dan belum diputuskan (R13).
@@ -191,6 +193,7 @@ impl<D: Deps> RunService<D> {
                     ac_cant_verify: count(Verdict::CantVerify),
                     entered_waiting_fix: run.entered_waiting_fix_ms.is_some(),
                     design_notes: run.design_notes.clone(),
+                    denials: run.denials.clone(),
                     group,
                     changed_in_lark,
                 };

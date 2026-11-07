@@ -5,6 +5,7 @@
   import type { RunView } from '#lib/protocol/RunView.ts';
   import { flagIcon } from './icons.ts';
   import RunStatusBadge from './RunStatusBadge.svelte';
+  import ApprovalBadge from './ApprovalBadge.svelte';
   import StatusDot from './StatusDot.svelte';
 
   interface Props {
@@ -38,5 +39,6 @@
     <span class="run" data-tone={fmeta.tone}><FlagIcon aria-hidden="true" /><span class="lbl">{fmeta.label}</span></span>
   {:else}
     <RunStatusBadge state={run.state} label={runLabel(run)} />
+    <ApprovalBadge {run} />
   {/if}
 </button>

@@ -64,6 +64,10 @@ describe('preferensi notifikasi desktop', () => {
     expect(shouldNotify('pr_created', DEFAULT_NOTIFY)).toBe(false);
     expect(shouldNotify('failed', { ...DEFAULT_NOTIFY, failed: false })).toBe(false);
     expect(shouldNotify('jenis_baru', DEFAULT_NOTIFY)).toBe(true);
+    expect(shouldNotify('approval_needed', DEFAULT_NOTIFY)).toBe(true);
+    expect(shouldNotify('approval_needed', { ...DEFAULT_NOTIFY, approval_needed: false })).toBe(
+      false
+    );
   });
 });
 

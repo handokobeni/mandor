@@ -406,7 +406,12 @@ impl Deps for FakeDeps {
     type Apps = run_fakes::FakeApps;
     type Overnight = run_fakes::FakeOvernight;
     type Design = run_fakes::FakeDesign;
+    type Approvals = approval_fakes::FakeApprovals;
+    type Waiter = approval_fakes::FakeWaiter;
+    type Permits = approval_fakes::FakePermits;
 }
+
+pub mod approval_fakes;
 
 pub mod run_fakes;
 
@@ -465,6 +470,9 @@ pub struct Station {
     pub apps: run_fakes::FakeApps,
     pub overnight: run_fakes::FakeOvernight,
     pub design: run_fakes::FakeDesign,
+    pub approvals: approval_fakes::FakeApprovals,
+    pub waiter: approval_fakes::FakeWaiter,
+    pub permits: approval_fakes::FakePermits,
 }
 
 pub fn station(lark: &FakeLark, clock: &FakeClock, me: &str) -> Station {
@@ -487,6 +495,9 @@ fn station_of(l: Laptop) -> Station {
     let apps = run_fakes::FakeApps::default();
     let overnight = run_fakes::FakeOvernight::default();
     let design = run_fakes::FakeDesign::default();
+    let approvals = approval_fakes::FakeApprovals::default();
+    let waiter = approval_fakes::FakeWaiter::default();
+    let permits = approval_fakes::FakePermits::default();
     let ports = mandor_usecase::RunPorts::<FakeDeps> {
         git: git.clone(),
         agent: agent.clone(),
@@ -499,6 +510,9 @@ fn station_of(l: Laptop) -> Station {
         apps: apps.clone(),
         overnight: overnight.clone(),
         design: design.clone(),
+        approvals: approvals.clone(),
+        waiter: waiter.clone(),
+        permits: permits.clone(),
     };
     let svc = Arc::new(mandor_usecase::RunService::new(Arc::new(svc), ports));
     Station {
@@ -514,6 +528,9 @@ fn station_of(l: Laptop) -> Station {
         apps,
         overnight,
         design,
+        approvals,
+        waiter,
+        permits,
     }
 }
 

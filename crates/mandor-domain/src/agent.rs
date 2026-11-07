@@ -48,6 +48,15 @@ impl UsageTracker {
     }
 }
 
+/// Satu penolakan izin dari hasil giliran Claude Code.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Denial {
+    pub tool_name: String,
+    pub tool_use_id: String,
+    /// Ringkasan input tersamarkan (perintah, URL, atau pasangan kunci-nilai).
+    pub input: String,
+}
+
 /// Satu event dari sesi agent.
 #[derive(Debug, Clone, PartialEq)]
 pub enum AgentEvent {
@@ -94,6 +103,9 @@ pub enum AgentEvent {
         result: String,
         num_turns: u32,
         denials: u32,
+        /// Penolakan Claude Code di giliran ini (`permission_denials`),
+        /// ringkasan input tersamarkan (plan 2026-11-06-001, KTD-A17).
+        denied: Vec<Denial>,
         /// Biaya giliran menurut CLI (`total_cost_usd`).
         cost_usd: Option<f64>,
         /// Batas yang menghentikan giliran: `budget` atau `turns`.

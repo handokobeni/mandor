@@ -73,6 +73,7 @@ function run(id: string, state: string, extra: Partial<RunView> = {}): RunView {
     ac: null,
     cards: [],
     one_plan: false,
+    pending_approvals: 0,
     ...extra
   };
 }
@@ -290,3 +291,14 @@ describe('label review AC dan chip kartu', () => {
     expect(acChip(null)).toBeNull();
   });
 });
+
+describe('badge kartu persetujuan', () => {
+  it('muncul hanya bila ada kartu menunggu', async () => {
+    const { approvalBadge } = await import('#lib/board.ts');
+    expect(approvalBadge(null)).toBeNull();
+    expect(approvalBadge({ pending_approvals: 0 })).toBeNull();
+    expect(approvalBadge({ pending_approvals: 1 })).toBe('Needs approval');
+    expect(approvalBadge({ pending_approvals: 3 })).toBe('Needs approval (3)');
+  });
+});
+

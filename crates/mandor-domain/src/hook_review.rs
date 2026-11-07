@@ -194,26 +194,33 @@ fn runs_node_code(cmd: &str) -> bool {
         words
             .iter()
             .position(|w| crate::hook::program_name(w) == "node")
-            .is_some_and(|i| {
-                let args = &words[i + 1..];
-                args.first().map(String::as_str) != Some("--test")
-                    || args[1..].iter().any(|a| a.starts_with('-'))
-            })
+            .is_some_and(|i| node_runs_code(&words[i + 1..]))
     })
+}
+
+/// Argumen `node` yang menjalankan kode selain `--test <path…>`.
+pub(crate) fn node_runs_code(args: &[String]) -> bool {
+    args.first().map(String::as_str) != Some("--test")
+        || args[1..].iter().any(|a| a.starts_with('-'))
 }
 
 /// Opsi `rg` yang menjalankan program lain: `--pre`/`--pre-glob` per berkas,
 /// `--hostname-bin`, dan `-z`/`--search-zip` (program dekompresi).
 fn runs_preprocessor(cmd: &str) -> bool {
     let words = shell_words(cmd);
-    words.iter().enumerate().any(|(i, w)| {
-        crate::hook::program_name(w) == "rg"
-            && words[i + 1..].iter().any(|a| {
-                a.starts_with("--pre")
-                    || a.starts_with("--hostname-bin")
-                    || a == "--search-zip"
-                    || (a.starts_with('-') && !a.starts_with("--") && a.contains('z'))
-            })
+    words
+        .iter()
+        .enumerate()
+        .any(|(i, w)| crate::hook::program_name(w) == "rg" && rg_runs_program(&words[i + 1..]))
+}
+
+/// Argumen `rg` yang menjalankan program lain.
+pub(crate) fn rg_runs_program(args: &[String]) -> bool {
+    args.iter().any(|a| {
+        a.starts_with("--pre")
+            || a.starts_with("--hostname-bin")
+            || a == "--search-zip"
+            || (a.starts_with('-') && !a.starts_with("--") && a.contains('z'))
     })
 }
 
@@ -510,7 +517,7 @@ fn runs_interpreter(cmd: &str) -> Option<String> {
         .find(|p| INTERPRETERS.contains(&p.as_str()))
 }
 
-fn dangerous_git_opt(arg: &str) -> bool {
+pub(crate) fn dangerous_git_opt(arg: &str) -> bool {
     if let Some(long) = arg.strip_prefix("--") {
         let name = long.split('=').next().unwrap_or(long);
         return !name.is_empty() && GIT_DANGEROUS_LONG.iter().any(|o| o.starts_with(name));

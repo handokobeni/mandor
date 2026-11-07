@@ -21,6 +21,10 @@ hold_note: string | null, pr_url: string | null, ac_pass: number, ac_fail: numbe
  */
 design_notes: Array<string>, 
 /**
+ * Penolakan izin agent semalam, tersamarkan (plan 2026-11-06-001, R13).
+ */
+denials: Array<string>, 
+/**
  * Keadaan kartu di grupnya: `committed`, `active`, `pending`, `removed`;
  * `None` untuk kartu tunggal.
  */

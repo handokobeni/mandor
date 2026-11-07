@@ -342,6 +342,7 @@ fn report_card_view(c: &ReportCard, task: Option<&Task>) -> ReportCardView {
         ac_cant_verify: c.ac_cant_verify,
         entered_waiting_fix: c.entered_waiting_fix,
         design_notes: c.design_notes.clone(),
+        denials: c.denials.clone(),
         group_card: c.group.map(|g| g.as_str().to_owned()),
         changed_in_lark: c.changed_in_lark,
     }
@@ -387,6 +388,7 @@ mod tests {
             ac_cant_verify: 1,
             entered_waiting_fix: false,
             design_notes: vec![],
+            denials: vec![],
             group: None,
             changed_in_lark: false,
         };

@@ -141,6 +141,7 @@ fn usecase_scope(s: &mandor_api::CapabilityScope) -> Option<CapabilityScope> {
     let role = match s.role.as_str() {
         "design" => CapabilityRole::Design,
         "verdict" => CapabilityRole::Verdict,
+        "permit" => CapabilityRole::Permit,
         _ => return None,
     };
     Some(CapabilityScope {
@@ -237,6 +238,32 @@ fn reviewer_settings(v: &ReviewerSettingsView) -> Result<ReviewerSettings, RpcEr
 }
 
 impl AppDispatch {
+    /// `permit.request` dari alat persetujuan; menunggu jawaban dev.
+    pub(super) async fn permit_call(
+        &self,
+        scope: &mandor_api::CapabilityScope,
+        v: Value,
+    ) -> Result<Value, RpcError> {
+        let p: mandor_protocol::PermitRequestParams = params(v)?;
+        let scope = usecase_scope(scope)
+            .ok_or_else(|| RpcError::new(ErrorCode::Unauthorized, "unknown capability role"))?;
+        let s = self.session().await?;
+        let answer = s
+            .runs
+            .permit_request_scoped(&scope, p.tool_name, p.input, p.tool_use_id)
+            .await;
+        ok(&match answer {
+            mandor_usecase::approval::PermitAnswer::Allow(input) => {
+                mandor_protocol::PermitDecision::Allow {
+                    updated_input: input,
+                }
+            }
+            mandor_usecase::approval::PermitAnswer::Deny(message) => {
+                mandor_protocol::PermitDecision::Deny { message }
+            }
+        })
+    }
+
     pub(super) async fn capability(&self, token: &str) -> Option<mandor_api::CapabilityScope> {
         let s = self.app.session().await?;
         s.runs.verify_capability(token).as_ref().map(api_scope)

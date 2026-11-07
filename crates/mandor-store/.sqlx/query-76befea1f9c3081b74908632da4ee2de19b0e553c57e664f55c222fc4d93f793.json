@@ -1,0 +1,33 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT run_id, COUNT(*) AS n FROM approvals WHERE status = 'pending' GROUP BY run_id",
+  "describe": {
+    "columns": [
+      {
+        "name": "run_id",
+        "ordinal": 0,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "approvals",
+            "name": "run_id"
+          }
+        }
+      },
+      {
+        "name": "n",
+        "ordinal": 1,
+        "type_info": "Integer",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      false,
+      false
+    ]
+  },
+  "hash": "76befea1f9c3081b74908632da4ee2de19b0e553c57e664f55c222fc4d93f793"
+}

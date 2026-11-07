@@ -195,6 +195,14 @@
             {#each c.design_notes as note (note)}
               <p class="hold"><span class="chip" data-tone="warning">Design</span> {note}</p>
             {/each}
+            {#if c.denials.length > 0}
+              <details class="hold">
+                <summary><span class="chip" data-tone="warning">Denied</span> {c.denials.length} {c.denials.length === 1 ? 'request was' : 'requests were'} denied overnight</summary>
+                <ul>
+                  {#each c.denials as d, i (i)}<li class="mono">{d}</li>{/each}
+                </ul>
+              </details>
+            {/if}
             {#if c.changed_in_lark}
               <p class="hold"><span class="chip" data-tone="warning">Changed in Lark</span> The card changed after it was committed. Keep it with a reason, or revert its commits.</p>
               <div class="actions">

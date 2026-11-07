@@ -77,11 +77,18 @@ pub struct RunService<D: Deps> {
     pub(crate) apps: D::Apps,
     pub(crate) overnight: D::Overnight,
     pub(crate) design: D::Design,
+    pub(crate) approvals: D::Approvals,
+    pub(crate) waiter: D::Waiter,
+    pub(crate) permits: D::Permits,
     /// Waktu sinkron AC terakhir yang berhasil per run (dibangun ulang saat
     /// refresh berikutnya setelah restart).
     pub(crate) ledger_synced: Mutex<HashMap<String, i64>>,
     /// Token kapabilitas tool ledger yang berlaku (KTD-26).
     pub(crate) capabilities: Arc<Mutex<crate::review::capability::Issued>>,
+    /// Berkas izin per run untuk token `Permit` giliran yang berjalan.
+    pub(crate) permit_grants: Mutex<HashMap<String, crate::review::PermitGrant>>,
+    /// `tool_use_id` per run yang sudah diputuskan alat persetujuan.
+    pub(crate) permit_handled: Mutex<HashMap<String, std::collections::HashSet<(String, String)>>>,
     /// Balasan komentar yang dikenal (digabung tiap poll, tanpa duplikat).
     pub(crate) replies: Mutex<Vec<mandor_domain::Reply>>,
     /// Semua komentar Base sudah dimuat sekali sejak start; cache di atas
@@ -119,6 +126,9 @@ pub struct RunPorts<D: Deps> {
     pub apps: D::Apps,
     pub overnight: D::Overnight,
     pub design: D::Design,
+    pub approvals: D::Approvals,
+    pub waiter: D::Waiter,
+    pub permits: D::Permits,
 }
 
 impl<D: Deps> std::fmt::Debug for RunPorts<D> {
@@ -143,8 +153,13 @@ impl<D: Deps> RunService<D> {
             apps: ports.apps,
             overnight: ports.overnight,
             design: ports.design,
+            approvals: ports.approvals,
+            waiter: ports.waiter,
+            permits: ports.permits,
             ledger_synced: Mutex::new(HashMap::new()),
             capabilities: crate::review::capability::empty(),
+            permit_grants: Mutex::new(HashMap::new()),
+            permit_handled: Mutex::new(HashMap::new()),
             replies: Mutex::new(Vec::new()),
             replies_loaded: std::sync::atomic::AtomicBool::new(false),
             cursor_sent: Mutex::new(HashMap::new()),

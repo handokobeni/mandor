@@ -315,3 +315,10 @@ export function sprintOptions(ids: string[], sprints: SprintView[]): SprintOptio
     .sort((a, b) => b.start - a.start)
     .map(({ id, name, label }) => ({ id, name, label }));
 }
+
+/** Badge kartu persetujuan yang menunggu; run tidak berpindah kolom (R9). */
+export function approvalBadge(run: { pending_approvals: number } | null | undefined): string | null {
+  const n = run?.pending_approvals ?? 0;
+  if (n <= 0) return null;
+  return n === 1 ? 'Needs approval' : `Needs approval (${n})`;
+}

@@ -239,6 +239,9 @@ pub struct AgentRequest {
     pub design: Vec<crate::review::DesignRoot>,
     /// Sesi reviewer AC: hanya baca, hook mode review, batas biaya dan waktu.
     pub review: Option<ReviewRequest>,
+    /// Token alat persetujuan Mandor (giliran implementasi dan plan di
+    /// laptop, plan 2026-11-06-001).
+    pub permit: Option<crate::review::CapabilityToken>,
 }
 
 /// Bagian permintaan agent untuk sesi reviewer (KTD-29–KTD-31).
@@ -326,6 +329,10 @@ pub trait AgentPort: Send + Sync {
     /// Login Claude Code yang dipakai agent masih valid (KTD-59 plan VM).
     /// Kegagalan memeriksa berarti tidak valid.
     fn logged_in(&self) -> impl Future<Output = bool> + Send;
+    /// Berkas izin yang akan ditulis untuk permintaan ini (deterministik).
+    fn permit_ref(&self, _req: &AgentRequest) -> Option<PermitRef> {
+        None
+    }
 }
 
 /// Bahan deskripsi PR. Semua teks berasal dari Lark atau diff dan diperlakukan
@@ -434,6 +441,9 @@ pub struct RunRecord {
     /// Sumber desain yang gagal diperbarui saat kartu VM dimulai (R12 plan
     /// 2026-10-30-001); untuk laporan pagi.
     pub design_notes: Vec<String>,
+    /// Penolakan izin agent di run VM, tersamarkan; untuk laporan pagi
+    /// (plan 2026-11-06-001, R13).
+    pub denials: Vec<String>,
     /// Cara grup VM dimulai; grup "Start now" tidak berjeda karena jam lembur
     /// (R21 plan grup, KTD-G12).
     pub vm_start: VmStart,
@@ -489,6 +499,7 @@ impl RunRecord {
             hold: None,
             entered_waiting_fix_ms: None,
             design_notes: Vec::new(),
+            denials: Vec::new(),
             draft_pending: None,
             vm_start: VmStart::Window,
             one_plan: None,
@@ -707,6 +718,8 @@ pub enum NoticeKind {
     PrCreated,
     ReviewFinished,
     AppFailed,
+    /// Kartu persetujuan pertama run menunggu (plan 2026-11-06-001, R9).
+    ApprovalNeeded,
 }
 
 impl NoticeKind {
@@ -721,6 +734,7 @@ impl NoticeKind {
             Self::PrCreated => "pr_created",
             Self::ReviewFinished => "review_finished",
             Self::AppFailed => "app_failed",
+            Self::ApprovalNeeded => "approval_needed",
         }
     }
 }
@@ -1069,4 +1083,202 @@ pub trait ReviewHistory: Send + Sync {
     ) -> impl Future<Output = Result<(), PortError>> + Send;
     /// Ekstensi Claude in Chrome terakhir terdeteksi tersambung (U13).
     fn chrome_connected(&self) -> impl Future<Output = bool> + Send;
+}
+
+/// Status kartu persetujuan yang disimpan (KTD-A11 plan 2026-11-06-001).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ApprovalStatus {
+    Pending,
+    Answered,
+    Expired,
+    Cancelled,
+}
+
+impl ApprovalStatus {
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Pending => "pending",
+            Self::Answered => "answered",
+            Self::Expired => "expired",
+            Self::Cancelled => "cancelled",
+        }
+    }
+
+    #[must_use]
+    pub fn parse(s: &str) -> Option<Self> {
+        match s {
+            "pending" => Some(Self::Pending),
+            "answered" => Some(Self::Answered),
+            "expired" => Some(Self::Expired),
+            "cancelled" => Some(Self::Cancelled),
+            _ => None,
+        }
+    }
+}
+
+/// Jawaban dev atas kartu persetujuan (R6).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ApprovalAnswer {
+    Deny,
+    AllowOnce,
+    /// Izinkan permintaan persis sama untuk sisa run (R7).
+    AllowRun,
+}
+
+impl ApprovalAnswer {
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Deny => "deny",
+            Self::AllowOnce => "allow_once",
+            Self::AllowRun => "allow_run",
+        }
+    }
+
+    #[must_use]
+    pub fn parse(s: &str) -> Option<Self> {
+        match s {
+            "deny" => Some(Self::Deny),
+            "allow_once" => Some(Self::AllowOnce),
+            "allow_run" => Some(Self::AllowRun),
+            _ => None,
+        }
+    }
+}
+
+/// Satu kartu persetujuan. `input` mentah hanya selama Pending; setelah itu
+/// tersamarkan (KTD-A11).
+#[derive(Debug, Clone, PartialEq)]
+pub struct ApprovalCard {
+    pub id: String,
+    pub run_id: String,
+    pub tool_use_id: String,
+    pub turn: mandor_domain::permit::TurnKind,
+    pub tool: String,
+    pub input: serde_json::Value,
+    pub cwd: String,
+    pub status: ApprovalStatus,
+    pub answer: Option<ApprovalAnswer>,
+    pub created_ms: i64,
+    pub deadline_ms: i64,
+    pub closed_ms: Option<i64>,
+}
+
+/// Keputusan run untuk permintaan persis sama (R7, R23).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RunDecision {
+    Allow,
+    Deny,
+}
+
+/// Penyimpanan kartu persetujuan dan keputusan run. Setiap transisi keluar
+/// Pending atomik; hanya satu yang menang (KTD-A11).
+pub trait ApprovalStore: Send + Sync {
+    fn create_approval(
+        &self,
+        card: &ApprovalCard,
+    ) -> impl Future<Output = Result<(), PortError>> + Send;
+    fn approval(
+        &self,
+        id: &str,
+    ) -> impl Future<Output = Result<Option<ApprovalCard>, PortError>> + Send;
+    /// Kartu run, urut waktu dibuat.
+    fn approvals(
+        &self,
+        run_id: &str,
+    ) -> impl Future<Output = Result<Vec<ApprovalCard>, PortError>> + Send;
+    fn pending_approvals(
+        &self,
+        run_id: &str,
+    ) -> impl Future<Output = Result<usize, PortError>> + Send;
+    /// Pending → Answered. `AllowRun` menulis izin run dengan `grant_key`,
+    /// `Deny` menulis penolakan run dengan `deny_key`, dalam transaksi yang
+    /// sama. `false` bila kartu sudah tidak Pending.
+    fn answer_approval(
+        &self,
+        id: &str,
+        answer: ApprovalAnswer,
+        grant_key: &str,
+        deny_key: &str,
+        now_ms: i64,
+    ) -> impl Future<Output = Result<bool, PortError>> + Send;
+    /// Pending → Expired; `false` bila kartu sudah tidak Pending.
+    fn expire_approval(
+        &self,
+        id: &str,
+        now_ms: i64,
+    ) -> impl Future<Output = Result<bool, PortError>> + Send;
+    /// Pending → Cancelled untuk satu run, atau semua run (`None`, saat
+    /// daemon start). Mengembalikan id kartu yang dibatalkan.
+    fn cancel_approvals(
+        &self,
+        run_id: Option<&str>,
+        now_ms: i64,
+    ) -> impl Future<Output = Result<Vec<String>, PortError>> + Send;
+    /// Keputusan run untuk string kunci (di-hash adapter).
+    fn run_decision(
+        &self,
+        run_id: &str,
+        key: &str,
+    ) -> impl Future<Output = Result<Option<RunDecision>, PortError>> + Send;
+    /// Mode tolak langsung run setelah kartu expired (R19).
+    fn deny_mode(&self, run_id: &str) -> impl Future<Output = Result<bool, PortError>> + Send;
+    fn set_deny_mode(
+        &self,
+        run_id: &str,
+        on: bool,
+        now_ms: i64,
+    ) -> impl Future<Output = Result<(), PortError>> + Send;
+}
+
+/// Hasil menunggu jawaban kartu.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WaitOutcome {
+    Answered(ApprovalAnswer),
+    TimedOut,
+    Cancelled,
+}
+
+/// Penantian jawaban kartu dengan tenggat dan pembatalan run (KTD-A13).
+pub trait ApprovalWaiter: Send + Sync {
+    type Ticket: Send + 'static;
+    /// Didaftarkan sebelum kartu dibuat agar jawaban cepat tidak hilang.
+    fn register(&self, card_id: &str, run_id: &str) -> Self::Ticket;
+    fn wait(
+        &self,
+        ticket: Self::Ticket,
+        timeout: std::time::Duration,
+    ) -> impl Future<Output = WaitOutcome> + Send;
+    /// Membangunkan penunggu kartu setelah jawaban tersimpan.
+    fn answered(&self, card_id: &str, answer: ApprovalAnswer);
+    /// Membatalkan semua penantian run.
+    fn cancel_run(&self, run_id: &str);
+}
+
+/// Berkas izin giliran beserta digest-nya (KTD-A4).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PermitRef {
+    pub path: String,
+    pub sha: String,
+}
+
+/// Fakta pemeriksaan dari berkas izin dan catatan hook (KTD-A9).
+pub trait PermitFacts: Send + Sync {
+    /// Folder kerja yang dicatat hook untuk `tool_use_id`; `None` bila hook
+    /// tidak memeriksanya sampai selesai.
+    fn evidence(
+        &self,
+        permit: &PermitRef,
+        tool_use_id: &str,
+    ) -> impl Future<Output = Option<String>> + Send;
+    /// Pemeriksaan ulang urutan KTD-A8 di daemon dengan batas waktu; `Err`
+    /// bila tidak bisa diperiksa tuntas.
+    fn recheck(
+        &self,
+        permit: &PermitRef,
+        tool: &str,
+        input: &serde_json::Value,
+        cwd: &str,
+    ) -> impl Future<Output = Result<mandor_domain::permit::Decision, String>> + Send;
 }

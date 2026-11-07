@@ -68,7 +68,8 @@ impl DaemonClient {
             client: self.client.to_owned(),
         };
         let params = serde_json::to_value(hello).map_err(|e| internal(&e.to_string()))?;
-        self.exchange(&mut conn, method::HELLO, params).await?;
+        self.exchange(&mut conn, method::HELLO, params, CALL_TIMEOUT)
+            .await?;
         Ok(conn)
     }
 
@@ -77,12 +78,26 @@ impl DaemonClient {
     /// # Errors
     /// Error RPC dari daemon, atau daemon tidak terjangkau atau tidak menjawab.
     pub async fn request(&self, name: &str, params: Value) -> Result<Value, RpcError> {
+        self.request_with_timeout(name, params, CALL_TIMEOUT).await
+    }
+
+    /// Seperti [`Self::request`] dengan batas waktu menunggu jawaban sendiri
+    /// (permintaan izin menunggu jawaban dev, KTD-A10).
+    ///
+    /// # Errors
+    /// Error RPC dari daemon, atau daemon tidak terjangkau atau tidak menjawab.
+    pub async fn request_with_timeout(
+        &self,
+        name: &str,
+        params: Value,
+        timeout: Duration,
+    ) -> Result<Value, RpcError> {
         let mut guard = self.conn.lock().await;
         let mut conn = match guard.take() {
             Some(conn) => conn,
             None => self.open().await?,
         };
-        let result = self.exchange(&mut conn, name, params).await;
+        let result = self.exchange(&mut conn, name, params, timeout).await;
         // Koneksi yang putus dibuang; panggilan berikutnya membuka ulang dan
         // token yang sudah dicabut ditolak saat hello.
         if !matches!(&result, Err(e) if e.code == ErrorCode::Unauthorized) {
@@ -96,6 +111,7 @@ impl DaemonClient {
         conn: &mut Conn,
         name: &str,
         params: Value,
+        timeout: Duration,
     ) -> Result<Value, RpcError> {
         let id = self.next_id.fetch_add(1, Ordering::Relaxed);
         let body = serde_json::to_string(&Request::new(id, name, params))
@@ -106,7 +122,7 @@ impl DaemonClient {
             .map_err(|_| internal("daemon did not accept the request in time"))?
             .map_err(|e| closed(&e.to_string()))?;
         loop {
-            let msg = tokio::time::timeout(CALL_TIMEOUT, stream.next())
+            let msg = tokio::time::timeout(timeout, stream.next())
                 .await
                 .map_err(|_| internal("daemon did not answer in time"))?;
             let text = match msg {

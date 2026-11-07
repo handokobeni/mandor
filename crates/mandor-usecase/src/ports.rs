@@ -222,4 +222,8 @@ pub trait Deps: Send + Sync + 'static {
     type Overnight: crate::overnight::OvernightStore + 'static;
     /// Sumber desain milik daemon (plan 2026-10-30-001, KTD-8).
     type Design: crate::review::DesignSources + 'static;
+    /// Kartu persetujuan izin agent (plan 2026-11-06-001).
+    type Approvals: crate::run_ports::ApprovalStore + 'static;
+    type Waiter: crate::run_ports::ApprovalWaiter + 'static;
+    type Permits: crate::run_ports::PermitFacts + 'static;
 }

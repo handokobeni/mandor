@@ -44,6 +44,7 @@ pub fn run_view(run: &RunRecord, task: Option<&Task>) -> RunView {
         ac: None,
         cards: Vec::new(),
         one_plan: run.one_plan.is_some(),
+        pending_approvals: 0,
     }
 }
 

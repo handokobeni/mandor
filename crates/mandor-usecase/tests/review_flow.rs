@@ -971,3 +971,43 @@ async fn covers_ae15_screenshot_vm_disimpan_lalu_dihapus_saat_run_ditutup() {
     st.svc.close_run(&run).await.unwrap();
     assert_eq!(*st.agent.forgotten.lock().unwrap(), [run]);
 }
+
+/// Plan 2026-11-06-001, AE5: reviewer tidak mendapat kartu, dan perintah di
+/// luar allowlist yang ditolak tercatat tepat satu item Chat walau event sesi
+/// reviewer tidak masuk Chat.
+#[tokio::test(flavor = "multi_thread")]
+async fn covers_ae5_penolakan_reviewer_tercatat_satu_item_chat_tanpa_kartu() {
+    use mandor_usecase::run_ports::ChatItem;
+    let (lark, clock) = setup();
+    let (st, run) = waiting(&lark, &clock).await;
+    st.svc
+        .start_review(&run, ReviewTrigger::Manual, None)
+        .await
+        .unwrap();
+    let rv = st.agent.last();
+    assert!(rv.req.permit.is_none(), "reviewer tanpa alat persetujuan");
+    rv.emit(mandor_domain::AgentEvent::PermissionDenied {
+        tool_name: "Bash".to_owned(),
+        tool_use_id: "t1".to_owned(),
+        reason: "not allowed".to_owned(),
+    });
+    rv.finish_denied(vec![mandor_domain::Denial {
+        tool_name: "Bash".to_owned(),
+        tool_use_id: "t1".to_owned(),
+        input: "docker ps".to_owned(),
+    }]);
+    reviewed(&st, &run).await;
+    let denied: Vec<String> = st
+        .runs
+        .chat
+        .lock()
+        .unwrap()
+        .iter()
+        .filter_map(|(_, i)| match i {
+            ChatItem::System(t) if t.contains("docker ps") => Some(t.clone()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(denied.len(), 1, "{denied:?}");
+    assert!(st.approvals.cards.lock().unwrap().is_empty(), "tanpa kartu");
+}

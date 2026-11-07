@@ -14,6 +14,7 @@ sqlx = { workspace = true, features = ["sqlite", "runtime-tokio", "migrate", "ma
 tokio = { workspace = true, features = ["time"] }
 serde.workspace = true
 serde_json.workspace = true
+sha2 = { version = "0.11", default-features = false }
 thiserror.workspace = true
 tracing.workspace = true
 

@@ -339,6 +339,7 @@ impl RunCtl {
             result: "Reached maximum budget ($2)".to_owned(),
             num_turns: 3,
             denials: 0,
+            denied: Vec::new(),
             cost_usd: Some(2.01),
             limit: Some("budget".to_owned()),
         });
@@ -351,6 +352,20 @@ impl RunCtl {
             result: result.to_owned(),
             num_turns: 1,
             denials: 0,
+            denied: Vec::new(),
+            cost_usd: None,
+            limit: None,
+        });
+        self.tx.lock().unwrap().take();
+    }
+    /// Giliran selesai dengan penolakan Claude Code (`permission_denials`).
+    pub fn finish_denied(&self, denied: Vec<mandor_domain::Denial>) {
+        self.emit(AgentEvent::Done {
+            is_error: false,
+            result: "selesai".to_owned(),
+            num_turns: 1,
+            denials: u32::try_from(denied.len()).unwrap(),
+            denied,
             cost_usd: None,
             limit: None,
         });
@@ -363,6 +378,7 @@ impl RunCtl {
             result: "selesai".to_owned(),
             num_turns: 1,
             denials: 0,
+            denied: Vec::new(),
             cost_usd: None,
             limit: None,
         });
@@ -460,6 +476,14 @@ impl FakeAgent {
 
 impl AgentPort for FakeAgent {
     type Run = FakeRun;
+
+    fn permit_ref(&self, req: &AgentRequest) -> Option<mandor_usecase::run_ports::PermitRef> {
+        Some(mandor_usecase::run_ports::PermitRef {
+            path: format!("{}/permit.json", req.worktree.display()),
+            sha: "ab".repeat(32),
+        })
+    }
+
     async fn spawn(&self, req: &AgentRequest) -> Result<FakeRun, PortError> {
         if *self.fail_spawn.lock().unwrap() {
             return Err(PortError::Transient("claude tidak ditemukan".to_owned()));

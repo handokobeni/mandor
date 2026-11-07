@@ -93,6 +93,14 @@ fn run_lengkap_menghasilkan_event_berurutan_dengan_session_id() {
     };
     assert!(!is_error);
     assert_eq!((*num_turns, *denials), (4, 2));
+    let AgentEvent::Done { denied, .. } = &events[11] else {
+        panic!()
+    };
+    assert_eq!(denied.len(), 2);
+    assert_eq!(denied[0].tool_name, "Bash");
+    assert_eq!(denied[0].tool_use_id, "toolu_01P5WZpbFCr3hPvCy3pjSmNk");
+    assert_eq!(denied[0].input, "git push origin main");
+    assert_eq!(denied[1].input, "ls /etc");
 }
 
 #[test]
@@ -194,4 +202,35 @@ fn pemakaian_per_pesan_dihitung_sekali_per_id_dan_tanpa_subagent() {
         input, 4,
         "dua pesan, masing-masing 2 token input, walau 6 baris"
     );
+}
+
+#[test]
+fn penolakan_disamarkan_dan_result_lama_tetap_terbaca() {
+    let line = serde_json::json!({
+        "type": "result", "subtype": "success", "is_error": false, "result": "ok", "num_turns": 1,
+        "permission_denials": [
+            {"tool_name": "Bash", "tool_use_id": "t1",
+             "tool_input": {"command": "curl -H 'Authorization: Bearer rahasia' https://x"}},
+            {"tool_name": "mcp__x__call", "tool_use_id": "t2",
+             "tool_input": {"api_key": "k-rahasia", "q": "a", "description": "d"}}
+        ]
+    })
+    .to_string();
+    let events = parse_line(&line);
+    let Some(AgentEvent::Done { denied, .. }) = events.last() else {
+        panic!("{events:?}")
+    };
+    assert!(!denied[0].input.contains("rahasia"), "{}", denied[0].input);
+    assert!(!denied[1].input.contains("rahasia"), "{}", denied[1].input);
+    assert!(!denied[1].input.contains("description"));
+    let old =
+        r#"{"type":"result","subtype":"success","is_error":false,"result":"ok","num_turns":1}"#;
+    let Some(AgentEvent::Done {
+        denied, denials, ..
+    }) = parse_line(old).last().cloned()
+    else {
+        panic!()
+    };
+    assert!(denied.is_empty());
+    assert_eq!(denials, 0);
 }

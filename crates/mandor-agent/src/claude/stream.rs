@@ -4,7 +4,8 @@
 //! `tool_use`). Usage hanya diambil dari event `result` agar tidak terhitung
 //! ganda (perbaikan bug §9.5 spesifikasi lama).
 
-use mandor_domain::{AgentEvent, Usage};
+use mandor_domain::permit::{redact_json, redact_text};
+use mandor_domain::{AgentEvent, Denial, Usage};
 use serde_json::Value;
 
 /// Batas panjang ringkasan input tool dan hasil tool.
@@ -194,10 +195,12 @@ fn result(v: &Value) -> Vec<AgentEvent> {
     if usage == Usage::default() {
         usage = model_usage(v);
     }
-    let denials = v
+    let denied: Vec<Denial> = v
         .get("permission_denials")
         .and_then(Value::as_array)
-        .map_or(0, Vec::len);
+        .map(|items| items.iter().map(denial).collect())
+        .unwrap_or_default();
+    let denials = denied.len();
     let mut text = str_at(v, "result").to_owned();
     if text.is_empty() {
         text = v
@@ -223,10 +226,35 @@ fn result(v: &Value) -> Vec<AgentEvent> {
             result: text,
             num_turns: u32::try_from(u64_at(Some(v), "num_turns")).unwrap_or(u32::MAX),
             denials: u32::try_from(denials).unwrap_or(u32::MAX),
+            denied,
             cost_usd: v.get("total_cost_usd").and_then(Value::as_f64),
             limit,
         },
     ]
+}
+
+/// Satu entri `permission_denials`: input diringkas lalu disamarkan.
+fn denial(v: &Value) -> Denial {
+    let input = v.get("tool_input").cloned().unwrap_or(Value::Null);
+    let shown = input
+        .get("command")
+        .or_else(|| input.get("url"))
+        .and_then(Value::as_str)
+        .map_or_else(
+            || {
+                let mut rest = redact_json(&input);
+                if let Some(map) = rest.as_object_mut() {
+                    map.remove("description");
+                }
+                rest.to_string()
+            },
+            redact_text,
+        );
+    Denial {
+        tool_name: str_at(v, "tool_name").to_owned(),
+        tool_use_id: str_at(v, "tool_use_id").to_owned(),
+        input: truncate(&shown),
+    }
 }
 
 /// Jumlah token dari `modelUsage` (semua model).

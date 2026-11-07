@@ -16,6 +16,8 @@
 #[cfg(unix)]
 mod agent_exec;
 mod app;
+mod approval_events;
+mod approval_waiter;
 mod apps;
 mod config;
 mod connect;
@@ -28,6 +30,7 @@ mod install;
 mod login;
 mod logins;
 mod mcp;
+mod permit_facts;
 mod power;
 mod prereq;
 mod prod;
@@ -78,7 +81,7 @@ async fn run(args: Vec<String>) -> ExitCode {
         None | Some("serve") => serve::run(cfg).await,
         Some("connect") => connect::run(&cfg).await,
         Some("token") => connect::print_token(&cfg).await,
-        Some("mcp") => mcp::run(&cfg).await,
+        Some("mcp") => mcp::run(&cfg, args[1..].iter().any(|a| a == "--permit")).await,
         Some("login") => login::run(&cfg, &args[1..]).await,
         Some("--version") => print_version().await,
         // Pemasangan sebagai service systemd hanya untuk daemon Linux (WSL,

@@ -20,6 +20,10 @@ pub struct ToolCall {
     pub action: Option<String>,
     /// Teks respons tool, hanya untuk `PostToolUse`.
     pub response: Option<String>,
+    /// Folder kerja agent saat tool dipanggil (`cwd` input hook).
+    pub cwd: Option<String>,
+    /// Id pemanggilan tool dari Claude Code.
+    pub tool_use_id: Option<String>,
 }
 
 /// Keputusan hook.
@@ -416,6 +420,18 @@ fn normalize_path(p: &str) -> String {
     p.replace('\\', "/").to_lowercase()
 }
 
+/// Tool penulis berkas.
+pub(crate) fn is_write_tool(tool: &str) -> bool {
+    WRITE_TOOLS.contains(&tool)
+}
+
+/// Path memuat segmen direktori konfigurasi agent atau hook git.
+pub(crate) fn in_protected_dir(path: &str) -> bool {
+    normalize_path(path)
+        .split('/')
+        .any(|seg| PROTECTED_DIRS.contains(&seg))
+}
+
 fn check_path(tool: &str, path: &str) -> Option<String> {
     let p = normalize_path(path);
     if CREDENTIAL_MARKERS.iter().any(|m| p.contains(m)) {
@@ -423,13 +439,10 @@ fn check_path(tool: &str, path: &str) -> Option<String> {
             "mandor: access to credential files is denied ({path})"
         ));
     }
-    if WRITE_TOOLS.contains(&tool) {
-        let in_protected = p.split('/').any(|seg| PROTECTED_DIRS.contains(&seg));
-        if in_protected {
-            return Some(format!(
-                "mandor: writing agent config or git hooks is denied ({path})"
-            ));
-        }
+    if WRITE_TOOLS.contains(&tool) && in_protected_dir(path) {
+        return Some(format!(
+            "mandor: writing agent config or git hooks is denied ({path})"
+        ));
     }
     None
 }

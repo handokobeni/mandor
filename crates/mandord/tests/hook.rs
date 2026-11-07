@@ -223,3 +223,218 @@ fn hook_vm_menolak_pesan_staging_dan_berkas_run() {
     ];
     assert_eq!(hook_with(&bash("sendmail -t"), false, &review).0, 2);
 }
+
+/// Plan 2026-11-06-001 (U3): giliran dengan berkas izin.
+#[cfg(unix)]
+mod permit {
+    use std::io::{Read, Write};
+    use std::path::{Path, PathBuf};
+    use std::process::{Command, Stdio};
+
+    use mandor_agent::claude::guardrails::{default_allowed, plan_allowed, review_allowed};
+    use mandor_agent::claude::permit::{PermitFile, VERSION, digest};
+
+    use super::BIN;
+
+    struct Fixture {
+        _dir: tempfile::TempDir,
+        root: PathBuf,
+        permit_dir: PathBuf,
+        evidence: PathBuf,
+    }
+
+    /// Run satu repo: `<root>` repo git dengan `sub/` dan repo bersarang
+    /// `nested/`, berkas izin di folder terpisah.
+    fn fixture() -> Fixture {
+        let dir = tempfile::tempdir().unwrap();
+        let base = std::fs::canonicalize(dir.path()).unwrap();
+        let root = base.join("run");
+        std::fs::create_dir_all(root.join(".git")).unwrap();
+        std::fs::create_dir_all(root.join("sub")).unwrap();
+        std::fs::create_dir_all(root.join("nested/.git")).unwrap();
+        let permit_dir = base.join("permit");
+        let evidence = permit_dir.join("run.d");
+        std::fs::create_dir_all(&evidence).unwrap();
+        Fixture {
+            _dir: dir,
+            root,
+            permit_dir,
+            evidence,
+        }
+    }
+
+    impl Fixture {
+        /// Menulis berkas izin; mengembalikan argumen hook.
+        fn permit(&self, turn: &str, allow: Vec<String>) -> Vec<String> {
+            let file = PermitFile {
+                version: VERSION,
+                turn: turn.to_owned(),
+                allow,
+                mcp: vec![],
+                design: vec![],
+                run_root: self.root.display().to_string(),
+                members: vec![self.root.display().to_string()],
+                evidence: (turn != "review").then(|| self.evidence.display().to_string()),
+            };
+            let bytes = file.to_bytes().unwrap();
+            let path = self.permit_dir.join("run.json");
+            std::fs::write(&path, &bytes).unwrap();
+            vec![
+                "--permit".to_owned(),
+                path.display().to_string(),
+                "--permit-sha".to_owned(),
+                digest(&bytes),
+            ]
+        }
+
+        fn input(tool: &str, tool_input: &serde_json::Value, cwd: &Path) -> String {
+            serde_json::json!({"hook_event_name": "PreToolUse", "tool_name": tool,
+                "tool_input": tool_input, "cwd": cwd, "tool_use_id": "toolu_01"})
+            .to_string()
+        }
+
+        fn bash(&self, cmd: &str) -> String {
+            Self::input("Bash", &serde_json::json!({"command": cmd}), &self.root)
+        }
+    }
+
+    /// (exit, stdout, stderr)
+    fn run(input: &str, args: &[String]) -> (i32, String, String) {
+        let mut child = Command::new(BIN)
+            .arg("hook")
+            .args(args)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .unwrap();
+        child
+            .stdin
+            .take()
+            .unwrap()
+            .write_all(input.as_bytes())
+            .unwrap();
+        let out = child.wait_with_output().unwrap();
+        (
+            out.status.code().unwrap_or(-1),
+            String::from_utf8_lossy(&out.stdout).into_owned(),
+            String::from_utf8_lossy(&out.stderr).into_owned(),
+        )
+    }
+
+    fn is_allow(stdout: &str) -> bool {
+        serde_json::from_str::<serde_json::Value>(stdout.trim())
+            .is_ok_and(|v| v["hookSpecificOutput"]["permissionDecision"] == "allow")
+    }
+
+    #[test]
+    fn tiga_keputusan_dan_bukti_pemeriksaan() {
+        let f = fixture();
+        let args = f.permit("implement", default_allowed());
+        let (code, out, err) = run(&f.bash("cd sub && git diff --stat"), &args);
+        assert_eq!(code, 0, "{err}");
+        assert!(is_allow(&out), "{out}");
+
+        let (code, out, _) = run(&f.bash("docker ps"), &args);
+        assert_eq!((code, out.as_str()), (0, ""));
+        let evidence: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(f.evidence.join("toolu_01.json")).unwrap())
+                .unwrap();
+        assert_eq!(evidence["cwd"], f.root.display().to_string());
+
+        let (code, out, err) = run(&f.bash("git push origin HEAD"), &args);
+        assert_eq!((code, out.as_str()), (2, ""));
+        assert!(err.contains("mandor:"), "{err}");
+        assert_eq!(run("{rusak", &args).0, 2);
+
+        // Repo bersarang sebagai folder kerja: tanpa keputusan.
+        let nested = Fixture::input(
+            "Bash",
+            &serde_json::json!({"command": "git status"}),
+            &f.root.join("nested"),
+        );
+        let input = nested.replace("toolu_01", "toolu_02");
+        assert_eq!(run(&input, &args).1, "");
+    }
+
+    #[test]
+    fn berkas_izin_hilang_rusak_atau_digest_beda_menolak() {
+        let f = fixture();
+        let mut args = f.permit("implement", default_allowed());
+        let input = f.bash("git status");
+        assert!(is_allow(&run(&input, &args).1));
+        let sha = args[3].clone();
+        args[3] = "0".repeat(64);
+        assert_eq!(run(&input, &args).0, 2);
+        args[3] = sha.clone();
+        std::fs::write(f.permit_dir.join("run.json"), b"{rusak").unwrap();
+        assert_eq!(run(&input, &args).0, 2);
+        std::fs::remove_file(f.permit_dir.join("run.json")).unwrap();
+        assert_eq!(run(&input, &args).0, 2);
+    }
+
+    #[test]
+    fn agent_tidak_bisa_menyentuh_folder_berkas_izin() {
+        let f = fixture();
+        let args = f.permit("implement", default_allowed());
+        let target = f.permit_dir.join("x");
+        let (code, _, err) = run(&f.bash(&format!("echo x > {}", target.display())), &args);
+        assert_eq!(code, 2, "{err}");
+        let write = Fixture::input(
+            "Write",
+            &serde_json::json!({"file_path": f.evidence.join("toolu_09.json")}),
+            &f.root,
+        );
+        assert_eq!(run(&write, &args).0, 2);
+    }
+
+    #[test]
+    fn tenggat_internal_terlewati_menolak() {
+        let f = fixture();
+        let mut args = f.permit("implement", default_allowed());
+        args.extend(["--deadline-ms".to_owned(), "200".to_owned()]);
+        let mut child = Command::new(BIN)
+            .arg("hook")
+            .args(&args)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .unwrap();
+        // Input tidak pernah selesai: stdin tetap terbuka.
+        let _stdin = child.stdin.take().unwrap();
+        let status = child.wait().unwrap();
+        let mut err = String::new();
+        child
+            .stderr
+            .take()
+            .unwrap()
+            .read_to_string(&mut err)
+            .unwrap();
+        assert_eq!(status.code(), Some(2));
+        assert!(err.contains("too long"), "{err}");
+    }
+
+    #[test]
+    fn plan_dan_reviewer_tetap_hanya_baca() {
+        let f = fixture();
+        let args = f.permit("plan", plan_allowed());
+        let write = Fixture::input(
+            "Write",
+            &serde_json::json!({"file_path": f.root.join("a.rs")}),
+            &f.root,
+        );
+        assert_eq!(run(&write, &args).0, 2);
+        assert!(is_allow(&run(&f.bash("git log --oneline -5"), &args).1));
+
+        let mut args = f.permit("review", review_allowed());
+        let state = f.permit_dir.join("r1.json");
+        std::fs::write(&state, r#"{"origins":[],"tabs":{}}"#).unwrap();
+        args.extend(["--review".to_owned(), state.display().to_string()]);
+        assert!(is_allow(&run(&f.bash("git diff --stat"), &args).1));
+        assert_eq!(run(&f.bash("echo x > a.rs"), &args).0, 2);
+        // Berkas izin reviewer tanpa --review tidak cocok dengan sesi.
+        let args = f.permit("review", review_allowed());
+        assert_eq!(run(&f.bash("git diff --stat"), &args).0, 2);
+    }
+}

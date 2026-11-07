@@ -27,7 +27,8 @@
   function select(n: NoticeView): void {
     open = false;
     void notifications.markRead([n.id]);
-    if (n.run_id) nav.run(n.run_id);
+    if (n.run_id && n.kind === 'approval_needed') nav.runApprovals(n.run_id);
+    else if (n.run_id) nav.run(n.run_id);
     else nav.board();
   }
 </script>

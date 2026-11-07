@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO approval_deny_mode (run_id, since_ms) VALUES (?, ?)\n                 ON CONFLICT(run_id) DO NOTHING",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": []
+  },
+  "hash": "b9f288cf1edbd699eda21bd3e6cd070fc9300234507456800b4f7afb92d546a3"
+}

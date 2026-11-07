@@ -1067,6 +1067,7 @@ dependencies = [
  "rand 0.10.3",
  "serde",
  "serde_json",
+ "sha2 0.11.0",
  "tempfile",
  "thiserror",
  "tokio",
@@ -1098,6 +1099,7 @@ name = "mandor-domain"
 version = "0.1.0"
 dependencies = [
  "pretty_assertions",
+ "serde_json",
  "thiserror",
 ]
 
@@ -1179,6 +1181,7 @@ dependencies = [
  "pretty_assertions",
  "serde",
  "serde_json",
+ "sha2 0.11.0",
  "sqlx",
  "tempfile",
  "thiserror",
@@ -1193,6 +1196,7 @@ dependencies = [
  "mandor-domain",
  "pretty_assertions",
  "secrecy",
+ "serde_json",
  "thiserror",
  "tokio",
  "tracing",

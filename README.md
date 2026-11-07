@@ -134,6 +134,8 @@ Sumber desain, app web untuk diuji di Chrome, gerbang Push & PR, view "Design ga
 
 Beberapa kartu satu epic milik Anda dikerjakan sebagai satu run, satu branch, dan satu PR ("Start together" di dialog Start): lihat `docs/runbook/grouped-runs.md`.
 
+Perintah agent yang aman berjalan tanpa bertanya; permintaan lain di laptop muncul sebagai kartu persetujuan di tab Chat run: lihat `docs/runbook/agent-permissions.md`.
+
 ## Build rilis
 
 ```bash

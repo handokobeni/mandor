@@ -33,6 +33,7 @@ fn spec(bin: PathBuf, wt: &Path) -> SessionSpec {
         plan_mode: false,
         review: None,
         runner: None,
+        permission_prompt_tool: None,
     }
 }
 
@@ -175,6 +176,7 @@ async fn pembuat_pesan_commit_tanpa_tool_dan_tanpa_token() {
         mcp_dir: dir.path().join("mcp"),
         ledger_server: None,
         review_dir: dir.path().join("review"),
+        permit_dir: dir.path().join("permit"),
         screens_dir: dir.path().join("screens"),
         runner: None,
         headless_browser: None,
@@ -226,6 +228,7 @@ async fn deskripsi_pr_tanpa_tool_dan_bahan_dibungkus_sebagai_data() {
         mcp_dir: dir.path().join("mcp"),
         ledger_server: None,
         review_dir: dir.path().join("review"),
+        permit_dir: dir.path().join("permit"),
         screens_dir: dir.path().join("screens"),
         runner: None,
         headless_browser: None,
@@ -294,6 +297,7 @@ async fn sesi_reviewer_dihentikan_saat_melewati_batas_waktu() {
         mcp_dir: dir.path().join("mcp"),
         ledger_server: None,
         review_dir: dir.path().join("review"),
+        permit_dir: dir.path().join("permit"),
         screens_dir: dir.path().join("screens"),
         runner: None,
         headless_browser: None,
@@ -326,6 +330,7 @@ async fn sesi_reviewer_dihentikan_saat_melewati_batas_waktu() {
             budget_cents: 200,
             timeout: Duration::from_millis(500),
         }),
+        permit: None,
     };
     let mut run = None;
     for _ in 0..20 {

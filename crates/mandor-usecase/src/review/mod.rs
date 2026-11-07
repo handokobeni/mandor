@@ -8,7 +8,8 @@ pub mod settings;
 mod snapshot;
 
 pub use capability::{
-    CapabilityRole, CapabilityScope, CapabilityToken, LedgerAccess, LedgerToolError, VisualReport,
+    CapabilityRole, CapabilityScope, CapabilityToken, LedgerAccess, LedgerToolError, PermitGrant,
+    VisualReport,
 };
 pub use design::{
     DesignCheck, DesignRoot, DesignSources, PathProbe, Prototype, SourceCheck, check_source,

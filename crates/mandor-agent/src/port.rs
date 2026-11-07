@@ -16,10 +16,12 @@ use crate::claude::command::{ReviewFlags, Session, SessionSpec};
 use crate::claude::guardrails::{
     default_allowed, default_denied, plan_allowed, review_allowed, settings_json,
 };
+use crate::claude::permit::{self, PermitFile};
 use crate::claude::review_state;
 use crate::prompt::{
     OperatorContext, ReviewBrowser, data_block, new_nonce, operator_prompt, review_operator_prompt,
 };
+use mandor_domain::permit::TurnKind;
 
 /// Tool ledger untuk giliran plan (peran Design).
 const PLAN_LEDGER_TOOLS: [&str; 2] = ["ac_ledger_read", "ac_set_design"];
@@ -97,6 +99,9 @@ pub struct ClaudeConfig {
     /// Folder berkas state pagar reviewer (`~/.mandor/agent/review`), ditolak
     /// bagi agent.
     pub review_dir: PathBuf,
+    /// Folder berkas izin giliran dan catatan bukti hook
+    /// (`~/.mandor/agent/permit`), ditolak bagi agent (KTD-A4).
+    pub permit_dir: PathBuf,
     /// Salinan screenshot perbandingan tampilan (`~/.mandor/screens`): hanya
     /// daemon yang bisa membaca dan menulisnya, juga di VM (KTD-P8).
     pub screens_dir: PathBuf,
@@ -118,6 +123,10 @@ pub struct LedgerServer {
 
 /// Nama server MCP ledger milik daemon.
 pub const LEDGER_SERVER_NAME: &str = "mandor";
+/// Nama server MCP alat persetujuan milik daemon (KTD-A10).
+pub const PERMIT_SERVER_NAME: &str = "mandor_permit";
+/// Alat persetujuan untuk `--permission-prompt-tool`.
+pub const PERMIT_TOOL: &str = "mcp__mandor_permit__permit";
 
 /// Allowlist reviewer ditambah perintah test repo, dan path pendamping
 /// (termasuk sumber desain) tanpa duplikat.
@@ -224,13 +233,7 @@ impl ClaudeAgent {
                 })
                 .collect()
         });
-        let mut servers: Vec<String> = req
-            .workspace
-            .as_ref()
-            .map_or_else(Vec::new, |ws| ws.mcp_servers.clone());
-        if self.ledger_enabled(req) {
-            servers.push(LEDGER_SERVER_NAME.to_owned());
-        }
+        let servers = self.servers(req);
         let mut companions: Vec<PathBuf> = Vec::new();
         let design_roots = req.design.iter().map(|d| &d.path);
         for c in repos
@@ -287,6 +290,7 @@ impl ClaudeAgent {
             plan_mode: req.plan_mode,
             review: None,
             runner: self.cfg.runner.clone(),
+            permission_prompt_tool: self.permit_enabled(req).then(|| PERMIT_TOOL.to_owned()),
         }
     }
 
@@ -398,7 +402,126 @@ impl ClaudeAgent {
                 ),
             }),
             runner: self.cfg.runner.clone(),
+            permission_prompt_tool: None,
         }
+    }
+
+    /// Server MCP giliran biasa atau plan: server workspace terpilih dan
+    /// ledger milik daemon.
+    fn servers(&self, req: &AgentRequest) -> Vec<String> {
+        let mut servers: Vec<String> = req
+            .workspace
+            .as_ref()
+            .map_or_else(Vec::new, |ws| ws.mcp_servers.clone());
+        if self.ledger_enabled(req) {
+            servers.push(LEDGER_SERVER_NAME.to_owned());
+        }
+        servers
+    }
+
+    /// Isi berkas izin giliran (KTD-A4): jenis giliran, allowlist, server
+    /// MCP, akar desain, akar run, dan folder worktree anggota.
+    #[must_use]
+    pub fn permit_file(&self, req: &AgentRequest) -> PermitFile {
+        let (turn, allow, mcp) = if req.review.is_some() {
+            let mcp = if self.ledger_enabled(req) {
+                vec![LEDGER_SERVER_NAME.to_owned()]
+            } else {
+                Vec::new()
+            };
+            (TurnKind::Review, review_tools(req).0, mcp)
+        } else {
+            let repos: Vec<&RepoInfo> = match &req.workspace {
+                Some(ws) => ws.repos.iter().map(|(r, _)| r).collect(),
+                None => vec![&req.repo],
+            };
+            let servers = self.servers(req);
+            let allow = allowed_tools(req, &repos, &servers, self.ledger_enabled(req));
+            let turn = if req.plan_mode {
+                TurnKind::Plan
+            } else {
+                TurnKind::Implement
+            };
+            (turn, allow, servers)
+        };
+        let path = |p: &Path| p.display().to_string();
+        let members = match &req.workspace {
+            Some(ws) => ws.repos.iter().map(|(_, wt)| path(wt)).collect(),
+            None => vec![path(&req.worktree)],
+        };
+        let evidence = (turn != TurnKind::Review && !self.shared_with_agent())
+            .then(|| path(&self.evidence_dir(req)));
+        PermitFile {
+            version: permit::VERSION,
+            turn: turn.as_str().to_owned(),
+            allow,
+            mcp,
+            design: req.design.iter().map(|d| path(&d.path)).collect(),
+            run_root: path(&req.worktree),
+            members,
+            evidence,
+        }
+    }
+
+    /// Nama berkas izin giliran: per review, atau per folder kerja run.
+    fn permit_name(req: &AgentRequest) -> String {
+        match &req.review {
+            Some(r) => format!("review-{}", wt_key(Path::new(&r.review_id))),
+            None => wt_key(&req.worktree),
+        }
+    }
+
+    /// Berkas izin giliran ini.
+    fn permit_path(&self, req: &AgentRequest) -> PathBuf {
+        self.cfg
+            .permit_dir
+            .join(format!("{}.json", Self::permit_name(req)))
+    }
+
+    /// Folder catatan bukti hook giliran ini.
+    fn evidence_dir(&self, req: &AgentRequest) -> PathBuf {
+        self.cfg
+            .permit_dir
+            .join(format!("{}.d", Self::permit_name(req)))
+    }
+
+    /// Menulis berkas izin giliran (0600, 0640 di VM dalam folder 2750) dan
+    /// menyiapkan folder catatan bukti yang kosong (0700). Mengembalikan
+    /// argumen hook `--permit <berkas> --permit-sha <hex>`.
+    ///
+    /// # Errors
+    /// [`PortError::Storage`] bila berkas tidak bisa ditulis.
+    pub async fn write_permit(&self, req: &AgentRequest) -> Result<String, PortError> {
+        let io = |e: std::io::Error| PortError::Storage(e.to_string());
+        let file = self.permit_file(req);
+        let bytes = file.to_bytes().map_err(PortError::Storage)?;
+        let sha = permit::digest(&bytes);
+        self.prepare_dir(&self.cfg.permit_dir, 0o2750)
+            .await
+            .map_err(io)?;
+        let path = self.permit_path(req);
+        let evidence = file.evidence.as_ref().map(PathBuf::from);
+        let mode = self.file_mode(0o640);
+        let target = path.clone();
+        let write = tokio::task::spawn_blocking(move || {
+            if let Some(dir) = &evidence {
+                fresh_private_dir(dir)?;
+            }
+            review_state::write_atomic(&target, &bytes, mode)
+        });
+        match tokio::time::timeout(FILE_TIMEOUT, write).await {
+            Ok(Ok(written)) => written.map_err(io)?,
+            Ok(Err(e)) => return Err(PortError::Storage(e.to_string())),
+            Err(_) => {
+                return Err(PortError::Storage(
+                    "writing the permit file timed out".to_owned(),
+                ));
+            }
+        }
+        Ok(format!(
+            " --permit {} --permit-sha {sha}",
+            shell_quote(&path.display().to_string())
+        ))
     }
 
     /// Browser reviewer: Playwright headless bila daemon VM menyediakannya.
@@ -408,6 +531,15 @@ impl ClaudeAgent {
         } else {
             ReviewBrowser::Chrome
         }
+    }
+
+    /// Giliran ini memakai alat persetujuan Mandor: implementasi atau plan di
+    /// laptop dengan token `Permit` (R12, R13).
+    fn permit_enabled(&self, req: &AgentRequest) -> bool {
+        req.permit.is_some()
+            && req.review.is_none()
+            && self.cfg.ledger_server.is_some()
+            && !self.shared_with_agent()
     }
 
     /// Giliran ini memakai server MCP ledger milik daemon.
@@ -454,6 +586,23 @@ impl ClaudeAgent {
                     "env": {
                         "MANDOR_MCP_PORT": server.port.to_string(),
                         "MANDOR_MCP_TOKEN": access.token.expose(),
+                    }
+                }),
+            );
+        }
+        if let (Some(token), Some(server), true) = (
+            &req.permit,
+            &self.cfg.ledger_server,
+            self.permit_enabled(req),
+        ) {
+            picked.insert(
+                PERMIT_SERVER_NAME.to_owned(),
+                serde_json::json!({
+                    "command": server.command.display().to_string(),
+                    "args": ["mcp", "--permit"],
+                    "env": {
+                        "MANDOR_MCP_PORT": server.port.to_string(),
+                        "MANDOR_MCP_TOKEN": token.expose(),
                     }
                 }),
             );
@@ -765,7 +914,10 @@ impl AgentPort for ClaudeAgent {
         if let Some(review) = &req.review {
             self.write_review_state(review).await?;
         }
-        let run = AgentRun::start(&ClaudeBackend, &self.spec(req, mcp_config), &req.message, 0)
+        let permit = self.write_permit(req).await?;
+        let mut spec = self.spec(req, mcp_config);
+        spec.hook_command.push_str(&permit);
+        let run = AgentRun::start(&ClaudeBackend, &spec, &req.message, 0)
             .await
             .map_err(|e| PortError::Transient(e.to_string()))?;
         let deadline = req
@@ -777,6 +929,14 @@ impl AgentPort for ClaudeAgent {
             deadline,
             timed_out: false,
             agent_user: self.cfg.runner.as_ref().map(|r| r.user.clone()),
+        })
+    }
+
+    fn permit_ref(&self, req: &AgentRequest) -> Option<mandor_usecase::run_ports::PermitRef> {
+        let bytes = self.permit_file(req).to_bytes().ok()?;
+        Some(mandor_usecase::run_ports::PermitRef {
+            path: self.permit_path(req).display().to_string(),
+            sha: permit::digest(&bytes),
         })
     }
 
@@ -955,6 +1115,23 @@ fn selected_servers(
 }
 
 /// Nama berkas aman dari path folder kerja.
+/// Folder kosong khusus daemon (0700): isi lama dihapus, symlink ditolak.
+fn fresh_private_dir(dir: &Path) -> std::io::Result<()> {
+    match std::fs::symlink_metadata(dir) {
+        Ok(meta) if meta.file_type().is_symlink() => std::fs::remove_file(dir)?,
+        Ok(_) => std::fs::remove_dir_all(dir)?,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+        Err(e) => return Err(e),
+    }
+    let mut builder = std::fs::DirBuilder::new();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::DirBuilderExt;
+        builder.mode(0o700);
+    }
+    builder.create(dir)
+}
+
 fn wt_key(path: &Path) -> String {
     path.display()
         .to_string()
@@ -1197,6 +1374,7 @@ mod tests {
             ledger: None,
             design: vec![],
             review: None,
+            permit: None,
         };
         let spec = agent.spec(&req, None);
         assert_eq!(spec.mcp_config, None);
@@ -1217,6 +1395,7 @@ mod tests {
             model: None,
             commit_model: "haiku".to_owned(),
             review_dir: mcp_dir.join("review"),
+            permit_dir: mcp_dir.join("permit"),
             screens_dir: mcp_dir.join("screens"),
             runner: None,
             headless_browser: None,
@@ -1268,6 +1447,7 @@ mod tests {
             ledger: None,
             design: vec![],
             review: None,
+            permit: None,
         }
     }
 
@@ -1484,6 +1664,167 @@ mod tests {
         assert_eq!(mode(&path), 0o600);
         laptop.write_review_state(&review).await.unwrap();
         assert_eq!(mode(&laptop.review_state_path("rv1")), 0o600);
+    }
+
+    /// U5 plan 2026-11-06-001: giliran laptop memakai alat persetujuan
+    /// Mandor; reviewer dan VM tetap `--permission-prompts none` (AE5, AE6).
+    #[tokio::test]
+    async fn alat_persetujuan_hanya_untuk_giliran_laptop() {
+        use crate::claude::command::args;
+        use mandor_usecase::review::CapabilityToken;
+        let flag = |a: &[String], f: &str| {
+            a.iter()
+                .position(|x| x == f)
+                .and_then(|i| a.get(i + 1))
+                .cloned()
+        };
+        let dir = tempfile::tempdir().unwrap();
+        let laptop = test_agent(dir.path().join("mcp"));
+        let mut req = workspace_req(dir.path().to_path_buf());
+        if let Some(ws) = req.workspace.as_mut() {
+            ws.mcp_servers.clear();
+        }
+        req.permit = Some(CapabilityToken::for_test("tok-permit"));
+        let mcp = laptop.prepare_workspace(&req).await.unwrap().unwrap();
+        let spec = laptop.spec(&req, Some(mcp.clone()));
+        let a = args(&spec);
+        assert_eq!(flag(&a, "--permission-prompts").as_deref(), Some("host"));
+        assert_eq!(
+            flag(&a, "--permission-prompt-tool").as_deref(),
+            Some("mcp__mandor_permit__permit")
+        );
+        assert!(
+            !a.iter().any(|x| x.contains("tok-permit")),
+            "token bukan di argv"
+        );
+        let config: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(&mcp).unwrap()).unwrap();
+        let server = &config["mcpServers"]["mandor_permit"];
+        assert_eq!(server["args"], serde_json::json!(["mcp", "--permit"]));
+        assert_eq!(server["env"]["MANDOR_MCP_TOKEN"], "tok-permit");
+        assert!(
+            !spec.allowed.iter().any(|t| t.contains("mandor_permit")),
+            "alat persetujuan tidak untuk agent"
+        );
+        let permit = laptop.permit_ref(&req).unwrap();
+        let args_hook = laptop.write_permit(&req).await.unwrap();
+        assert!(
+            args_hook.ends_with(&permit.sha),
+            "berkas sama dengan referensinya"
+        );
+
+        // Reviewer: tanpa alat persetujuan walau token ada.
+        let mut review = req.clone();
+        review.review = Some(ReviewRequest {
+            review_id: "rv1".to_owned(),
+            origins: vec![],
+            browser: false,
+            model: None,
+            budget_cents: 100,
+            timeout: Duration::from_secs(900),
+        });
+        let a = args(&laptop.spec(&review, None));
+        assert_eq!(flag(&a, "--permission-prompts").as_deref(), Some("none"));
+        assert!(!a.contains(&"--permission-prompt-tool".to_owned()));
+
+        // VM: semua giliran tanpa kartu.
+        let mut cfg = test_agent(dir.path().join("vm")).cfg;
+        cfg.runner = Some(crate::claude::command::AgentRunner {
+            exe: "/opt/mandord".into(),
+            user: "beni-agent".to_owned(),
+            run_dir: dir.path().to_path_buf(),
+        });
+        let vm = ClaudeAgent::new(cfg);
+        let a = args(&vm.spec(&req, None));
+        assert_eq!(flag(&a, "--permission-prompts").as_deref(), Some("none"));
+        let vm_mcp = vm.prepare_workspace(&req).await.unwrap();
+        if let Some(path) = vm_mcp {
+            let text = std::fs::read_to_string(path).unwrap();
+            assert!(!text.contains("mandor_permit"), "{text}");
+        }
+    }
+
+    /// KTD-A4 plan 2026-11-06-001: berkas izin giliran tanpa rahasia, 0600
+    /// di laptop dengan folder bukti, 0640 dalam folder 2750 di VM tanpa bukti.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn berkas_izin_giliran_dengan_digest_di_argumen_hook() {
+        use std::os::unix::fs::PermissionsExt;
+        let mode = |p: &Path| std::fs::metadata(p).unwrap().permissions().mode() & 0o7777;
+        let dir = tempfile::tempdir().unwrap();
+        let laptop = test_agent(dir.path().join("laptop"));
+        let mut req = workspace_req(dir.path().to_path_buf());
+        req.ledger = Some(mandor_usecase::review::LedgerAccess {
+            role: mandor_usecase::review::CapabilityRole::Design,
+            token: mandor_usecase::review::CapabilityToken::for_test("tok-rahasia"),
+        });
+        let args = laptop.write_permit(&req).await.unwrap();
+        let path = dir
+            .path()
+            .join("laptop/permit")
+            .join(format!("{}.json", wt_key(&req.worktree)));
+        assert!(
+            args.contains(&format!("--permit {}", path.display())),
+            "{args}"
+        );
+        let bytes = std::fs::read(&path).unwrap();
+        assert!(args.ends_with(&format!("--permit-sha {}", permit::digest(&bytes))));
+        assert_eq!(mode(&path), 0o600);
+        let text = String::from_utf8_lossy(&bytes);
+        assert!(!text.contains("tok-rahasia"), "tanpa token");
+        let file: PermitFile = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(file.turn, "implement");
+        assert_eq!(file.run_root, req.worktree.display().to_string());
+        assert_eq!(file.members.len(), 2);
+        assert!(file.mcp.contains(&LEDGER_SERVER_NAME.to_owned()));
+        let evidence = PathBuf::from(file.evidence.unwrap());
+        assert_eq!(mode(&evidence), 0o700);
+        std::fs::write(evidence.join("lama.json"), "x").unwrap();
+        laptop.write_permit(&req).await.unwrap();
+        assert!(
+            !evidence.join("lama.json").exists(),
+            "bukti giliran lama dibuang"
+        );
+
+        req.plan_mode = true;
+        laptop.write_permit(&req).await.unwrap();
+        let file: PermitFile = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+        assert_eq!(file.turn, "plan");
+        assert!(file.allow.contains(&"Bash(cat *)".to_owned()));
+        assert!(!file.allow.contains(&"Bash(cargo *)".to_owned()));
+
+        let mut cfg = test_agent(dir.path().join("vm")).cfg;
+        cfg.runner = Some(crate::claude::command::AgentRunner {
+            exe: "/opt/mandord".into(),
+            user: "beni-agent".to_owned(),
+            run_dir: dir.path().to_path_buf(),
+        });
+        let vm = ClaudeAgent::new(cfg);
+        req.plan_mode = false;
+        vm.write_permit(&req).await.unwrap();
+        let vm_path = dir
+            .path()
+            .join("vm/permit")
+            .join(format!("{}.json", wt_key(&req.worktree)));
+        assert_eq!(mode(&vm_path), 0o640);
+        assert_eq!(mode(&dir.path().join("vm/permit")), 0o2750);
+        let file: PermitFile = serde_json::from_slice(&std::fs::read(&vm_path).unwrap()).unwrap();
+        assert!(file.evidence.is_none(), "VM tanpa kartu");
+
+        req.review = Some(ReviewRequest {
+            review_id: "rv1".to_owned(),
+            origins: vec![],
+            browser: false,
+            model: None,
+            budget_cents: 100,
+            timeout: Duration::from_secs(900),
+        });
+        laptop.write_permit(&req).await.unwrap();
+        let review = dir.path().join("laptop/permit/review-rv1.json");
+        let file: PermitFile = serde_json::from_slice(&std::fs::read(&review).unwrap()).unwrap();
+        assert_eq!(file.turn, "review");
+        assert!(file.evidence.is_none(), "reviewer tanpa kartu");
+        assert!(file.allow.contains(&"Bash(git diff*)".to_owned()));
     }
 
     /// KTD-64 plan VM: reviewer daemon VM memakai MCP Playwright headless

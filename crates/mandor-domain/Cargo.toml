@@ -8,6 +8,7 @@ license.workspace = true
 description = "Aturan bisnis murni mandor: tanpa I/O."
 
 [dependencies]
+serde_json.workspace = true
 thiserror.workspace = true
 
 [dev-dependencies]

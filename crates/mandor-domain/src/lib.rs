@@ -15,6 +15,7 @@ pub mod hook;
 pub mod hook_review;
 pub mod kanban;
 pub mod overnight;
+pub mod permit;
 pub mod planned;
 pub mod power;
 pub mod push_gate;
@@ -25,7 +26,7 @@ pub mod task;
 pub mod trust;
 
 pub use ac_ledger::{AcRow, Design, FetchedAc, RowStatus, Verdict};
-pub use agent::{AgentEvent, Usage, UsageTracker};
+pub use agent::{AgentEvent, Denial, Usage, UsageTracker};
 pub use claim::{Claim, ClaimIdentity, ClaimRefused, Holder};
 pub use cursor::{Cursor, Reply};
 pub use gate::GateRejection;

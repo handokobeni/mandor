@@ -112,6 +112,7 @@ const held: ReportCardView = {
   ac_cant_verify: 0,
   entered_waiting_fix: false,
   design_notes: [],
+  denials: [],
   group_card: null,
   changed_in_lark: false
 };

@@ -91,6 +91,23 @@ Temuan dan perbaikan dari uji ini: satu Deny dari dev tercatat dua kali di Chat,
 
 AE5, AE11, AE14 dan batas 5 kartu dibuktikan test otomatis (kartu uji tanpa AC tidak bisa direview; agent memanggil tool berurutan sehingga 5 kartu bersamaan tidak terjadi secara alami).
 
+## Uji manual lewat app Windows (2026-11-07)
+
+Installer dari workflow `release` (commit `ea24a13`), kartu uji PGS-1576 di Base copy, repo mandor-smoke.
+
+| Langkah | Hasil |
+|---|---|
+| Giliran plan: `node --test 2>&1 \| tail -12` | Kartu (allowlist plan sengaja tanpa perintah test); Allow once berjalan, kartu ke riwayat "Allowed once", badge hilang |
+| `cd web && ls`, `node --test 2>&1 \| tail -3` (implementasi) | Tanpa kartu (AE1) |
+| Kartu, badge "Needs approval" di header/sidebar/papan tanpa pindah kolom, notifikasi desktop Windows "Approval needed" | Lulus (R4–R6, R9) |
+| Allow for this run lalu permintaan sama di folder sama | Tanpa kartu (AE3); folder berbeda (shell kembali ke root tiap giliran) memunculkan kartu baru sesuai R7 |
+| Deny lalu permintaan sama di folder sama | Ditolak langsung tanpa kartu, satu catatan Chat (AE13) |
+| Klik notifikasi di lonceng | Workspace terbuka di tab Chat dengan kartu menunggu terlihat (R24) |
+| Kartu dibiarkan 10 menit | "Expired after 10 minutes, denied"; buka tab Chat → "Approval requests resumed."; permintaan berikutnya menjadi kartu (AE4, R19) |
+| Stop saat kartu menunggu | **Gagal pada build `ea24a13`:** kartu tetap Pending karena transaksi pembatalan kena "database is locked" saat Stop menulis state run dan Chat bersamaan. Diperbaiki dengan `BEGIN IMMEDIATE` untuk transisi kartu (test store konkuren baru). Perlu uji ulang dengan build berikutnya. |
+
+Catatan UI: perintah yang ditolak lewat kartu tampil "Error" di grup tool, bukan "Denied" seperti penolakan hook; catatan Chat tetap benar. Perbaikan kecil terpisah.
+
 ## Uji langsung VM (2026-11-06)
 
 Setelah uji, run VM ditutup dan kartu uji PGS-1575 ditandai Delivered di Base copy.

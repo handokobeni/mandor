@@ -136,3 +136,31 @@ async fn daemon_start_membatalkan_semua_kartu_pending() {
     assert_eq!(cancelled, ["a", "b"]);
     assert!(s.create_approval(&card("a", 4)).await.is_err(), "id unik");
 }
+
+/// Uji langsung 2026-11-07: Stop menulis state run dan Chat bersamaan dengan
+/// pembatalan kartu; transaksi kartu tidak boleh gagal "database is locked".
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn transisi_kartu_bertahan_saat_ada_penulis_lain_bersamaan() {
+    let dir = tempfile::tempdir().unwrap();
+    let s = open(&dir.path().join("mandor.db")).await;
+    for round in 0..20 {
+        let id = format!("p{round}");
+        s.create_approval(&card(&id, round)).await.unwrap();
+        let writers: Vec<_> = (0..6)
+            .map(|i| {
+                let s = s.clone();
+                tokio::spawn(async move {
+                    let mut c = card(&format!("w{round}-{i}"), 1_000 + i);
+                    c.run_id = "run2".to_owned();
+                    s.create_approval(&c).await.unwrap();
+                    s.set_deny_mode("run2", i % 2 == 0, 5).await.unwrap();
+                })
+            })
+            .collect();
+        let cancelled = s.cancel_approvals(Some("run1"), 10).await;
+        for w in writers {
+            w.await.unwrap();
+        }
+        assert_eq!(cancelled.unwrap(), [id], "putaran {round}");
+    }
+}

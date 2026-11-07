@@ -80,7 +80,14 @@ impl Store {
         decision: Option<(&str, Option<TurnKind>, RunDecision)>,
         now_ms: i64,
     ) -> Result<bool, StoreError> {
-        let mut tx = self.pool.begin().await.map_err(StoreError::internal)?;
+        // Kunci tulis diambil di awal: transaksi baca-lalu-tulis biasa gagal
+        // seketika ("database is locked") bila penulis lain commit di antaranya,
+        // tanpa menunggu busy_timeout.
+        let mut tx = self
+            .pool
+            .begin_with("BEGIN IMMEDIATE")
+            .await
+            .map_err(StoreError::internal)?;
         let row = sqlx::query!(
             "SELECT run_id, input_json FROM approvals WHERE id = ? AND status = 'pending'",
             id

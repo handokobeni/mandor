@@ -110,6 +110,17 @@ impl GitPort for GitAdapter {
         worktree: &Path,
         branch: &str,
     ) -> Result<(), PortError> {
+        // Start ulang bisa memakai worktree lama yang dipertahankan; rollback
+        // tidak boleh menghapus pekerjaan yang belum di-push.
+        if tokio::fs::try_exists(worktree).await.unwrap_or(false) {
+            let changes = self.changes(repo, worktree, branch).await?;
+            if !changes.is_empty() {
+                return Err(PortError::Rejected(format!(
+                    "{} still has unpushed changes; kept",
+                    worktree.display()
+                )));
+            }
+        }
         self.git
             .remove_worktree(&repo.path, worktree, Some(branch))
             .await;

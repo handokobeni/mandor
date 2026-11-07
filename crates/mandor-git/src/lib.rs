@@ -98,6 +98,10 @@ pub enum GitError {
     UnsafeConfig(String),
     #[error("refusing to run git: cannot read the repo config: {0}")]
     UnreadableConfig(String),
+    #[error(
+        "branch {branch} is checked out at {path}, outside Mandor's worktrees; switch that folder to another branch first"
+    )]
+    BranchCheckedOutElsewhere { branch: String, path: String },
 }
 
 /// Kunci konfigurasi lokal/worktree yang dipercaya daemon VM (KTD-65 plan

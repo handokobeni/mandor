@@ -258,8 +258,7 @@ impl<D: Deps> RunService<D> {
         self.clear_stopper(run_id, generation);
         let mut run = self.load(run_id).await?;
         if run.generation != generation {
-            // Giliran ini sudah diinterupsi; tokennya dicabut `interrupt`, dan
-            // token giliran yang lebih baru tidak boleh ikut dicabut.
+            self.end_stale_turn(&run).await;
             return Ok(());
         }
         self.end_turn_access(run_id).await;
@@ -282,14 +281,7 @@ impl<D: Deps> RunService<D> {
         }
         match end {
             TurnEnd::Ok(_) if self.asked_in_turn(run_id, generation).await => {
-                // Giliran bertanya lewat kartu (plan 2026-11-07-001): bukan
-                // plan (R15), dan antrean ditahan sampai dev menjawab (R13).
-                run.state = RunState::AwaitingDev;
-                self.runs.save(&run, generation, self.now()).await?;
-                let body = "The agent has a question: pick an answer or reply in chat";
-                self.notifier
-                    .notify(notice(self, NoticeKind::AwaitingAnswer, &run, body).await)
-                    .await;
+                self.finish_asking_turn(run, generation).await?;
             }
             TurnEnd::Ok(result) => {
                 if run.phase == RunPhase::Plan && !result.trim().is_empty() {
@@ -518,6 +510,31 @@ impl<D: Deps> RunService<D> {
                 )
                 .await?;
         }
+        Ok(())
+    }
+
+    /// Giliran yang sudah digantikan (interupsi, klaim hilang, dsb.): token
+    /// dicabut kecuali giliran yang lebih baru sedang berjalan, karena token
+    /// itu milik giliran baru (gagal tertutup, bukan terbuka).
+    async fn end_stale_turn(&self, run: &RunRecord) {
+        if !run.state.is_busy() {
+            self.end_turn_access(&run.id).await;
+        }
+    }
+
+    /// Giliran bertanya lewat kartu (plan 2026-11-07-001): bukan plan (R15),
+    /// dan antrean ditahan sampai dev menjawab (R13).
+    async fn finish_asking_turn(
+        &self,
+        mut run: RunRecord,
+        generation: i64,
+    ) -> Result<(), RunError> {
+        run.state = RunState::AwaitingDev;
+        self.runs.save(&run, generation, self.now()).await?;
+        let body = "The agent has a question: pick an answer or reply in chat";
+        self.notifier
+            .notify(notice(self, NoticeKind::AwaitingAnswer, &run, body).await)
+            .await;
         Ok(())
     }
 

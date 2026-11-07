@@ -49,8 +49,10 @@ export function runMeta(state: string): StateMeta {
  * ditahan; `undefined` = label bawaan state.
  */
 export function runLabel(
-  run: Pick<RunView, 'state' | 'phase'> & Partial<Pick<RunView, 'note' | 'ac'>>
+  run: Pick<RunView, 'state' | 'phase'> & Partial<Pick<RunView, 'note' | 'ac' | 'pending_question'>>
 ): string | undefined {
+  // Agent menunggu jawaban kartu pertanyaan (plan 2026-11-07-001).
+  if (run.pending_question && run.state === 'awaiting_dev') return 'Question for you';
   const labels: Record<string, [string, string]> = {
     brainstorm: ['Brainstorming', 'Question for you'],
     plan: ['Planning', 'Plan ready']

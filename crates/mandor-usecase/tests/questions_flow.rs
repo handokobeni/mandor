@@ -421,3 +421,14 @@ async fn send_now_tidak_mencabut_token_giliran_baru() {
     st.svc.ask_question(&new, &draft()).await.unwrap();
     assert_eq!(st.questions.all(&run).len(), 1);
 }
+
+#[tokio::test]
+async fn token_giliran_yang_dihentikan_dicabut_bila_tidak_ada_giliran_baru() {
+    let (lark, clock) = setup();
+    let st = station(&lark, &clock, "ou_me");
+    let run = start(&st, brainstorm()).await;
+    let token = st.agent.last().req.ledger.unwrap().token;
+    st.svc.stop(&run).await.unwrap();
+    eventually(|| st.agent.run(0).is_stopped()).await;
+    eventually(|| st.svc.verify_capability(token.expose()).is_none()).await;
+}

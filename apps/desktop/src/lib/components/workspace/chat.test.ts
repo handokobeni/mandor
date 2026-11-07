@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { startFixParams, toBlocks, toolLabel } from '#lib/chat.ts';
+import { ASK_TOOL, questionIdOf, startFixParams, toBlocks, toolLabel } from '#lib/chat.ts';
 import { renderMarkdown } from '#lib/markdown.ts';
 import type { MessageView } from '#lib/protocol/MessageView.ts';
 import type { Rpc } from '#lib/rpc.ts';
@@ -178,5 +178,52 @@ describe('nama tool', () => {
     expect(toolLabel('mcp__graft__graft_find_code')).toBe('graft · find_code');
     expect(toolLabel('mcp__figma__get_file')).toBe('figma · get_file');
     expect(toolLabel('Bash')).toBe('Bash');
+  });
+});
+
+describe('kartu pertanyaan di chat', () => {
+  it('alat ask_developer yang diterima menjadi blok question di posisinya', () => {
+    const blocks = toBlocks([
+      msg(1, 'agent', { type: 'tool_use', id: 'r1', name: 'Read', preview: 'src/a.ts' }),
+      msg(2, 'agent', { type: 'tool_use', id: 'a1', name: ASK_TOOL, preview: '' }),
+      msg(3, 'agent', { type: 'tool_result', tool_use_id: 'r1', is_error: false, preview: 'isi' }),
+      msg(4, 'agent', {
+        type: 'tool_result',
+        tool_use_id: 'a1',
+        is_error: false,
+        preview: 'q-abc123 recorded. End your turn now; the developer answers in the chat.'
+      })
+    ]);
+    expect(blocks.map((b) => b.kind)).toEqual(['tools', 'question']);
+    const tools = blocks[0];
+    if (tools.kind !== 'tools') throw new Error('no tools');
+    expect(tools.calls.map((c) => c.name)).toEqual(['Read']);
+    const q = blocks[1];
+    if (q.kind !== 'question') throw new Error('no question');
+    expect(q.questionId).toBe('q-abc123');
+  });
+
+  it('panggilan yang ditolak tetap tool call; grup kosong dibuang', () => {
+    const blocks = toBlocks([
+      msg(1, 'agent', { type: 'tool_use', id: 'a1', name: ASK_TOOL, preview: '' }),
+      msg(2, 'agent', { type: 'tool_result', tool_use_id: 'a1', is_error: true, preview: 'give 2 to 4 options (got 1)' }),
+      msg(3, 'agent', { type: 'tool_use', id: 'a2', name: ASK_TOOL, preview: '' }),
+      msg(4, 'agent', { type: 'tool_result', tool_use_id: 'a2', is_error: false, preview: '"q-9 recorded. End your turn now."' })
+    ]);
+    expect(blocks.map((b) => b.kind)).toEqual(['tools', 'question']);
+    const tools = blocks[0];
+    if (tools.kind !== 'tools') throw new Error('no tools');
+    expect(tools.calls[0].result?.isError).toBe(true);
+  });
+
+  it('id pertanyaan terbaca dari teks polos atau string JSON berkutip', () => {
+    expect(questionIdOf('q-1a2b recorded. End your turn now.')).toBe('q-1a2b');
+    expect(questionIdOf('"q-1a2b recorded. End your turn now."')).toBe('q-1a2b');
+    expect(questionIdOf('recorded q-1a2b')).toBeNull();
+  });
+
+  it('pertanyaan teks biasa tetap blok assistant', () => {
+    const blocks = toBlocks([msg(1, 'agent', { type: 'assistant_message', text: 'Keep both? A or B' })]);
+    expect(blocks.map((b) => b.kind)).toEqual(['assistant']);
   });
 });

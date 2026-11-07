@@ -9,13 +9,17 @@
   import { applyCommand, commandQuery, suggestCommands } from '#lib/commands.ts';
   import { skills } from '#lib/stores/skills.svelte.ts';
   import { workspace } from '#lib/stores/workspace.svelte.ts';
+  import { queueHeld } from '#lib/questions.ts';
 
   interface Props {
     run: RunView;
     onsend: (text: string, now: boolean) => void;
     onstop: () => void;
+    /** Pesan antrean yang ditahan pertanyaan: kirim atau buang (R13). */
+    onqueued?: (action: 'send' | 'discard') => void;
   }
-  let { run, onsend, onstop }: Props = $props();
+  let { run, onsend, onstop, onqueued }: Props = $props();
+  const held = $derived(queueHeld(run));
 
   const working = $derived(isWorking(run.state));
   const blocked = $derived(composerBlocked(run));
@@ -97,6 +101,11 @@
         {#each run.queued as q, i (i)}
           <span class="q-chip" title={q}><ListPlus class="icon-sm" aria-hidden="true" /><span>{q}</span></span>
         {/each}
+        {#if held && onqueued}
+          <span class="held muted">Held because the agent asked a question.</span>
+          <Button variant="secondary" size="xs" onclick={() => onqueued('send')}>Send</Button>
+          <Button variant="ghost" size="xs" onclick={() => onqueued('discard')}>Discard</Button>
+        {/if}
       </div>
     {/if}
     <div class="composer-box">
@@ -128,7 +137,11 @@
         oninput={(e) => update(e.currentTarget.value)}
         {onkeydown}
         placeholder={blocked ??
-          (working ? 'Queue a message for when this turn ends' : 'Reply to the agent, or type / for a skill. Drafts are kept per task.')}
+          (working
+            ? 'Queue a message for when this turn ends'
+            : run.pending_question
+              ? 'Your message answers the agent\'s question'
+              : 'Reply to the agent, or type / for a skill. Drafts are kept per task.')}
       ></textarea>
       <div class="composer-bar">
         <span class="hint"><span class="kbd">{isMac ? '⌘' : 'Ctrl'} ↵</span> send</span>

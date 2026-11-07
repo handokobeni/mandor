@@ -16,6 +16,7 @@ export type ChatBlock =
   | { kind: 'system'; id: number; text: string }
   | { kind: 'assistant'; id: number; text: string }
   | { kind: 'tools'; id: number; calls: ToolCall[] }
+  | { kind: 'question'; id: number; questionId: string }
   | { kind: 'done'; id: number; isError: boolean; text: string }
   | { kind: 'failed'; id: number; text: string };
 
@@ -29,6 +30,14 @@ function hookDenial(preview: string): string | null {
   return /^mandor: \S/.test(preview) ? preview.trim() : null;
 }
 
+/** Alat pertanyaan yang bisa diklik (plan 2026-11-07-001). */
+export const ASK_TOOL = 'mcp__mandor__ask_developer';
+
+/** Id pertanyaan di awal hasil alat yang diterima (KTD-Q2), polos atau berkutip JSON. */
+export function questionIdOf(preview: string): string | null {
+  return preview.match(/^"?(q-[A-Za-z0-9-]+) recorded/)?.[1] ?? null;
+}
+
 function str(v: unknown): string {
   return typeof v === 'string' ? v : '';
 }
@@ -37,6 +46,7 @@ function str(v: unknown): string {
 export function toBlocks(messages: MessageView[]): ChatBlock[] {
   const out: ChatBlock[] = [];
   const calls = new Map<string, ToolCall>();
+  const owner = new Map<string, ToolCall[]>();
   for (const m of messages) {
     const b = m.body as Record<string, unknown>;
     const type = str(b.type);
@@ -56,13 +66,27 @@ export function toBlocks(messages: MessageView[]): ChatBlock[] {
         const call: ToolCall = { id: str(b.id), name: str(b.name), preview: str(b.preview) };
         calls.set(call.id, call);
         const last = out.at(-1);
-        if (last?.kind === 'tools') last.calls.push(call);
-        else out.push({ kind: 'tools', id: m.id, calls: [call] });
+        if (last?.kind === 'tools') {
+          last.calls.push(call);
+          owner.set(call.id, last.calls);
+        } else {
+          const group = [call];
+          out.push({ kind: 'tools', id: m.id, calls: group });
+          owner.set(call.id, group);
+        }
         break;
       }
       case 'tool_result': {
         const call = calls.get(str(b.tool_use_id));
         if (!call) break;
+        // Pertanyaan yang diterima menjadi kartu di posisi alat itu (R7).
+        const qid = call.name === ASK_TOOL && b.is_error !== true ? questionIdOf(str(b.preview)) : null;
+        if (qid) {
+          const group = owner.get(call.id);
+          group?.splice(group.indexOf(call), 1);
+          out.push({ kind: 'question', id: m.id, questionId: qid });
+          break;
+        }
         const denial = b.is_error === true ? hookDenial(str(b.preview)) : null;
         if (denial) call.denied = denial;
         else call.result = { isError: b.is_error === true, preview: str(b.preview) };
@@ -83,7 +107,7 @@ export function toBlocks(messages: MessageView[]): ChatBlock[] {
         break;
     }
   }
-  return out;
+  return out.filter((b) => b.kind !== 'tools' || b.calls.length > 0);
 }
 
 function plural(n: number, word: string): string {

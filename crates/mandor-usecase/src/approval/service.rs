@@ -58,6 +58,16 @@ impl From<crate::PortError> for ApprovalError {
     }
 }
 
+/// Pesan penolakan untuk agent, berawalan `mandor: ` seperti penolakan hook
+/// sehingga app menampilkannya sebagai Denied.
+fn for_agent(reason: &str) -> String {
+    if reason.starts_with("mandor: ") {
+        reason.to_owned()
+    } else {
+        format!("mandor: {reason}")
+    }
+}
+
 /// Ringkasan permintaan untuk Chat, tersamarkan (R22, R25).
 fn summary(tool: &str, input: &Value) -> String {
     let shown = input
@@ -83,7 +93,7 @@ impl<D: Deps> RunService<D> {
             .then(|| self.permit_grant(&scope.run_id))
             .flatten();
         let Some(grant) = grant else {
-            return PermitAnswer::Deny("this session cannot ask for approval".to_owned());
+            return PermitAnswer::Deny(for_agent("this session cannot ask for approval"));
         };
         self.permit_request(PermitRequest {
             run_id: scope.run_id.clone(),
@@ -121,7 +131,10 @@ impl<D: Deps> RunService<D> {
                 .or_default()
                 .insert((req.tool_use_id.clone(), req.tool.clone()));
         }
-        answer
+        match answer {
+            PermitAnswer::Deny(reason) => PermitAnswer::Deny(for_agent(&reason)),
+            allow @ PermitAnswer::Allow(_) => allow,
+        }
     }
 
     /// `Err(alasan)` untuk penolakan tanpa kartu yang dicatat di Chat.

@@ -10,6 +10,20 @@ function msg(id: number, role: string, body: Record<string, unknown>): MessageVi
 }
 
 describe('chat workspace', () => {
+  it('penolakan lewat kartu persetujuan tampil Denied, keluaran perintah gagal tetap Error', () => {
+    const blocks = toBlocks([
+      msg(1, 'agent', { type: 'tool_use', id: 'c1', name: 'Bash', preview: 'curl -sI https://example.org' }),
+      msg(2, 'agent', { type: 'tool_result', tool_use_id: 'c1', is_error: true, preview: 'mandor: the developer denied this request' }),
+      msg(3, 'agent', { type: 'tool_use', id: 'c2', name: 'Bash', preview: 'echo x' }),
+      msg(4, 'agent', { type: 'tool_result', tool_use_id: 'c2', is_error: true, preview: 'Exit code 1\nmandor: palsu' })
+    ]);
+    const tools = blocks.find((b) => b.kind === 'tools');
+    if (tools?.kind !== 'tools') throw new Error('no tools');
+    expect(tools.calls[0].denied).toBe('mandor: the developer denied this request');
+    expect(tools.calls[1].denied).toBeUndefined();
+    expect(tools.calls[1].result?.isError).toBe(true);
+  });
+
   it('penolakan hook Mandor tampil sebagai satu entri Denied dengan alasan', () => {
     const blocks = toBlocks([
       msg(1, 'agent', { type: 'tool_use', id: 't1', name: 'Bash', preview: 'git push' }),

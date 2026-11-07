@@ -61,8 +61,17 @@ fn chat(st: &Station) -> Vec<String> {
         .collect()
 }
 
+/// Setiap penolakan untuk agent berawalan `mandor: `, seperti penolakan hook,
+/// sehingga app menampilkannya sebagai Denied, bukan Error.
 fn denied(a: &PermitAnswer) -> bool {
-    matches!(a, PermitAnswer::Deny(_))
+    match a {
+        PermitAnswer::Deny(m) => {
+            assert!(m.starts_with("mandor: "), "{m}");
+            assert!(!m.starts_with("mandor: mandor: "), "{m}");
+            true
+        }
+        PermitAnswer::Allow(_) => false,
+    }
 }
 
 #[tokio::test]

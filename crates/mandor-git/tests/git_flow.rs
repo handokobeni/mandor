@@ -107,22 +107,121 @@ async fn worktree_dibuat_dari_origin_terbaru() {
 }
 
 #[tokio::test]
-async fn gagal_membuat_worktree_tidak_meninggalkan_sisa() {
+async fn gagal_membuat_worktree_hanya_menghapus_yang_dibuatnya() {
     let f = fixture();
-    sh(&f.repo, &["branch", "sudah-ada"]);
+    // Path worktree sudah ada sebagai folder berisi (bukan milik percobaan ini).
+    std::fs::create_dir_all(f.root.join("workspaces/ws-gagal")).unwrap();
+    std::fs::write(
+        f.root.join("workspaces/ws-gagal/catatan.txt"),
+        "milik orang lain",
+    )
+    .unwrap();
     let err = f
         .git
-        .create_worktree(&f.repo, "ws-gagal", "sudah-ada", "main", None)
+        .create_worktree(&f.repo, "ws-gagal", "mandor/baru", "main", None)
         .await
         .unwrap_err();
     assert!(matches!(err, GitError::Command { .. }), "{err:?}");
-    assert!(!f.root.join("workspaces/ws-gagal").exists());
+    assert_eq!(
+        std::fs::read_to_string(f.root.join("workspaces/ws-gagal/catatan.txt")).unwrap(),
+        "milik orang lain",
+        "path yang sudah ada tidak dihapus"
+    );
+    assert!(
+        sh(&f.repo, &["branch", "--list", "mandor/baru"])
+            .trim()
+            .is_empty(),
+        "branch yang sempat dibuat percobaan ini dihapus"
+    );
 
     let bad = f
         .git
         .create_worktree(&f.repo, "ws-x", "bad..name", "main", None)
         .await;
     assert!(matches!(bad, Err(GitError::InvalidBranch(_))));
+}
+
+/// Start ulang kartu setelah run ditutup: worktree yang dipertahankan Close run
+/// (ada perubahan) dipakai lagi apa adanya.
+#[tokio::test]
+async fn start_ulang_memakai_worktree_lama_yang_dipertahankan() {
+    let f = fixture();
+    let wt = f
+        .git
+        .create_worktree(&f.repo, "ws1", "mandor/pgs-1", "main", None)
+        .await
+        .unwrap();
+    std::fs::write(wt.path.join("kerja-lama.txt"), "belum di-commit").unwrap();
+    let again = f
+        .git
+        .create_worktree(&f.repo, "ws1", "mandor/pgs-1", "main", None)
+        .await
+        .unwrap();
+    assert_eq!(again.path, wt.path);
+    assert_eq!(
+        std::fs::read_to_string(again.path.join("kerja-lama.txt")).unwrap(),
+        "belum di-commit"
+    );
+    // Folder lain untuk branch yang sama: worktree yang sudah ada dipakai.
+    let other = f
+        .git
+        .create_worktree(&f.repo, "ws-lain", "mandor/pgs-1", "main", None)
+        .await
+        .unwrap();
+    assert_eq!(other.path, wt.path);
+    assert!(!f.root.join("workspaces/ws-lain").exists());
+}
+
+/// Branch yang di-checkout di clone milik dev tidak dipakai sebagai folder agent.
+#[tokio::test]
+async fn branch_di_clone_dev_tidak_dipakai_sebagai_worktree() {
+    let f = fixture();
+    sh(&f.repo, &["checkout", "-q", "-b", "mandor/pgs-3"]);
+    let err = f
+        .git
+        .create_worktree(&f.repo, "ws3", "mandor/pgs-3", "main", None)
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(err, GitError::BranchCheckedOutElsewhere { .. }),
+        "{err:?}"
+    );
+    assert!(!f.root.join("workspaces/ws3").exists());
+    assert_eq!(
+        sh(&f.repo, &["branch", "--show-current"]).trim(),
+        "mandor/pgs-3",
+        "clone dev tidak disentuh"
+    );
+}
+
+/// Branch lama tanpa worktree: worktree dibuat ulang dari branch itu, commit
+/// lama ikut.
+#[tokio::test]
+async fn start_ulang_melanjutkan_branch_lama_tanpa_worktree() {
+    let f = fixture();
+    let wt = f
+        .git
+        .create_worktree(&f.repo, "ws1", "mandor/pgs-2", "main", None)
+        .await
+        .unwrap();
+    std::fs::write(wt.path.join("fitur.txt"), "fitur\n").unwrap();
+    sh(&wt.path, &["add", "-A"]);
+    sh(&wt.path, &["commit", "-q", "-m", "kerja lama"]);
+    sh(
+        &f.repo,
+        &["worktree", "remove", "--force", wt.path.to_str().unwrap()],
+    );
+    let again = f
+        .git
+        .create_worktree(&f.repo, "ws1", "mandor/pgs-2", "main", None)
+        .await
+        .unwrap();
+    assert_eq!(
+        sh(&again.path, &["branch", "--show-current"]).trim(),
+        "mandor/pgs-2"
+    );
+    assert!(again.path.join("fitur.txt").exists(), "commit lama ikut");
+    assert!(sh(&again.path, &["log", "--oneline", "-1"]).contains("kerja lama"));
 }
 
 #[tokio::test]
@@ -793,4 +892,50 @@ async fn folder_desain_dengan_hook_ditolak_di_vm() {
     let vm = Git::new(cfg);
     let err = vm.update_design(&design, None).await.unwrap_err();
     assert!(matches!(err, GitError::UnsafeConfig(_)), "{err}");
+}
+
+#[tokio::test]
+async fn rollback_tidak_menghapus_worktree_yang_masih_punya_perubahan() {
+    use mandor_git::GitAdapter;
+    use mandor_usecase::run_ports::{GitPort, RepoInfo};
+
+    let f = fixture();
+    let port = GitAdapter::new(f.git.clone());
+    let repo = RepoInfo {
+        id: "r1".to_owned(),
+        path: f.repo.clone(),
+        default_branch: "main".to_owned(),
+        gh_profile: None,
+        companions: vec![],
+        trusted_reviewers: vec![],
+        extra_allowed: vec![],
+        app: mandor_domain::app_run::AppSettings::default(),
+        gate_mode: None,
+    };
+    let branch = "mandor/pgs-2-lama";
+    let wt = port.prepare_worktree(&repo, branch, None).await.unwrap();
+    std::fs::write(wt.join("kerja.txt"), "belum di-commit\n").unwrap();
+
+    // Start ulang memakai worktree lama, lalu langkah berikutnya gagal.
+    let again = port.prepare_worktree(&repo, branch, None).await.unwrap();
+    assert_eq!(again, wt);
+    assert!(port.discard_worktree(&repo, &wt, branch).await.is_err());
+    assert!(wt.join("kerja.txt").exists());
+    assert!(sh(&f.repo, &["branch", "--list", branch]).contains("pgs-2-lama"));
+
+    // Commit lokal yang belum di-push juga dipertahankan.
+    port.commit_all(&wt, "feat: lama").await.unwrap();
+    assert!(port.discard_worktree(&repo, &wt, branch).await.is_err());
+    assert!(port.worktree_exists(&wt).await);
+
+    // Worktree bersih tetap dihapus.
+    let fresh = port
+        .prepare_worktree(&repo, "mandor/pgs-3-baru", None)
+        .await
+        .unwrap();
+    port.discard_worktree(&repo, &fresh, "mandor/pgs-3-baru")
+        .await
+        .unwrap();
+    assert!(!port.worktree_exists(&fresh).await);
+    assert!(sh(&f.repo, &["branch", "--list", "mandor/pgs-3-baru"]).is_empty());
 }

@@ -109,7 +109,8 @@ pub trait GitPort: Send + Sync {
         branch: &str,
         group: Option<&str>,
     ) -> impl Future<Output = Result<PathBuf, PortError>> + Send;
-    /// Menghapus worktree dan branch lokal (rollback Start).
+    /// Menghapus worktree dan branch lokal (rollback Start); worktree yang
+    /// masih punya perubahan belum di-push dipertahankan dan menghasilkan error.
     fn discard_worktree(
         &self,
         repo: &RepoInfo,

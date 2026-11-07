@@ -19,11 +19,14 @@ export type ChatBlock =
   | { kind: 'done'; id: number; isError: boolean; text: string }
   | { kind: 'failed'; id: number; text: string };
 
-/** Alasan penolakan hook Mandor dari hasil tool `PreToolUse … mandor: …`. */
+/** Alasan penolakan Mandor dari hasil tool (hook atau alat persetujuan). */
 function hookDenial(preview: string): string | null {
-  // Hanya format pesan hook Claude Code di awal hasil, bukan teks di tengah keluaran.
-  const m = preview.match(/^PreToolUse:\S+ hook error: \[[^\]]*\]: (mandor: [\s\S]*)$/);
-  return m ? m[1].trim() : null;
+  // Hanya di awal hasil: penolakan hook (`PreToolUse:… mandor: …`) atau alat
+  // persetujuan (`mandor: …`). Perintah yang benar-benar berjalan dan gagal
+  // diawali "Exit code N", jadi keluarannya tidak bisa menyamar.
+  const hook = preview.match(/^PreToolUse:\S+ hook error: \[[^\]]*\]: (mandor: [\s\S]*)$/);
+  if (hook) return hook[1].trim();
+  return /^mandor: \S/.test(preview) ? preview.trim() : null;
 }
 
 function str(v: unknown): string {

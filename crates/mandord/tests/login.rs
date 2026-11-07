@@ -119,9 +119,21 @@ fn rpc(home: &Path, calls: &[(&str, Value)]) -> Vec<Value> {
     );
     for line in lines {
         writeln!(stdin, "{line}").unwrap();
-        let mut buf = String::new();
-        out.read_line(&mut buf).unwrap();
-        replies.push(serde_json::from_str(&buf).unwrap());
+        // Notifikasi (mis. `sync.status`) bisa datang sebelum balasan; lewati
+        // pesan tanpa `id` yang sama dengan permintaan.
+        let id = line["id"].clone();
+        loop {
+            let mut buf = String::new();
+            assert!(
+                out.read_line(&mut buf).unwrap() > 0,
+                "relay closed before reply {id}"
+            );
+            let msg: Value = serde_json::from_str(&buf).unwrap();
+            if msg["id"] == id {
+                replies.push(msg);
+                break;
+            }
+        }
     }
     drop(stdin);
     let _ = child.wait();

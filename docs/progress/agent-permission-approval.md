@@ -93,7 +93,7 @@ AE5, AE11, AE14 dan batas 5 kartu dibuktikan test otomatis (kartu uji tanpa AC t
 
 ## Uji manual lewat app Windows (2026-11-07)
 
-Installer dari workflow `release` (commit `ea24a13`), kartu uji PGS-1576 di Base copy, repo mandor-smoke.
+Installer dari workflow `release` (commit `ea24a13`, lalu `46ff8c2`), kartu uji PGS-1576 di Base copy, repo mandor-smoke.
 
 | Langkah | Hasil |
 |---|---|
@@ -104,7 +104,9 @@ Installer dari workflow `release` (commit `ea24a13`), kartu uji PGS-1576 di Base
 | Deny lalu permintaan sama di folder sama | Ditolak langsung tanpa kartu, satu catatan Chat (AE13) |
 | Klik notifikasi di lonceng | Workspace terbuka di tab Chat dengan kartu menunggu terlihat (R24) |
 | Kartu dibiarkan 10 menit | "Expired after 10 minutes, denied"; buka tab Chat → "Approval requests resumed."; permintaan berikutnya menjadi kartu (AE4, R19) |
-| Stop saat kartu menunggu | **Gagal pada build `ea24a13`:** kartu tetap Pending karena transaksi pembatalan kena "database is locked" saat Stop menulis state run dan Chat bersamaan. Diperbaiki dengan `BEGIN IMMEDIATE` untuk transisi kartu (test store konkuren baru). Perlu uji ulang dengan build berikutnya. |
+| Stop saat kartu menunggu | Gagal pada build `ea24a13`: kartu tetap Pending karena transaksi pembatalan kena "database is locked" saat Stop menulis state run dan Chat bersamaan. Diperbaiki dengan `BEGIN IMMEDIATE` untuk transisi kartu (test store konkuren baru). Uji ulang dengan installer `46ff8c2` lulus: "Waiting approval requests were cancelled.", kartu Cancelled, badge hilang; kartu yang tersangkut dari build lama dibatalkan saat daemon baru start (R20). |
+
+Setelah uji, run PGS-1576 ditutup dan kartunya ditandai Delivered.
 
 Catatan UI: perintah yang ditolak lewat kartu tampil "Error" di grup tool, bukan "Denied" seperti penolakan hook; catatan Chat tetap benar. Perbaikan kecil terpisah.
 

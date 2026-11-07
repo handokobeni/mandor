@@ -10,6 +10,8 @@ export class WorkspaceStore {
   selected = $state<string | null>(null);
   messages = new SvelteMap<string, MessageView[]>();
   drafts = new SvelteMap<string, string>();
+  /** Pesan dev per run yang sedang dikirim; hilang saat daemon mencatatnya. */
+  sending = new SvelteMap<string, string>();
   private rpc: Rpc | null = null;
   private off: (() => void) | null = null;
   private loading = new Set<string>();
@@ -42,6 +44,16 @@ export class WorkspaceStore {
     else this.drafts.delete(runId);
   }
 
+  /** Pesan dikirim: tampil di chat sebelum daemon mencatatnya. */
+  beginSend(runId: string, text: string): void {
+    this.sending.set(runId, text);
+  }
+
+  /** Kiriman selesai tanpa pesan tercatat (gagal), atau sudah tercatat. */
+  endSend(runId: string): void {
+    this.sending.delete(runId);
+  }
+
   /** Mengambil pesan setelah pesan terakhir yang sudah dimuat. */
   async fetchNew(runId: string): Promise<void> {
     if (!this.rpc || this.loading.has(runId)) return;
@@ -56,6 +68,8 @@ export class WorkspaceStore {
           limit: PAGE
         });
         this.messages.set(runId, [...have, ...page]);
+        // Pesan dev yang tercatat menggantikan pesan sementara.
+        if (page.some((m) => m.role === 'dev')) this.sending.delete(runId);
         if (page.length < PAGE) break;
       }
     } finally {

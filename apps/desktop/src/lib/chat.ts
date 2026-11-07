@@ -17,6 +17,10 @@ export type ChatBlock =
   | { kind: 'assistant'; id: number; text: string }
   | { kind: 'tools'; id: number; calls: ToolCall[] }
   | { kind: 'question'; id: number; questionId: string }
+  /** Pesan dev yang sedang dikirim; belum tercatat daemon. */
+  | { kind: 'sending'; id: number; text: string }
+  /** Agent bekerja tapi belum ada output setelah pesan dev terakhir. */
+  | { kind: 'thinking'; id: number }
   | { kind: 'done'; id: number; isError: boolean; text: string }
   | { kind: 'failed'; id: number; text: string };
 
@@ -108,6 +112,20 @@ export function toBlocks(messages: MessageView[]): ChatBlock[] {
     }
   }
   return out.filter((b) => b.kind !== 'tools' || b.calls.length > 0);
+}
+
+/**
+ * Baris sementara di akhir chat: pesan yang sedang dikirim, lalu indikator
+ * "Agent is working…" sampai output pertama agent masuk.
+ */
+export function withLiveRows(blocks: ChatBlock[], opts: { sending: string | null; working: boolean }): ChatBlock[] {
+  const out = [...blocks];
+  const next = (blocks.at(-1)?.id ?? 0) + 1;
+  if (opts.sending !== null) out.push({ kind: 'sending', id: next, text: opts.sending });
+  const last = out.at(-1);
+  const waiting = last === undefined || last.kind === 'dev' || last.kind === 'sending';
+  if ((opts.working || opts.sending !== null) && waiting) out.push({ kind: 'thinking', id: next + 1 });
+  return out;
 }
 
 function plural(n: number, word: string): string {

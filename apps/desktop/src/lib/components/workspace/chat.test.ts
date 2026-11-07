@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { ASK_TOOL, questionIdOf, startFixParams, toBlocks, toolLabel } from '#lib/chat.ts';
+import { ASK_TOOL, questionIdOf, startFixParams, toBlocks, toolLabel, withLiveRows } from '#lib/chat.ts';
 import { renderMarkdown } from '#lib/markdown.ts';
 import type { MessageView } from '#lib/protocol/MessageView.ts';
 import type { Rpc } from '#lib/rpc.ts';
@@ -132,6 +132,32 @@ describe('chat workspace', () => {
     expect((seen[1] as { after_id: number }).after_id).toBe(1);
   });
 
+  it('pesan sementara hilang saat pesan dev tercatat, tidak saat output agent', async () => {
+    const pages: MessageView[][] = [[], [msg(1, 'agent', { type: 'assistant_message', text: 'x' })], [msg(2, 'dev', { text: 'lanjut' })]];
+    const handlers: ((p: unknown) => void)[] = [];
+    const rpc: Rpc = {
+      request: async <T>() => (pages.shift() ?? []) as T,
+      on: (_m, h) => {
+        handlers.push(h);
+        return () => undefined;
+      }
+    };
+    const ws = new WorkspaceStore();
+    ws.attach(rpc);
+    ws.open('r1');
+    await new Promise((r) => setTimeout(r, 0));
+    ws.beginSend('r1', 'lanjut');
+    handlers[0]({ run_id: 'r1' });
+    await new Promise((r) => setTimeout(r, 0));
+    expect(ws.sending.get('r1')).toBe('lanjut');
+    handlers[0]({ run_id: 'r1' });
+    await new Promise((r) => setTimeout(r, 0));
+    expect(ws.sending.has('r1')).toBe(false);
+    ws.beginSend('r1', 'gagal');
+    ws.endSend('r1');
+    expect(ws.sending.has('r1')).toBe(false);
+  });
+
   it('Mulai perbaikan hanya mengirim instruksi dan komentar yang dipilih', () => {
     expect(startFixParams('rec1', '  Perbaiki form  ', { r1: true, r2: false, r3: true })).toEqual({
       record_id: 'rec1',
@@ -225,5 +251,29 @@ describe('kartu pertanyaan di chat', () => {
   it('pertanyaan teks biasa tetap blok assistant', () => {
     const blocks = toBlocks([msg(1, 'agent', { type: 'assistant_message', text: 'Keep both? A or B' })]);
     expect(blocks.map((b) => b.kind)).toEqual(['assistant']);
+  });
+});
+
+describe('indikator setelah Send', () => {
+  const dev = msg(1, 'dev', { text: 'halo' });
+  const reply = msg(2, 'agent', { type: 'assistant_message', text: 'siap' });
+
+  it('pesan yang dikirim langsung tampil, diikuti indikator agent bekerja', () => {
+    const rows = withLiveRows(toBlocks([dev, reply]), { sending: 'lanjut', working: false });
+    expect(rows.map((b) => b.kind)).toEqual(['dev', 'assistant', 'sending', 'thinking']);
+    const sending = rows[2];
+    if (sending.kind !== 'sending') throw new Error('no sending');
+    expect(sending.text).toBe('lanjut');
+    expect(new Set(rows.map((b) => b.id)).size).toBe(rows.length);
+  });
+
+  it('indikator tampil saat agent bekerja dan belum ada output setelah pesan dev', () => {
+    expect(withLiveRows(toBlocks([dev]), { sending: null, working: true }).map((b) => b.kind)).toEqual(['dev', 'thinking']);
+    expect(withLiveRows([], { sending: null, working: true }).map((b) => b.kind)).toEqual(['thinking']);
+  });
+
+  it('indikator hilang begitu agent mengeluarkan output atau giliran selesai', () => {
+    expect(withLiveRows(toBlocks([dev, reply]), { sending: null, working: true }).map((b) => b.kind)).toEqual(['dev', 'assistant']);
+    expect(withLiveRows(toBlocks([dev]), { sending: null, working: false }).map((b) => b.kind)).toEqual(['dev']);
   });
 });

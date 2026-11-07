@@ -32,3 +32,16 @@ Kartu uji di Base salinan, repo `mandor-smoke`, mode Brainstorm, then plan: PGS-
 | AE10 | Continue to plan melewati kartu | Lulus 2026-11-07: kartu Pending lalu `runs.continue_to_plan` → kartu `skipped`, fase plan, plan ditulis. |
 
 Semua AE1–AE10 lulus uji langsung dengan Claude asli di daemon laptop; perilaku UI (kartu inline, klik, status akhir, Approve tersembunyi, label) dicek di `/?mock` dan Vitest. Uji di app Windows dari installer branch ini dilakukan pemilik produk sebelum merge.
+
+## Uji di app Windows (installer branch ini)
+
+Pemilik produk, 2026-11-07, kartu PGS-1580 (daemon WSL dari branch ini):
+
+| Langkah | Hasil |
+|---|---|
+| A. Kartu tampil (R7, R11) | Lulus: kartu "The agent asks" inline di Chat, 3 pilihan dengan Recommended, label run "Question for you", placeholder composer "Your message answers the agent's question". |
+| B. Klik pilihan (R8, R9) | Lulus: kartu menjadi Answered dengan pilihan ditandai dan tombol nonaktif; pesan "Bahasa Indonesia" muncul sebagai pesan dev; agent mengajukan kartu kedua. |
+| C. Antrean ditahan (R13) | Tidak teramati di app (giliran agent selesai sebelum pesan sempat di-Queue); lulus di uji daemon (AE9) dan Vitest. |
+| D. Balas lewat chat (R10) | Lulus: kartu kedua menampilkan "Your reply: …" (Answered in chat). |
+| E. Continue to plan (R16) | Lulus: kartu ketiga Skipped, agent mulai menulis plan. |
+| F. Plan yang bertanya (R15) | Lulus: revisi plan bertanya lewat kartu; tombol Approve hilang, baris status "The agent asked a question…", label Question for you, tetap di tab Chat; setelah klik, kartu Answered dan plan revisi ditulis (`pending_question` kosong, plan baru tersimpan). |

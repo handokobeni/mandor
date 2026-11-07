@@ -41,6 +41,9 @@ pub mod method {
     pub const LEDGER_TOOL_SET_VERDICT: &str = "ledger.tool.set_verdict";
     /// Koneksi kapabilitas, peran verdict: `LedgerToolSetVisual`.
     pub const LEDGER_TOOL_SET_VISUAL: &str = "ledger.tool.set_visual";
+    /// Koneksi kapabilitas, peran ask atau design di laptop: `AskToolQuestion`
+    /// → teks balasan alat (plan 2026-11-07-001).
+    pub const ASK_TOOL_ASK: &str = "ask.tool.ask";
     /// Koneksi kapabilitas peran permit (`mandord mcp --permit`):
     /// `PermitRequestParams` → `PermitDecision`; boleh menunggu jawaban dev
     /// sampai 10 menit (plan 2026-11-06-001).
@@ -113,6 +116,16 @@ pub mod method {
     pub const APPROVALS_ANSWER: &str = "approvals.answer";
     /// Dev membuka tab Chat run (`RunRef`): mode tolak langsung berakhir.
     pub const APPROVALS_SEEN: &str = "approvals.seen";
+    /// Kartu pertanyaan run (`RunRef` → `Vec<QuestionView>`), urut waktu
+    /// (plan 2026-11-07-001).
+    pub const QUESTIONS_LIST: &str = "questions.list";
+    /// Klik pilihan kartu pertanyaan (`QuestionAnswerParams`); hanya koneksi
+    /// token penuh.
+    pub const QUESTIONS_ANSWER: &str = "questions.answer";
+    /// Kirim pesan antrean yang ditahan sebagai satu pesan (`RunRef`).
+    pub const RUNS_QUEUED_SEND: &str = "runs.queued.send";
+    /// Buang pesan antrean yang ditahan (`RunRef`).
+    pub const RUNS_QUEUED_DISCARD: &str = "runs.queued.discard";
     pub const RUNS_MESSAGES: &str = "runs.messages";
     pub const RUNS_START: &str = "runs.start";
     pub const RUNS_SEND: &str = "runs.send";
@@ -218,6 +231,9 @@ pub mod event {
     /// Kartu persetujuan run berubah (`RunEventView`); client memuat ulang
     /// `approvals.list`.
     pub const APPROVALS_UPDATED: &str = "approvals.updated";
+    /// Kartu pertanyaan run berubah (`RunEventView`); client memuat ulang
+    /// `questions.list`.
+    pub const QUESTIONS_UPDATED: &str = "questions.updated";
     /// Review run berubah (`RunEventView`); client memuat ulang `review.history`.
     pub const REVIEW_PROGRESS: &str = "review.progress";
     /// State run app berubah (`RunEventView`); client memuat ulang `app.status`.
@@ -351,6 +367,15 @@ fn approval_bindings() -> Result<Vec<(&'static str, String)>, String> {
         one(
             "ApprovalAnswerParams.ts",
             ApprovalAnswerParams::export_to_string(&cfg),
+        )?,
+        one("QuestionView.ts", QuestionView::export_to_string(&cfg))?,
+        one(
+            "QuestionOptionView.ts",
+            QuestionOptionView::export_to_string(&cfg),
+        )?,
+        one(
+            "QuestionAnswerParams.ts",
+            QuestionAnswerParams::export_to_string(&cfg),
         )?,
     ])
 }

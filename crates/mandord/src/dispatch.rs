@@ -39,6 +39,7 @@ pub(crate) mod design;
 mod group;
 mod overnight;
 mod planned;
+mod questions;
 mod review;
 mod workspaces;
 
@@ -319,6 +320,13 @@ impl AppDispatch {
         let active = s.runs.active_runs().await.map_err(run_error)?;
         let mut groups = group::group_views(&s, &active).await?;
         let pending = self.pending_approvals().await;
+        let asking = self
+            .app
+            .store
+            .pending_question_runs()
+            .await
+            .inspect_err(|e| tracing::warn!(error = %e, "pertanyaan run tidak terbaca"))
+            .unwrap_or_default();
         let mut out = Vec::new();
         for r in active {
             let task = s.sync.cached(&r.record_id).await.map_err(sync_error)?;
@@ -326,6 +334,7 @@ impl AppDispatch {
             view.ac = summaries.get(&r.id).cloned();
             view.cards = groups.remove(&r.id).unwrap_or_default();
             view.pending_approvals = pending.get(&r.id).copied().unwrap_or(0);
+            view.pending_question = asking.get(&r.id).cloned();
             out.push(view);
         }
         ok(&out)
@@ -853,6 +862,9 @@ impl AppDispatch {
         ) {
             return self.approvals_call(name, v).await;
         }
+        if Self::is_questions_method(name) {
+            return self.questions_call(name, v).await;
+        }
         if !RUN_METHODS.contains(&name) {
             return Err(RpcError::new(
                 ErrorCode::MethodNotFound,
@@ -1047,6 +1059,8 @@ async fn approve<D: mandor_usecase::Deps>(
 enum ScopedRoute {
     Permit,
     Ledger,
+    /// Alat `ask_developer` (plan 2026-11-07-001, KTD-Q4).
+    Ask,
     /// Method kartu persetujuan: hanya untuk koneksi token penuh (KTD-A16).
     Approvals,
     Refused,
@@ -1060,7 +1074,16 @@ fn scoped_route(role: &str, name: &str) -> ScopedRoute {
             ScopedRoute::Approvals
         }
         ("permit", method::PERMIT_REQUEST) => ScopedRoute::Permit,
-        ("permit", _) | (_, method::PERMIT_REQUEST) => ScopedRoute::Refused,
+        ("ask" | "design", method::ASK_TOOL_ASK) => ScopedRoute::Ask,
+        // Peran ask hanya bertanya; buku AC tertutup (KTD-Q4).
+        ("ask", method::LEDGER_TOOL_INFO) => ScopedRoute::Ledger,
+        (role, name)
+            if matches!(role, "permit" | "ask")
+                || matches!(name, method::PERMIT_REQUEST | method::ASK_TOOL_ASK)
+                || AppDispatch::is_questions_method(name) =>
+        {
+            ScopedRoute::Refused
+        }
         _ => ScopedRoute::Ledger,
     }
 }
@@ -1080,6 +1103,7 @@ impl Dispatch for AppDispatch {
             ScopedRoute::Permit => self.permit_call(scope, v).await,
             ScopedRoute::Approvals => Err(self.approvals_refused(scope, name).await),
             ScopedRoute::Ledger => self.ledger_tool_call(scope, name, v).await,
+            ScopedRoute::Ask => self.ask_tool_call(scope, v).await,
             ScopedRoute::Refused => Err(RpcError::new(
                 ErrorCode::Unauthorized,
                 format!("{name} is not available on this connection"),
@@ -1162,11 +1186,39 @@ mod tests {
             scoped_route("verdict", "ledger.tool.read"),
             ScopedRoute::Ledger
         );
-        for role in ["permit", "design", "verdict"] {
+        for role in ["permit", "design", "verdict", "ask"] {
             assert_eq!(
                 scoped_route(role, "approvals.answer"),
                 ScopedRoute::Approvals
             );
+        }
+    }
+
+    /// Plan 2026-11-07-001, U5: `ask.tool.ask` hanya untuk peran ask dan
+    /// design; peran ask tidak bisa membaca atau mengubah buku AC; method
+    /// pertanyaan untuk aplikasi tidak pernah lewat koneksi kapabilitas.
+    #[test]
+    fn rute_alat_pertanyaan() {
+        use super::{ScopedRoute, scoped_route};
+        assert_eq!(scoped_route("ask", "ask.tool.ask"), ScopedRoute::Ask);
+        assert_eq!(scoped_route("design", "ask.tool.ask"), ScopedRoute::Ask);
+        assert_eq!(
+            scoped_route("verdict", "ask.tool.ask"),
+            ScopedRoute::Refused
+        );
+        assert_eq!(scoped_route("permit", "ask.tool.ask"), ScopedRoute::Refused);
+        assert_eq!(scoped_route("ask", "ledger.tool.info"), ScopedRoute::Ledger);
+        for m in [
+            "ledger.tool.read",
+            "ledger.tool.set_design",
+            "permit.request",
+        ] {
+            assert_eq!(scoped_route("ask", m), ScopedRoute::Refused, "{m}");
+        }
+        for role in ["ask", "design", "verdict"] {
+            for m in ["questions.answer", "questions.list", "runs.queued.send"] {
+                assert_eq!(scoped_route(role, m), ScopedRoute::Refused, "{role} {m}");
+            }
         }
     }
 

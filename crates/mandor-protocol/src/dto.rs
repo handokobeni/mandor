@@ -181,6 +181,10 @@ pub struct RunView {
     /// Kartu persetujuan yang menunggu jawaban (R9).
     #[serde(default)]
     pub pending_approvals: u32,
+    /// Id kartu pertanyaan yang menunggu jawaban; selama ada, Approve
+    /// disembunyikan (plan 2026-11-07-001, R15).
+    #[serde(default)]
+    pub pending_question: Option<String>,
 }
 
 /// Satu kartu run grup.
@@ -1236,12 +1240,32 @@ pub struct DesignSourceCheckView {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct LedgerToolInfo {
     pub run_id: String,
-    /// `design` atau `verdict`.
+    /// `design`, `verdict`, atau `ask`.
     pub role: String,
     /// Prototype run ini menyala; reviewer mendapat `ac_set_visual`
     /// (plan 2026-11-03-002, R16).
     #[serde(default)]
     pub visual: bool,
+    /// Giliran ini mendapat `ask_developer` (laptop, peran design atau ask;
+    /// plan 2026-11-07-001, KTD-Q5).
+    #[serde(default)]
+    pub ask: bool,
+}
+
+/// Satu pilihan `ask.tool.ask`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AskToolOption {
+    pub label: String,
+    pub description: String,
+    #[serde(default)]
+    pub recommended: bool,
+}
+
+/// Parameter `ask.tool.ask` (alat `ask_developer`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AskToolQuestion {
+    pub question: String,
+    pub options: Vec<AskToolOption>,
 }
 
 /// Parameter `ledger.tool.set_design`.
@@ -1634,6 +1658,39 @@ pub struct ApprovalView {
     pub deadline_ms: i64,
     #[ts(type = "number | null")]
     pub closed_at_ms: Option<i64>,
+}
+
+/// Satu pilihan kartu pertanyaan.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+pub struct QuestionOptionView {
+    pub label: String,
+    pub description: String,
+    pub recommended: bool,
+}
+
+/// Kartu pertanyaan agent untuk Chat run (plan 2026-11-07-001, R7, R11).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+pub struct QuestionView {
+    pub id: String,
+    pub run_id: String,
+    pub question: String,
+    pub options: Vec<QuestionOptionView>,
+    /// `pending` | `answered` | `answered_in_chat` | `skipped`.
+    pub status: String,
+    /// Label pilihan, atau teks pesan chat yang menjawab.
+    pub answer: Option<String>,
+    #[ts(type = "number")]
+    pub created_at_ms: i64,
+    #[ts(type = "number | null")]
+    pub closed_at_ms: Option<i64>,
+}
+
+/// Parameter `questions.answer`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+pub struct QuestionAnswerParams {
+    pub question_id: String,
+    /// Indeks pilihan, mulai 0.
+    pub option: u32,
 }
 
 /// Parameter `approvals.answer`.

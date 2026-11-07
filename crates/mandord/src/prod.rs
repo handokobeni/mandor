@@ -40,6 +40,7 @@ impl Deps for Prod {
     type Approvals = crate::approval_events::BroadcastApprovals;
     type Waiter = crate::approval_waiter::TokioWaiter;
     type Permits = crate::permit_facts::DiskPermits;
+    type Questions = crate::question_events::BroadcastQuestions;
 }
 
 pub fn now_ms() -> i64 {

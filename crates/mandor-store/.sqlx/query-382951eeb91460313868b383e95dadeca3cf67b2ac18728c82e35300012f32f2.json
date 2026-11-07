@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "UPDATE questions SET status = ?, answer = ?, closed_ms = ?\n             WHERE id = ? AND status = 'pending'",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 4
+    },
+    "nullable": []
+  },
+  "hash": "382951eeb91460313868b383e95dadeca3cf67b2ac18728c82e35300012f32f2"
+}

@@ -16,7 +16,9 @@ mod one_plan;
 mod ownership;
 pub use ownership::{CarriedReview, VmCarry};
 mod publish;
+mod questions;
 pub use publish::PublishOutcome;
+pub use questions::AskError;
 mod planned;
 mod reconcile;
 mod send_to_vm;
@@ -80,6 +82,7 @@ pub struct RunService<D: Deps> {
     pub(crate) approvals: D::Approvals,
     pub(crate) waiter: D::Waiter,
     pub(crate) permits: D::Permits,
+    pub(crate) questions: D::Questions,
     /// Waktu sinkron AC terakhir yang berhasil per run (dibangun ulang saat
     /// refresh berikutnya setelah restart).
     pub(crate) ledger_synced: Mutex<HashMap<String, i64>>,
@@ -129,6 +132,7 @@ pub struct RunPorts<D: Deps> {
     pub approvals: D::Approvals,
     pub waiter: D::Waiter,
     pub permits: D::Permits,
+    pub questions: D::Questions,
 }
 
 impl<D: Deps> std::fmt::Debug for RunPorts<D> {
@@ -156,6 +160,7 @@ impl<D: Deps> RunService<D> {
             approvals: ports.approvals,
             waiter: ports.waiter,
             permits: ports.permits,
+            questions: ports.questions,
             ledger_synced: Mutex::new(HashMap::new()),
             capabilities: crate::review::capability::empty(),
             permit_grants: Mutex::new(HashMap::new()),

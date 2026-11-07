@@ -22,9 +22,12 @@ use crate::prompt::{
     OperatorContext, ReviewBrowser, data_block, new_nonce, operator_prompt, review_operator_prompt,
 };
 use mandor_domain::permit::TurnKind;
+use mandor_usecase::review::CapabilityRole;
 
 /// Tool ledger untuk giliran plan (peran Design).
 const PLAN_LEDGER_TOOLS: [&str; 2] = ["ac_ledger_read", "ac_set_design"];
+/// Alat pertanyaan yang bisa diklik di server ledger (plan 2026-11-07-001).
+const ASK_TOOL: &str = "ask_developer";
 
 /// Allowlist `--allowedTools` giliran biasa atau plan. Giliran plan hanya-baca:
 /// allowlist plan ditambah tool ledger Design saja, tanpa allowlist tambahan
@@ -37,12 +40,17 @@ fn allowed_tools(
 ) -> Vec<String> {
     if req.plan_mode {
         let mut allowed = plan_allowed();
-        if ledger {
+        let role = req.ledger.as_ref().filter(|_| ledger).map(|l| l.role);
+        if role == Some(CapabilityRole::Design) {
             allowed.extend(
                 PLAN_LEDGER_TOOLS
                     .iter()
                     .map(|t| format!("mcp__{LEDGER_SERVER_NAME}__{t}")),
             );
+        }
+        // Pertanyaan yang bisa diklik di laptop (plan 2026-11-07-001, KTD-Q4).
+        if req.ask && role.is_some() {
+            allowed.push(format!("mcp__{LEDGER_SERVER_NAME}__{ASK_TOOL}"));
         }
         return allowed;
     }
@@ -1459,6 +1467,7 @@ mod tests {
             design: vec![],
             review: None,
             permit: None,
+            ask: false,
         };
         let spec = agent.spec(&req, None);
         assert_eq!(spec.mcp_config, None);
@@ -1532,6 +1541,7 @@ mod tests {
             design: vec![],
             review: None,
             permit: None,
+            ask: false,
         }
     }
 
@@ -1658,6 +1668,63 @@ mod tests {
         assert!(!spec.allowed.contains(&"Bash(gofmt *)".to_owned()));
         let argv = format!("{:?}", spec.allowed);
         assert!(!argv.contains("tok-rahasia"));
+    }
+
+    /// Plan 2026-11-07-001, U4 (AE7): giliran plan di laptop tanpa sumber
+    /// desain hanya mendapat `ask_developer`; dengan sumber desain juga alat
+    /// buku AC; giliran implementasi tidak pernah. Berkas izin mengikuti.
+    #[tokio::test]
+    async fn alat_pertanyaan_mengikuti_peran_dan_flag_ask() {
+        use mandor_usecase::review::{CapabilityRole, LedgerAccess};
+        let dir = tempfile::tempdir().unwrap();
+        let agent = test_agent(dir.path().join("mcp"));
+        let ask = "mcp__mandor__ask_developer".to_owned();
+        let ledger = [
+            "mcp__mandor__ac_ledger_read".to_owned(),
+            "mcp__mandor__ac_set_design".to_owned(),
+        ];
+        let plan_req = |role: Option<CapabilityRole>, ask_flag: bool| {
+            let mut req = workspace_req(dir.path().to_path_buf());
+            req.workspace.as_mut().unwrap().mcp_servers.clear();
+            req.plan_mode = true;
+            req.ask = ask_flag;
+            req.ledger = role.map(|role| LedgerAccess {
+                role,
+                token: mandor_usecase::review::CapabilityToken::for_test("tok"),
+            });
+            req
+        };
+
+        let req = plan_req(Some(CapabilityRole::Ask), true);
+        let path = agent.prepare_workspace(&req).await.unwrap().unwrap();
+        let cfg: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+        assert_eq!(
+            cfg["mcpServers"]["mandor"]["args"],
+            serde_json::json!(["mcp"])
+        );
+        let spec = agent.spec(&req, Some(path));
+        assert!(spec.allowed.contains(&ask));
+        assert!(ledger.iter().all(|t| !spec.allowed.contains(t)));
+        let permit = agent.permit_file(&req);
+        assert_eq!(permit.turn, "plan");
+        assert!(permit.allow.contains(&ask));
+        assert_eq!(permit.mcp, ["mandor"]);
+
+        let req = plan_req(Some(CapabilityRole::Design), true);
+        let spec = agent.spec(&req, None);
+        assert!(spec.allowed.contains(&ask));
+        assert!(ledger.iter().all(|t| spec.allowed.contains(t)));
+
+        // VM: token Design tanpa flag ask.
+        let req = plan_req(Some(CapabilityRole::Design), false);
+        let spec = agent.spec(&req, None);
+        assert!(!spec.allowed.contains(&ask));
+        assert!(!agent.permit_file(&req).allow.contains(&ask));
+
+        let mut req = plan_req(None, false);
+        req.plan_mode = false;
+        assert!(!agent.spec(&req, None).allowed.contains(&ask));
     }
 
     /// Di VM login Claude ada di user agent: cek login dan pembuat pesan

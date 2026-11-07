@@ -219,10 +219,20 @@ impl<D: Deps> RunService<D> {
         };
         let plan_mode = run.phase != RunPhase::Implement;
         // Giliran brainstorm/plan mengisi kolom Design lewat tool ledger bila
-        // ada sumber desain; tanpa sumber, Design tidak diisi (U6).
-        let ledger = (plan_mode && !run.design.is_empty()).then(|| crate::review::LedgerAccess {
-            role: crate::review::CapabilityRole::Design,
-            token: self.issue_capability(&run.id, crate::review::CapabilityRole::Design),
+        // ada sumber desain (U6). Di laptop giliran itu juga bisa bertanya
+        // lewat `ask_developer`; tanpa sumber desain tokennya peran Ask
+        // (plan 2026-11-07-001, KTD-Q4, KTD-Q5).
+        let ask = plan_mode && !self.is_vm();
+        let role = if plan_mode && !run.design.is_empty() {
+            Some(crate::review::CapabilityRole::Design)
+        } else if ask {
+            Some(crate::review::CapabilityRole::Ask)
+        } else {
+            None
+        };
+        let ledger = role.map(|role| crate::review::LedgerAccess {
+            role,
+            token: self.issue_capability(&run.id, role),
         });
         Ok(AgentRequest {
             repo: primary.repo,
@@ -236,6 +246,7 @@ impl<D: Deps> RunService<D> {
             design: run.design.clone(),
             review: None,
             permit: None,
+            ask,
         })
     }
 

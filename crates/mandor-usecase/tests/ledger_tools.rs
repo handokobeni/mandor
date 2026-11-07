@@ -257,7 +257,13 @@ async fn start_tanpa_sumber_desain_tidak_meminta_design() {
         .await
         .unwrap();
     let req = st.agent.last().req;
-    assert!(req.ledger.is_none(), "tanpa sumber, Design tidak diisi");
+    // Tanpa sumber, Design tidak diisi; giliran hanya bisa bertanya
+    // (plan 2026-11-07-001, KTD-Q4).
+    assert_eq!(
+        req.ledger.as_ref().map(|l| l.role),
+        Some(mandor_usecase::review::CapabilityRole::Ask)
+    );
+    assert!(req.ask);
     assert!(req.design.is_empty());
     assert!(!req.message.contains("DESIGN"), "{}", req.message);
     assert!(st.runs.only().design.is_empty());

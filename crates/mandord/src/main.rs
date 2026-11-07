@@ -34,6 +34,7 @@ mod permit_facts;
 mod power;
 mod prereq;
 mod prod;
+mod question_events;
 mod review_state;
 mod serve;
 mod session;

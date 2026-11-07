@@ -1,0 +1,122 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT id, run_id, generation, question, options_json, status, answer,\n                    created_ms, closed_ms\n             FROM questions WHERE id = ?",
+  "describe": {
+    "columns": [
+      {
+        "name": "id",
+        "ordinal": 0,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "questions",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "name": "run_id",
+        "ordinal": 1,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "questions",
+            "name": "run_id"
+          }
+        }
+      },
+      {
+        "name": "generation",
+        "ordinal": 2,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "questions",
+            "name": "generation"
+          }
+        }
+      },
+      {
+        "name": "question",
+        "ordinal": 3,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "questions",
+            "name": "question"
+          }
+        }
+      },
+      {
+        "name": "options_json",
+        "ordinal": 4,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "questions",
+            "name": "options_json"
+          }
+        }
+      },
+      {
+        "name": "status",
+        "ordinal": 5,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "questions",
+            "name": "status"
+          }
+        }
+      },
+      {
+        "name": "answer",
+        "ordinal": 6,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "questions",
+            "name": "answer"
+          }
+        }
+      },
+      {
+        "name": "created_ms",
+        "ordinal": 7,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "questions",
+            "name": "created_ms"
+          }
+        }
+      },
+      {
+        "name": "closed_ms",
+        "ordinal": 8,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "questions",
+            "name": "closed_ms"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      false,
+      true
+    ]
+  },
+  "hash": "3128bdec1817ab3d0c1a7c33f0d8b43c1f063c9ced943e50c83b2bd741e7296d"
+}

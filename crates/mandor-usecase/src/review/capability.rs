@@ -18,13 +18,15 @@ use crate::run_ports::{AgentPort, AppRecord, AppRecords, LedgerStore, RunStore};
 const EVIDENCE_MAX: usize = 2_000;
 const TRUNCATED: &str = " [truncated]";
 
-/// Peran token: giliran plan mengisi Design, reviewer mengisi Verdict, dan
-/// alat persetujuan meminta izin (plan 2026-11-06-001).
+/// Peran token: giliran plan mengisi Design, reviewer mengisi Verdict, alat
+/// persetujuan meminta izin (plan 2026-11-06-001), dan giliran brainstorm/plan
+/// tanpa sumber desain hanya bertanya (plan 2026-11-07-001, KTD-Q4).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum CapabilityRole {
     Design,
     Verdict,
     Permit,
+    Ask,
 }
 
 impl CapabilityRole {
@@ -34,6 +36,7 @@ impl CapabilityRole {
             Self::Design => "design",
             Self::Verdict => "verdict",
             Self::Permit => "permit",
+            Self::Ask => "ask",
         }
     }
 }

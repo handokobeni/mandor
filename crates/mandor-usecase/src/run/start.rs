@@ -257,12 +257,18 @@ impl<D: Deps> RunService<D> {
     }
 
     /// Pesan brainstorm/plan ditambah instruksi kolom Design bila run punya
-    /// sumber desain.
+    /// sumber desain, dan instruksi `ask_developer` di laptop.
     pub(crate) fn with_design(&self, run: &RunRecord, message: String) -> String {
-        if run.design.is_empty() {
-            return message;
+        let mut out = message;
+        if !run.design.is_empty() {
+            out = format!("{out}\n\n{}", self.prompts.design_message(&run.design));
         }
-        format!("{message}\n\n{}", self.prompts.design_message(&run.design))
+        // Pertanyaan lewat kartu hanya di laptop (plan 2026-11-07-001, KTD-Q12).
+        let ask = self.prompts.ask_tool_message();
+        if !self.is_vm() && !ask.is_empty() {
+            out = format!("{out}\n\n{ask}");
+        }
+        out
     }
 
     async fn prepare_and_spawn(

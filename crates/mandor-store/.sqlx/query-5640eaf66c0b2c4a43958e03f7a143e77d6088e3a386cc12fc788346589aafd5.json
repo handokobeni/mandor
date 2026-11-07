@@ -1,0 +1,38 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT run_id, id FROM questions WHERE status = 'pending'\n             ORDER BY created_ms, rowid",
+  "describe": {
+    "columns": [
+      {
+        "name": "run_id",
+        "ordinal": 0,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "questions",
+            "name": "run_id"
+          }
+        }
+      },
+      {
+        "name": "id",
+        "ordinal": 1,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "questions",
+            "name": "id"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      false,
+      false
+    ]
+  },
+  "hash": "5640eaf66c0b2c4a43958e03f7a143e77d6088e3a386cc12fc788346589aafd5"
+}

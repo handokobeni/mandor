@@ -19,6 +19,7 @@ pub mod permit;
 pub mod planned;
 pub mod power;
 pub mod push_gate;
+pub mod question;
 pub mod role;
 pub mod run;
 pub mod service;

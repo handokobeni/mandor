@@ -256,14 +256,13 @@ impl<D: Deps> RunService<D> {
         stats: ReviewEnd,
     ) -> Result<(), RunError> {
         self.clear_stopper(run_id, generation);
-        self.revoke_capabilities(run_id);
-        // Giliran selesai atau dihentikan: kartu yang menunggu tidak punya
-        // agent lagi (R20).
-        self.cancel_run_approvals(run_id).await;
         let mut run = self.load(run_id).await?;
         if run.generation != generation {
+            // Giliran ini sudah diinterupsi; tokennya dicabut `interrupt`, dan
+            // token giliran yang lebih baru tidak boleh ikut dicabut.
             return Ok(());
         }
+        self.end_turn_access(run_id).await;
         run.pid = None;
         self.mark_stale_if_changed(&run).await;
         if run.state == RunState::Reviewing {
@@ -282,6 +281,16 @@ impl<D: Deps> RunService<D> {
             return self.finish_fix_turn(run, end).await;
         }
         match end {
+            TurnEnd::Ok(_) if self.asked_in_turn(run_id, generation).await => {
+                // Giliran bertanya lewat kartu (plan 2026-11-07-001): bukan
+                // plan (R15), dan antrean ditahan sampai dev menjawab (R13).
+                run.state = RunState::AwaitingDev;
+                self.runs.save(&run, generation, self.now()).await?;
+                let body = "The agent has a question: pick an answer or reply in chat";
+                self.notifier
+                    .notify(notice(self, NoticeKind::AwaitingAnswer, &run, body).await)
+                    .await;
+            }
             TurnEnd::Ok(result) => {
                 if run.phase == RunPhase::Plan && !result.trim().is_empty() {
                     run.plan = Some(result.clone());
@@ -357,6 +366,7 @@ impl<D: Deps> RunService<D> {
         if run.phase != RunPhase::Plan || run.plan.is_none() {
             return Err(RunError::InvalidState("no plan to approve"));
         }
+        self.ensure_no_open_question(run_id).await?;
         let rows = follow_design_rows(self.reviews.ac_rows(run_id).await?, follow_design)?;
         let followed: Vec<String> = rows
             .iter()
@@ -437,7 +447,14 @@ impl<D: Deps> RunService<D> {
         );
         let req = self.resume_request(&mut run, message).await?;
         self.spawn_turn(&mut run, req, Some("Continue to plan".to_owned()))
-            .await
+            .await?;
+        // Kartu yang belum dijawab dilewati (R16).
+        self.close_open_question(
+            run_id,
+            mandor_domain::question::QuestionStatus::Skipped,
+            None,
+        )
+        .await
     }
 
     /// Pesan dev: diantrekan bila agent sibuk, selain itu dikirim sebagai giliran baru.
@@ -463,6 +480,13 @@ impl<D: Deps> RunService<D> {
         let req = self.resume_request(&mut run, text.to_owned()).await?;
         self.spawn_turn(&mut run, req, Some(text.to_owned()))
             .await?;
+        // Pesan chat menjawab kartu yang terbuka (R10).
+        self.close_open_question(
+            run_id,
+            mandor_domain::question::QuestionStatus::AnsweredInChat,
+            Some(text),
+        )
+        .await?;
         Ok(SendOutcome::Sent)
     }
 
@@ -497,6 +521,13 @@ impl<D: Deps> RunService<D> {
         Ok(())
     }
 
+    /// Giliran selesai atau dihentikan: token dicabut, dan kartu persetujuan
+    /// yang menunggu tidak punya agent lagi (R20).
+    async fn end_turn_access(&self, run_id: &str) {
+        self.revoke_capabilities(run_id);
+        self.cancel_run_approvals(run_id).await;
+    }
+
     /// Menaikkan generasi lebih dulu (event giliran lama jadi basi), lalu
     /// menghentikan prosesnya. Mengembalikan `true` bila ada giliran yang dihentikan.
     pub(crate) async fn interrupt(&self, run_id: &str) -> Result<bool, RunError> {
@@ -513,6 +544,7 @@ impl<D: Deps> RunService<D> {
         };
         run.pid = None;
         self.runs.save(&run, expected, self.now()).await?;
+        self.end_turn_access(run_id).await;
         if let Some(stopper) = self.take_stopper(run_id) {
             stopper.stop().await;
         }

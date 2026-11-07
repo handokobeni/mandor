@@ -628,11 +628,9 @@ function handle(method: string, params: Record<string, unknown>): unknown {
         { reply_id: 'r1', author: 'ou_51aa6c', create_time: 1792370000, text: 'The error should mention the policy limit.', trusted: true, sent: true },
         { reply_id: 'r2', author: 'ou_2c81d4', create_time: 1792371000, text: 'Maybe also make it red?', trusted: false, sent: false }
       ];
-    case 'runs.send': {
-      const list = (MESSAGES[String(params.run_id)] ??= []);
-      list.push({ id: nextMsg++, role: 'dev', body: { text: params.text }, created_at_ms: Date.now() });
+    case 'runs.send':
+      // Pesan tercatat dan agent membalas lewat `playSend` (jeda seperti daemon asli).
       return { outcome: 'sent' };
-    }
     case 'card.details': {
       const c = CARDS.find((x) => x.record_id === params.record_id);
       return {
@@ -957,6 +955,25 @@ export class MockTransport implements Transport {
     );
   }
 
+  /** Daemon asli butuh beberapa detik untuk memulai sesi sebelum pesan tercatat dan agent membalas. */
+  private playSend(runId: string, text: string): void {
+    const run = RUNS.find((r) => r.id === runId);
+    const list = (MESSAGES[runId] ??= []);
+    setTimeout(() => {
+      list.push({ id: nextMsg++, role: 'dev', body: { text }, created_at_ms: Date.now() });
+      if (run) run.state = 'running';
+      this.emit('run.message', { run_id: runId });
+      this.emit('run.updated', { run_id: runId });
+    }, 1500);
+    setTimeout(() => {
+      list.push({ id: nextMsg++, role: 'agent', body: { type: 'assistant_message', text: 'Noted. Working on it.' }, created_at_ms: Date.now() });
+      list.push({ id: nextMsg++, role: 'agent', body: { type: 'done', is_error: false, result: 'ok' }, created_at_ms: Date.now() });
+      if (run) run.state = 'awaiting_dev';
+      this.emit('run.message', { run_id: runId });
+      this.emit('run.updated', { run_id: runId });
+    }, 5000);
+  }
+
   async send(line: string): Promise<void> {
     const req = JSON.parse(line) as { id: number; method: string; params?: Record<string, unknown> };
     if (req.method === 'runs.close_finished') {
@@ -988,9 +1005,7 @@ export class MockTransport implements Transport {
           1500
         );
       }
-      if (req.method === 'runs.send') {
-        this.onLine?.(JSON.stringify({ jsonrpc: '2.0', method: 'run.message', params: { run_id: req.params?.run_id } }));
-      }
+      if (req.method === 'runs.send') this.playSend(String(req.params?.run_id), String(req.params?.text ?? ''));
       if (req.method === 'review.start') this.playReview(String(req.params?.run_id));
       if (req.method === 'app.run') this.playApp(String(req.params?.run_id));
     }, delay);

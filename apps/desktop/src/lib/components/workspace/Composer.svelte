@@ -20,6 +20,7 @@
   }
   let { run, onsend, onstop, onqueued }: Props = $props();
   const held = $derived(queueHeld(run));
+  const sending = $derived(workspace.sending.has(run.id));
 
   const working = $derived(isWorking(run.state));
   const blocked = $derived(composerBlocked(run));
@@ -63,7 +64,7 @@
 
   function send(now: boolean): void {
     const text = draft.trim();
-    if (!text || blocked) return;
+    if (!text || blocked || sending) return;
     onsend(text, now);
     update('');
   }
@@ -157,7 +158,7 @@
             >
             <Button variant="secondary" size="sm" disabled={!draft.trim()} onclick={() => send(false)}><ListPlus />Queue</Button>
           {:else}
-            <Button variant="secondary" size="sm" disabled={!draft.trim() || !!blocked} onclick={() => send(false)}>
+            <Button variant="secondary" size="sm" disabled={!draft.trim() || !!blocked || sending} onclick={() => send(false)}>
               <SendHorizontal />Send
             </Button>
           {/if}

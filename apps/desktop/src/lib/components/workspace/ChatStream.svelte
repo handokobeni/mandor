@@ -5,7 +5,8 @@
   import Info from '@lucide/svelte/icons/info';
   import MessagesSquare from '@lucide/svelte/icons/messages-square';
   import { isWorking } from '#lib/board.ts';
-  import { type ChatBlock, toBlocks } from '#lib/chat.ts';
+  import LoaderCircle from '@lucide/svelte/icons/loader-circle';
+  import { type ChatBlock, toBlocks, withLiveRows } from '#lib/chat.ts';
   import EmptyState from '#lib/components/mandor/EmptyState.svelte';
   import { renderMarkdown } from '#lib/markdown.ts';
   import type { RunView } from '#lib/protocol/RunView.ts';
@@ -17,15 +18,26 @@
 
   let { run, questions }: { run: RunView; questions?: QuestionsStore } = $props();
 
-  const blocks = $derived(toBlocks(workspace.messages.get(run.id) ?? []));
-  const lastId = $derived(blocks.at(-1)?.id);
   const working = $derived(isWorking(run.state));
+  const blocks = $derived(
+    withLiveRows(toBlocks(workspace.messages.get(run.id) ?? []), {
+      sending: workspace.sending.get(run.id) ?? null,
+      working
+    })
+  );
+  const lastId = $derived(blocks.filter((b) => b.kind !== 'thinking').at(-1)?.id);
 </script>
 
 {#snippet block(b: ChatBlock)}
   <div class="chat-row">
     {#if b.kind === 'dev'}
       <div class="msg-dev"><span class="who">You</span>{b.text}</div>
+    {:else if b.kind === 'sending'}
+      <div class="msg-dev sending"><span class="who">You · Sending…</span>{b.text}</div>
+    {:else if b.kind === 'thinking'}
+      <div class="msg-system thinking" role="status">
+        <LoaderCircle class="icon-sm spin" aria-hidden="true" /><span>Agent is working…</span>
+      </div>
     {:else if b.kind === 'system'}
       <div class="msg-system"><Info class="icon-sm" aria-hidden="true" /><span>{b.text}</span></div>
     {:else if b.kind === 'assistant'}
@@ -69,3 +81,8 @@
 {:else}
   <VirtualList class="chat" items={blocks} row={block} />
 {/if}
+
+<style>
+  .sending { opacity: 0.6; }
+  .thinking { color: var(--muted-foreground); }
+</style>

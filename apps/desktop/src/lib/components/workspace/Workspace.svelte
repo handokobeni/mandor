@@ -62,6 +62,7 @@
   import { oldestPending } from '#lib/approvals.ts';
   import { ApprovalsStore } from '#lib/stores/approvals.svelte.ts';
   import { QuestionsStore } from '#lib/stores/questions.svelte.ts';
+  import { workspace } from '#lib/stores/workspace.svelte.ts';
   import { approveHidden } from '#lib/questions.ts';
   import {
     activeRows,
@@ -328,6 +329,21 @@
     } finally {
       busy = false;
     }
+  }
+
+  /** Pesan langsung tampil sampai daemon mencatatnya; yang diantrekan tampil sebagai chip. */
+  function send(text: string, now: boolean): void {
+    const runId = run.id;
+    const queued = isWorking(run.state) && !now;
+    if (!queued) workspace.beginSend(runId, text);
+    void act(async () => {
+      try {
+        await rpc.request(now ? 'runs.send_now' : 'runs.send', { run_id: runId, text });
+      } catch (err) {
+        workspace.endSend(runId);
+        throw err;
+      }
+    });
   }
 
   async function loadChanges(): Promise<void> {
@@ -854,7 +870,7 @@
       {/if}
       <Composer
         {run}
-        onsend={(text, now) => act(() => rpc.request(now ? 'runs.send_now' : 'runs.send', { run_id: run.id, text }))}
+        onsend={(text, now) => send(text, now)}
         onstop={() => act(() => rpc.request('runs.stop', { run_id: run.id }))}
         onqueued={(a) =>
           act(() => rpc.request(a === 'send' ? 'runs.queued.send' : 'runs.queued.discard', { run_id: run.id }))}

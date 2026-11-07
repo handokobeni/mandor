@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO questions (id, run_id, generation, question, options_json, status,\n                                    answer, created_ms, closed_ms)\n             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)\n             ON CONFLICT(run_id, generation) DO NOTHING",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 9
+    },
+    "nullable": []
+  },
+  "hash": "2f8c1b059a1dea83e167a4e87035507d178644cbcc7ef01689728c6384c34cf7"
+}

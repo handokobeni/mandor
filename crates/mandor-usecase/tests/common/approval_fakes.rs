@@ -270,3 +270,89 @@ impl PermitFacts for FakePermits {
         })
     }
 }
+
+/// Fake kartu pertanyaan (plan 2026-11-07-001, U3).
+#[derive(Clone, Default)]
+pub struct FakeQuestions {
+    pub rows: Arc<Mutex<Vec<mandor_usecase::run_ports::QuestionRecord>>>,
+}
+
+impl FakeQuestions {
+    pub fn all(&self, run_id: &str) -> Vec<mandor_usecase::run_ports::QuestionRecord> {
+        self.rows
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|q| q.run_id == run_id)
+            .cloned()
+            .collect()
+    }
+}
+
+impl mandor_usecase::run_ports::QuestionStore for FakeQuestions {
+    async fn create_question(
+        &self,
+        q: &mandor_usecase::run_ports::QuestionRecord,
+    ) -> Result<bool, PortError> {
+        let mut rows = self.rows.lock().unwrap();
+        if rows
+            .iter()
+            .any(|r| r.run_id == q.run_id && r.generation == q.generation)
+        {
+            return Ok(false);
+        }
+        rows.push(q.clone());
+        Ok(true)
+    }
+
+    async fn question(
+        &self,
+        id: &str,
+    ) -> Result<Option<mandor_usecase::run_ports::QuestionRecord>, PortError> {
+        Ok(self
+            .rows
+            .lock()
+            .unwrap()
+            .iter()
+            .find(|q| q.id == id)
+            .cloned())
+    }
+
+    async fn questions(
+        &self,
+        run_id: &str,
+    ) -> Result<Vec<mandor_usecase::run_ports::QuestionRecord>, PortError> {
+        Ok(self.all(run_id))
+    }
+
+    async fn pending_question(
+        &self,
+        run_id: &str,
+    ) -> Result<Option<mandor_usecase::run_ports::QuestionRecord>, PortError> {
+        Ok(self
+            .all(run_id)
+            .into_iter()
+            .rev()
+            .find(|q| q.status == mandor_domain::question::QuestionStatus::Pending))
+    }
+
+    async fn close_question(
+        &self,
+        id: &str,
+        status: mandor_domain::question::QuestionStatus,
+        answer: Option<&str>,
+        now_ms: i64,
+    ) -> Result<bool, PortError> {
+        let mut rows = self.rows.lock().unwrap();
+        let Some(q) = rows
+            .iter_mut()
+            .find(|q| q.id == id && q.status == mandor_domain::question::QuestionStatus::Pending)
+        else {
+            return Ok(false);
+        };
+        q.status = status;
+        q.answer = answer.map(str::to_owned);
+        q.closed_ms = Some(now_ms);
+        Ok(true)
+    }
+}

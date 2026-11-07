@@ -175,6 +175,10 @@ pub async fn start(
                 ),
                 waiter: env.waiter.clone(),
                 permits: crate::permit_facts::DiskPermits,
+                questions: crate::question_events::BroadcastQuestions::new(
+                    mandor_store::QuestionsStore::new(env.store.clone()),
+                    env.events.clone(),
+                ),
             },
         )
         .with_drain_gate(Arc::clone(env.drain)),

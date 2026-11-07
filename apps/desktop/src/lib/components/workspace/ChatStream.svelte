@@ -11,9 +11,11 @@
   import type { RunView } from '#lib/protocol/RunView.ts';
   import { workspace } from '#lib/stores/workspace.svelte.ts';
   import VirtualList from '../VirtualList.svelte';
+  import type { QuestionsStore } from '#lib/stores/questions.svelte.ts';
+  import QuestionCard from './QuestionCard.svelte';
   import ToolCallGroup from './ToolCallGroup.svelte';
 
-  let { run }: { run: RunView } = $props();
+  let { run, questions }: { run: RunView; questions?: QuestionsStore } = $props();
 
   const blocks = $derived(toBlocks(workspace.messages.get(run.id) ?? []));
   const lastId = $derived(blocks.at(-1)?.id);
@@ -34,6 +36,17 @@
       </div>
     {:else if b.kind === 'tools'}
       <ToolCallGroup calls={b.calls} live={working && b.id === lastId} />
+    {:else if b.kind === 'question'}
+      {@const q = questions?.byId(b.questionId)}
+      {#if q && questions}
+        <QuestionCard
+          question={q}
+          {run}
+          submitting={!!questions.submitting[q.id]}
+          note={questions.notes[q.id]}
+          onanswer={(i) => questions.answer(q.id, i)}
+        />
+      {/if}
     {:else if b.kind === 'done'}
       <div class="msg-turn" data-failed={b.isError ? 'true' : undefined}>
         {#if b.isError}<CircleX class="icon-sm" aria-hidden="true" />{:else}<CircleCheck class="icon-sm" aria-hidden="true" />{/if}

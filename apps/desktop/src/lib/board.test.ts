@@ -74,6 +74,7 @@ function run(id: string, state: string, extra: Partial<RunView> = {}): RunView {
     cards: [],
     one_plan: false,
     pending_approvals: 0,
+    pending_question: null,
     ...extra
   };
 }
@@ -82,6 +83,7 @@ describe('label fase plan', () => {
   it('fase plan diberi label sendiri, fase implementasi memakai label bawaan', () => {
     expect(runLabel(run('a', 'running', { phase: 'plan' }))).toBe('Planning');
     expect(runLabel(run('a', 'awaiting_dev', { phase: 'plan', plan: '## Plan' }))).toBe('Plan ready');
+    expect(runLabel(run('a', 'awaiting_dev', { phase: 'plan', plan: '## Plan', pending_question: 'q-1' }))).toBe('Question for you');
     expect(runLabel(run('a', 'awaiting_dev'))).toBeUndefined();
     expect(runLabel(run('a', 'running', { phase: 'brainstorm' }))).toBe('Brainstorming');
     expect(runLabel(run('a', 'awaiting_dev', { phase: 'brainstorm' }))).toBe('Question for you');

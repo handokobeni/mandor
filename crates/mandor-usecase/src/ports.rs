@@ -225,5 +225,7 @@ pub trait Deps: Send + Sync + 'static {
     /// Kartu persetujuan izin agent (plan 2026-11-06-001).
     type Approvals: crate::run_ports::ApprovalStore + 'static;
     type Waiter: crate::run_ports::ApprovalWaiter + 'static;
+    /// Kartu pertanyaan agent (plan 2026-11-07-001).
+    type Questions: crate::run_ports::QuestionStore + 'static;
     type Permits: crate::run_ports::PermitFacts + 'static;
 }

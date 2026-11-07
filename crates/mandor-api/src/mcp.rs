@@ -7,8 +7,8 @@
 use std::future::Future;
 
 use mandor_protocol::{
-    LedgerToolInfo, LedgerToolSetDesign, LedgerToolSetVerdict, LedgerToolSetVisual, RpcError,
-    method,
+    AskToolQuestion, LedgerToolInfo, LedgerToolSetDesign, LedgerToolSetVerdict,
+    LedgerToolSetVisual, RpcError, method,
 };
 use serde_json::{Value, json};
 
@@ -79,16 +79,25 @@ impl<R: LedgerRpc> McpSession<R> {
 
     async fn tools_list(&mut self) -> Result<Value, (i64, String)> {
         let role = self.role().await?;
-        let mut tools = vec![read_tool()];
+        let flags = self
+            .info
+            .as_ref()
+            .map_or((false, false), |i| (i.visual, i.ask));
+        let mut tools = Vec::new();
         match role.as_str() {
-            "design" => tools.push(design_tool()),
+            "design" => tools.extend([read_tool(), design_tool()]),
             "verdict" => {
-                tools.push(verdict_tool());
-                if self.info.as_ref().is_some_and(|i| i.visual) {
+                tools.extend([read_tool(), verdict_tool()]);
+                if flags.0 {
                     tools.push(visual_tool());
                 }
             }
             _ => {}
+        }
+        // Pertanyaan yang bisa diklik (plan 2026-11-07-001, KTD-Q4): peran ask
+        // hanya punya alat ini; peran design mendapatnya di laptop.
+        if flags.1 && matches!(role.as_str(), "design" | "ask") {
+            tools.push(ask_tool());
         }
         Ok(json!({ "tools": tools }))
     }
@@ -111,6 +120,16 @@ impl<R: LedgerRpc> McpSession<R> {
             },
             "ac_set_visual" => match serde_json::from_value::<LedgerToolSetVisual>(args) {
                 Ok(p) => self.call_with(method::LEDGER_TOOL_SET_VISUAL, &p).await,
+                Err(e) => return tool_error(&format!("invalid arguments: {e}")),
+            },
+            "ask_developer" => match serde_json::from_value::<AskToolQuestion>(args) {
+                // Balasan teks polos yang diawali id pertanyaan (KTD-Q2).
+                Ok(p) => match self.call_with(method::ASK_TOOL_ASK, &p).await {
+                    Ok(Value::String(text)) => {
+                        return json!({"content": [{"type": "text", "text": text}], "isError": false});
+                    }
+                    other => other,
+                },
                 Err(e) => return tool_error(&format!("invalid arguments: {e}")),
             },
             other => return tool_error(&format!("unknown tool: {other}")),
@@ -204,6 +223,36 @@ fn visual_tool() -> Value {
     })
 }
 
+fn ask_tool() -> Value {
+    json!({
+        "name": "ask_developer",
+        "description": "Ask the developer one question that only they can decide, as a card with clickable answers. Give one question (at most 500 characters) and 2 to 4 options, each with a short unique label (at most 80 characters) and a one-line description (at most 300 characters); mark at most one option as recommended. Ask one question per turn. After the call succeeds, end your turn at once without repeating the question; the developer's answer arrives as the next message. In a plan turn, asking means you write the plan in a later turn.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "question": {"type": "string"},
+                "options": {
+                    "type": "array",
+                    "minItems": 2,
+                    "maxItems": 4,
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "label": {"type": "string"},
+                            "description": {"type": "string"},
+                            "recommended": {"type": "boolean"},
+                        },
+                        "required": ["label", "description"],
+                        "additionalProperties": false,
+                    },
+                },
+            },
+            "required": ["question", "options"],
+            "additionalProperties": false,
+        },
+    })
+}
+
 fn tool_error(message: &str) -> Value {
     json!({"content": [{"type": "text", "text": message}], "isError": true})
 }
@@ -232,10 +281,23 @@ mod tests {
                 .unwrap_or_else(std::sync::PoisonError::into_inner)
                 .push((method.to_owned(), params.clone()));
             match method {
-                "ledger.tool.info" => Ok(match self.role.strip_suffix("+visual") {
-                    Some(role) => json!({"run_id": "run1", "role": role, "visual": true}),
-                    None => json!({"run_id": "run1", "role": self.role}),
-                }),
+                "ledger.tool.info" => {
+                    let (role, ask) = match self.role.strip_suffix("+ask") {
+                        Some(role) => (role, true),
+                        None => (self.role, false),
+                    };
+                    Ok(match role.strip_suffix("+visual") {
+                        Some(role) => {
+                            json!({"run_id": "run1", "role": role, "visual": true, "ask": ask})
+                        }
+                        None => json!({"run_id": "run1", "role": role, "ask": ask}),
+                    })
+                }
+                "ask.tool.ask" if self.role == "verdict" => Err(RpcError::new(
+                    ErrorCode::Unauthorized,
+                    "ask.tool.ask is not available on this connection",
+                )),
+                "ask.tool.ask" => Ok(json!("q-1 recorded. End your turn now.")),
                 "ledger.tool.read" => Ok(json!([{"ac_id": "ac1"}])),
                 "ledger.tool.set_verdict" if self.role == "design" => Err(RpcError::new(
                     ErrorCode::Unauthorized,
@@ -392,5 +454,87 @@ mod tests {
         assert_eq!(method, "ledger.tool.set_visual");
         assert_eq!(params["result"], "differs");
         assert_eq!(params["screenshots"], json!([]));
+    }
+
+    /// Plan 2026-11-07-001, U4: `ask_developer` hanya untuk peran ask, dan
+    /// peran design di laptop (flag `ask`); reviewer tidak pernah.
+    #[tokio::test]
+    async fn alat_pertanyaan_mengikuti_peran_dan_flag() {
+        for (role, want) in [
+            ("ask+ask", vec!["ask_developer"]),
+            (
+                "design+ask",
+                vec!["ac_ledger_read", "ac_set_design", "ask_developer"],
+            ),
+            ("design", vec!["ac_ledger_read", "ac_set_design"]),
+            ("verdict+ask", vec!["ac_ledger_read", "ac_set_verdict"]),
+            ("ask", vec![]),
+        ] {
+            let fake = rpc(role);
+            let mut s = McpSession::new(&fake);
+            let list = ask(
+                &mut s,
+                json!({"jsonrpc":"2.0","id":1,"method":"tools/list"}),
+            )
+            .await;
+            let names: Vec<String> = list["result"]["tools"]
+                .as_array()
+                .cloned()
+                .unwrap_or_default()
+                .iter()
+                .filter_map(|t| t["name"].as_str().map(str::to_owned))
+                .collect();
+            assert_eq!(names, want, "{role}");
+        }
+    }
+
+    #[tokio::test]
+    async fn panggilan_pertanyaan_diteruskan_dengan_balasan_teks_polos() {
+        let fake = rpc("ask+ask");
+        let mut s = McpSession::new(&fake);
+        let out = ask(
+            &mut s,
+            json!({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"ask_developer","arguments":{
+                "question":"Keep?","options":[{"label":"Yes","description":"keep","recommended":true},
+                {"label":"No","description":"drop"}]}}}),
+        )
+        .await;
+        assert_eq!(out["result"]["isError"], false, "{out}");
+        assert_eq!(
+            out["result"]["content"][0]["text"],
+            "q-1 recorded. End your turn now."
+        );
+        let (method, params) = fake
+            .calls
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .last()
+            .cloned()
+            .unwrap_or_default();
+        assert_eq!(method, "ask.tool.ask");
+        assert_eq!(params["options"][1]["recommended"], false);
+
+        let bad = ask(
+            &mut s,
+            json!({"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"ask_developer","arguments":{"question":"x"}}}),
+        )
+        .await;
+        assert_eq!(bad["result"]["isError"], true);
+        assert!(
+            bad["result"]["content"][0]["text"]
+                .as_str()
+                .unwrap_or_default()
+                .starts_with("invalid arguments")
+        );
+
+        let refused = rpc("verdict");
+        let mut s = McpSession::new(&refused);
+        let out = ask(
+            &mut s,
+            json!({"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"ask_developer","arguments":{
+                "question":"Keep?","options":[{"label":"Yes","description":"keep"},{"label":"No","description":"drop"}]}}}),
+        )
+        .await;
+        assert_eq!(out["result"]["isError"], true);
     }
 }

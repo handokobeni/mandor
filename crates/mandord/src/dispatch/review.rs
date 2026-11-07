@@ -137,11 +137,12 @@ fn api_scope(s: &CapabilityScope) -> mandor_api::CapabilityScope {
     }
 }
 
-fn usecase_scope(s: &mandor_api::CapabilityScope) -> Option<CapabilityScope> {
+pub(super) fn usecase_scope(s: &mandor_api::CapabilityScope) -> Option<CapabilityScope> {
     let role = match s.role.as_str() {
         "design" => CapabilityRole::Design,
         "verdict" => CapabilityRole::Verdict,
         "permit" => CapabilityRole::Permit,
+        "ask" => CapabilityRole::Ask,
         _ => return None,
     };
     Some(CapabilityScope {
@@ -284,6 +285,7 @@ impl AppDispatch {
                 let visual = scope.role == CapabilityRole::Verdict
                     && s.runs.visual_prototype_url(&scope.run_id).await.is_some();
                 return ok(&LedgerToolInfo {
+                    ask: s.runs.ask_available(scope.role),
                     run_id: scope.run_id,
                     role: scope.role.as_str().to_owned(),
                     visual,

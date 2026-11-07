@@ -54,4 +54,9 @@ one_plan: boolean,
 /**
  * Kartu persetujuan yang menunggu jawaban (R9).
  */
-pending_approvals: number, };
+pending_approvals: number, 
+/**
+ * Id kartu pertanyaan yang menunggu jawaban; selama ada, Approve
+ * disembunyikan (plan 2026-11-07-001, R15).
+ */
+pending_question: string | null, };

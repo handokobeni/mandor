@@ -81,6 +81,7 @@ impl<D: Deps> RunService<D> {
         let Some(plan) = run.plan.clone().filter(|_| run.phase == RunPhase::Plan) else {
             return Err(RunError::InvalidState("no plan to approve"));
         };
+        self.ensure_no_open_question(run_id).await?;
         let cards = queued_group_cards(&self.runs.cards(run_id).await?)?;
         let branch = run
             .branch

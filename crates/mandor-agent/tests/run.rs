@@ -331,6 +331,7 @@ async fn sesi_reviewer_dihentikan_saat_melewati_batas_waktu() {
             timeout: Duration::from_millis(500),
         }),
         permit: None,
+        ask: false,
     };
     let mut run = None;
     for _ in 0..20 {

@@ -243,6 +243,9 @@ pub struct AgentRequest {
     /// Token alat persetujuan Mandor (giliran implementasi dan plan di
     /// laptop, plan 2026-11-06-001).
     pub permit: Option<crate::review::CapabilityToken>,
+    /// Giliran brainstorm/plan di laptop mendapat alat `ask_developer` di
+    /// server ledger (plan 2026-11-07-001, KTD-Q4, KTD-Q5).
+    pub ask: bool,
 }
 
 /// Bagian permintaan agent untuk sesi reviewer (KTD-29–KTD-31).
@@ -827,6 +830,9 @@ pub trait Prompts: Send + Sync {
     /// Tambahan pesan brainstorm/plan bila run punya sumber desain: baca
     /// sumber dan isi kolom Design per AC lewat tool ledger.
     fn design_message(&self, sources: &[crate::review::DesignRoot]) -> String;
+    /// Tambahan pesan brainstorm/plan bila giliran mendapat `ask_developer`:
+    /// bertanya lewat alat itu, lalu akhiri giliran (KTD-Q12).
+    fn ask_tool_message(&self) -> String;
     /// Sumber desain untuk giliran implementasi: acuan tampilan saja.
     fn design_reference_message(&self, sources: &[crate::review::DesignRoot]) -> String;
     /// Pesan pertama sesi reviewer: AC sebagai data, fakta kesiapan, dan
@@ -1231,6 +1237,55 @@ pub trait ApprovalStore: Send + Sync {
         on: bool,
         now_ms: i64,
     ) -> impl Future<Output = Result<(), PortError>> + Send;
+}
+
+/// Kartu pertanyaan agent (plan 2026-11-07-001, KTD-Q1).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct QuestionRecord {
+    pub id: String,
+    pub run_id: String,
+    /// Generasi run saat agent bertanya: satu pertanyaan per giliran (KTD-Q3).
+    pub generation: i64,
+    pub question: String,
+    pub options: Vec<mandor_domain::question::QuestionOption>,
+    pub status: mandor_domain::question::QuestionStatus,
+    /// Label pilihan atau teks pesan chat yang menjawab.
+    pub answer: Option<String>,
+    pub created_ms: i64,
+    pub closed_ms: Option<i64>,
+}
+
+/// Penyimpanan kartu pertanyaan. Transisi keluar Pending atomik; hanya satu
+/// yang menang (R9).
+pub trait QuestionStore: Send + Sync {
+    /// Menyimpan pertanyaan baru; `false` bila generasi run itu sudah punya
+    /// pertanyaan (R4).
+    fn create_question(
+        &self,
+        q: &QuestionRecord,
+    ) -> impl Future<Output = Result<bool, PortError>> + Send;
+    fn question(
+        &self,
+        id: &str,
+    ) -> impl Future<Output = Result<Option<QuestionRecord>, PortError>> + Send;
+    /// Pertanyaan run, urut waktu dibuat.
+    fn questions(
+        &self,
+        run_id: &str,
+    ) -> impl Future<Output = Result<Vec<QuestionRecord>, PortError>> + Send;
+    /// Pertanyaan Pending terbaru run.
+    fn pending_question(
+        &self,
+        run_id: &str,
+    ) -> impl Future<Output = Result<Option<QuestionRecord>, PortError>> + Send;
+    /// Pending → `status` dengan `answer`; `false` bila sudah tidak Pending.
+    fn close_question(
+        &self,
+        id: &str,
+        status: mandor_domain::question::QuestionStatus,
+        answer: Option<&str>,
+        now_ms: i64,
+    ) -> impl Future<Output = Result<bool, PortError>> + Send;
 }
 
 /// Hasil menunggu jawaban kartu.

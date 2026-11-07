@@ -6,6 +6,7 @@ import type { ReviewerSettingsView } from '#lib/protocol/ReviewerSettingsView.ts
 import type { CardView } from '#lib/protocol/CardView.ts';
 import type { MessageView } from '#lib/protocol/MessageView.ts';
 import type { ApprovalView } from '#lib/protocol/ApprovalView.ts';
+import type { QuestionView } from '#lib/protocol/QuestionView.ts';
 import type { RunView } from '#lib/protocol/RunView.ts';
 import type { Transport } from '#lib/api/client.ts';
 import type { AcRowView } from '#lib/protocol/AcRowView.ts';
@@ -61,6 +62,7 @@ function run(id: string, key: string, title: string, state: string, extra: Parti
     cards: [],
     one_plan: false,
     pending_approvals: 0,
+    pending_question: null,
     ...extra
   };
 }
@@ -85,6 +87,7 @@ const RUNS: RunView[] = [
   run('7', 'PGS-1355', 'Rename leave balance fields', 'wf_awaiting_comment'),
   run('8', 'PGS-1350', 'Cache employee search results', 'awaiting_dev', {
     phase: 'plan',
+    pending_question: 'q-mock1',
     plan: [
       '# PGS-1350: Cache employee search results',
       '',
@@ -325,9 +328,37 @@ const MESSAGES: Record<string, MessageView[]> = {
       },
       created_at_ms: 0
     },
-    { id: 5, role: 'agent', body: { type: 'done', is_error: false, result: 'ok' }, created_at_ms: 0 }
+    { id: 5, role: 'agent', body: { type: 'done', is_error: false, result: 'ok' }, created_at_ms: 0 },
+    // Revisi plan yang bertanya lewat kartu (plan 2026-11-07-001).
+    { id: 6, role: 'dev', body: { text: 'Bagaimana dengan hasil lama?' }, created_at_ms: 0 },
+    { id: 7, role: 'agent', body: { type: 'tool_use', id: 'q1', name: 'mcp__mandor__ask_developer', preview: '' }, created_at_ms: 0 },
+    {
+      id: 8,
+      role: 'agent',
+      body: { type: 'tool_result', tool_use_id: 'q1', is_error: false, preview: 'q-mock1 recorded. End your turn now; the developer answers in the chat.' },
+      created_at_ms: 0
+    },
+    { id: 9, role: 'agent', body: { type: 'done', is_error: false, result: '' }, created_at_ms: 0 }
   ]
 };
+
+/** Kartu pertanyaan tiruan untuk run 8 (plan 2026-11-07-001). */
+let mockQuestions: QuestionView[] = [
+  {
+    id: 'q-mock1',
+    run_id: '8',
+    question: 'Should cached results expire after a fixed time, or only when an employee record changes?',
+    options: [
+      { label: 'Fixed time (5 min)', description: 'Simple; results can be up to 5 minutes old.', recommended: true },
+      { label: 'On record change', description: 'Always fresh; needs an invalidation hook in the employee API.', recommended: false },
+      { label: 'Both', description: 'Expire after 5 minutes and also on change.', recommended: false }
+    ],
+    status: 'pending',
+    answer: null,
+    created_at_ms: Date.now() - 2 * 60_000,
+    closed_at_ms: null
+  }
+];
 
 const PATCH = `diff --git a/src/lib/api/invoice.ts b/src/lib/api/invoice.ts
 --- a/src/lib/api/invoice.ts
@@ -530,6 +561,20 @@ function handle(method: string, params: Record<string, unknown>): unknown {
       RUNS[0].pending_approvals = mockApprovals.filter((a) => a.status === 'pending').length;
       return {};
     case 'approvals.seen':
+      return {};
+    case 'questions.list':
+      return mockQuestions.filter((q) => q.run_id === String(params.run_id));
+    case 'questions.answer': {
+      const q = mockQuestions.find((x) => x.id === params.question_id);
+      const label = q?.options[Number(params.option)]?.label ?? null;
+      mockQuestions = mockQuestions.map((x) =>
+        x.id === params.question_id ? { ...x, status: 'answered', answer: label, closed_at_ms: Date.now() } : x
+      );
+      for (const r of RUNS) if (r.pending_question === params.question_id) r.pending_question = null;
+      return {};
+    }
+    case 'runs.queued.send':
+    case 'runs.queued.discard':
       return {};
     case 'runs.messages': {
       const all = MESSAGES[String(params.run_id)] ?? [];

@@ -61,6 +61,8 @@
   import ApprovalCard from './ApprovalCard.svelte';
   import { oldestPending } from '#lib/approvals.ts';
   import { ApprovalsStore } from '#lib/stores/approvals.svelte.ts';
+  import { QuestionsStore } from '#lib/stores/questions.svelte.ts';
+  import { approveHidden } from '#lib/questions.ts';
   import {
     activeRows,
     blockReason,
@@ -184,6 +186,12 @@
     const id = run.id;
     return untrack(() => approvals.attach(rpc, id));
   });
+  // Kartu pertanyaan agent (plan 2026-11-07-001, U6).
+  const questions = new QuestionsStore();
+  $effect(() => {
+    const id = run.id;
+    return untrack(() => questions.attach(rpc, id));
+  });
   const openCards = $derived(approvals.cards.filter((c) => c.status === 'pending'));
   const closedCards = $derived(approvals.cards.filter((c) => c.status !== 'pending'));
   // Jam untuk sisa waktu kartu; hanya berjalan saat ada kartu menunggu.
@@ -284,7 +292,8 @@
 
   // Plan baru (atau revisi) langsung ditampilkan.
   $effect(() => {
-    if (planning && run.state === 'awaiting_dev' && run.plan) untrack(() => (tab = 'plan'));
+    // Pertanyaan agent ada di Chat (plan 2026-11-07-001): jangan pindah ke tab Plan.
+    if (planning && run.state === 'awaiting_dev' && run.plan && !run.pending_question) untrack(() => (tab = 'plan'));
   });
 
   function continueToPlan(): void {
@@ -573,6 +582,8 @@
     <span class="muted">Answer the agent in chat. Continue to plan when the requirements are clear.</span>
   {:else if planning && working}
     <span class="muted">{run.one_plan ? 'Agent is writing one plan for all cards in the group.' : 'Agent is reading the code and writing a plan.'} It does not change any file.</span>
+  {:else if planning && run.state === 'awaiting_dev' && approveHidden(run)}
+    <span class="muted">The agent asked a question. Pick an answer or reply in chat; it writes the plan next.</span>
   {:else if planning && run.state === 'awaiting_dev'}
     {#if run.one_plan}
       <span class="muted">Group plan ready for all {run.cards.length} cards. Read it in the Plan tab, reply in chat to revise it, or approve to build the cards one by one.</span>
@@ -629,6 +640,8 @@
       </Button>
     {:else if brainstorming && run.state === 'awaiting_dev'}
       <Button size="sm" disabled={busy} onclick={continueToPlan}><ClipboardList />Continue to plan</Button>
+    {:else if planning && run.state === 'awaiting_dev' && approveHidden(run)}
+      <!-- Approve disembunyikan selama ada pertanyaan (R15); penjelasan di baris status. -->
     {:else if planning && run.state === 'awaiting_dev'}
       {#if vmQueue}
         <QueueForVm
@@ -816,7 +829,7 @@
   <div class="ws-main">
     <!-- Chat tetap ter-mount saat pindah tab agar posisi gulir dan draft tidak hilang. -->
     <section class="ws-pane" hidden={tab !== 'chat'} aria-label="Chat">
-      <ChatStream {run} />
+      <ChatStream {run} {questions} />
       <span class="sr-only" aria-live="polite">{announced}</span>
       {#if closedCards.length > 0}
         <details class="approvals-closed">
@@ -843,6 +856,8 @@
         {run}
         onsend={(text, now) => act(() => rpc.request(now ? 'runs.send_now' : 'runs.send', { run_id: run.id, text }))}
         onstop={() => act(() => rpc.request('runs.stop', { run_id: run.id }))}
+        onqueued={(a) =>
+          act(() => rpc.request(a === 'send' ? 'runs.queued.send' : 'runs.queued.discard', { run_id: run.id }))}
       />
     </section>
     {#if tab === 'plan'}

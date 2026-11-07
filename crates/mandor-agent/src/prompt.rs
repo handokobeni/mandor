@@ -524,6 +524,17 @@ pub fn approved_plan_message(
 }
 
 /// Instruksi kolom Design untuk giliran brainstorm/plan (R7, R8).
+/// Instruksi alat `ask_developer` untuk giliran brainstorm/plan di laptop
+/// (plan 2026-11-07-001, KTD-Q12). Menggantikan instruksi menulis pertanyaan
+/// di pesan akhir, termasuk dari skill.
+pub const ASK_TOOL_MESSAGE: &str = "You have the `ask_developer` tool. Use it for every \
+     question the developer must decide, instead of writing the question in your final message, \
+     also when a skill tells you to ask in a dialog or in your final message. Ask one question per \
+     turn with 2 to 4 options, and mark the option you recommend. When the call succeeds, end your \
+     turn at once without repeating the question; the answer arrives as the next message. In a \
+     plan turn, a turn that asks does not write the plan. If the tool is missing or keeps failing, \
+     ask in your final message instead.";
+
 #[must_use]
 pub fn design_message(sources: &[mandor_usecase::review::DesignRoot]) -> String {
     let list: Vec<String> = sources
@@ -609,6 +620,10 @@ impl mandor_usecase::run_ports::Prompts for ClaudePrompts {
 
     fn design_message(&self, sources: &[mandor_usecase::review::DesignRoot]) -> String {
         design_message(sources)
+    }
+
+    fn ask_tool_message(&self) -> String {
+        ASK_TOOL_MESSAGE.to_owned()
     }
 
     fn design_reference_message(&self, sources: &[mandor_usecase::review::DesignRoot]) -> String {
@@ -1217,5 +1232,18 @@ mod tests {
             ..brief
         };
         assert!(!review_message(&brief, "n1").contains("ac_set_visual"));
+    }
+
+    #[test]
+    fn instruksi_alat_pertanyaan() {
+        use mandor_usecase::run_ports::Prompts as _;
+        let text = ClaudePrompts.ask_tool_message();
+        assert!(text.contains("`ask_developer`"));
+        assert!(text.contains("end your"));
+        assert!(text.contains("does not write the plan"));
+        assert!(
+            text.contains("final message instead"),
+            "cadangan bila alat tidak ada"
+        );
     }
 }

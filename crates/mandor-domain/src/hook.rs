@@ -49,6 +49,8 @@ const CREDENTIAL_MARKERS: &[&str] = &[
     ".ssh/",
     ".aws/credentials",
     "daemon.json",
+    // Login Claude Code CLI (`~/.claude/.credentials.json`).
+    ".credentials.json",
 ];
 /// Direktori konfigurasi agent dan hook git yang tidak boleh ditulis.
 const PROTECTED_DIRS: &[&str] = &[".claude", ".husky", ".githooks", ".git"];
@@ -479,12 +481,38 @@ fn git_subcommand(rest: &[String]) -> Option<&str> {
     None
 }
 
+/// Bagian `~/.claude` yang boleh dibaca perintah shell: file plugin dan skill,
+/// serta hasil tool besar yang disimpan Claude Code untuk sesinya.
+fn readable_claude_path(rest: &str) -> bool {
+    rest.starts_with("plugins/")
+        || (rest.starts_with("projects/") && rest.contains("/tool-results/"))
+}
+
+/// Perintah hanya-membaca yang menyebut `.claude/` hanya untuk path yang
+/// boleh dibaca (lihat [`readable_claude_path`]), tanpa penanda konfigurasi
+/// lain. Tulis, `..`, dan bentuk yang tidak bisa diperiksa tetap ditolak.
+fn reads_claude_data(cmd: &str, lower: &str) -> bool {
+    if crate::hook_review::readonly_violation(cmd).is_some() || lower.contains("..") {
+        return false;
+    }
+    let others = PROTECTED_MARKERS
+        .iter()
+        .filter(|m| **m != ".claude/")
+        .any(|m| lower.contains(m));
+    if others {
+        return false;
+    }
+    lower
+        .match_indices(".claude/")
+        .all(|(i, m)| readable_claude_path(&lower[i + m.len()..]))
+}
+
 fn check_command(cmd: &str) -> Option<String> {
     let lower = cmd.to_lowercase();
     if CREDENTIAL_MARKERS.iter().any(|m| lower.contains(m)) {
         return Some("mandor: access to credential files is denied".to_owned());
     }
-    if PROTECTED_MARKERS.iter().any(|m| lower.contains(m)) {
+    if PROTECTED_MARKERS.iter().any(|m| lower.contains(m)) && !reads_claude_data(cmd, &lower) {
         return Some("mandor: changing agent config or git hooks is denied".to_owned());
     }
     if LARK_HOSTS.iter().any(|h| lower.contains(h)) {
@@ -792,6 +820,51 @@ mod tests {
         assert_eq!(tool("Write", "docs/.gitkeep"), Verdict::Allow);
         assert!(matches!(
             tool("Read", "/home/u/.config/gh/hosts.yml"),
+            Verdict::Deny(_)
+        ));
+    }
+
+    /// Plugin skill dan hasil tool besar milik sesi agent ada di bawah
+    /// `~/.claude`; membacanya boleh, mengubahnya tetap ditolak.
+    #[test]
+    fn baca_plugin_dan_tool_results_di_claude_diizinkan() {
+        for cmd in [
+            "cat /home/u/.claude/plugins/cache/ce/skills/ce-doc-review/references/personas/a.md",
+            "cd /home/u/.claude/plugins/cache/ce/skills/x/references; cat personas/a.md",
+            "cut -c1-1500 /home/u/.claude/projects/-home-u-w/7995/tool-results/mcp-mandor-ac.txt",
+            "grep -n ac_id /home/u/.claude/projects/-w/s1/tool-results/x.txt | head -40",
+            "jq -r .rows /home/u/.claude/projects/-w/s1/tool-results/x.json",
+        ] {
+            assert_eq!(bash(cmd), Verdict::Allow, "{cmd}");
+        }
+    }
+
+    #[test]
+    fn tulis_atau_baca_konfigurasi_claude_lain_tetap_ditolak() {
+        for cmd in [
+            "echo x > /home/u/.claude/plugins/cache/a.md",
+            "cp a.md /home/u/.claude/plugins/cache/a.md",
+            "rm -rf /home/u/.claude/plugins/cache",
+            "sed -i s/a/b/ /home/u/.claude/plugins/cache/a.md",
+            "cat /home/u/.claude/settings.json",
+            "cat /home/u/.claude/projects/-w/memory/MEMORY.md",
+            "cat /home/u/.claude/plugins/../settings.json",
+            "cat /home/u/.claude/projects/-w/../../settings.json",
+            "cat /home/u/.claude/plugins/a.md .claude/settings.local.json",
+            "echo '{\"disableAllHooks\": true}' > .claude/settings.local.json",
+        ] {
+            assert!(matches!(bash(cmd), Verdict::Deny(_)), "{cmd}");
+        }
+    }
+
+    #[test]
+    fn berkas_login_claude_adalah_kredensial() {
+        assert!(matches!(
+            tool("Read", "/home/u/.claude/.credentials.json"),
+            Verdict::Deny(_)
+        ));
+        assert!(matches!(
+            bash("cat /home/u/.claude/.credentials.json"),
             Verdict::Deny(_)
         ));
     }

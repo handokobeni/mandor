@@ -481,20 +481,42 @@ fn git_subcommand(rest: &[String]) -> Option<&str> {
     None
 }
 
-/// Bagian `~/.claude` yang boleh dibaca perintah shell: file plugin dan skill,
-/// serta hasil tool besar yang disimpan Claude Code untuk sesinya.
-fn readable_claude_path(rest: &str) -> bool {
-    rest.starts_with("plugins/")
-        || (rest.starts_with("projects/") && rest.contains("/tool-results/"))
-}
+/// Program baca yang boleh menyebut path `~/.claude` (daftar izin positif).
+/// Argumen berbahaya (mis. `sed -i`, `awk` dengan `system`, `rg --pre`)
+/// disaring [`crate::permit::args::dangerous`].
+const CLAUDE_READERS: &[&str] = &[
+    "cat", "head", "tail", "grep", "rg", "jq", "cut", "wc", "ls", "sed", "awk", "sort", "cd",
+];
 
-/// Perintah hanya-membaca yang menyebut `.claude/` hanya untuk path yang
-/// boleh dibaca (lihat [`readable_claude_path`]), tanpa penanda konfigurasi
-/// lain. Tulis, `..`, dan bentuk yang tidak bisa diperiksa tetap ditolak.
-fn reads_claude_data(cmd: &str, lower: &str) -> bool {
-    if crate::hook_review::readonly_violation(cmd).is_some() || lower.contains("..") {
+/// Path yang boleh dibaca, dicek per komponen: file plugin dan skill
+/// (`plugins/…`), atau hasil tool besar sesi Claude Code
+/// (`projects/<proyek>/<sesi>/tool-results/<berkas>`).
+fn readable_claude_path(rest: &str) -> bool {
+    let parts: Vec<&str> = rest.split('/').collect();
+    if parts
+        .iter()
+        .any(|p| p.is_empty() || *p == "." || *p == "..")
+    {
         return false;
     }
+    matches!(
+        parts.as_slice(),
+        ["plugins", _, ..] | ["projects", _, _, "tool-results", _]
+    )
+}
+
+/// Satu kata perintah aman terhadap `~/.claude`: tidak menyebutnya, atau
+/// setiap kemunculan `.claude/` di kata itu menunjuk path yang boleh dibaca.
+fn word_reads_claude_data(word: &str) -> bool {
+    word.match_indices(".claude/")
+        .all(|(i, m)| readable_claude_path(&word[i + m.len()..]))
+}
+
+/// Perintah yang seluruhnya hanya membaca `~/.claude/plugins` atau
+/// `tool-results` sesi: bisa diurai pasti, setiap program ada di
+/// [`CLAUDE_READERS`] tanpa argumen berbahaya dan tanpa redirect tulis, dan
+/// tidak ada penanda konfigurasi lain.
+fn reads_claude_data(cmd: &str, lower: &str) -> bool {
     let others = PROTECTED_MARKERS
         .iter()
         .filter(|m| **m != ".claude/")
@@ -502,9 +524,22 @@ fn reads_claude_data(cmd: &str, lower: &str) -> bool {
     if others {
         return false;
     }
-    lower
-        .match_indices(".claude/")
-        .all(|(i, m)| readable_claude_path(&lower[i + m.len()..]))
+    let Ok(commands) = crate::permit::parse(cmd) else {
+        return false;
+    };
+    commands.iter().all(|c| {
+        let reader = c
+            .words
+            .first()
+            .is_some_and(|w| CLAUDE_READERS.contains(&program_name(w)));
+        reader
+            && c.redirects.iter().all(|r| !r.write)
+            && crate::permit::args::dangerous(c).is_none()
+            && c.words.iter().all(|w| word_reads_claude_data(w))
+            && c.redirects
+                .iter()
+                .all(|r| word_reads_claude_data(&r.target))
+    })
 }
 
 fn check_command(cmd: &str) -> Option<String> {
@@ -852,6 +887,18 @@ mod tests {
             "cat /home/u/.claude/projects/-w/../../settings.json",
             "cat /home/u/.claude/plugins/a.md .claude/settings.local.json",
             "echo '{\"disableAllHooks\": true}' > .claude/settings.local.json",
+            "python3 -c 'print(1)' /home/u/.claude/plugins/a.md",
+            "tar xf /home/u/.claude/plugins/a.tar",
+            "curl -o /tmp/x file:///home/u/.claude/plugins/a.md",
+            "rsync /home/u/.claude/plugins/a.md /tmp/a",
+            "cat /home/u/.claude/plugins/a.md /home/u/.claude/settings.json",
+            "cat /home/u/.claude/projects/-w/s1/tool-results/x.txt/../../../settings.json",
+            "cat /home/u/.claude/projects/-w/tool-results/x/../settings.json",
+            "cat /home/u/.claude/projects/-w/s1/memory/tool-results/x",
+            "cat '/home/u/.claude/plugins/a.md /home/u/.claude/settings.json'",
+            "awk 'BEGIN{system(\"x\")}' /home/u/.claude/plugins/a.md",
+            "rg --pre cat x /home/u/.claude/plugins",
+            "cat /home/u/.claude/plugins/a.md > /home/u/.claude/plugins/b.md",
         ] {
             assert!(matches!(bash(cmd), Verdict::Deny(_)), "{cmd}");
         }

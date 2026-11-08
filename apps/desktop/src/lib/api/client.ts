@@ -92,11 +92,11 @@ export class RpcClient {
   }
 
   /** Memanggil method daemon. */
-  request<T = unknown>(method: string, params: unknown = null): Promise<T> {
+  request<T = unknown>(method: string, params: unknown = null, opts: { timeoutMs?: number } = {}): Promise<T> {
     if (!this.ready) {
       return Promise.reject(new RpcFailure('disconnected', 'not connected to the daemon'));
     }
-    return this.call(method, params, false) as Promise<T>;
+    return this.call(method, params, false, opts.timeoutMs) as Promise<T>;
   }
 
   /** Berlangganan notifikasi; mengembalikan fungsi untuk berhenti. */
@@ -107,7 +107,7 @@ export class RpcClient {
     return () => set.delete(handler);
   }
 
-  private call(method: string, params: unknown, allowBeforeReady: boolean): Promise<unknown> {
+  private call(method: string, params: unknown, allowBeforeReady: boolean, timeoutMs?: number): Promise<unknown> {
     if (!allowBeforeReady && !this.ready) {
       return Promise.reject(new RpcFailure('disconnected', 'not connected to the daemon'));
     }
@@ -116,7 +116,7 @@ export class RpcClient {
       const timer = setTimeout(() => {
         this.pending.delete(id);
         reject(new RpcFailure('timeout', `daemon did not answer ${method}`));
-      }, this.timeoutMs);
+      }, timeoutMs ?? this.timeoutMs);
       this.pending.set(id, { resolve, reject, timer });
       const line = JSON.stringify({ jsonrpc: '2.0', id, method, params });
       this.transport.send(line).catch((err: unknown) => {

@@ -19,7 +19,15 @@
   import { Textarea } from '#lib/components/ui/textarea/index.ts';
   import type { CardView } from '#lib/protocol/CardView.ts';
   import type { StartProgressView } from '#lib/protocol/StartProgressView.ts';
-  import { START_STEPS, TAKEOVER_STEPS, stepsAt } from '#lib/start.ts';
+  import { RpcFailure } from '#lib/api/client.ts';
+  import {
+    START_STEPS,
+    START_STILL_RUNNING,
+    START_TIMEOUT_MS,
+    TAKEOVER_STEPS,
+    findStartedRun,
+    stepsAt
+  } from '#lib/start.ts';
   import type { RepoView } from '#lib/protocol/RepoView.ts';
   import type { SkillView } from '#lib/protocol/SkillView.ts';
   import type { WorkspaceView } from '#lib/protocol/WorkspaceView.ts';
@@ -164,13 +172,25 @@
         method = 'runs.start_group';
         params = groupStartParams(rest, groupOrder, onePlan, planning.mode);
       }
-      const run = await rpc.request<{ id: string }>(method, params);
+      const run = await rpc.request<{ id: string }>(method, params, { timeoutMs: START_TIMEOUT_MS });
       steps = stepsAt(defs, 'done');
       runId = run.id;
       phase = 'done';
     } catch (err) {
-      steps = stepsAt(defs, current, err instanceof Error ? err.message : String(err));
-      phase = 'failed';
+      // Daemon bisa saja menyelesaikan Start setelah app berhenti menunggu.
+      const started =
+        err instanceof RpcFailure && err.code === 'timeout'
+          ? await findStartedRun(rpc, grouped ? groupOrder : [card.record_id])
+          : null;
+      if (started) {
+        steps = stepsAt(defs, 'done');
+        runId = started;
+        phase = 'done';
+      } else {
+        const why = err instanceof RpcFailure && err.code === 'timeout' ? START_STILL_RUNNING : null;
+        steps = stepsAt(defs, current, why ?? (err instanceof Error ? err.message : String(err)));
+        phase = 'failed';
+      }
     } finally {
       off();
     }

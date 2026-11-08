@@ -97,6 +97,20 @@ describe('RpcClient', () => {
     await expect(p).rejects.toMatchObject({ code: 'timeout' });
   });
 
+  it('batas tunggu per permintaan menggantikan bawaan', async () => {
+    const t = new FakeTransport();
+    const c = new RpcClient(t, { requestTimeoutMs: 500 });
+    await c.connect();
+    t.autoReply = false;
+    let settled = false;
+    const p = c.request('runs.start_group', {}, { timeoutMs: 2_000 });
+    p.catch(() => undefined).finally(() => (settled = true));
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(settled).toBe(false);
+    await vi.advanceTimersByTimeAsync(1_000);
+    await expect(p).rejects.toMatchObject({ code: 'timeout' });
+  });
+
   it('notifikasi diteruskan ke pelanggan', async () => {
     const t = new FakeTransport();
     const c = new RpcClient(t);

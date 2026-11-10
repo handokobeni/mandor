@@ -179,21 +179,12 @@ pub async fn start(
                     mandor_store::QuestionsStore::new(env.store.clone()),
                     env.events.clone(),
                 ),
+                lab: lab_port(env).await,
             },
         )
         .with_drain_gate(Arc::clone(env.drain)),
     );
-    warn_err(runs.reap_apps().await, "pembersihan app yatim gagal");
-    // Kartu Pending dari proses sebelumnya tidak punya penunggu (KTD-A11).
-    warn_err(
-        runs.cancel_stale_approvals().await,
-        "kartu persetujuan lama tidak dibatalkan",
-    );
-    if let Some(marked) = warn_err(runs.reconcile().await, "rekonsiliasi run gagal") {
-        if !marked.is_empty() {
-            tracing::info!(?marked, "run terputus ditandai gagal");
-        }
-    }
+    startup_maintenance(&runs).await;
     let session = Arc::new(LarkSession {
         me,
         sync,
@@ -209,6 +200,22 @@ pub async fn start(
     });
     env.tracker.spawn(run_loop(Arc::clone(&session)));
     Ok(session)
+}
+
+/// Pembersihan saat sesi dibangun: app yatim, kartu persetujuan lama, dan run
+/// yang terputus.
+async fn startup_maintenance(runs: &Arc<RunService<Prod>>) {
+    warn_err(runs.reap_apps().await, "pembersihan app yatim gagal");
+    // Kartu Pending dari proses sebelumnya tidak punya penunggu (KTD-A11).
+    warn_err(
+        runs.cancel_stale_approvals().await,
+        "kartu persetujuan lama tidak dibatalkan",
+    );
+    if let Some(marked) = warn_err(runs.reconcile().await, "rekonsiliasi run gagal") {
+        if !marked.is_empty() {
+            tracing::info!(?marked, "run terputus ditandai gagal");
+        }
+    }
 }
 
 /// Store run milik Base aktif. Run hanya dibaca di Base asalnya karena Base
@@ -262,12 +269,42 @@ async fn build_agent(cfg: &Config, rpc_port: u16) -> anyhow::Result<ClaudeAgent>
             user: v.user.clone(),
             run_dir: v.run_dir(),
         }),
-        headless_browser: cfg.vm_agent.as_ref().map(|v| v.playwright_mcp.clone()),
+        // Playwright untuk review di laptop dan VM (KTD-L1 plan 2026-11-10-001).
+        headless_browser: cfg.playwright_mcp.clone(),
         ledger_server: Some(LedgerServer {
             command: cfg.exe.clone(),
             port: rpc_port,
         }),
     }))
+}
+
+/// Port review lab: perlengkapan, login akun uji, dan proxy review.
+async fn lab_port(env: &SessionEnv<'_>) -> crate::lab_port::ProdLab {
+    crate::lab_port::ProdLab::new(
+        env.store.clone(),
+        env.cfg.lab_root(),
+        env.cfg.playwright_mcp.clone(),
+        playwright_env(&login_env(env.cfg).await),
+        env.tracker.clone(),
+        env.parent.clone(),
+    )
+}
+
+/// Environment proses Playwright login milik daemon: hanya yang perlu untuk
+/// menjalankan `node` dan menemukan cache browser, tanpa secret.
+fn playwright_env(login: &BTreeMap<String, String>) -> Vec<(String, String)> {
+    [
+        "PATH",
+        "HOME",
+        "USER",
+        "LANG",
+        "LC_ALL",
+        "TMPDIR",
+        "XDG_CACHE_HOME",
+    ]
+    .iter()
+    .filter_map(|k| login.get(*k).map(|v| ((*k).to_owned(), v.clone())))
+    .collect()
 }
 
 /// Perintah hook semua sesi agent; di VM ditambah `--vm <run dir>` sehingga

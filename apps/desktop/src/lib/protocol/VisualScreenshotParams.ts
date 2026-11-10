@@ -3,4 +3,9 @@
 /**
  * Parameter `review.screenshot`: screenshot ke-`index` baris AC.
  */
-export type VisualScreenshotParams = { run_id: string, ac_id: string, index: number, };
+export type VisualScreenshotParams = { run_id: string, ac_id: string, index: number, 
+/**
+ * Screenshot bukti verdict (`AcRowView.evidence_detail`), bukan hasil
+ * tampilan (plan 2026-11-10-001, R16).
+ */
+evidence: boolean, };

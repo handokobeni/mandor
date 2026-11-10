@@ -7,8 +7,14 @@ import type { AcRowView } from '#lib/protocol/AcRowView.ts';
 import type { PublishParams } from '#lib/protocol/PublishParams.ts';
 import type { Tone } from '#lib/board.ts';
 
-/** Baris tanpa hasil tampilan (run tanpa prototype); dipakai fixture dan mock. */
-export const NO_VISUAL: Pick<AcRowView, 'visual' | 'visual_detail'> = {
+/** Baris tanpa hasil tampilan maupun hasil lab; dipakai fixture dan mock. */
+export const NO_VISUAL: Pick<
+  AcRowView,
+  'visual' | 'visual_detail' | 'lab_need' | 'evidence_detail' | 'look_recommendation'
+> = {
+  lab_need: null,
+  evidence_detail: null,
+  look_recommendation: null,
   visual: 'not_compared',
   visual_detail: {
     description: null,

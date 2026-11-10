@@ -19,7 +19,8 @@ use crate::claude::guardrails::{
 use crate::claude::permit::{self, PermitFile};
 use crate::claude::review_state;
 use crate::prompt::{
-    OperatorContext, ReviewBrowser, data_block, new_nonce, operator_prompt, review_operator_prompt,
+    OperatorContext, data_block, lab_operator_prompt, lab_setup_prompt, new_nonce, operator_prompt,
+    review_operator_prompt,
 };
 use mandor_domain::permit::TurnKind;
 use mandor_usecase::review::CapabilityRole;
@@ -162,6 +163,44 @@ fn review_tools(req: &AgentRequest) -> (Vec<String>, Vec<PathBuf>) {
     (allowed, companions)
 }
 
+/// Tool yang diizinkan dan ditolak sesi reviewer, beserta path pendamping.
+fn review_tool_sets(req: &AgentRequest, lab: bool) -> (Vec<String>, Vec<String>, Vec<PathBuf>) {
+    let (review_allowed, companions) = review_tools(req);
+    let allowed = if lab { lab_allowed() } else { review_allowed };
+    let mut denied = default_denied(&companions);
+    denied.extend(REVIEW_WRITE_TOOLS.iter().map(|t| (*t).to_owned()));
+    denied.push("ExitPlanMode".to_owned());
+    if lab {
+        denied.extend(LAB_DENIED.iter().map(|t| (*t).to_owned()));
+    }
+    (allowed, denied, companions)
+}
+
+/// Server Playwright yang boleh dipakai reviewer: satu per role di giliran
+/// lab, `playwright` di review biasa.
+fn browser_tools(review: &ReviewRequest) -> Vec<String> {
+    if review.lab.is_some() {
+        review
+            .sessions
+            .iter()
+            .map(|s| format!("mcp__{}", s.server))
+            .collect()
+    } else {
+        vec![format!("mcp__{PLAYWRIGHT_SERVER_NAME}")]
+    }
+}
+
+/// Tool giliran lab: baca berkas tanpa shell (KTD-L10).
+fn lab_allowed() -> Vec<String> {
+    ["Read", "Grep", "Glob", "TodoWrite", "ToolSearch"]
+        .iter()
+        .map(|t| (*t).to_owned())
+        .collect()
+}
+
+/// Tool yang selalu ditolak di giliran lab.
+const LAB_DENIED: &[&str] = &["Bash", "WebFetch", "WebSearch", "Task", "Agent"];
+
 /// Nama server MCP Playwright reviewer di VM; awalan tool-nya dikenali hook
 /// review (`mcp__playwright__`).
 pub const PLAYWRIGHT_SERVER_NAME: &str = "playwright";
@@ -170,25 +209,44 @@ pub const PLAYWRIGHT_SERVER_NAME: &str = "playwright";
 /// terisolasi di memori, service worker diblokir, dan permintaan browser
 /// dibatasi ke origin app run ini. Snapshot dan screenshot ditulis ke
 /// `output`, di luar worktree: berkas baru di worktree membuat review basi.
-fn playwright_server(bin: &Path, origins: &[String], output: &Path) -> serde_json::Value {
+fn playwright_server(
+    bin: &Path,
+    origins: &[String],
+    output: &Path,
+    storage_state: Option<&Path>,
+    proxy: Option<&str>,
+) -> serde_json::Value {
     let allowed = origins
         .iter()
         .map(|o| browser_origin(o))
         .collect::<Vec<_>>()
         .join(";");
+    let mut args = vec![
+        "--headless".to_owned(),
+        "--isolated".to_owned(),
+        "--browser".to_owned(),
+        "chromium".to_owned(),
+        "--block-service-workers".to_owned(),
+        "--allowed-origins".to_owned(),
+        allowed,
+        "--output-dir".to_owned(),
+        output.display().to_string(),
+    ];
+    // Sesi akun uji yang dibuat daemon (KTD-L4, KTD-L5).
+    if let Some(state) = storage_state {
+        args.push("--storage-state".to_owned());
+        args.push(state.display().to_string());
+    }
+    // Proxy allowlist milik daemon (KTD-L6). Playwright memaksa trafik
+    // loopback lewat proxy selama PLAYWRIGHT_DISABLE_FORCED_CHROMIUM_PROXIED_LOOPBACK
+    // tidak diset; env agent dibangun tanpa variabel itu.
+    if let Some(proxy) = proxy {
+        args.push("--proxy-server".to_owned());
+        args.push(proxy.to_owned());
+    }
     serde_json::json!({
         "command": bin.display().to_string(),
-        "args": [
-            "--headless",
-            "--isolated",
-            "--browser",
-            "chromium",
-            "--block-service-workers",
-            "--allowed-origins",
-            allowed,
-            "--output-dir",
-            output.display().to_string(),
-        ],
+        "args": args,
     })
 }
 
@@ -319,10 +377,8 @@ impl ClaudeAgent {
         review: &ReviewRequest,
         mcp_config: Option<PathBuf>,
     ) -> SessionSpec {
-        let (mut allowed, companions) = review_tools(req);
-        let mut denied = default_denied(&companions);
-        denied.extend(REVIEW_WRITE_TOOLS.iter().map(|t| (*t).to_owned()));
-        denied.push("ExitPlanMode".to_owned());
+        let lab = review.lab.as_ref();
+        let (mut allowed, denied, companions) = review_tool_sets(req, lab.is_some());
         let state = shell_quote(
             &self
                 .review_state_path(&review.review_id)
@@ -335,12 +391,11 @@ impl ClaudeAgent {
             hook_command.push_str(" --mcp ");
             hook_command.push_str(LEDGER_SERVER_NAME);
         }
-        let chrome = review.browser && self.review_browser() == ReviewBrowser::Chrome;
-        if review.browser {
-            allowed.push(match self.review_browser() {
-                ReviewBrowser::Chrome => "mcp__claude-in-chrome".to_owned(),
-                ReviewBrowser::Playwright => format!("mcp__{PLAYWRIGHT_SERVER_NAME}"),
-            });
+        // Review selalu memakai Playwright headless (KTD-L1); tanpa biner
+        // Playwright tidak ada browser sama sekali.
+        let chrome = false;
+        if review.browser && self.cfg.headless_browser.is_some() {
+            allowed.extend(browser_tools(review));
         }
         for d in &req.design {
             hook_command.push_str(" --design ");
@@ -356,6 +411,13 @@ impl ClaudeAgent {
         hook_command.push_str(" --review ");
         hook_command.push_str(&state);
         hook_command.push_str(&origins);
+        if let Some(lab) = lab {
+            hook_command.push_str(" --lab");
+            if let Some(f) = &lab.fixtures {
+                hook_command.push_str(" --fixtures ");
+                hook_command.push_str(&shell_quote(&f.display().to_string()));
+            }
+        }
         let post_hook_command =
             format!("{} --review {state}{origins} --post", self.cfg.hook_command);
         let wt = req.worktree.display().to_string();
@@ -382,16 +444,17 @@ impl ClaudeAgent {
                 SessionRef::New(id) => Session::New(id.clone()),
                 SessionRef::Resume(id) => Session::Resume(id.clone()),
             },
-            operator_prompt: review_operator_prompt(
-                &OperatorContext {
-                    worktree: &wt,
-                    branch: &req.branch,
-                    base_branch: &req.repo.default_branch,
-                    repos: &listing,
-                    design: &design,
-                },
-                self.review_browser(),
-            ),
+            operator_prompt: (match lab {
+                Some(l) if l.setup => lab_setup_prompt,
+                Some(_) => lab_operator_prompt,
+                None => review_operator_prompt,
+            })(&OperatorContext {
+                worktree: &wt,
+                branch: &req.branch,
+                base_branch: &req.repo.default_branch,
+                repos: &listing,
+                design: &design,
+            }),
             model: review.model.clone().or_else(|| self.cfg.model.clone()),
             allowed,
             denied,
@@ -431,13 +494,17 @@ impl ClaudeAgent {
     /// MCP, akar desain, akar run, dan folder worktree anggota.
     #[must_use]
     pub fn permit_file(&self, req: &AgentRequest) -> PermitFile {
-        let (turn, allow, mcp) = if req.review.is_some() {
+        let (turn, allow, mcp) = if let Some(review) = &req.review {
             let mcp = if self.ledger_enabled(req) {
                 vec![LEDGER_SERVER_NAME.to_owned()]
             } else {
                 Vec::new()
             };
-            (TurnKind::Review, review_tools(req).0, mcp)
+            match &review.lab {
+                Some(l) if l.setup => (TurnKind::LabSetup, lab_allowed(), mcp),
+                Some(_) => (TurnKind::Lab, lab_allowed(), mcp),
+                None => (TurnKind::Review, review_tools(req).0, mcp),
+            }
         } else {
             let repos: Vec<&RepoInfo> = match &req.workspace {
                 Some(ws) => ws.repos.iter().map(|(r, _)| r).collect(),
@@ -457,8 +524,15 @@ impl ClaudeAgent {
             Some(ws) => ws.repos.iter().map(|(_, wt)| path(wt)).collect(),
             None => vec![path(&req.worktree)],
         };
-        let evidence = (turn != TurnKind::Review && !self.shared_with_agent())
-            .then(|| path(&self.evidence_dir(req)));
+        let evidence = (!matches!(turn, TurnKind::Review | TurnKind::Lab | TurnKind::LabSetup)
+            && !self.shared_with_agent())
+        .then(|| path(&self.evidence_dir(req)));
+        let fixtures = req
+            .review
+            .as_ref()
+            .and_then(|r| r.lab.as_ref())
+            .and_then(|l| l.fixtures.as_deref())
+            .map(path);
         PermitFile {
             version: permit::VERSION,
             turn: turn.as_str().to_owned(),
@@ -468,6 +542,7 @@ impl ClaudeAgent {
             run_root: path(&req.worktree),
             members,
             evidence,
+            fixtures,
         }
     }
 
@@ -580,15 +655,6 @@ impl ClaudeAgent {
         }
     }
 
-    /// Browser reviewer: Playwright headless bila daemon VM menyediakannya.
-    fn review_browser(&self) -> ReviewBrowser {
-        if self.cfg.headless_browser.is_some() {
-            ReviewBrowser::Playwright
-        } else {
-            ReviewBrowser::Chrome
-        }
-    }
-
     /// Giliran ini memakai alat persetujuan Mandor: implementasi atau plan di
     /// laptop dengan token `Permit` (R12, R13).
     fn permit_enabled(&self, req: &AgentRequest) -> bool {
@@ -663,15 +729,8 @@ impl ClaudeAgent {
                 }),
             );
         }
-        if let (Some(review), Some(bin)) = (
-            req.review.as_ref().filter(|r| r.browser),
-            &self.cfg.headless_browser,
-        ) {
-            let output = self.review_output_dir(&review.review_id);
-            picked.insert(
-                PLAYWRIGHT_SERVER_NAME.to_owned(),
-                playwright_server(bin, &review.origins, &output),
-            );
+        for (name, server) in self.review_browser_servers(req).await? {
+            picked.insert(name, server);
         }
         if picked.is_empty() {
             return Ok(None);
@@ -947,6 +1006,80 @@ impl AgentRunHandle for ClaudeRun {
 impl ClaudeAgent {
     /// Folder output Playwright satu review. Direktori run bisa ditulis user
     /// agent (grup developer); tanpa runner, folder MCP daemon.
+    /// Server Playwright reviewer, dengan sesi login salinan daemon dan proxy
+    /// review: satu `playwright` untuk review biasa, satu per role untuk
+    /// giliran lab (KTD-L5). Kosong bila review tanpa browser atau Playwright
+    /// tidak ada.
+    async fn review_browser_servers(
+        &self,
+        req: &AgentRequest,
+    ) -> Result<Vec<(String, serde_json::Value)>, PortError> {
+        let (Some(review), Some(bin)) = (
+            req.review.as_ref().filter(|r| r.browser),
+            &self.cfg.headless_browser,
+        ) else {
+            return Ok(Vec::new());
+        };
+        let output = self.review_output_dir(&review.review_id);
+        let names: Vec<String> = if review.lab.is_some() {
+            review.sessions.iter().map(|s| s.server.clone()).collect()
+        } else {
+            vec![PLAYWRIGHT_SERVER_NAME.to_owned()]
+        };
+        let mut out = Vec::new();
+        for name in names {
+            let state = match review.sessions.iter().find(|s| s.server == name) {
+                Some(session) => Some(self.copy_session(&review.review_id, session).await?),
+                None => None,
+            };
+            let server = playwright_server(
+                bin,
+                &review.origins,
+                &output,
+                state.as_deref(),
+                review.proxy.as_deref(),
+            );
+            out.push((name, server));
+        }
+        Ok(out)
+    }
+
+    /// Menyalin berkas sesi login milik daemon ke folder konfigurasi MCP
+    /// dengan mode yang bisa dibaca server Playwright (0600 di laptop, 0640
+    /// di VM; folder yang sama dengan konfigurasi MCP berisi token).
+    async fn copy_session(
+        &self,
+        review_id: &str,
+        session: &mandor_usecase::run_ports::BrowserSession,
+    ) -> Result<PathBuf, PortError> {
+        let io = |e: std::io::Error| PortError::Storage(e.to_string());
+        self.prepare_dir(&self.cfg.mcp_dir, 0o2750)
+            .await
+            .map_err(io)?;
+        let target = self.cfg.mcp_dir.join(format!(
+            "{}{}.state.json",
+            session_prefix(review_id),
+            wt_key(Path::new(&session.server))
+        ));
+        let from = session.state.clone();
+        let to = target.clone();
+        let mode = self.file_mode(0o640);
+        let copy = tokio::task::spawn_blocking(move || {
+            let body = std::fs::read(&from)?;
+            review_state::write_atomic(&to, &body, mode)
+        });
+        match tokio::time::timeout(FILE_TIMEOUT, copy).await {
+            Ok(Ok(r)) => r.map_err(io)?,
+            Ok(Err(e)) => return Err(PortError::Storage(e.to_string())),
+            Err(_) => {
+                return Err(PortError::Storage(
+                    "copying the browser session timed out".to_owned(),
+                ));
+            }
+        }
+        Ok(target)
+    }
+
     fn review_output_dir(&self, review_id: &str) -> PathBuf {
         let base = self
             .cfg
@@ -1013,9 +1146,12 @@ impl AgentPort for ClaudeAgent {
             .cfg
             .mcp_dir
             .join(format!("review-{}.json", wt_key(Path::new(review_id))));
+        let sessions_dir = self.cfg.mcp_dir.clone();
+        let prefix = session_prefix(review_id);
         let cleanup = tokio::task::spawn_blocking(move || {
             review_state::remove(&state);
             let _ = std::fs::remove_file(mcp);
+            remove_sessions(&sessions_dir, &prefix);
         });
         if tokio::time::timeout(FILE_TIMEOUT, cleanup).await.is_err() {
             tracing::warn!(review_id, "berkas review tidak terhapus tepat waktu");
@@ -1405,6 +1541,25 @@ impl ClaudeAgent {
     }
 }
 
+/// Awalan berkas sesi login satu review di folder konfigurasi MCP.
+fn session_prefix(review_id: &str) -> String {
+    format!("review-{}-", wt_key(Path::new(review_id)))
+}
+
+/// Menghapus salinan sesi login review (`<awalan>*.state.json`).
+fn remove_sessions(dir: &Path, prefix: &str) {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
+    for e in entries.flatten() {
+        let name = e.file_name();
+        let name = name.to_string_lossy();
+        if name.starts_with(prefix) && name.ends_with(".state.json") {
+            let _ = std::fs::remove_file(e.path());
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
 
@@ -1782,6 +1937,9 @@ mod tests {
             model: None,
             budget_cents: 100,
             timeout: Duration::from_secs(900),
+            proxy: None,
+            sessions: Vec::new(),
+            lab: None,
         };
         req.review = Some(review.clone());
         let path = agent.prepare_workspace(&req).await.unwrap().unwrap();
@@ -1936,6 +2094,9 @@ mod tests {
             model: None,
             budget_cents: 100,
             timeout: Duration::from_secs(900),
+            proxy: None,
+            sessions: Vec::new(),
+            lab: None,
         });
         let a = args(&laptop.spec(&review, None));
         assert_eq!(flag(&a, "--permission-prompts").as_deref(), Some("none"));
@@ -2032,6 +2193,9 @@ mod tests {
             model: None,
             budget_cents: 100,
             timeout: Duration::from_secs(900),
+            proxy: None,
+            sessions: Vec::new(),
+            lab: None,
         });
         laptop.write_permit(&req).await.unwrap();
         let review = dir.path().join("laptop/permit/review-rv1.json");
@@ -2039,6 +2203,209 @@ mod tests {
         assert_eq!(file.turn, "review");
         assert!(file.evidence.is_none(), "reviewer tanpa kartu");
         assert!(file.allow.contains(&"Bash(git diff*)".to_owned()));
+    }
+
+    /// KTD-L4, KTD-L5, KTD-L6 plan 2026-11-10-001: review laptop memakai
+    /// Playwright dengan sesi login salinan daemon dan proxy review; salinan
+    /// sesi dihapus saat review selesai.
+    #[tokio::test]
+    async fn reviewer_laptop_memakai_sesi_login_dan_proxy() {
+        use mandor_usecase::review::{CapabilityRole, CapabilityToken, LedgerAccess};
+        let dir = tempfile::tempdir().unwrap();
+        let mut cfg = test_agent(dir.path().join("mcp")).cfg;
+        cfg.headless_browser = Some("/home/dev/.local/bin/playwright-mcp".into());
+        let agent = ClaudeAgent::new(cfg);
+        let daemon_state = dir.path().join("lab-state.json");
+        std::fs::write(
+            &daemon_state,
+            br#"{"cookies":[{"name":"sesi"}],"origins":[]}"#,
+        )
+        .unwrap();
+        let mut req = workspace_req(dir.path().to_path_buf());
+        req.ledger = Some(LedgerAccess {
+            role: CapabilityRole::Verdict,
+            token: CapabilityToken::for_test("tok-v"),
+        });
+        req.review = Some(ReviewRequest {
+            review_id: "rv9".to_owned(),
+            origins: vec!["http://localhost:5173".to_owned()],
+            browser: true,
+            model: None,
+            budget_cents: 250,
+            timeout: Duration::from_secs(900),
+            proxy: Some("http://127.0.0.1:40123".to_owned()),
+            sessions: vec![mandor_usecase::run_ports::BrowserSession {
+                server: "playwright".to_owned(),
+                state: daemon_state,
+            }],
+            lab: None,
+        });
+        let path = agent.prepare_workspace(&req).await.unwrap().unwrap();
+        let cfg: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+        let args: Vec<String> = cfg["mcpServers"]["playwright"]["args"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|a| a.as_str().unwrap().to_owned())
+            .collect();
+        let at = args.iter().position(|a| a == "--proxy-server").unwrap();
+        assert_eq!(args[at + 1], "http://127.0.0.1:40123");
+        let at = args.iter().position(|a| a == "--storage-state").unwrap();
+        let copy = PathBuf::from(&args[at + 1]);
+        assert!(
+            copy.starts_with(dir.path().join("mcp")),
+            "{}",
+            copy.display()
+        );
+        assert!(std::fs::read_to_string(&copy).unwrap().contains("sesi"));
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let m = std::fs::metadata(&copy).unwrap().permissions().mode() & 0o777;
+            assert_eq!(m, 0o600);
+        }
+        assert!(!args.iter().any(|a| a.contains("unrestricted")));
+        let spec = agent.spec(&req, Some(path));
+        assert!(spec.allowed.contains(&"mcp__playwright".to_owned()));
+        assert!(!spec.review.unwrap().chrome);
+        agent.end_review("rv9").await;
+        assert!(!copy.exists(), "salinan sesi dihapus");
+    }
+
+    /// KTD-L5, KTD-L10 plan 2026-11-10-001: giliran lab mendapat satu server
+    /// Playwright per role, tanpa shell, dengan berkas izin `lab` dan folder
+    /// staging berkas uji.
+    #[tokio::test]
+    async fn giliran_lab_satu_server_per_role_tanpa_shell() {
+        use mandor_usecase::review::{CapabilityRole, CapabilityToken, LedgerAccess};
+        let dir = tempfile::tempdir().unwrap();
+        let mut cfg = test_agent(dir.path().join("mcp")).cfg;
+        cfg.headless_browser = Some("/home/dev/.local/bin/playwright-mcp".into());
+        let agent = ClaudeAgent::new(cfg);
+        let mut sessions = Vec::new();
+        for role in ["admin", "manager"] {
+            let state = dir.path().join(format!("{role}.json"));
+            std::fs::write(&state, b"{}").unwrap();
+            sessions.push(mandor_usecase::run_ports::BrowserSession {
+                server: format!("playwright_{role}"),
+                state,
+            });
+        }
+        let mut req = workspace_req(dir.path().to_path_buf());
+        req.ledger = Some(LedgerAccess {
+            role: CapabilityRole::Verdict,
+            token: CapabilityToken::for_test("tok-l"),
+        });
+        req.review = Some(ReviewRequest {
+            review_id: "lab1".to_owned(),
+            origins: vec!["http://localhost:5173".to_owned()],
+            browser: true,
+            model: None,
+            budget_cents: 300,
+            timeout: Duration::from_secs(1200),
+            proxy: Some("http://127.0.0.1:40999".to_owned()),
+            sessions,
+            lab: Some(mandor_usecase::run_ports::LabTurn {
+                fixtures: Some("/home/dev/.mandor/lab/sessions/lab1/fixtures".into()),
+                setup: false,
+            }),
+        });
+        let path = agent.prepare_workspace(&req).await.unwrap().unwrap();
+        let cfg: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+        let servers = cfg["mcpServers"].as_object().unwrap();
+        assert!(servers.contains_key("playwright_admin"));
+        assert!(servers.contains_key("playwright_manager"));
+        assert!(!servers.contains_key("playwright"));
+        let spec = agent.spec(&req, Some(path));
+        for t in [
+            "mcp__playwright_admin",
+            "mcp__playwright_manager",
+            "Read",
+            "mcp__mandor",
+        ] {
+            assert!(spec.allowed.contains(&t.to_owned()), "{t}");
+        }
+        assert!(
+            !spec.allowed.iter().any(|a| a.starts_with("Bash")),
+            "{:?}",
+            spec.allowed
+        );
+        for t in ["Bash", "WebFetch", "WebSearch"] {
+            assert!(spec.denied.contains(&t.to_owned()), "{t}");
+        }
+        assert!(
+            spec.hook_command.contains(" --lab --fixtures "),
+            "{}",
+            spec.hook_command
+        );
+        assert!(spec.operator_prompt.contains("REVIEW LAB"));
+        let file = agent.permit_file(&req);
+        assert_eq!(file.turn, "lab");
+        assert_eq!(
+            file.fixtures.as_deref(),
+            Some("/home/dev/.mandor/lab/sessions/lab1/fixtures")
+        );
+        assert!(file.evidence.is_none(), "lab tanpa kartu persetujuan");
+    }
+
+    /// KTD-L14 plan 2026-11-10-001: pengusul perlengkapan tanpa browser dan
+    /// shell, dengan berkas izin `lab_setup` dan hanya server ledger.
+    #[tokio::test]
+    async fn giliran_pengusul_lab_tanpa_browser_dan_shell() {
+        use mandor_usecase::review::{CapabilityRole, CapabilityToken, LedgerAccess};
+        let dir = tempfile::tempdir().unwrap();
+        let mut cfg = test_agent(dir.path().join("mcp")).cfg;
+        cfg.headless_browser = Some("/home/dev/.local/bin/playwright-mcp".into());
+        let agent = ClaudeAgent::new(cfg);
+        let mut req = workspace_req(dir.path().to_path_buf());
+        req.workspace = None;
+        req.ledger = Some(LedgerAccess {
+            role: CapabilityRole::LabSetup,
+            token: CapabilityToken::for_test("tok-s"),
+        });
+        req.review = Some(ReviewRequest {
+            review_id: "labsetup-1".to_owned(),
+            origins: Vec::new(),
+            browser: false,
+            model: None,
+            budget_cents: 100,
+            timeout: Duration::from_secs(600),
+            proxy: None,
+            sessions: Vec::new(),
+            lab: Some(mandor_usecase::run_ports::LabTurn {
+                fixtures: None,
+                setup: true,
+            }),
+        });
+        let path = agent.prepare_workspace(&req).await.unwrap().unwrap();
+        let cfg: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+        let servers = cfg["mcpServers"].as_object().unwrap();
+        assert!(servers.contains_key("mandor"));
+        assert!(
+            !servers.keys().any(|k| k.starts_with("playwright")),
+            "{servers:?}"
+        );
+        let spec = agent.spec(&req, Some(path));
+        assert!(spec.allowed.contains(&"mcp__mandor".to_owned()));
+        assert!(
+            !spec
+                .allowed
+                .iter()
+                .any(|a| a.starts_with("Bash") || a.contains("playwright")),
+            "{:?}",
+            spec.allowed
+        );
+        for t in ["Bash", "WebFetch", "WebSearch", "Write", "Edit"] {
+            assert!(spec.denied.contains(&t.to_owned()), "{t}");
+        }
+        assert!(spec.operator_prompt.contains("REVIEW LAB EQUIPMENT"));
+        let file = agent.permit_file(&req);
+        assert_eq!(file.turn, "lab_setup");
+        assert!(file.fixtures.is_none());
+        assert!(file.evidence.is_none());
     }
 
     /// KTD-64 plan VM: reviewer daemon VM memakai MCP Playwright headless
@@ -2070,6 +2437,9 @@ mod tests {
             model: None,
             budget_cents: 250,
             timeout: Duration::from_secs(900),
+            proxy: None,
+            sessions: Vec::new(),
+            lab: None,
         });
         let path = agent.prepare_workspace(&req).await.unwrap().unwrap();
         let cfg: serde_json::Value =
@@ -2141,6 +2511,9 @@ mod tests {
             model: Some("haiku".to_owned()),
             budget_cents: 250,
             timeout: Duration::from_secs(900),
+            proxy: None,
+            sessions: Vec::new(),
+            lab: None,
         });
         let path = agent.prepare_workspace(&req).await.unwrap().unwrap();
         assert!(path.ends_with("review-rv1.json"));
@@ -2165,7 +2538,7 @@ mod tests {
             flags.post_hook_command,
             format!("/opt/mandord hook --review {state} --origin http://localhost:5173 --post")
         );
-        assert!(flags.chrome);
+        assert!(!flags.chrome, "review tidak lagi memakai Claude in Chrome");
         assert_eq!(flags.budget_usd, "2.50");
         assert_eq!(spec.model.as_deref(), Some("haiku"));
         assert!(!spec.allowed.contains(&"Edit".to_owned()));
@@ -2181,7 +2554,7 @@ mod tests {
         // Perintah test khusus repo tetap boleh.
         assert!(spec.allowed.contains(&"Bash(cargo *)".to_owned()));
         assert!(spec.denied.contains(&"Write".to_owned()));
-        assert!(spec.allowed.contains(&"mcp__claude-in-chrome".to_owned()));
+        assert!(!spec.allowed.contains(&"mcp__claude-in-chrome".to_owned()));
         assert!(spec.allowed.contains(&"mcp__mandor".to_owned()));
         assert!(!spec.allowed.contains(&"mcp__graft".to_owned()));
         assert!(spec.operator_prompt.contains("REVIEWER"));

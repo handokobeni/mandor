@@ -311,7 +311,10 @@ async fn mcp_stdio_menerjemahkan_tools_list_lewat_token_kapabilitas() {
         .iter()
         .map(|t| t["name"].as_str().unwrap())
         .collect();
-    assert_eq!(names, ["ac_ledger_read", "ac_set_verdict"]);
+    assert_eq!(
+        names,
+        ["ac_ledger_read", "ac_set_verdict", "ac_report_finding"]
+    );
     drop(lines);
     drop(client);
     let done = tokio::time::timeout(Duration::from_secs(3), mcp)

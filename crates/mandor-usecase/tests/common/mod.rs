@@ -410,6 +410,7 @@ impl Deps for FakeDeps {
     type Waiter = approval_fakes::FakeWaiter;
     type Permits = approval_fakes::FakePermits;
     type Questions = approval_fakes::FakeQuestions;
+    type Lab = run_fakes::FakeLab;
 }
 
 pub mod approval_fakes;
@@ -475,6 +476,7 @@ pub struct Station {
     pub waiter: approval_fakes::FakeWaiter,
     pub permits: approval_fakes::FakePermits,
     pub questions: approval_fakes::FakeQuestions,
+    pub lab: run_fakes::FakeLab,
 }
 
 pub fn station(lark: &FakeLark, clock: &FakeClock, me: &str) -> Station {
@@ -501,6 +503,7 @@ fn station_of(l: Laptop) -> Station {
     let waiter = approval_fakes::FakeWaiter::default();
     let permits = approval_fakes::FakePermits::default();
     let questions = approval_fakes::FakeQuestions::default();
+    let lab = run_fakes::FakeLab::default();
     let ports = mandor_usecase::RunPorts::<FakeDeps> {
         git: git.clone(),
         agent: agent.clone(),
@@ -517,6 +520,7 @@ fn station_of(l: Laptop) -> Station {
         waiter: waiter.clone(),
         permits: permits.clone(),
         questions: questions.clone(),
+        lab: lab.clone(),
     };
     let svc = Arc::new(mandor_usecase::RunService::new(Arc::new(svc), ports));
     Station {
@@ -536,6 +540,7 @@ fn station_of(l: Laptop) -> Station {
         waiter,
         permits,
         questions,
+        lab,
     }
 }
 
@@ -615,6 +620,24 @@ impl mandor_usecase::run_ports::Prompts for PlainMessage {
         format!("CONTINUE SKILL:{}", skill.unwrap_or("-"))
     }
 
+    fn lab_setup_message(&self, app_url: &str) -> String {
+        format!("LAB SETUP {app_url}")
+    }
+
+    fn lab_message(&self, b: &mandor_usecase::run_ports::LabBrief<'_>) -> String {
+        let acs: Vec<String> = b.rows.iter().map(|r| r.ac_id.clone()).collect();
+        let gone: Vec<String> = b.unavailable.iter().map(|(r, _)| r.clone()).collect();
+        format!(
+            "LAB {} AC:{} ROLES:{} UNAVAILABLE:{} FIXTURES:{}",
+            b.task.title,
+            acs.join("|"),
+            b.roles.join("|"),
+            gone.join("|"),
+            b.fixtures
+                .map_or("-".to_owned(), |p| p.display().to_string())
+        )
+    }
+
     fn review_message(&self, b: &mandor_usecase::run_ports::ReviewBrief<'_>) -> String {
         let acs: Vec<String> = b.rows.iter().map(|r| r.ac_id.clone()).collect();
         let mut out = format!(
@@ -670,5 +693,13 @@ impl mandor_usecase::run_ports::Prompts for PlainMessage {
             comments.join("|"),
             ctx.instruction.unwrap_or("-")
         )
+    }
+}
+
+/// Laporan verdict hanya dengan teks bukti.
+pub fn report(evidence: Option<&str>) -> mandor_usecase::review::VerdictReport {
+    mandor_usecase::review::VerdictReport {
+        evidence: evidence.map(str::to_owned),
+        ..mandor_usecase::review::VerdictReport::default()
     }
 }

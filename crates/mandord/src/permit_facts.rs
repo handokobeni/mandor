@@ -96,6 +96,7 @@ mod tests {
             run_root: root.display().to_string(),
             members: vec![root.display().to_string()],
             evidence: Some(ev.display().to_string()),
+            fixtures: None,
         };
         let bytes = file.to_bytes().unwrap();
         let path = base.join("permit/run.json");

@@ -28,6 +28,10 @@ tokio-util = { workspace = true, features = ["rt"] }
 serde.workspace = true
 serde_json.workspace = true
 secrecy.workspace = true
+sha2 = { version = "0.11", default-features = false }
+hyper = { version = "1", default-features = false, features = ["http1", "server", "client"] }
+hyper-util = { version = "0.1", default-features = false, features = ["tokio"] }
+http-body-util = { version = "0.1", default-features = false }
 fd-lock.workspace = true
 rand = { workspace = true, features = ["std", "thread_rng"] }
 tracing.workspace = true

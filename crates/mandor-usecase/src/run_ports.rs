@@ -118,6 +118,19 @@ pub trait GitPort: Send + Sync {
         branch: &str,
     ) -> impl Future<Output = Result<(), PortError>> + Send;
     fn worktree_exists(&self, worktree: &Path) -> impl Future<Output = bool> + Send;
+    /// Salinan bersih branch default repo tanpa berkas yang tidak dilacak
+    /// (pengusul perlengkapan lab, KTD-L14); dihapus dengan
+    /// [`Self::discard_clean_checkout`].
+    fn clean_checkout(
+        &self,
+        repo: &RepoInfo,
+    ) -> impl Future<Output = Result<PathBuf, PortError>> + Send;
+    /// Menghapus salinan bersih; tidak pernah gagal.
+    fn discard_clean_checkout(
+        &self,
+        repo: &RepoInfo,
+        path: &Path,
+    ) -> impl Future<Output = ()> + Send;
     /// Ukuran folder dalam byte (berkas di bawahnya, tanpa mengikuti symlink),
     /// dibatasi waktu (plan `2026-11-03-001`, KTD-C3).
     fn dir_size(&self, path: &Path) -> impl Future<Output = Result<u64, PortError>> + Send;
@@ -261,6 +274,126 @@ pub struct ReviewRequest {
     /// Batas biaya `--max-budget-usd`, dalam sen.
     pub budget_cents: u32,
     pub timeout: std::time::Duration,
+    /// Proxy allowlist review (`--proxy-server`, KTD-L6).
+    pub proxy: Option<String>,
+    /// Sesi login per server Playwright (KTD-L5).
+    pub sessions: Vec<BrowserSession>,
+    /// Giliran reviewer lab (KTD-L10); `None` = review biasa.
+    pub lab: Option<LabTurn>,
+}
+
+/// Giliran reviewer lab (plan 2026-11-10-001).
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct LabTurn {
+    /// Folder staging berkas uji milik daemon (KTD-L11).
+    pub fixtures: Option<PathBuf>,
+    /// Giliran pengusul perlengkapan (KTD-L14): tanpa browser, hanya membaca
+    /// worktree utama repo dan memanggil `lab_propose`.
+    pub setup: bool,
+}
+
+/// Sesi login satu server Playwright: berkas `storageState` milik daemon yang
+/// disalin adapter agent ke folder konfigurasi MCP.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BrowserSession {
+    /// Nama server MCP, mis. `playwright` atau `playwright_admin`.
+    pub server: String,
+    pub state: PathBuf,
+}
+
+/// Kegagalan login akun uji (KTD-L4); tanpa teks dari halaman.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LoginFailure {
+    NotInstalled,
+    NoPassword,
+    Timeout,
+    FormNotFound,
+    NotSignedIn,
+    SessionNotKept,
+    Failed,
+}
+
+impl LoginFailure {
+    #[must_use]
+    pub fn reason(self) -> &'static str {
+        match self {
+            Self::NotInstalled => "Playwright is not installed",
+            Self::NoPassword => "no password is saved",
+            Self::Timeout => "the login took too long",
+            Self::FormNotFound => "the login form was not found",
+            Self::NotSignedIn => "the signed-in page did not appear",
+            Self::SessionNotKept => "the session did not stay signed in",
+            Self::Failed => "Playwright reported an error",
+        }
+    }
+}
+
+/// Satu permintaan login akun uji.
+#[derive(Debug, Clone, Copy)]
+pub struct LabLogin<'a> {
+    pub review_id: &'a str,
+    pub repo_id: &'a str,
+    pub equipment: &'a mandor_domain::lab::LabEquipment,
+    pub role: &'a str,
+    pub origins: &'a [String],
+    pub proxy: Option<&'a str>,
+}
+
+/// Request yang ditolak proxy review, dengan waktunya.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ProxyHit {
+    pub at_ms: i64,
+    pub request: mandor_domain::lab::BlockedRequest,
+    /// Request tulis ke origin run (bukan origin lain).
+    pub write: bool,
+}
+
+/// Review lab: perlengkapan, login akun uji, dan proxy per review (plan
+/// 2026-11-10-001).
+pub trait LabPort: Send + Sync {
+    /// Biner Playwright MCP tersedia.
+    fn playwright_installed(&self) -> bool;
+    /// Perlengkapan repo yang sudah disetujui; `None` bila belum ada atau
+    /// belum disetujui.
+    fn approved_equipment(
+        &self,
+        repo_id: &str,
+    ) -> impl Future<Output = Result<Option<mandor_domain::lab::LabEquipment>, PortError>> + Send;
+    /// Menyalakan proxy review; mengembalikan URL `--proxy-server`.
+    fn start_proxy(
+        &self,
+        review_id: &str,
+        policy: mandor_domain::lab::ProxyPolicy,
+    ) -> impl Future<Output = Result<String, PortError>> + Send;
+    /// Penolakan proxy sejak panggilan sebelumnya.
+    fn take_blocked(&self, review_id: &str) -> Vec<ProxyHit>;
+    /// Mengizinkan request tulis lewat proxy (sesi lab data `running`, KTD-L6).
+    fn set_proxy_writes(&self, review_id: &str, allowed: bool);
+    /// Login akun uji; berkas `storageState` milik daemon.
+    fn login(
+        &self,
+        req: LabLogin<'_>,
+    ) -> impl Future<Output = Result<PathBuf, LoginFailure>> + Send;
+    /// Menyalin folder berkas uji `dir` (relatif terhadap `worktree`) ke
+    /// staging milik daemon (KTD-L11): hanya berkas biasa, tanpa symlink dan
+    /// dotfile; folder yang jalurnya melewati symlink ditolak. `None` bila
+    /// folder sumber tidak ada.
+    fn stage_fixtures(
+        &self,
+        review_id: &str,
+        worktree: &std::path::Path,
+        dir: &str,
+    ) -> impl Future<Output = Result<Option<PathBuf>, PortError>> + Send;
+    /// Menghentikan proxy dan menghapus berkas sesi review.
+    fn end_review(&self, review_id: &str) -> impl Future<Output = ()> + Send;
+    /// Menyamarkan password akun uji repo dan nilai cookie sesi review di
+    /// teks bukti (KTD-L12). Urutan dan jumlah teks sama dengan masukan.
+    fn redact(
+        &self,
+        repo_ids: &[String],
+        review_id: &str,
+        texts: Vec<String>,
+    ) -> impl Future<Output = Vec<String>> + Send;
 }
 
 /// Konteks agent untuk run workspace.
@@ -838,6 +971,12 @@ pub trait Prompts: Send + Sync {
     /// Pesan pertama sesi reviewer: AC sebagai data, fakta kesiapan, dan
     /// instruksi melapor lewat `ac_set_verdict` (KTD-38).
     fn review_message(&self, brief: &ReviewBrief<'_>) -> String;
+    /// Pesan pertama sesi reviewer lab: AC calon lab sebagai data, role yang
+    /// tersedia, dan folder berkas uji (plan 2026-11-10-001, U7).
+    fn lab_message(&self, brief: &LabBrief<'_>) -> String;
+    /// Pesan pertama giliran pengusul perlengkapan lab (KTD-L14): URL app
+    /// repo sebagai data.
+    fn lab_setup_message(&self, app_url: &str) -> String;
     /// Pesan ke agent pelaksana berisi temuan reviewer sebagai data.
     fn findings_message(&self, rows: &[AcRow]) -> String;
 }
@@ -972,6 +1111,21 @@ pub struct ReviewBrief<'a> {
     pub cards: &'a [Task],
 }
 
+/// Bahan pesan pertama sesi reviewer lab.
+#[derive(Debug, Clone, Copy)]
+pub struct LabBrief<'a> {
+    pub task: &'a Task,
+    /// Baris calon lab kartu ini, dengan bukti reviewer biasa.
+    pub rows: &'a [AcRow],
+    /// Role yang sudah login, mis. `admin`; server-nya `playwright_<role>`.
+    pub roles: &'a [String],
+    /// Role yang gagal login, beserta alasannya.
+    pub unavailable: &'a [(String, String)],
+    pub app_urls: &'a [String],
+    /// Folder staging berkas uji, bila ada.
+    pub fixtures: Option<&'a std::path::Path>,
+}
+
 /// Pemicu review.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ReviewTrigger {
@@ -1075,6 +1229,31 @@ impl Default for ReviewerSettings {
     }
 }
 
+/// Setelan sesi lab (KTD-L8): batas per sesi kartu dan per run.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LabSettings {
+    /// `None` = model reviewer.
+    pub model: Option<String>,
+    /// Batas biaya per sesi lab kartu, dalam sen USD.
+    pub budget_cents: u32,
+    pub timeout_secs: u64,
+    /// Batas biaya semua sesi lab satu run.
+    pub run_budget_cents: u32,
+    pub run_timeout_secs: u64,
+}
+
+impl Default for LabSettings {
+    fn default() -> Self {
+        Self {
+            model: None,
+            budget_cents: 300,
+            timeout_secs: 20 * 60,
+            run_budget_cents: 1500,
+            run_timeout_secs: 90 * 60,
+        }
+    }
+}
+
 /// Riwayat review dan setelan reviewer.
 pub trait ReviewHistory: Send + Sync {
     fn save_review(&self, r: &ReviewRecord) -> impl Future<Output = Result<(), PortError>> + Send;
@@ -1090,6 +1269,24 @@ pub trait ReviewHistory: Send + Sync {
     ) -> impl Future<Output = Result<(), PortError>> + Send;
     /// Ekstensi Claude in Chrome terakhir terdeteksi tersambung (U13).
     fn chrome_connected(&self) -> impl Future<Output = bool> + Send;
+    /// Menyimpan temuan reviewer di luar AC (R19).
+    fn save_finding(
+        &self,
+        review_id: &str,
+        finding: &mandor_domain::lab::Finding,
+        at_ms: i64,
+    ) -> impl Future<Output = Result<(), PortError>> + Send;
+    /// Temuan semua review run: `(review_id, temuan)`.
+    fn findings(
+        &self,
+        run_id: &str,
+    ) -> impl Future<Output = Result<Vec<(String, mandor_domain::lab::Finding)>, PortError>> + Send;
+    /// Setelan lab; bawaan bila belum diatur atau rusak.
+    fn lab_settings(&self) -> impl Future<Output = LabSettings> + Send;
+    fn set_lab_settings(
+        &self,
+        s: &LabSettings,
+    ) -> impl Future<Output = Result<(), PortError>> + Send;
 }
 
 /// Status kartu persetujuan yang disimpan (KTD-A11 plan 2026-11-06-001).

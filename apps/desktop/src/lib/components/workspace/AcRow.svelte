@@ -16,6 +16,8 @@
     visualLinks,
     visualMeta
   } from '#lib/ac-review.ts';
+  import { adviceLabel, evidenceBadges, labNeedLabel } from '#lib/lab.ts';
+  import { Badge } from '#lib/components/ui/badge/index.ts';
   import { Button } from '#lib/components/ui/button/index.ts';
   import { Checkbox } from '#lib/components/ui/checkbox/index.ts';
   import type { AcRowView } from '#lib/protocol/AcRowView.ts';
@@ -39,6 +41,10 @@
     urls?: { app: string | null; prototype: string | null };
     /** Memuat screenshot hasil tampilan (run VM) sebagai data URL. */
     onscreenshot?: (index: number) => Promise<string>;
+    /** Memuat screenshot bukti verdict (langkah browser) sebagai data URL. */
+    onevidenceshot?: (index: number) => Promise<string>;
+    /** Approve atau Reject rekomendasi tampilan reviewer (R18). */
+    onlook?: (approve: boolean) => Promise<void>;
   }
   let {
     row,
@@ -54,8 +60,39 @@
     onkey,
     onfile,
     urls = { app: null, prototype: null },
-    onscreenshot
+    onscreenshot,
+    onevidenceshot,
+    onlook
   }: Props = $props();
+
+  const detail = $derived(row.evidence_detail);
+  const badges = $derived(evidenceBadges(row));
+  const need = $derived(row.verdict === 'cant_verify' ? labNeedLabel(row.lab_need) : null);
+  let evShots = $state<string[] | null>(null);
+  let evViewing = $state<number | null>(null);
+  let evError = $state<string | null>(null);
+  async function loadEvidenceShots(): Promise<void> {
+    if (!onevidenceshot || !detail) return;
+    try {
+      evShots = await Promise.all(detail.screenshots.map((_, i) => onevidenceshot(i)));
+    } catch (err) {
+      evError = err instanceof Error ? err.message : String(err);
+    }
+  }
+  let deciding = $state(false);
+  let lookError = $state<string | null>(null);
+  async function decide(approve: boolean): Promise<void> {
+    if (!onlook) return;
+    deciding = true;
+    lookError = null;
+    try {
+      await onlook(approve);
+    } catch (err) {
+      lookError = err instanceof Error ? err.message : String(err);
+    } finally {
+      deciding = false;
+    }
+  }
 
   let shots = $state<string[] | null>(null);
   /** Screenshot yang dibuka di penampil besar. */
@@ -138,6 +175,9 @@
   <span class="ac-c ac-v" role="gridcell">
     <AcChip kind="verdict" value={verdict} stale={row.stale} {pending} />
     {#if look && !pending}<AcChip kind="visual" value={row.visual} />{/if}
+    {#if !pending}
+      {#each badges as b (b)}<Badge variant="outline" class="ev-badge">{b}</Badge>{/each}
+    {/if}
   </span>
   <span class="ac-c ac-x" role="gridcell">
     <Button variant="ghost" size="icon-xs" tabindex={-1} aria-label="{expanded ? 'Collapse' : 'Expand'} {label(row)}" onclick={onexpand}>
@@ -160,7 +200,8 @@
             asked to update the AC in Lark.
           </p>
         {/if}
-        {#if row.evidence}
+        {#if need}<p class="muted">{need}</p>{/if}
+        {#if row.evidence && !(detail && detail.steps.length > 0 && row.evidence.startsWith('1. '))}
           <p class="ev-text">
             {#each evidenceParts(row.evidence) as part, i (i)}
               {#if part.kind === 'file'}
@@ -171,6 +212,42 @@
             {/each}
           </p>
         {/if}
+        {#if detail}
+          {#if detail.steps.length > 0}
+            <ol class="ev-steps">
+              {#each detail.steps as step, i (i)}<li>{step}</li>{/each}
+            </ol>
+          {/if}
+          {#if detail.prepared}<p><span class="muted">Prepared:</span> {detail.prepared}</p>{/if}
+          {#if detail.blocked_requests.length > 0}
+            <p class="muted">Blocked by the review proxy:</p>
+            <ul class="ev-blocked">
+              {#each detail.blocked_requests as b, i (i)}<li class="mono">{b.method} {b.url}</li>{/each}
+            </ul>
+          {/if}
+          {#if detail.screenshots.length > 0 && onevidenceshot}
+            {#if evShots}
+              <div class="ev-shots">
+                {#each evShots as src, i (i)}
+                  <button type="button" class="ev-shot" onclick={() => (evViewing = i)} title="Open full size">
+                    <img {src} alt="Step screenshot {i + 1} of {label(row)}" />
+                    <span class="ev-shot-label">Screenshot {i + 1}</span>
+                  </button>
+                {/each}
+              </div>
+              {#if evViewing !== null}
+                <ScreenshotViewer shots={evShots} title={label(row)} bind:index={evViewing} onclose={() => (evViewing = null)} />
+              {/if}
+            {:else}
+              <p>
+                <button type="button" class="link" onclick={() => void loadEvidenceShots()}
+                  >Show {detail.screenshots.length} screenshot{detail.screenshots.length === 1 ? '' : 's'}</button
+                >
+                {#if evError}<span class="field-error">{evError}</span>{/if}
+              </p>
+            {/if}
+          {/if}
+        {/if}
       </div>
       {#if look}
         <div class="ev-col">
@@ -180,6 +257,21 @@
             <p>By {row.visual_detail.decided_by}{#if row.visual_detail.decision_reason}: {row.visual_detail.decision_reason}{/if}</p>
           {/if}
           {#if row.visual_detail.description}<p class="ev-text">{row.visual_detail.description}</p>{/if}
+          {#if row.look_recommendation && row.visual === 'differs'}
+            <div class="ev-rec">
+              <p><span class="muted">Reviewer recommends:</span> {adviceLabel(row.look_recommendation.advice)}</p>
+              <p class="ev-text">{row.look_recommendation.reason}</p>
+              {#if !readonly && onlook}
+                <div class="ev-rec-actions">
+                  <Button size="sm" disabled={deciding || reviewing} onclick={() => void decide(true)}>Approve</Button>
+                  <Button variant="outline" size="sm" disabled={deciding || reviewing} onclick={() => void decide(false)}
+                    >Reject</Button
+                  >
+                </div>
+                {#if lookError}<p class="field-error">{lookError}</p>{/if}
+              {/if}
+            </div>
+          {/if}
           {#if row.visual_detail.screenshots.length > 0 && onscreenshot}
             {#if shots}
               <div class="ev-shots">
@@ -233,3 +325,12 @@
     </div>
   </div>
 {/if}
+
+<style>
+  :global(.ev-badge) { margin-left: 4px; }
+  .ev-steps { margin: 6px 0; padding-left: 20px; list-style: decimal; }
+  .ev-steps li { margin: 2px 0; }
+  .ev-blocked { margin: 2px 0 6px; padding-left: 16px; font-size: var(--text-xs); }
+  .ev-rec { margin-top: 8px; padding: 8px 10px; border: 1px solid var(--border); border-radius: var(--radius); }
+  .ev-rec-actions { display: flex; gap: 8px; margin-top: 6px; }
+</style>

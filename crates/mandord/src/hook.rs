@@ -31,7 +31,9 @@ use mandor_domain::hook::{
     DesignRoot, ToolCall, Verdict, check_design_path, classify_planning, classify_vm,
     classify_with_mcp,
 };
-use mandor_domain::hook_review::{classify_review, mark_before, record_post};
+use mandor_domain::hook_review::{
+    LabGuard, classify_lab, classify_review, mark_before, record_post,
+};
 use mandor_domain::permit::{Decision, TurnKind, decide};
 
 use crate::review_state;
@@ -93,12 +95,44 @@ fn review_state_path(args: &[String]) -> Option<PathBuf> {
         .map(|w| PathBuf::from(&w[1]))
 }
 
+/// Argumen giliran reviewer lab tanpa berkas izin (KTD-L10).
+struct LabArgs {
+    /// `--fixtures <dir>`: folder staging berkas uji.
+    fixtures: Option<String>,
+}
+
+/// `--lab [--fixtures <dir>]`.
+fn lab_args(args: &[String]) -> Option<LabArgs> {
+    args.iter().any(|a| a == "--lab").then(|| LabArgs {
+        fixtures: args
+            .windows(2)
+            .find(|w| w[0] == "--fixtures")
+            .map(|w| w[1].clone()),
+    })
+}
+
 /// Keputusan `PreToolUse` sesi reviewer; tool yang diizinkan dan bisa
 /// memindah halaman menandai tab belum terkonfirmasi sebelum berjalan.
-fn review_pre(path: &Path, origins: &[String], call: &ToolCall, allowed: &[String]) -> Verdict {
+fn review_pre(
+    path: &Path,
+    origins: &[String],
+    call: &ToolCall,
+    allowed: &[String],
+    lab: Option<&LabArgs>,
+) -> Verdict {
     let outcome = review_state::with_locked(path, |state| {
         pin_origins(state, origins);
-        let verdict = classify_review(call, state, allowed);
+        let verdict = match lab {
+            Some(l) => classify_lab(
+                call,
+                state,
+                allowed,
+                LabGuard {
+                    fixtures: l.fixtures.as_deref(),
+                },
+            ),
+            None => classify_review(call, state, allowed),
+        };
         if verdict == Verdict::Allow {
             mark_before(call, state);
         }
@@ -192,7 +226,7 @@ impl PermitHook {
             return deny("hook input has no cwd");
         };
         let decision = match (scope.turn, &self.review) {
-            (TurnKind::Review, Some(state_path)) => {
+            (TurnKind::Review | TurnKind::Lab | TurnKind::LabSetup, Some(state_path)) => {
                 let outcome = review_state::with_locked(state_path, |state| {
                     pin_origins(state, &self.origins);
                     let d = decide(&scope, call, cwd, Some(state), &FsFacts);
@@ -203,7 +237,7 @@ impl PermitHook {
                 });
                 outcome.unwrap_or_else(|e| deny(&e))
             }
-            (TurnKind::Review, None) | (_, Some(_)) => {
+            (TurnKind::Review | TurnKind::Lab | TurnKind::LabSetup, None) | (_, Some(_)) => {
                 return deny("the permit file does not match this session");
             }
             _ => decide(&scope, call, cwd, None, &FsFacts),
@@ -232,6 +266,7 @@ pub fn run(args: &[String]) -> u8 {
     let origins = review_origins(args);
     let vm = vm_run_dir(args);
     let post = args.iter().any(|a| a == "--post");
+    let lab = lab_args(args);
     let mut stderr = std::io::stderr();
     if let (false, Some((path, sha))) = (post, permit_args(args)) {
         let hook = PermitHook {
@@ -271,7 +306,7 @@ pub fn run(args: &[String]) -> u8 {
             }
         }
         match &review {
-            Some(path) => review_pre(path, &origins, call, &allowed),
+            Some(path) => review_pre(path, &origins, call, &allowed, lab.as_ref()),
             None if plan => classify_planning(call, &allowed),
             None => classify_with_mcp(call, &allowed),
         }

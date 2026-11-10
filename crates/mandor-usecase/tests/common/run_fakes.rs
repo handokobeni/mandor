@@ -145,6 +145,16 @@ impl GitPort for FakeGit {
             .removed_roots
             .push(root.to_path_buf());
     }
+    async fn clean_checkout(&self, repo: &RepoInfo) -> Result<PathBuf, PortError> {
+        let path = PathBuf::from(format!("/wt/lab-setup-{}", repo.id));
+        self.state.lock().unwrap().worktrees.insert(path.clone());
+        Ok(path)
+    }
+    async fn discard_clean_checkout(&self, _repo: &RepoInfo, path: &Path) {
+        let mut st = self.state.lock().unwrap();
+        st.worktrees.remove(path);
+        st.removed_roots.push(path.to_path_buf());
+    }
     async fn worktree_exists(&self, wt: &Path) -> bool {
         self.state.lock().unwrap().worktrees.contains(wt)
     }
@@ -935,6 +945,8 @@ pub struct FakeReviews {
     pub history: Arc<Mutex<Vec<mandor_usecase::run_ports::ReviewRecord>>>,
     pub settings: Arc<Mutex<mandor_usecase::run_ports::ReviewerSettings>>,
     pub chrome: Arc<Mutex<bool>>,
+    pub lab_settings: Arc<Mutex<mandor_usecase::run_ports::LabSettings>>,
+    pub findings: Arc<Mutex<Vec<(String, mandor_domain::lab::Finding)>>>,
 }
 
 impl FakeReviews {
@@ -1120,6 +1132,34 @@ impl mandor_usecase::run_ports::ReviewHistory for FakeReviews {
     }
     async fn chrome_connected(&self) -> bool {
         *self.chrome.lock().unwrap()
+    }
+    async fn lab_settings(&self) -> mandor_usecase::run_ports::LabSettings {
+        self.lab_settings.lock().unwrap().clone()
+    }
+    async fn save_finding(
+        &self,
+        review_id: &str,
+        finding: &mandor_domain::lab::Finding,
+        _at_ms: i64,
+    ) -> Result<(), PortError> {
+        self.findings
+            .lock()
+            .unwrap()
+            .push((review_id.to_owned(), finding.clone()));
+        Ok(())
+    }
+    async fn findings(
+        &self,
+        _run_id: &str,
+    ) -> Result<Vec<(String, mandor_domain::lab::Finding)>, PortError> {
+        Ok(self.findings.lock().unwrap().clone())
+    }
+    async fn set_lab_settings(
+        &self,
+        s: &mandor_usecase::run_ports::LabSettings,
+    ) -> Result<(), PortError> {
+        *self.lab_settings.lock().unwrap() = s.clone();
+        Ok(())
     }
 }
 
@@ -1443,5 +1483,140 @@ impl mandor_usecase::review::DesignSources for FakeDesign {
                     .map(|(id, _)| id.clone())
             })
             .collect())
+    }
+}
+
+/// Satu login akun uji: `(review_id, repo_id, role, proxy)`.
+pub type LoginCall = (String, String, String, Option<String>);
+
+/// Review lab di memori (plan 2026-11-10-001): perlengkapan, login, proxy.
+#[derive(Clone)]
+pub struct FakeLab {
+    pub installed: Arc<Mutex<bool>>,
+    pub equipment: Arc<Mutex<HashMap<String, mandor_domain::lab::LabEquipment>>>,
+    /// `None` = login berhasil.
+    pub login_failure: Arc<Mutex<Option<mandor_usecase::run_ports::LoginFailure>>>,
+    /// `(review_id, repo_id, role, proxy)` per login.
+    pub logins: Arc<Mutex<Vec<LoginCall>>>,
+    pub proxies: Arc<Mutex<Vec<(String, mandor_domain::lab::ProxyPolicy)>>>,
+    pub proxy_fails: Arc<Mutex<bool>>,
+    pub blocked: Arc<Mutex<HashMap<String, Vec<mandor_usecase::run_ports::ProxyHit>>>>,
+    pub ended: Arc<Mutex<Vec<String>>>,
+    /// Nilai yang disamarkan `redact`.
+    pub secrets: Arc<Mutex<Vec<String>>>,
+    /// `(review_id, folder sumber)` per `stage_fixtures`.
+    pub staged: Arc<Mutex<Vec<(String, PathBuf)>>>,
+}
+
+impl Default for FakeLab {
+    fn default() -> Self {
+        Self {
+            installed: Arc::new(Mutex::new(true)),
+            equipment: Arc::default(),
+            login_failure: Arc::default(),
+            logins: Arc::default(),
+            proxies: Arc::default(),
+            proxy_fails: Arc::default(),
+            blocked: Arc::default(),
+            ended: Arc::default(),
+            secrets: Arc::default(),
+            staged: Arc::default(),
+        }
+    }
+}
+
+impl mandor_usecase::run_ports::LabPort for FakeLab {
+    fn playwright_installed(&self) -> bool {
+        *self.installed.lock().unwrap()
+    }
+
+    async fn approved_equipment(
+        &self,
+        repo_id: &str,
+    ) -> Result<Option<mandor_domain::lab::LabEquipment>, PortError> {
+        Ok(self.equipment.lock().unwrap().get(repo_id).cloned())
+    }
+
+    async fn start_proxy(
+        &self,
+        review_id: &str,
+        policy: mandor_domain::lab::ProxyPolicy,
+    ) -> Result<String, PortError> {
+        if *self.proxy_fails.lock().unwrap() {
+            return Err(PortError::Storage("port busy".to_owned()));
+        }
+        self.proxies
+            .lock()
+            .unwrap()
+            .push((review_id.to_owned(), policy));
+        Ok(format!("http://127.0.0.1:9/{review_id}"))
+    }
+
+    fn take_blocked(&self, review_id: &str) -> Vec<mandor_usecase::run_ports::ProxyHit> {
+        self.blocked
+            .lock()
+            .unwrap()
+            .remove(review_id)
+            .unwrap_or_default()
+    }
+
+    fn set_proxy_writes(&self, review_id: &str, allowed: bool) {
+        if let Some((_, p)) = self
+            .proxies
+            .lock()
+            .unwrap()
+            .iter_mut()
+            .rev()
+            .find(|(id, _)| id == review_id)
+        {
+            p.write_allowed = allowed;
+        }
+    }
+
+    async fn login(
+        &self,
+        req: mandor_usecase::run_ports::LabLogin<'_>,
+    ) -> Result<PathBuf, mandor_usecase::run_ports::LoginFailure> {
+        self.logins.lock().unwrap().push((
+            req.review_id.to_owned(),
+            req.repo_id.to_owned(),
+            req.role.to_owned(),
+            req.proxy.map(str::to_owned),
+        ));
+        match *self.login_failure.lock().unwrap() {
+            Some(f) => Err(f),
+            None => Ok(PathBuf::from(format!(
+                "/daemon/lab/{}/{}.json",
+                req.review_id, req.role
+            ))),
+        }
+    }
+
+    async fn end_review(&self, review_id: &str) {
+        self.ended.lock().unwrap().push(review_id.to_owned());
+    }
+
+    async fn stage_fixtures(
+        &self,
+        review_id: &str,
+        worktree: &Path,
+        dir: &str,
+    ) -> Result<Option<PathBuf>, PortError> {
+        self.staged
+            .lock()
+            .unwrap()
+            .push((review_id.to_owned(), worktree.join(dir)));
+        Ok(Some(PathBuf::from(format!(
+            "/daemon/lab/{review_id}/fixtures"
+        ))))
+    }
+
+    async fn redact(&self, _repos: &[String], _review_id: &str, texts: Vec<String>) -> Vec<String> {
+        let secrets = self.secrets.lock().unwrap().clone();
+        let refs: Vec<&str> = secrets.iter().map(String::as_str).collect();
+        texts
+            .iter()
+            .map(|t| mandor_domain::lab::redact_values(t, &refs))
+            .collect()
     }
 }

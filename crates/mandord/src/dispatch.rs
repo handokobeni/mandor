@@ -37,6 +37,7 @@ mod approvals;
 mod cleanup;
 pub(crate) mod design;
 mod group;
+mod lab;
 mod overnight;
 mod planned;
 mod questions;
@@ -844,14 +845,22 @@ impl AppDispatch {
                         .collect::<Vec<_>>();
                 ok(&skills)
             }
-            other if Self::is_workspaces_method(other) => self.workspaces_call(other, v).await,
-            other if Self::is_design_method(other) => self.design_call(other, v).await,
-            other if Self::is_app_method(other) => self.app_call(other, v).await,
-            other if Self::is_review_method(other) => self.review_call(other, v).await,
-            other if Self::is_group_method(other) => self.group_call(other, v).await,
-            other if Self::is_cleanup_method(other) => self.cleanup_call(other, v).await,
-            other if Self::is_overnight_method(other) => self.overnight_call(other, v).await,
-            other => self.run_action(other, v).await,
+            other => self.feature_call(other, v).await,
+        }
+    }
+
+    /// Method per fitur; sisanya aksi run.
+    async fn feature_call(&self, name: &str, v: Value) -> Result<Value, RpcError> {
+        match name {
+            n if Self::is_workspaces_method(n) => self.workspaces_call(n, v).await,
+            n if Self::is_design_method(n) => self.design_call(n, v).await,
+            n if Self::is_app_method(n) => self.app_call(n, v).await,
+            n if Self::is_review_method(n) => self.review_call(n, v).await,
+            n if Self::is_group_method(n) => self.group_call(n, v).await,
+            n if Self::is_cleanup_method(n) => self.cleanup_call(n, v).await,
+            n if Self::is_overnight_method(n) => self.overnight_call(n, v).await,
+            n if Self::is_lab_method(n) => self.lab_call(n, v).await,
+            n => self.run_action(n, v).await,
         }
     }
 
@@ -1077,8 +1086,15 @@ fn scoped_route(role: &str, name: &str) -> ScopedRoute {
         ("ask" | "design", method::ASK_TOOL_ASK) => ScopedRoute::Ask,
         // Peran ask hanya bertanya; buku AC tertutup (KTD-Q4).
         ("ask", method::LEDGER_TOOL_INFO) => ScopedRoute::Ledger,
+        // Perlengkapan lab dan password akun uji hanya untuk app (U3 plan
+        // 2026-11-10-001).
+        (_, name) if AppDispatch::is_lab_method(name) => ScopedRoute::Refused,
+        // Pengusul perlengkapan hanya mengirim usulan (KTD-L14).
+        ("lab_setup", method::LEDGER_TOOL_INFO | method::LEDGER_TOOL_LAB_PROPOSE) => {
+            ScopedRoute::Ledger
+        }
         (role, name)
-            if matches!(role, "permit" | "ask")
+            if matches!(role, "permit" | "ask" | "lab_setup")
                 || matches!(name, method::PERMIT_REQUEST | method::ASK_TOOL_ASK)
                 || AppDispatch::is_questions_method(name) =>
         {
@@ -1194,9 +1210,53 @@ mod tests {
         }
     }
 
+    /// Plan 2026-11-10-001, U3: perlengkapan lab dan password akun uji tidak
+    /// pernah lewat koneksi token kapabilitas peran apa pun.
+    #[test]
+    fn method_lab_ditolak_untuk_semua_token_kapabilitas() {
+        use super::{ScopedRoute, scoped_route};
+        for role in [
+            "permit",
+            "design",
+            "verdict",
+            "ask",
+            "lab",
+            "lab_setup",
+            "lab_data",
+        ] {
+            for name in ["lab.get", "lab.set", "lab.approve"] {
+                assert_eq!(
+                    scoped_route(role, name),
+                    ScopedRoute::Refused,
+                    "{role} {name}"
+                );
+            }
+        }
+    }
+
     /// Plan 2026-11-07-001, U5: `ask.tool.ask` hanya untuk peran ask dan
     /// design; peran ask tidak bisa membaca atau mengubah buku AC; method
     /// pertanyaan untuk aplikasi tidak pernah lewat koneksi kapabilitas.
+    /// KTD-L14: token pengusul hanya membaca info dan mengirim usulan.
+    #[test]
+    fn rute_pengusul_lab() {
+        use super::{ScopedRoute, scoped_route};
+        for m in ["ledger.tool.info", "ledger.tool.lab_propose"] {
+            assert_eq!(scoped_route("lab_setup", m), ScopedRoute::Ledger, "{m}");
+        }
+        for m in [
+            "ledger.tool.read",
+            "ledger.tool.set_verdict",
+            "lab.get",
+            "lab.propose",
+            "permit.request",
+            "ask.tool.ask",
+        ] {
+            assert_eq!(scoped_route("lab_setup", m), ScopedRoute::Refused, "{m}");
+        }
+        assert_eq!(scoped_route("verdict", "lab.propose"), ScopedRoute::Refused);
+    }
+
     #[test]
     fn rute_alat_pertanyaan() {
         use super::{ScopedRoute, scoped_route};

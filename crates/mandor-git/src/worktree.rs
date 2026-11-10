@@ -136,6 +136,51 @@ impl Git {
         })
     }
 
+    /// Salinan bersih `base` tanpa branch (`worktree add --detach`): hanya
+    /// berkas ter-commit, jadi `.env` dan berkas lain yang tidak dilacak di
+    /// checkout developer tidak ikut (KTD-L14 plan 2026-11-10-001). Salinan
+    /// lama dengan nama yang sama diganti. Memakai branch lokal `base` bila
+    /// ada, selain itu `origin/<base>`.
+    ///
+    /// # Errors
+    /// Nama atau branch tidak valid, atau `git worktree add` gagal.
+    pub async fn clean_checkout(
+        &self,
+        repo: &Path,
+        dir_name: &str,
+        base: &str,
+    ) -> Result<PathBuf, GitError> {
+        self.validate_branch(repo, base).await?;
+        let mut parts = Path::new(dir_name).components();
+        if !matches!(
+            (parts.next(), parts.next()),
+            (Some(std::path::Component::Normal(_)), None)
+        ) {
+            return Err(GitError::Io("invalid checkout folder".to_owned()));
+        }
+        let path = self.cfg.workspaces_dir.join(dir_name);
+        tokio::fs::create_dir_all(&self.cfg.workspaces_dir)
+            .await
+            .map_err(|e| GitError::Io(e.to_string()))?;
+        if tokio::fs::symlink_metadata(&path).await.is_ok() {
+            self.remove_worktree(repo, &path, None).await;
+        }
+        let rev = if self.local_branch_exists(repo, base).await? {
+            base.to_owned()
+        } else {
+            format!("origin/{base}")
+        };
+        let path_str = path.to_string_lossy().into_owned();
+        let cmd = self
+            .git(repo)
+            .args(["worktree", "add", "--detach", &path_str, &rev]);
+        if let Err(err) = self.ok("worktree add", cmd).await {
+            self.remove_worktree(repo, &path, None).await;
+            return Err(err);
+        }
+        Ok(path)
+    }
+
     /// Branch lokal `branch` ada.
     async fn local_branch_exists(&self, repo: &Path, branch: &str) -> Result<bool, GitError> {
         Ok(self

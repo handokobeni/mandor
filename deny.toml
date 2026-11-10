@@ -5,6 +5,14 @@ all-features = false
 [advisories]
 version = 2
 yanked = "deny"
+ignore = [
+    # SQLite < 3.54 lewat libsqlite3-sys 0.37 (sqlx-sqlite 0.9.0, versi sqlx
+    # terbaru, belum bisa naik). Hanya terpicu bila proses membuka database
+    # beserta berkas -wal yang ditulis pihak kurang tepercaya; mandord hanya
+    # membuka ~/.mandor/mandor.db milik user sendiri. Disetujui pemilik produk
+    # 2026-11-10. Hapus saat sqlx memakai libsqlite3-sys >= 0.39.
+    { id = "RUSTSEC-2026-0459", reason = "local-only; daemon opens only its own ~/.mandor database; blocked on sqlx upgrade" },
+]
 
 [licenses]
 version = 2

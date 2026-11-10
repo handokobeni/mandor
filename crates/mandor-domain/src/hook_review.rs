@@ -15,8 +15,34 @@ use crate::hook::{ToolCall, Verdict, classify_planning};
 /// Awalan tool ekstensi Claude in Chrome.
 pub const BROWSER_PREFIX: &str = "mcp__claude-in-chrome__";
 
-/// Awalan tool MCP Playwright reviewer headless di VM (KTD-64 plan VM).
+/// Awalan tool MCP Playwright reviewer headless (KTD-64 plan VM).
 pub const PLAYWRIGHT_PREFIX: &str = "mcp__playwright__";
+
+/// Nama server Playwright review biasa.
+pub const PLAYWRIGHT_SERVER: &str = "playwright";
+
+/// Memecah nama tool Playwright menjadi `(server, tool)`: `mcp__playwright__x`
+/// atau `mcp__playwright_<role>__x` dengan role sah (KTD-L10 plan
+/// 2026-11-10-001). Nama lain `None`.
+#[must_use]
+pub fn playwright_tool(name: &str) -> Option<(&str, &str)> {
+    let rest = name.strip_prefix("mcp__")?;
+    let (server, tool) = rest.split_once("__")?;
+    let valid = server == PLAYWRIGHT_SERVER
+        || server
+            .strip_prefix("playwright_")
+            .is_some_and(crate::lab::valid_role);
+    (valid && !tool.is_empty()).then_some((server, tool))
+}
+
+/// Profil guard giliran lab (KTD-L10): JavaScript di halaman dan upload dari
+/// folder staging berkas uji; tanpa shell.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct LabGuard<'a> {
+    /// Folder staging berkas uji milik daemon (absolut); `None` = upload
+    /// ditolak.
+    pub fixtures: Option<&'a str>,
+}
 
 /// Jenis tool Playwright menurut pagar. Hampir semua tool Playwright
 /// mengembalikan isi halaman, jadi halaman harus sudah terkonfirmasi di
@@ -37,6 +63,9 @@ fn pw_kind(tool: &str) -> Option<Kind> {
         | "browser_handle_dialog" => Kind::Interact,
         "browser_resize" => Kind::Context,
         "browser_close" => Kind::Close,
+        // Hanya giliran lab (KTD-L10); giliran review menolaknya.
+        "browser_evaluate" => Kind::Evaluate,
+        "browser_file_upload" => Kind::Upload,
         // Menjalankan kode, menulis atau mengunggah berkas, membuka tab, atau
         // tool baru: ditolak.
         _ => return None,
@@ -71,9 +100,9 @@ pub struct ReviewState {
     pub origins: Vec<String>,
     /// Tab yang dibuat reviewer.
     pub tabs: BTreeMap<u64, TabState>,
-    /// Halaman Playwright reviewer headless di VM; `None` sebelum navigasi
-    /// pertama atau setelah browser ditutup.
-    pub page: Option<TabState>,
+    /// Halaman Playwright per server (`playwright`, `playwright_<role>`);
+    /// tidak ada sebelum navigasi pertama atau setelah browser ditutup.
+    pub pages: BTreeMap<String, TabState>,
 }
 
 /// Tool yang bisa memindah halaman: navigasi dan setiap interaksi, termasuk
@@ -94,6 +123,10 @@ enum Kind {
     /// Bisa memicu navigasi.
     Interact,
     Wait,
+    /// `browser_evaluate`: JavaScript di halaman (giliran lab).
+    Evaluate,
+    /// `browser_file_upload` dari folder staging (giliran lab).
+    Upload,
     Denied,
 }
 
@@ -264,8 +297,8 @@ fn deny(reason: &str) -> Verdict {
 /// Memutuskan tool call sesi reviewer.
 #[must_use]
 pub fn classify_review(call: &ToolCall, state: &ReviewState, allowed_mcp: &[String]) -> Verdict {
-    if let Some(tool) = call.tool_name.strip_prefix(PLAYWRIGHT_PREFIX) {
-        return playwright_verdict(tool, call, state);
+    if let Some((server, tool)) = playwright_tool(&call.tool_name) {
+        return playwright_verdict(server, tool, call, state, None);
     }
     if let Some(kind) = kind(call) {
         return browser_verdict(call, kind, state);
@@ -281,15 +314,206 @@ pub fn classify_review(call: &ToolCall, state: &ReviewState, allowed_mcp: &[Stri
     }
 }
 
-fn playwright_verdict(tool: &str, call: &ToolCall, state: &ReviewState) -> Verdict {
+/// Tool yang hanya untuk giliran lab, dan aturan path-nya.
+fn lab_only(kind: Kind, tool: &str, call: &ToolCall, lab: Option<LabGuard<'_>>) -> Option<Verdict> {
+    match (kind, lab) {
+        (Kind::Evaluate | Kind::Upload, None) => {
+            Some(deny(&format!("`{tool}` is not available during review")))
+        }
+        (Kind::Upload, Some(guard)) => {
+            let Some(dir) = guard.fixtures else {
+                return Some(deny("this lab has no test files folder"));
+            };
+            let ok = !call.paths.is_empty() && call.paths.iter().all(|p| in_fixtures(p, dir));
+            (!ok).then(|| deny("upload only files from the lab's test files folder"))
+        }
+        _ => None,
+    }
+}
+
+/// Path absolut di dalam `dir` tanpa `..`, `.` , atau dotfile (lexical; hook
+/// juga menolak symlink).
+#[must_use]
+pub fn in_fixtures(path: &str, dir: &str) -> bool {
+    let dir = dir.trim_end_matches('/');
+    path.strip_prefix(dir)
+        .and_then(|rest| rest.strip_prefix('/'))
+        .is_some_and(|rest| {
+            !rest.is_empty()
+                && rest
+                    .split('/')
+                    .all(|seg| !seg.is_empty() && !seg.starts_with('.'))
+        })
+}
+
+/// Tool non-browser yang boleh dipakai giliran lab: baca berkas dan alat
+/// bantu; tanpa shell, tanpa jaringan, tanpa menulis (KTD-L10).
+const LAB_TOOLS: &[&str] = &["Read", "Grep", "Glob", "TodoWrite", "ToolSearch"];
+
+/// Path yang tidak boleh dibaca giliran lab maupun pengusul perlengkapan,
+/// walau di dalam worktree: berkas env (selain `.env.example`), folder
+/// kredensial, dan `/proc`.
+#[must_use]
+pub fn lab_read_violation(path: &str) -> Option<String> {
+    let denied = path.starts_with("/proc")
+        || crate::hook::is_credential_path(path)
+        || path
+            .split('/')
+            .any(|seg| (seg == ".env" || seg.starts_with(".env.")) && seg != ".env.example");
+    denied.then(|| format!("mandor: the review lab cannot read `{path}`"))
+}
+
+/// Penanda nama berkas rahasia untuk pola pencarian lab.
+const SECRET_NAME_MARKERS: &[&str] = &[
+    "id_rsa",
+    "id_ed25519",
+    "id_ecdsa",
+    ".pem",
+    ".key",
+    ".p12",
+    ".pfx",
+    "secret",
+    "credential",
+    "token",
+    "password",
+    ".ssh",
+    ".aws",
+    ".netrc",
+    ".npmrc",
+    ".pgpass",
+];
+
+/// Nama berkas atau folder literal yang tidak boleh dicari lab.
+fn secret_name(segment: &str) -> bool {
+    let s = segment.to_ascii_lowercase();
+    let env = (s == ".env" || s.starts_with(".env.")) && s != ".env.example";
+    env || crate::hook::is_credential_path(&format!("/{s}/"))
+        || SECRET_NAME_MARKERS.iter().any(|m| s.contains(m))
+}
+
+/// Ekstensi kode dan dokumen yang boleh diakhiri pola ber-wildcard; tidak ada
+/// yang bisa menjadi akhiran berkas env (mis. `.local`, `.production`).
+const SEARCH_EXTENSIONS: &[&str] = &[
+    "ts", "tsx", "js", "jsx", "mjs", "cjs", "svelte", "vue", "py", "rs", "go", "java", "kt", "rb",
+    "php", "cs", "sql", "md", "mdx", "json", "yaml", "yml", "toml", "html", "css", "scss", "txt",
+    "csv", "graphql", "prisma", "xml", "sh",
+];
+
+/// Pola berkas pencarian lab dengan tata bahasa sempit (KTD-L10, KTD-L14):
+/// satu pola tanpa spasi, koma, kelas karakter, `?`, alternatif, atau
+/// negasi; tidak ada segmen yang menyebut dotfile atau nama rahasia; segmen
+/// terakhir yang memakai `*` harus berakhir dengan ekstensi dari
+/// [`SEARCH_EXTENSIONS`], mis. `**/*.ts`. Pola seperti `*`, `.e*v`,
+/// `.[e]nv`, atau `**/*.local` ditolak karena bisa mengenai `.env*`.
+fn search_glob_allowed(glob: &str) -> bool {
+    if glob.is_empty()
+        || glob.contains(['[', ']', '?', '{', '}', '!', '\\', ','])
+        || glob.chars().any(char::is_whitespace)
+    {
+        return false;
+    }
+    let segments: Vec<&str> = glob.split('/').filter(|s| !s.is_empty()).collect();
+    let Some((last, dirs)) = segments.split_last() else {
+        return false;
+    };
+    let dir_ok = |seg: &&str| {
+        *seg == "**"
+            || (!seg.starts_with('.') && !secret_name(seg))
+            || (*seg == "." || *seg == "..")
+    };
+    if !dirs.iter().all(dir_ok) || dirs.contains(&"..") {
+        return false;
+    }
+    if secret_name(last) {
+        return false;
+    }
+    match last.rfind('*') {
+        None => !last.starts_with('.') || *last == ".env.example",
+        Some(i) => {
+            let suffix = last[i + 1..].to_ascii_lowercase();
+            let ext = suffix.rsplit('.').next().unwrap_or_default();
+            !last.starts_with('.')
+                && suffix.starts_with('.')
+                && !suffix.contains("env")
+                && SEARCH_EXTENSIONS.contains(&ext)
+        }
+    }
+}
+
+/// Memutuskan tool call giliran lab (KTD-L10): Playwright per role dengan
+/// JavaScript di halaman dan upload dari staging, baca berkas tanpa shell,
+/// dan tool MCP ledger.
+#[must_use]
+pub fn classify_lab(
+    call: &ToolCall,
+    state: &ReviewState,
+    allowed_mcp: &[String],
+    guard: LabGuard<'_>,
+) -> Verdict {
+    if let Some((server, tool)) = playwright_tool(&call.tool_name) {
+        return playwright_verdict(server, tool, call, state, Some(guard));
+    }
+    files_or_ledger(call, allowed_mcp, "in the review lab")
+}
+
+/// Memutuskan tool call giliran pengusul perlengkapan lab (KTD-L14): baca
+/// berkas tanpa shell, tanpa browser, tanpa menulis, dan tool MCP ledger
+/// (yang hanya menawarkan `lab_propose`).
+#[must_use]
+pub fn classify_lab_setup(call: &ToolCall, allowed_mcp: &[String]) -> Verdict {
+    files_or_ledger(call, allowed_mcp, "while proposing lab equipment")
+}
+
+/// Baca berkas tanpa shell (selain path terlarang) atau tool MCP server yang
+/// diizinkan; selain itu ditolak dengan `context` di alasannya.
+fn files_or_ledger(call: &ToolCall, allowed_mcp: &[String], context: &str) -> Verdict {
+    if let Some(reason) = call.paths.iter().find_map(|p| lab_read_violation(p)) {
+        return Verdict::Deny(reason);
+    }
+    if let Some(glob) = call.globs.iter().find(|g| !search_glob_allowed(g)) {
+        return deny(&format!(
+            "the search pattern `{glob}` is not available {context}; use a plain pattern such as **/*.ts"
+        ));
+    }
+    // Grep tanpa pola berkas bisa membaca isi dotfile; wajib `glob` atau `type`.
+    if call.tool_name == "Grep" && call.globs.is_empty() {
+        return deny(&format!(
+            "Grep needs a glob such as **/*.ts or a type {context}"
+        ));
+    }
+    if LAB_TOOLS.contains(&call.tool_name.as_str()) {
+        return Verdict::Allow;
+    }
+    let mcp_ok = call
+        .tool_name
+        .strip_prefix("mcp__")
+        .and_then(|rest| rest.split_once("__"))
+        .is_some_and(|(server, _)| allowed_mcp.iter().any(|m| m == server));
+    if mcp_ok {
+        Verdict::Allow
+    } else {
+        deny(&format!("`{}` is not available {context}", call.tool_name))
+    }
+}
+
+fn playwright_verdict(
+    server: &str,
+    tool: &str,
+    call: &ToolCall,
+    state: &ReviewState,
+    lab: Option<LabGuard<'_>>,
+) -> Verdict {
     let Some(kind) = pw_kind(tool) else {
         return deny(&format!("`{tool}` is not available during review"));
     };
+    if let Some(v) = lab_only(kind, tool, call, lab) {
+        return v;
+    }
     // Tool Playwright tidak boleh menulis atau membaca berkas sebutan agent:
     // nama berkas relatif ditulis di folder kerja (worktree) dan membuat hasil
     // review usang. Tanpa nama, Playwright menyimpan hasilnya di folder output
-    // review.
-    if !call.paths.is_empty() {
+    // review. Upload lab sudah diperiksa di atas.
+    if kind != Kind::Upload && !call.paths.is_empty() {
         return deny(&format!(
             "call `{tool}` without a filename; it is saved in the review output folder and the reply names the file"
         ));
@@ -298,7 +522,7 @@ fn playwright_verdict(tool: &str, call: &ToolCall, state: &ReviewState) -> Verdi
         Kind::Navigate if allowed(state, call.url.as_deref()) => Verdict::Allow,
         Kind::Navigate => deny("that address is outside the app allowed for this review"),
         Kind::Context | Kind::Close => Verdict::Allow,
-        _ => match &state.page {
+        _ => match state.pages.get(server) {
             None => deny("open the app with browser_navigate first"),
             Some(page) if !allowed(state, page.url.as_deref()) => deny(
                 "the page is not on the allowed app (or its address is unknown); navigate to the app first",
@@ -581,9 +805,12 @@ fn mutating_git(cmd: &str) -> Option<String> {
 /// tab belum terkonfirmasi sebelum tool berjalan, sehingga `PostToolUse` yang
 /// gagal tetap gagal-tertutup.
 pub fn mark_before(call: &ToolCall, state: &mut ReviewState) {
-    if let Some(tool) = call.tool_name.strip_prefix(PLAYWRIGHT_PREFIX) {
-        if matches!(pw_kind(tool), Some(Kind::Navigate | Kind::Interact)) {
-            let page = state.page.get_or_insert_with(TabState::default);
+    if let Some((server, tool)) = playwright_tool(&call.tool_name) {
+        if matches!(
+            pw_kind(tool),
+            Some(Kind::Navigate | Kind::Interact | Kind::Evaluate | Kind::Upload)
+        ) {
+            let page = state.pages.entry(server.to_owned()).or_default();
             page.settled = false;
         }
         return;
@@ -598,8 +825,9 @@ pub fn mark_before(call: &ToolCall, state: &mut ReviewState) {
 
 /// Mencatat hasil tool browser dari respons `PostToolUse`.
 pub fn record_post(call: &ToolCall, state: &mut ReviewState) {
-    if let Some(tool) = call.tool_name.strip_prefix(PLAYWRIGHT_PREFIX) {
+    if let Some((server, tool)) = playwright_tool(&call.tool_name) {
         record_pw(
+            server,
             tool,
             pw_kind(tool),
             call.response.as_deref().unwrap_or_default(),
@@ -661,12 +889,12 @@ pub fn record_post(call: &ToolCall, state: &mut ReviewState) {
 /// dilaporkan dengan `Page URL` barunya.
 const NO_PAGE_UNLESS_MOVED: &[&str] = &["browser_fill_form", "browser_type", "browser_press_key"];
 
-fn record_pw(tool: &str, kind: Option<Kind>, text: &str, state: &mut ReviewState) {
+fn record_pw(server: &str, tool: &str, kind: Option<Kind>, text: &str, state: &mut ReviewState) {
     let Some(kind) = kind else {
         return;
     };
     if kind == Kind::Close {
-        state.page = None;
+        state.pages.remove(server);
         return;
     }
     if kind == Kind::Context {
@@ -678,19 +906,20 @@ fn record_pw(tool: &str, kind: Option<Kind>, text: &str, state: &mut ReviewState
         .collect();
     let unchanged =
         urls.is_empty() && NO_PAGE_UNLESS_MOVED.contains(&tool) && !text.contains("### Error");
-    let page = state.page.get_or_insert_with(TabState::default);
+    let origins = state.origins.clone();
+    let page = state.pages.entry(server.to_owned()).or_default();
     let off = if unchanged {
         page.url.clone()
     } else {
         urls.iter()
-            .find(|u| !origin_allowed(&state.origins, Some(u)))
+            .find(|u| !origin_allowed(&origins, Some(u)))
             .or_else(|| urls.first())
             .map(|u| (*u).to_owned())
     };
     // Halaman stabil hanya dengan URL baru di respons ini.
     let known = off.is_some() && !unchanged;
     // Pembaca hanya boleh memperketat, tidak memulihkan halaman ke app.
-    if kind != Kind::Reader || !origin_allowed(&state.origins, off.as_deref()) {
+    if kind != Kind::Reader || !origin_allowed(&origins, off.as_deref()) {
         page.url = off;
     }
     if !known {
@@ -1516,6 +1745,7 @@ mod tests {
         for tool in [
             "browser_evaluate",
             "browser_run_code",
+            "browser_run_code_unsafe",
             "browser_file_upload",
             "browser_install",
             "browser_tabs",
@@ -1524,6 +1754,225 @@ mod tests {
             "tool_baru",
         ] {
             assert!(!allows(tool, &s), "{tool}");
+        }
+    }
+
+    fn role_call(server: &str, tool: &str, url: Option<&str>) -> ToolCall {
+        ToolCall {
+            tool_name: format!("mcp__{server}__{tool}"),
+            url: url.map(str::to_owned),
+            ..ToolCall::default()
+        }
+    }
+
+    fn lab_post(server: &str, tool: &str, url: Option<&str>, response: &str, s: &mut ReviewState) {
+        let mut call = role_call(server, tool, url);
+        mark_before(&call, s);
+        call.response = Some(response.to_owned());
+        record_post(&call, s);
+    }
+
+    const STAGING: &str = "/home/dev/.mandor/lab/sessions/rv1/fixtures";
+
+    fn guard() -> LabGuard<'static> {
+        LabGuard {
+            fixtures: Some(STAGING),
+        }
+    }
+
+    fn lab_allows(call: &ToolCall, s: &ReviewState) -> bool {
+        classify_lab(call, s, &["mandor".to_owned()], guard()) == Verdict::Allow
+    }
+
+    #[test]
+    fn nama_tool_playwright_per_role() {
+        assert_eq!(
+            playwright_tool("mcp__playwright__browser_click"),
+            Some(("playwright", "browser_click"))
+        );
+        assert_eq!(
+            playwright_tool("mcp__playwright_admin__browser_click"),
+            Some(("playwright_admin", "browser_click"))
+        );
+        assert_eq!(
+            playwright_tool("mcp__playwright_non-admin__browser_evaluate"),
+            Some(("playwright_non-admin", "browser_evaluate"))
+        );
+        for bad in [
+            "mcp__playwright_Admin__browser_click",
+            "mcp__playwright_a_b__browser_click",
+            "mcp__playwrightx__browser_click",
+            "mcp__playwright__",
+            "Read",
+        ] {
+            assert_eq!(playwright_tool(bad), None, "{bad}");
+        }
+    }
+
+    #[test]
+    fn lab_boleh_evaluate_setelah_halaman_stabil_dan_review_tidak() {
+        let mut s = state();
+        let eval = role_call("playwright_admin", "browser_evaluate", None);
+        assert!(!lab_allows(&eval, &s), "belum navigasi");
+        lab_post(
+            "playwright_admin",
+            "browser_navigate",
+            Some("http://localhost:5173/"),
+            &page_state("http://localhost:5173/"),
+            &mut s,
+        );
+        assert!(lab_allows(&eval, &s));
+        assert_ne!(
+            classify_review(&eval, &s, &[]),
+            Verdict::Allow,
+            "review menolak"
+        );
+        // evaluate bisa memindah halaman: setelahnya perlu wait_for.
+        mark_before(&eval, &mut s);
+        assert!(!lab_allows(
+            &role_call("playwright_admin", "browser_snapshot", None),
+            &s
+        ));
+    }
+
+    #[test]
+    fn navigasi_satu_role_tidak_membuka_role_lain() {
+        let mut s = state();
+        lab_post(
+            "playwright_admin",
+            "browser_navigate",
+            Some("http://localhost:5173/"),
+            &page_state("http://localhost:5173/"),
+            &mut s,
+        );
+        assert!(lab_allows(
+            &role_call("playwright_admin", "browser_click", None),
+            &s
+        ));
+        assert!(!lab_allows(
+            &role_call("playwright_user", "browser_click", None),
+            &s
+        ));
+    }
+
+    #[test]
+    fn upload_lab_hanya_dari_staging() {
+        let mut s = state();
+        lab_post(
+            "playwright_admin",
+            "browser_navigate",
+            Some("http://localhost:5173/"),
+            &page_state("http://localhost:5173/"),
+            &mut s,
+        );
+        let upload = |paths: &[&str]| ToolCall {
+            tool_name: "mcp__playwright_admin__browser_file_upload".to_owned(),
+            paths: paths.iter().map(|p| (*p).to_owned()).collect(),
+            ..ToolCall::default()
+        };
+        assert!(lab_allows(&upload(&[&format!("{STAGING}/kb.xlsx")]), &s));
+        assert!(lab_allows(&upload(&[&format!("{STAGING}/a/kb.xls")]), &s));
+        for bad in [
+            vec![format!("{STAGING}/../secrets.json")],
+            vec![format!("{STAGING}/.env")],
+            vec!["/etc/passwd".to_owned()],
+            vec![format!("{STAGING}/kb.xlsx"), "/etc/passwd".to_owned()],
+            vec![],
+        ] {
+            let refs: Vec<&str> = bad.iter().map(String::as_str).collect();
+            assert!(!lab_allows(&upload(&refs), &s), "{bad:?}");
+        }
+        let no_dir = LabGuard { fixtures: None };
+        assert_ne!(
+            classify_lab(&upload(&[&format!("{STAGING}/kb.xlsx")]), &s, &[], no_dir),
+            Verdict::Allow
+        );
+        assert_ne!(
+            classify_review(&upload(&[&format!("{STAGING}/kb.xlsx")]), &s, &[]),
+            Verdict::Allow
+        );
+    }
+
+    #[test]
+    fn lab_menolak_kode_node_shell_dan_tool_baru() {
+        let mut s = state();
+        lab_post(
+            "playwright_admin",
+            "browser_navigate",
+            Some("http://localhost:5173/"),
+            &page_state("http://localhost:5173/"),
+            &mut s,
+        );
+        for tool in [
+            "browser_run_code",
+            "browser_run_code_unsafe",
+            "browser_install",
+            "tool_baru",
+        ] {
+            assert!(
+                !lab_allows(&role_call("playwright_admin", tool, None), &s),
+                "{tool}"
+            );
+        }
+        let bash = ToolCall {
+            tool_name: "Bash".to_owned(),
+            command: Some("ls".to_owned()),
+            ..ToolCall::default()
+        };
+        assert!(!lab_allows(&bash, &s));
+        for tool in ["WebFetch", "Write", "Edit", "Task"] {
+            let call = ToolCall {
+                tool_name: tool.to_owned(),
+                ..ToolCall::default()
+            };
+            assert!(!lab_allows(&call, &s), "{tool}");
+        }
+        let ledger = ToolCall {
+            tool_name: "mcp__mandor__ac_set_verdict".to_owned(),
+            ..ToolCall::default()
+        };
+        assert!(lab_allows(&ledger, &s));
+    }
+
+    #[test]
+    fn lab_tidak_membaca_env_kredensial_dan_proc() {
+        let s = state();
+        let read = |p: &str| ToolCall {
+            tool_name: "Read".to_owned(),
+            paths: vec![p.to_owned()],
+            ..ToolCall::default()
+        };
+        assert!(lab_allows(&read("/w/run/src/app.ts"), &s));
+        assert!(lab_allows(&read("/w/run/.env.example"), &s));
+        for bad in [
+            "/w/run/.env",
+            "/w/run/.env.local",
+            "/w/run/api/.env.production",
+            "/home/dev/.mandor/lab/repo1/private/secrets.json",
+            "/home/dev/.ssh/id_rsa",
+            "/proc/self/environ",
+        ] {
+            assert!(!lab_allows(&read(bad), &s), "{bad}");
+        }
+    }
+
+    #[test]
+    fn navigasi_skema_non_http_ditolak_di_lab_dan_review() {
+        let s = state();
+        for url in [
+            "file:///proc/self/environ",
+            "data:text/html,x",
+            "javascript:alert(1)",
+            "view-source:http://localhost:5173/",
+            "chrome://settings",
+        ] {
+            let nav = role_call("playwright_admin", "browser_navigate", Some(url));
+            assert!(!lab_allows(&nav, &s), "{url}");
+            assert_ne!(
+                classify_review(&pw("browser_navigate", Some(url)), &s, &[]),
+                Verdict::Allow,
+                "{url}"
+            );
         }
     }
 }

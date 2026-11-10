@@ -35,6 +35,9 @@ pub struct PermitFile {
     pub members: Vec<String>,
     /// Folder catatan bukti; `None` bila giliran ini tidak punya kartu.
     pub evidence: Option<String>,
+    /// Folder staging berkas uji giliran lab (KTD-L11).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fixtures: Option<String>,
 }
 
 impl PermitFile {
@@ -50,6 +53,7 @@ impl PermitFile {
             members: self.members.clone(),
             vm_run_dir,
             private,
+            fixtures: self.fixtures.clone(),
         })
     }
 
@@ -203,6 +207,7 @@ mod tests {
             run_root: "/w".to_owned(),
             members: vec!["/w".to_owned()],
             evidence: None,
+            fixtures: None,
         }
     }
 

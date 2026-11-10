@@ -6,25 +6,20 @@ Panduan menyiapkan review Acceptance Criteria (AC) di Mandor: sumber desain, app
 
 1. **Start**: pilih sumber desain (opsional) dan skill reviewer. Fase plan membandingkan setiap AC dengan desain dan mengisi kolom Design (In design, Partly, Missing, Conflicts).
 2. **Approve plan**: di tab Plan, tandai AC yang desainnya lebih baru dengan **Follow design**. AC itu keluar dari gerbang, dan selisih desain ditulis ke field `mandor_design_gaps` di kartu Lark.
-3. **Review**: tombol **Push & create PR** memulai review bila AC belum direview. Reviewer membaca kode dan test, dan bila app web berjalan, mencoba app di Chrome Anda. Hasil per AC: Pass, Fail, atau Can't verify.
+3. **Review**: tombol **Push & create PR** memulai review bila AC belum direview. Reviewer membaca kode dan test, dan bila app web berjalan, mencoba app di browser Playwright headless dengan akun uji Default. Hasil per AC: Pass, Fail, atau Can't verify. AC yang butuh role lain, simulasi kegagalan, atau berkas uji lalu diuji **review lab** (lihat `review-lab.md`).
 4. **Gerbang**: AC Fail memblokir push (mode Block) atau menjadi peringatan (mode Warn). AC Can't verify harus Anda konfirmasi. **Push anyway** butuh alasan dan dicatat di PR.
 5. **PR**: deskripsi PR berisi ringkasan AC.
 
 Mandor tidak pernah mengubah status Lark di luar allowlist Rilis 1 dan tidak mengirim pesan ke siapa pun.
 
-## 2. Ekstensi Claude in Chrome
+## 2. Browser reviewer
 
-Reviewer memakai browser keluarga Chrome milik Anda (Chrome, Edge, atau Chromium) lewat ekstensi Claude in Chrome.
-
-1. Pasang ekstensi Claude in Chrome dari Chrome Web Store dan login dengan akun Claude yang sama dengan `claude` di mesin daemon.
-2. Di WSL, Chrome Windows tersambung ke `claude` di WSL lewat native messaging. Jalankan `claude --chrome` sekali dari terminal WSL untuk memastikan sambungan.
-3. Di Mandor, buka **Settings → About → Claude in Chrome → Check connection**. Status "Connected" disimpan 60 detik; checklist kesiapan memakai hasil ini.
+Review memakai Playwright MCP headless, di laptop maupun VM, login dengan akun uji **Default** dari perlengkapan review lab yang Anda setujui. Pemasangan Playwright dan penyiapan akun uji: `review-lab.md`. Claude in Chrome tidak lagi dipakai review.
 
 Pagar yang berlaku selama review:
 
-- Reviewer hanya memakai tab yang ia buat sendiri, bukan tab Anda.
-- Navigasi hanya ke origin app run ini (port atau App URL di setelan repo). Alamat lain ditolak hook dengan pesan "that address is outside the app allowed for this review".
-- Reviewer tidak menjalankan skrip di halaman dan tidak mengunggah berkas.
+- Semua request browser lewat proxy review: navigasi dan request hanya ke origin app run ini; request tulis dijawab `418` kecuali path login dan path POST baca-saja yang disetujui.
+- Review biasa tidak menjalankan skrip di halaman dan tidak mengunggah berkas; itu hanya untuk review lab.
 - Isi halaman dibaca model AI. Jangan login dengan akun produksi atau data pelanggan sungguhan.
 
 ## 3. Setelan repo web
@@ -57,7 +52,7 @@ Restart otomatis sebelum review hanya berjalan bila semuanya terpenuhi:
 - app run itu sedang menyala tetapi dengan kode lama;
 - tidak ada app run lain yang sedang menyala (app run lain tidak pernah dihentikan);
 - Anda pernah menandai **I'm logged in**;
-- ekstensi Chrome tersambung.
+- Playwright MCP terpasang (browser review siap).
 
 Konfirmasi login dipertahankan karena cookie di browser tetap ada. Bila app butuh login ulang setelah restart, reviewer akan menilai AC tampilan Can't verify. Hasil restart dicatat di chat run. Bila restart gagal atau melewati 5 menit, review tetap berjalan tanpa browser. Stop app oleh Anda atau restart daemon mereset konfirmasi, jadi restart otomatis baru aktif lagi setelah Anda login dan mengonfirmasi ulang.
 
@@ -117,7 +112,7 @@ Riwayat status saja tidak menunjukkan alasan task dikembalikan, jadi reviewer ma
 | Gejala | Penyebab dan tindakan |
 |---|---|
 | Review tanpa browser, alasan "No app for this run" | Test mode repo No app, atau app run ini tidak menyala. Nyalakan **Run app** |
-| Alasan tanpa browser "Claude in Chrome extension not connected" | Ekstensi belum login atau native messaging belum tersambung. Jalankan `claude --chrome` sekali, lalu **Check connection** di Settings → About |
+| Alasan tanpa browser "Playwright is not installed" atau "No test login is prepared for unattended review" | Pasang Playwright MCP dan siapkan perlengkapan review lab (`review-lab.md`) |
 | App Failed: port already in use | Program lain memakai port. Hentikan program itu atau ganti port |
 | Review stale | Kode berubah setelah verdict. Jalankan review lagi sebelum push |
 | Push held (Waiting Fix) | Review otomatis menemukan AC Fail. Buka tab AC review, kirim temuan ke agent atau push anyway dengan alasan |

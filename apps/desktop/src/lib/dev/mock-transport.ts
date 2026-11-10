@@ -11,6 +11,8 @@ import type { RunView } from '#lib/protocol/RunView.ts';
 import type { Transport } from '#lib/api/client.ts';
 import type { AcRowView } from '#lib/protocol/AcRowView.ts';
 import type { AppRunView } from '#lib/protocol/AppRunView.ts';
+import type { LabSetParams } from '#lib/protocol/LabSetParams.ts';
+import type { LabView } from '#lib/protocol/LabView.ts';
 import { activeRows, gate } from '#lib/ac-review.ts';
 import { background } from '#lib/stores/background.svelte.ts';
 import { history, ledger, mockShot, scenarioFor, scenarioRows } from './mock-ac.ts';
@@ -27,6 +29,67 @@ function appView(runId: string, state: string): AppRunView {
     login_confirmed: false,
     error: state === 'failed' ? 'pegasus-web: the app exited (code 1) before opening its port' : null
   };
+}
+
+/** Perlengkapan lab tiruan per repo (plan 2026-11-10-001). */
+const LAB = new Map<string, LabView>();
+function mockLab(method: string, params: Record<string, unknown>): LabView {
+  const repo = String(params.repo_id);
+  const cur: LabView = LAB.get(repo) ?? {
+    repo_id: repo,
+    equipment: null,
+    approved: false,
+    approved_at_ms: null,
+    proposing: false,
+    proposal: null,
+    proposal_error: null
+  };
+  let next = cur;
+  if (method === 'lab.propose') {
+    next = {
+      ...cur,
+      proposing: false,
+      proposal_error: null,
+      proposal: {
+        accounts: [
+          { role: 'admin', username: 'admin@pegasus.test', default: true, has_password: false },
+          { role: 'manager', username: 'manager@pegasus.test', default: false, has_password: false }
+        ],
+        login: {
+          url: 'http://localhost:5173/login',
+          username_field: '#email',
+          password_field: '#password',
+          submit: 'text=Sign in',
+          submit_path: '/api/auth/login',
+          success_kind: 'path',
+          success: '/dashboard',
+          authenticated_url: 'http://localhost:5173/dashboard'
+        },
+        safe_posts: ['/api/invoices/search'],
+        fixtures_dir: 'review-fixtures'
+      }
+    };
+  } else if (method === 'lab.set') {
+    const p = params as unknown as LabSetParams;
+    const has = new Set([
+      ...(cur.equipment?.accounts.filter((a) => a.has_password).map((a) => a.role) ?? []),
+      ...p.passwords.filter((x) => x.password).map((x) => x.role)
+    ]);
+    next = {
+      ...cur,
+      equipment: {
+        ...p.equipment,
+        accounts: p.equipment.accounts.map((a) => ({ ...a, has_password: has.has(a.role) }))
+      },
+      approved: false,
+      approved_at_ms: null,
+      proposal: null
+    };
+  } else if (method === 'lab.approve') {
+    next = { ...cur, approved: true, approved_at_ms: Date.now() };
+  }
+  LAB.set(repo, next);
+  return next;
 }
 
 /** Buku AC tiruan per run; berubah saat review atau Push & PR. */
@@ -838,6 +901,40 @@ function handle(method: string, params: Record<string, unknown>): unknown {
       return { connected: true, detail: '', checked_at_ms: Date.now() };
     case 'review.screenshot':
       return { data_url: mockShot(Number(params.index)) };
+    case 'review.findings':
+      return scenarioFor(String(params.run_id)) === 'lab'
+        ? [
+            {
+              review_id: 'rv-lab',
+              card: null,
+              title: 'The success toast covers the Save button',
+              detail: 'Seen while testing AC-3 as manager; the toast stays for 8 seconds.',
+              steps: ['Sign in as manager', 'Save a filter', 'The toast covers Save']
+            }
+          ]
+        : [];
+    case 'ledger.look_decision': {
+      const id = String(params.run_id);
+      const rows = acRows(id).map((r) =>
+        r.ac_id === params.ac_id && r.look_recommendation
+          ? {
+              ...r,
+              visual: params.approve && r.look_recommendation.advice === 'accept' ? 'accepted' : r.visual,
+              visual_detail: params.approve
+                ? { ...r.visual_detail, decision_reason: r.look_recommendation.reason, decided_by: 'You' }
+                : r.visual_detail,
+              look_recommendation: null
+            }
+          : r
+      );
+      AC.set(id, rows);
+      return rows;
+    }
+    case 'lab.get':
+    case 'lab.set':
+    case 'lab.approve':
+    case 'lab.propose':
+      return mockLab(method, params);
     case 'ledger.get': {
       const id = String(params.run_id);
       return ledger(id, acRows(id), scenarioFor(id));

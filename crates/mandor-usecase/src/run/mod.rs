@@ -105,6 +105,9 @@ pub struct RunService<D: Deps> {
     pub(crate) lab_plans: Mutex<HashMap<String, crate::review::lab::LabPlan>>,
     /// Progres lab yang berjalan per run.
     pub(crate) lab_runs: Mutex<HashMap<String, crate::review::lab::LabProgress>>,
+    /// Giliran pengusul perlengkapan lab per repo beserta usulannya (KTD-L14).
+    /// Hanya di memori: setelah restart developer cukup meminta usulan lagi.
+    pub(crate) lab_setups: Mutex<HashMap<String, crate::review::lab_setup::SetupProgress>>,
     /// Penghenti run aktif per run ID beserta generasinya.
     stoppers: Mutex<HashMap<String, (i64, StopperOf<D>)>>,
     /// Gerbang drain untuk pembaruan daemon (dibagi dengan daemon).
@@ -178,6 +181,7 @@ impl<D: Deps> RunService<D> {
             cursor_sent: Mutex::new(HashMap::new()),
             lab_plans: Mutex::new(HashMap::new()),
             lab_runs: Mutex::new(HashMap::new()),
+            lab_setups: Mutex::new(HashMap::new()),
             cleanup_checked_ms: std::sync::atomic::AtomicI64::new(0),
             cleanup_busy: std::sync::atomic::AtomicBool::new(false),
             stoppers: Mutex::new(HashMap::new()),

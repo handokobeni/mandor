@@ -620,6 +620,10 @@ impl mandor_usecase::run_ports::Prompts for PlainMessage {
         format!("CONTINUE SKILL:{}", skill.unwrap_or("-"))
     }
 
+    fn lab_setup_message(&self, app_url: &str) -> String {
+        format!("LAB SETUP {app_url}")
+    }
+
     fn lab_message(&self, b: &mandor_usecase::run_ports::LabBrief<'_>) -> String {
         let acs: Vec<String> = b.rows.iter().map(|r| r.ac_id.clone()).collect();
         let gone: Vec<String> = b.unavailable.iter().map(|(r, _)| r.clone()).collect();

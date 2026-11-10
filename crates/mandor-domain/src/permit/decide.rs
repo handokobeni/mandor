@@ -14,7 +14,9 @@ use crate::hook::{
     DesignRoot, ToolCall, Verdict, check_design_path, classify_planning, classify_vm,
     classify_with_mcp, in_protected_dir, is_credential_path, is_write_tool, program_name,
 };
-use crate::hook_review::{LabGuard, ReviewState, classify_lab, classify_review};
+use crate::hook_review::{
+    LabGuard, ReviewState, classify_lab, classify_lab_setup, classify_review,
+};
 
 /// Jenis giliran agent.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -24,6 +26,9 @@ pub enum TurnKind {
     Review,
     /// Reviewer lab (plan 2026-11-10-001, KTD-L10).
     Lab,
+    /// Pengusul perlengkapan lab (KTD-L14): hanya membaca worktree utama repo
+    /// dan memanggil `lab_propose`.
+    LabSetup,
 }
 
 impl TurnKind {
@@ -34,6 +39,7 @@ impl TurnKind {
             Self::Plan => "plan",
             Self::Review => "review",
             Self::Lab => "lab",
+            Self::LabSetup => "lab_setup",
         }
     }
 
@@ -44,6 +50,7 @@ impl TurnKind {
             "plan" => Some(Self::Plan),
             "review" => Some(Self::Review),
             "lab" => Some(Self::Lab),
+            "lab_setup" => Some(Self::LabSetup),
             _ => None,
         }
     }
@@ -150,13 +157,14 @@ pub fn decide(
                 classify_lab(call, state, &scope.mcp, guard)
             },
         ),
+        TurnKind::LabSetup => classify_lab_setup(call, &scope.mcp),
         TurnKind::Plan => classify_planning(call, &scope.mcp),
         TurnKind::Implement => classify_with_mcp(call, &scope.mcp),
     };
     if let Verdict::Deny(reason) = verdict {
         return Decision::Deny(reason);
     }
-    if scope.turn == TurnKind::Lab
+    if matches!(scope.turn, TurnKind::Lab | TurnKind::LabSetup)
         && let Some(reason) = lab_paths(scope, call, cwd, facts)
     {
         return Decision::Deny(reason);
@@ -1203,5 +1211,47 @@ mod tests {
     fn jenis_giliran_lab_bolak_balik() {
         assert_eq!(TurnKind::parse("lab"), Some(TurnKind::Lab));
         assert_eq!(TurnKind::Lab.as_str(), "lab");
+        assert_eq!(TurnKind::parse("lab_setup"), Some(TurnKind::LabSetup));
+        assert_eq!(TurnKind::LabSetup.as_str(), "lab_setup");
+    }
+
+    /// KTD-L14: pengusul perlengkapan hanya membaca worktree utama repo tanpa
+    /// berkas env, dan hanya memanggil `lab_propose` di server ledger.
+    #[test]
+    fn giliran_pengusul_lab_hanya_baca() {
+        let mut setup = scope(TurnKind::LabSetup);
+        setup.mcp = vec!["mandor".to_owned()];
+        let call = |tool: &str, path: Option<&str>| ToolCall {
+            tool_name: tool.to_owned(),
+            paths: path.map(|p| vec![p.to_owned()]).unwrap_or_default(),
+            ..ToolCall::default()
+        };
+        let d = |c: &ToolCall| decide(&setup, c, "/run/kelola-api", None, &fs());
+        let denied = |c: &ToolCall| matches!(d(c), Decision::Deny(_));
+        assert!(!denied(&call("Read", Some("README.md"))));
+        assert!(!denied(&call("Read", Some(".env.example"))));
+        assert!(!denied(&call("Grep", None)));
+        assert!(!denied(&call("mcp__mandor__lab_propose", None)));
+        assert!(denied(&call("Read", Some(".env"))));
+        assert!(denied(&call("Read", Some("config/.env.local"))));
+        assert!(denied(&call(
+            "Read",
+            Some("/home/u/.mandor/lab/kelola/private/secrets.json")
+        )));
+        assert!(
+            denied(&call("Read", Some("keys/id_rsa"))),
+            "symlink keluar worktree"
+        );
+        assert!(denied(&call("Write", Some("lab.json"))));
+        assert!(denied(&call("WebFetch", None)));
+        assert!(denied(&call("mcp__playwright__browser_navigate", None)));
+        assert!(denied(&call("mcp__claude-in-chrome__navigate", None)));
+        assert!(denied(&call("mcp__lain__alat", None)));
+        let bash = ToolCall {
+            tool_name: "Bash".to_owned(),
+            command: Some("cat README.md".to_owned()),
+            ..ToolCall::default()
+        };
+        assert!(denied(&bash));
     }
 }

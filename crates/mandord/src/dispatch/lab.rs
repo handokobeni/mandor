@@ -18,13 +18,29 @@ use crate::lab_secrets;
 
 impl AppDispatch {
     pub(super) fn is_lab_method(name: &str) -> bool {
-        [method::LAB_GET, method::LAB_SET, method::LAB_APPROVE].contains(&name)
+        [
+            method::LAB_GET,
+            method::LAB_SET,
+            method::LAB_APPROVE,
+            method::LAB_PROPOSE,
+        ]
+        .contains(&name)
     }
 
     pub(super) async fn lab_call(&self, name: &str, v: Value) -> Result<Value, RpcError> {
         match name {
             method::LAB_SET => self.lab_set(params(v)?).await,
             method::LAB_APPROVE => self.lab_approve(params(v)?).await,
+            method::LAB_PROPOSE => {
+                let p: LabRepoRef = params(v)?;
+                self.session()
+                    .await?
+                    .runs
+                    .propose_lab(&p.repo_id)
+                    .await
+                    .map_err(super::run_error)?;
+                self.lab_view(&p.repo_id).await
+            }
             _ => {
                 let p: LabRepoRef = params(v)?;
                 self.lab_view(&p.repo_id).await
@@ -42,11 +58,18 @@ impl AppDispatch {
         let secrets = lab_secrets::load(&self.app.cfg.lab_root(), repo_id)
             .await
             .map_err(internal)?;
+        let setup = match self.app.session().await {
+            Some(s) => s.runs.lab_setup_status(repo_id),
+            None => mandor_usecase::review::LabSetupStatus::default(),
+        };
         ok(&LabView {
             repo_id: repo_id.to_owned(),
             approved: lab.as_ref().is_some_and(|l| l.approved_digest.is_some()),
             approved_at_ms: lab.as_ref().and_then(|l| l.approved_at_ms),
             equipment: lab.map(|l| equipment_dto(&l.equipment, &secrets)),
+            proposing: setup.running,
+            proposal: setup.proposal.map(|eq| equipment_dto(&eq, &secrets)),
+            proposal_error: setup.error,
         })
     }
 
@@ -157,7 +180,7 @@ fn equipment_dto(eq: &LabEquipment, secrets: &lab_secrets::LabSecrets) -> LabEqu
     }
 }
 
-fn equipment_of(d: LabEquipmentDto) -> Result<LabEquipment, RpcError> {
+pub(super) fn equipment_of(d: LabEquipmentDto) -> Result<LabEquipment, RpcError> {
     let success = match d.login.success_kind.as_str() {
         "path" => SuccessMarker::PathPrefix(d.login.success),
         "text" => SuccessMarker::Text(d.login.success),

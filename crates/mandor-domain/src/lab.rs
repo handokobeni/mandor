@@ -455,6 +455,49 @@ pub fn is_loopback_host(host: &str) -> bool {
 /// Penanda pengganti nilai rahasia di bukti.
 pub const REDACTED: &str = "[redacted]";
 
+/// Kunci usulan perlengkapan yang tidak boleh ada: usulan agent tidak pernah
+/// membawa password, secret, token, atau cookie (R13). Selektor
+/// `password_field` boleh karena hanya menunjuk kolom di form.
+const SECRET_KEYS: &[&str] = &[
+    "password",
+    "passwd",
+    "secret",
+    "token",
+    "cookie",
+    "credential",
+];
+
+/// Jalur kunci pertama di usulan JSON yang tampak seperti rahasia, mis.
+/// `accounts[0].password`; `None` bila bersih.
+#[must_use]
+pub fn secret_field(value: &serde_json::Value) -> Option<String> {
+    fn walk(v: &serde_json::Value, path: &str) -> Option<String> {
+        match v {
+            serde_json::Value::Object(map) => map.iter().find_map(|(k, child)| {
+                let here = if path.is_empty() {
+                    k.clone()
+                } else {
+                    format!("{path}.{k}")
+                };
+                let lower = k.to_ascii_lowercase();
+                let secret =
+                    lower != "password_field" && SECRET_KEYS.iter().any(|s| lower.contains(s));
+                if secret {
+                    Some(here)
+                } else {
+                    walk(child, &here)
+                }
+            }),
+            serde_json::Value::Array(items) => items
+                .iter()
+                .enumerate()
+                .find_map(|(i, child)| walk(child, &format!("{path}[{i}]"))),
+            _ => None,
+        }
+    }
+    walk(value, "")
+}
+
 /// Mengganti setiap kemunculan nilai rahasia di `text` (KTD-L12). Nilai
 /// pendek (< 4 karakter) dilewati agar teks biasa tidak rusak; nilai panjang
 /// diganti lebih dulu agar nilai yang memuat nilai lain tetap tersamarkan.
@@ -598,6 +641,37 @@ pub fn lab_candidates(rows: &[AcRow], data_ready: bool) -> Vec<CardCandidates> {
         }
     }
     out
+}
+
+#[cfg(test)]
+mod secret_tests {
+    use super::secret_field;
+    use serde_json::json;
+
+    #[test]
+    fn usulan_dengan_field_rahasia_dikenali() {
+        let clean = json!({
+            "accounts": [{"role": "admin", "username": "a@uji.test", "default": true}],
+            "login": {"password_field": "#password", "submit": "text=Sign in"},
+        });
+        assert_eq!(secret_field(&clean), None);
+        let with = |extra: serde_json::Value| {
+            let mut v = clean.clone();
+            v["accounts"][0]
+                .as_object_mut()
+                .unwrap_or_else(|| panic!("objek"))
+                .extend(extra.as_object().cloned().unwrap_or_default());
+            secret_field(&v)
+        };
+        assert_eq!(
+            with(json!({"password": "rahasia"})).as_deref(),
+            Some("accounts[0].password")
+        );
+        assert!(with(json!({"Password": "x"})).is_some());
+        assert!(with(json!({"api_token": "x"})).is_some());
+        assert!(with(json!({"session_cookie": "x"})).is_some());
+        assert!(secret_field(&json!({"login": {"admin_secret": 1}})).is_some());
+    }
 }
 
 #[cfg(test)]

@@ -45,6 +45,9 @@ pub mod method {
     pub const LEDGER_TOOL_REPORT_FINDING: &str = "ledger.tool.report_finding";
     /// Koneksi kapabilitas, peran verdict: `LedgerToolRecommendLook` (R18).
     pub const LEDGER_TOOL_RECOMMEND_LOOK: &str = "ledger.tool.recommend_look";
+    /// Koneksi kapabilitas, peran `lab_setup`: usulan perlengkapan lab
+    /// (`LabEquipmentDto` tanpa password) → `{"saved": true}` (KTD-L14).
+    pub const LEDGER_TOOL_LAB_PROPOSE: &str = "ledger.tool.lab_propose";
     /// Koneksi kapabilitas, peran ask atau design di laptop: `AskToolQuestion`
     /// → teks balasan alat (plan 2026-11-07-001).
     pub const ASK_TOOL_ASK: &str = "ask.tool.ask";
@@ -96,6 +99,9 @@ pub mod method {
     /// Menyetujui perlengkapan yang dilihat developer (`LabApproveParams` →
     /// `LabView`).
     pub const LAB_APPROVE: &str = "lab.approve";
+    /// Meminta agent mengusulkan perlengkapan dari isi repo (`LabRepoRef` →
+    /// `LabView`); hasilnya muncul di `LabView.proposal` (KTD-L14).
+    pub const LAB_PROPOSE: &str = "lab.propose";
     /// Sumber desain terdaftar (`Vec<DesignSourceView>`).
     pub const DESIGN_SOURCES_LIST: &str = "design_sources.list";
     /// `DesignSourceAdd` → `DesignSourceView`.

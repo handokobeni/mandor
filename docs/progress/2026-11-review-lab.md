@@ -12,6 +12,7 @@ Branch fase 1: `feat/review-lab-phase1`.
 | U5 | selesai | `ac_set_verdict` dengan langkah, screenshot, data disiapkan, `simulated`, `lab_need`; Pass lewat browser wajib langkah; tulis yang diblokir proxy membuat Can't verify `lab_need: data`; penyamaran password dan nilai cookie; `ac_report_finding`, `ac_recommend_look` |
 | U6 | selesai | `TurnKind::Lab`, `classify_lab` (evaluate, upload dari staging, tanpa Bash, baca dibatasi), parser `mcp__playwright[_<role>]__`, state halaman per server (berkas state lama tetap terbaca), spec agent giliran lab dengan satu server per role, prompt reviewer lab |
 | U7 | selesai | `review/lab.rs`: rencana lab saat review mulai, sesi lab per kartu berurutan (login semua role, staging berkas uji, proxy yang sama), `finish_lab_turn`, baris tak dilaporkan kembali dengan catatan, batas biaya/waktu per run, catatan bila perlengkapan belum disetujui, pembatalan di tengah lab; review perbaikan otomatis memakai ekor yang sama |
+| U8 | selesai | `TurnKind::LabSetup` + `classify_lab_setup` (baca worktree utama tanpa `.env`, tanpa shell/browser/tulis); `review/lab_setup.rs` (`propose_lab`, 100 sen, 600 detik, satu giliran per repo); tool MCP `lab_propose` (hanya untuk peran `lab_setup`), field rahasia ditolak daemon (`secret_field`), usulan divalidasi U1 dan kiriman ulang sekali; RPC `lab.propose`, `LabView.proposal/proposing/proposal_error` |
 
 ## Catatan
 
@@ -20,4 +21,6 @@ Branch fase 1: `feat/review-lab-phase1`.
 - Playwright MCP 0.0.83 dipasang di `~/.local` (`~/.local/bin/playwright-mcp`) beserta Chromium 1247; tool kode bernama `browser_run_code_unsafe`. Daemon menemukan biner itu otomatis di laptop.
 - RUSTSEC-2026-0459 diabaikan di `deny.toml` dengan alasan (disetujui pemilik produk 2026-11-10).
 - Review keamanan otomatis: `CONNECT` ke origin HTTP di luar sesi data bisa melewati blokir tulis. Diperbaiki: terowongan ke origin HTTP hanya saat tulis diizinkan (KTD-L6 diperbarui).
+- Draf usulan perlengkapan (U8) hanya di memori dan tidak menimpa perlengkapan tersimpan; setelah restart developer cukup menekan "Propose from repo" lagi.
+- Review keamanan otomatis: folder berkas uji bisa dialihkan lewat symlink di tengah jalur. Diperbaiki: tiap bagian jalur diperiksa tanpa mengikuti symlink dan jalur kanonis harus tetap di worktree.
 - Progres lab hanya di memori (plan: `LabCursor` di `RunRecord`); setelah daemon restart, review yang terputus ditutup rekonsiliasi seperti review biasa.

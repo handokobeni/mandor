@@ -182,6 +182,7 @@ impl<D: Deps> RunService<D> {
             sessions,
             lab: Some(LabTurn {
                 fixtures: progress.fixtures.clone(),
+                setup: false,
             }),
         });
         progress.session = session;

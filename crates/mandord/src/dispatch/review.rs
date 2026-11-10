@@ -42,6 +42,8 @@ pub(super) enum LedgerTool {
         result: mandor_domain::ac_ledger::Visual,
         report: mandor_usecase::review::VisualReport,
     },
+    /// Usulan perlengkapan lab dari giliran pengusul (KTD-L14).
+    LabPropose(mandor_domain::lab::LabEquipment),
 }
 
 /// Mengurai method dan parameter tool ledger; method lain ditolak.
@@ -110,6 +112,16 @@ pub(super) fn ledger_tool(name: &str, v: Value) -> Result<LedgerTool, RpcError> 
                 reason: p.reason,
             })
         }
+        method::LEDGER_TOOL_LAB_PROPOSE => {
+            if let Some(field) = mandor_domain::lab::secret_field(&v) {
+                return Err(RpcError::new(
+                    ErrorCode::Rejected,
+                    format!("proposals must not contain passwords or other secrets (`{field}`)"),
+                ));
+            }
+            let dto: mandor_protocol::LabEquipmentDto = params(v)?;
+            Ok(LedgerTool::LabPropose(super::lab::equipment_of(dto)?))
+        }
         method::LEDGER_TOOL_SET_VISUAL => {
             let p: LedgerToolSetVisual = params(v)?;
             let result = mandor_domain::ac_ledger::Visual::parse(&p.result)
@@ -172,7 +184,7 @@ fn tool_error(e: &LedgerToolError) -> RpcError {
     let code = match e {
         LedgerToolError::WrongRole => ErrorCode::Unauthorized,
         LedgerToolError::UnknownAc(_) => ErrorCode::NotFound,
-        LedgerToolError::NotAllowed(_) => ErrorCode::Rejected,
+        LedgerToolError::NotAllowed(_) | LedgerToolError::Invalid(_) => ErrorCode::Rejected,
         LedgerToolError::Storage(_) => ErrorCode::Internal,
     };
     RpcError::new(code, e.to_string())
@@ -191,6 +203,7 @@ pub(super) fn usecase_scope(s: &mandor_api::CapabilityScope) -> Option<Capabilit
         "verdict" => CapabilityRole::Verdict,
         "permit" => CapabilityRole::Permit,
         "ask" => CapabilityRole::Ask,
+        "lab_setup" => CapabilityRole::LabSetup,
         _ => return None,
     };
     Some(CapabilityScope {
@@ -383,6 +396,13 @@ impl AppDispatch {
                     .ledger_set_visual(&scope, &ac_id, result, report)
                     .await
             }
+            LedgerTool::LabPropose(eq) => {
+                s.runs
+                    .ledger_lab_propose(&scope, eq)
+                    .await
+                    .map_err(|e| tool_error(&e))?;
+                return ok(&serde_json::json!({"saved": true}));
+            }
         }
         .map_err(|e| tool_error(&e))?;
         ok(&rows.iter().map(ac_row_view).collect::<Vec<_>>())
@@ -555,6 +575,31 @@ mod tests {
     use mandor_domain::{AcRow, Design, RowStatus, Verdict};
 
     use super::*;
+
+    /// KTD-L14: usulan perlengkapan diurai; field rahasia ditolak.
+    #[test]
+    fn usulan_lab_diurai_dan_field_rahasia_ditolak() {
+        let proposal = serde_json::json!({
+            "accounts": [{"role": "admin", "username": "a@uji.test", "default": true}],
+            "login": {
+                "url": "http://localhost:5173/login", "username_field": "#email",
+                "password_field": "#password", "submit": "text=Sign in",
+                "submit_path": "/api/login", "success_kind": "path", "success": "/admin",
+                "authenticated_url": "http://localhost:5173/admin",
+            },
+        });
+        let t = ledger_tool(method::LEDGER_TOOL_LAB_PROPOSE, proposal.clone()).unwrap();
+        let LedgerTool::LabPropose(eq) = t else {
+            panic!("{t:?}");
+        };
+        assert_eq!(eq.accounts[0].role, "admin");
+        assert_eq!(eq.login.password_field, "#password");
+        let mut leaked = proposal;
+        leaked["accounts"][0]["password"] = serde_json::json!("rahasia");
+        let err = ledger_tool(method::LEDGER_TOOL_LAB_PROPOSE, leaked).unwrap_err();
+        assert_eq!(err.code, ErrorCode::Rejected);
+        assert!(!err.message.contains("rahasia"), "{}", err.message);
+    }
 
     #[test]
     fn tool_ledger_diurai_dan_method_lain_ditolak() {

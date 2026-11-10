@@ -274,6 +274,9 @@ pub struct ReviewRequest {
 pub struct LabTurn {
     /// Folder staging berkas uji milik daemon (KTD-L11).
     pub fixtures: Option<PathBuf>,
+    /// Giliran pengusul perlengkapan (KTD-L14): tanpa browser, hanya membaca
+    /// worktree utama repo dan memanggil `lab_propose`.
+    pub setup: bool,
 }
 
 /// Sesi login satu server Playwright: berkas `storageState` milik daemon yang
@@ -958,6 +961,9 @@ pub trait Prompts: Send + Sync {
     /// Pesan pertama sesi reviewer lab: AC calon lab sebagai data, role yang
     /// tersedia, dan folder berkas uji (plan 2026-11-10-001, U7).
     fn lab_message(&self, brief: &LabBrief<'_>) -> String;
+    /// Pesan pertama giliran pengusul perlengkapan lab (KTD-L14): URL app
+    /// repo sebagai data.
+    fn lab_setup_message(&self, app_url: &str) -> String;
     /// Pesan ke agent pelaksana berisi temuan reviewer sebagai data.
     fn findings_message(&self, rows: &[AcRow]) -> String;
 }

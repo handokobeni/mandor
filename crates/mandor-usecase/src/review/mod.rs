@@ -3,6 +3,7 @@
 pub(crate) mod capability;
 mod design;
 pub(crate) mod lab;
+pub(crate) mod lab_setup;
 mod ledger;
 pub(crate) mod service;
 pub mod settings;
@@ -15,6 +16,7 @@ pub use capability::{
 pub use design::{
     DesignCheck, DesignRoot, DesignSources, PathProbe, Prototype, SourceCheck, check_source,
 };
+pub use lab_setup::{LAB_SETUP_BUDGET_CENTS, LAB_SETUP_TIMEOUT, LabSetupStatus};
 pub use ledger::LedgerRefresh;
 pub use service::{
     AppReadiness, BrowserDriver, Confirmations, DEFAULT_BROWSER_SERVER, LoginKind, ReviewReadiness,

@@ -4,4 +4,16 @@ import type { LabEquipmentDto } from "./LabEquipmentDto";
 /**
  * Perlengkapan lab beserta status persetujuan.
  */
-export type LabView = { repo_id: string, equipment: LabEquipmentDto | null, approved: boolean, approved_at_ms: number | null, };
+export type LabView = { repo_id: string, equipment: LabEquipmentDto | null, approved: boolean, approved_at_ms: number | null, 
+/**
+ * Agent pengusul sedang berjalan.
+ */
+proposing: boolean, 
+/**
+ * Draf usulan agent terakhir; belum disimpan maupun disetujui.
+ */
+proposal: LabEquipmentDto | null, 
+/**
+ * Alasan giliran pengusul terakhir tidak menghasilkan usulan.
+ */
+proposal_error: string | null, };

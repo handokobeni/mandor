@@ -19,7 +19,7 @@ use crate::claude::guardrails::{
 use crate::claude::permit::{self, PermitFile};
 use crate::claude::review_state;
 use crate::prompt::{
-    OperatorContext, data_block, lab_operator_prompt, new_nonce, operator_prompt,
+    OperatorContext, data_block, lab_operator_prompt, lab_setup_prompt, new_nonce, operator_prompt,
     review_operator_prompt,
 };
 use mandor_domain::permit::TurnKind;
@@ -444,10 +444,10 @@ impl ClaudeAgent {
                 SessionRef::New(id) => Session::New(id.clone()),
                 SessionRef::Resume(id) => Session::Resume(id.clone()),
             },
-            operator_prompt: (if lab.is_some() {
-                lab_operator_prompt
-            } else {
-                review_operator_prompt
+            operator_prompt: (match lab {
+                Some(l) if l.setup => lab_setup_prompt,
+                Some(_) => lab_operator_prompt,
+                None => review_operator_prompt,
             })(&OperatorContext {
                 worktree: &wt,
                 branch: &req.branch,
@@ -500,10 +500,10 @@ impl ClaudeAgent {
             } else {
                 Vec::new()
             };
-            if review.lab.is_some() {
-                (TurnKind::Lab, lab_allowed(), mcp)
-            } else {
-                (TurnKind::Review, review_tools(req).0, mcp)
+            match &review.lab {
+                Some(l) if l.setup => (TurnKind::LabSetup, lab_allowed(), mcp),
+                Some(_) => (TurnKind::Lab, lab_allowed(), mcp),
+                None => (TurnKind::Review, review_tools(req).0, mcp),
             }
         } else {
             let repos: Vec<&RepoInfo> = match &req.workspace {
@@ -524,7 +524,7 @@ impl ClaudeAgent {
             Some(ws) => ws.repos.iter().map(|(_, wt)| path(wt)).collect(),
             None => vec![path(&req.worktree)],
         };
-        let evidence = (!matches!(turn, TurnKind::Review | TurnKind::Lab)
+        let evidence = (!matches!(turn, TurnKind::Review | TurnKind::Lab | TurnKind::LabSetup)
             && !self.shared_with_agent())
         .then(|| path(&self.evidence_dir(req)));
         let fixtures = req
@@ -2308,6 +2308,7 @@ mod tests {
             sessions,
             lab: Some(mandor_usecase::run_ports::LabTurn {
                 fixtures: Some("/home/dev/.mandor/lab/sessions/lab1/fixtures".into()),
+                setup: false,
             }),
         });
         let path = agent.prepare_workspace(&req).await.unwrap().unwrap();
@@ -2347,6 +2348,64 @@ mod tests {
             Some("/home/dev/.mandor/lab/sessions/lab1/fixtures")
         );
         assert!(file.evidence.is_none(), "lab tanpa kartu persetujuan");
+    }
+
+    /// KTD-L14 plan 2026-11-10-001: pengusul perlengkapan tanpa browser dan
+    /// shell, dengan berkas izin `lab_setup` dan hanya server ledger.
+    #[tokio::test]
+    async fn giliran_pengusul_lab_tanpa_browser_dan_shell() {
+        use mandor_usecase::review::{CapabilityRole, CapabilityToken, LedgerAccess};
+        let dir = tempfile::tempdir().unwrap();
+        let mut cfg = test_agent(dir.path().join("mcp")).cfg;
+        cfg.headless_browser = Some("/home/dev/.local/bin/playwright-mcp".into());
+        let agent = ClaudeAgent::new(cfg);
+        let mut req = workspace_req(dir.path().to_path_buf());
+        req.workspace = None;
+        req.ledger = Some(LedgerAccess {
+            role: CapabilityRole::LabSetup,
+            token: CapabilityToken::for_test("tok-s"),
+        });
+        req.review = Some(ReviewRequest {
+            review_id: "labsetup-1".to_owned(),
+            origins: Vec::new(),
+            browser: false,
+            model: None,
+            budget_cents: 100,
+            timeout: Duration::from_secs(600),
+            proxy: None,
+            sessions: Vec::new(),
+            lab: Some(mandor_usecase::run_ports::LabTurn {
+                fixtures: None,
+                setup: true,
+            }),
+        });
+        let path = agent.prepare_workspace(&req).await.unwrap().unwrap();
+        let cfg: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+        let servers = cfg["mcpServers"].as_object().unwrap();
+        assert!(servers.contains_key("mandor"));
+        assert!(
+            !servers.keys().any(|k| k.starts_with("playwright")),
+            "{servers:?}"
+        );
+        let spec = agent.spec(&req, Some(path));
+        assert!(spec.allowed.contains(&"mcp__mandor".to_owned()));
+        assert!(
+            !spec
+                .allowed
+                .iter()
+                .any(|a| a.starts_with("Bash") || a.contains("playwright")),
+            "{:?}",
+            spec.allowed
+        );
+        for t in ["Bash", "WebFetch", "WebSearch", "Write", "Edit"] {
+            assert!(spec.denied.contains(&t.to_owned()), "{t}");
+        }
+        assert!(spec.operator_prompt.contains("REVIEW LAB EQUIPMENT"));
+        let file = agent.permit_file(&req);
+        assert_eq!(file.turn, "lab_setup");
+        assert!(file.fixtures.is_none());
+        assert!(file.evidence.is_none());
     }
 
     /// KTD-64 plan VM: reviewer daemon VM memakai MCP Playwright headless

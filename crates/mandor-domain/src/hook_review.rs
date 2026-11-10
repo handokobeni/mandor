@@ -376,6 +376,20 @@ pub fn classify_lab(
     if let Some((server, tool)) = playwright_tool(&call.tool_name) {
         return playwright_verdict(server, tool, call, state, Some(guard));
     }
+    files_or_ledger(call, allowed_mcp, "in the review lab")
+}
+
+/// Memutuskan tool call giliran pengusul perlengkapan lab (KTD-L14): baca
+/// berkas tanpa shell, tanpa browser, tanpa menulis, dan tool MCP ledger
+/// (yang hanya menawarkan `lab_propose`).
+#[must_use]
+pub fn classify_lab_setup(call: &ToolCall, allowed_mcp: &[String]) -> Verdict {
+    files_or_ledger(call, allowed_mcp, "while proposing lab equipment")
+}
+
+/// Baca berkas tanpa shell (selain path terlarang) atau tool MCP server yang
+/// diizinkan; selain itu ditolak dengan `context` di alasannya.
+fn files_or_ledger(call: &ToolCall, allowed_mcp: &[String], context: &str) -> Verdict {
     if let Some(reason) = call.paths.iter().find_map(|p| lab_read_violation(p)) {
         return Verdict::Deny(reason);
     }
@@ -390,10 +404,7 @@ pub fn classify_lab(
     if mcp_ok {
         Verdict::Allow
     } else {
-        deny(&format!(
-            "`{}` is not available in the review lab",
-            call.tool_name
-        ))
+        deny(&format!("`{}` is not available {context}", call.tool_name))
     }
 }
 

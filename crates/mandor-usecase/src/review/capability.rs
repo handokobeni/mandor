@@ -32,6 +32,8 @@ pub enum CapabilityRole {
     Verdict,
     Permit,
     Ask,
+    /// Pengusul perlengkapan lab (KTD-L14); lingkupnya kunci repo, bukan run.
+    LabSetup,
 }
 
 impl CapabilityRole {
@@ -42,6 +44,7 @@ impl CapabilityRole {
             Self::Verdict => "verdict",
             Self::Permit => "permit",
             Self::Ask => "ask",
+            Self::LabSetup => "lab_setup",
         }
     }
 }
@@ -101,6 +104,9 @@ pub enum LedgerToolError {
     UnknownAc(String),
     #[error("value not allowed here: {0}")]
     NotAllowed(&'static str),
+    /// Isian ditolak dengan alasan yang bisa diperbaiki agent.
+    #[error("{0}")]
+    Invalid(String),
     #[error("storage error: {0}")]
     Storage(String),
 }

@@ -92,6 +92,7 @@ impl<R: LedgerRpc> McpSession<R> {
                     tools.extend([visual_tool(), recommend_look_tool()]);
                 }
             }
+            "lab_setup" => tools.push(lab_propose_tool()),
             _ => {}
         }
         // Pertanyaan yang bisa diklik (plan 2026-11-07-001, KTD-Q4): peran ask
@@ -130,6 +131,9 @@ impl<R: LedgerRpc> McpSession<R> {
                 Ok(p) => self.call_with(method::LEDGER_TOOL_RECOMMEND_LOOK, &p).await,
                 Err(e) => return tool_error(&format!("invalid arguments: {e}")),
             },
+            // Diteruskan apa adanya: daemon memeriksa field rahasia sebelum
+            // mengurai usulan (KTD-L14).
+            "lab_propose" => self.rpc.call(method::LEDGER_TOOL_LAB_PROPOSE, args).await,
             "ask_developer" => match serde_json::from_value::<AskToolQuestion>(args) {
                 // Balasan teks polos yang diawali id pertanyaan (KTD-Q2).
                 Ok(p) => match self.call_with(method::ASK_TOOL_ASK, &p).await {
@@ -230,6 +234,48 @@ fn finding_tool() -> Value {
                 "screenshots": {"type": "array", "items": {"type": "string"}},
             },
             "required": ["title", "detail"],
+            "additionalProperties": false,
+        },
+    })
+}
+
+fn lab_propose_tool() -> Value {
+    let account = json!({
+        "type": "object",
+        "properties": {
+            "role": {"type": "string", "description": "short lowercase name, e.g. admin or manager"},
+            "username": {"type": "string", "description": "test account user name or email from the repo's seed or docs"},
+            "default": {"type": "boolean", "description": "true for the one account ordinary review signs in with"},
+        },
+        "required": ["role", "username", "default"],
+        "additionalProperties": false,
+    });
+    json!({
+        "name": "lab_propose",
+        "description": "Propose the review lab equipment for this repo: test accounts per role, the login form, read-only POST paths, and the test files folder. Never include passwords, tokens, or cookies; the developer enters passwords. If the proposal is rejected, fix the reported problem and call this tool once more.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "accounts": {"type": "array", "items": account, "maxItems": 4},
+                "login": {
+                    "type": "object",
+                    "properties": {
+                        "url": {"type": "string", "description": "login page URL on the app's local origin"},
+                        "username_field": {"type": "string", "description": "selector: #id, [name=x], or text=..."},
+                        "password_field": {"type": "string", "description": "selector of the password input"},
+                        "submit": {"type": "string", "description": "selector of the submit button"},
+                        "submit_path": {"type": "string", "description": "path the login form POSTs to, starting with /"},
+                        "success_kind": {"type": "string", "enum": ["path", "text"]},
+                        "success": {"type": "string", "description": "path prefix or visible text after signing in"},
+                        "authenticated_url": {"type": "string", "description": "a page URL that only works when signed in"},
+                    },
+                    "required": ["url", "username_field", "password_field", "submit", "submit_path", "success_kind", "success", "authenticated_url"],
+                    "additionalProperties": false,
+                },
+                "safe_posts": {"type": "array", "items": {"type": "string"}, "description": "POST paths that only read data, e.g. search endpoints"},
+                "fixtures_dir": {"type": "string", "description": "repo-relative folder of test files for uploads, if any"},
+            },
+            "required": ["accounts", "login"],
             "additionalProperties": false,
         },
     })
@@ -475,6 +521,43 @@ mod tests {
 
     /// Plan 2026-11-03-002, U5: `ac_set_visual` hanya untuk reviewer run yang
     /// prototype-nya menyala (AE7).
+    /// KTD-L14: pengusul hanya punya `lab_propose`; argumen diteruskan apa
+    /// adanya agar daemon bisa menolak field rahasia.
+    #[tokio::test]
+    async fn pengusul_lab_hanya_punya_lab_propose() {
+        let fake = rpc("lab_setup");
+        let mut s = McpSession::new(&fake);
+        let list = ask(
+            &mut s,
+            json!({"jsonrpc":"2.0","id":1,"method":"tools/list"}),
+        )
+        .await;
+        let names: Vec<String> = list["result"]["tools"]
+            .as_array()
+            .cloned()
+            .unwrap_or_default()
+            .iter()
+            .filter_map(|t| t["name"].as_str().map(str::to_owned))
+            .collect();
+        assert_eq!(names, ["lab_propose"]);
+        let args = json!({"accounts": [], "login": {"url": "x"}, "password": "p"});
+        let out = ask(
+            &mut s,
+            json!({"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"lab_propose","arguments": args}}),
+        )
+        .await;
+        assert_eq!(out["result"]["isError"], false);
+        let calls = fake
+            .calls
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone();
+        assert_eq!(
+            calls.last().cloned(),
+            Some(("ledger.tool.lab_propose".to_owned(), args))
+        );
+    }
+
     #[tokio::test]
     async fn alat_tampilan_hanya_bila_prototype_menyala() {
         let fake = rpc("verdict+visual");

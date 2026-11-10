@@ -1793,6 +1793,15 @@ pub struct LabView {
     pub approved: bool,
     #[ts(type = "number | null")]
     pub approved_at_ms: Option<i64>,
+    /// Agent pengusul sedang berjalan.
+    #[serde(default)]
+    pub proposing: bool,
+    /// Draf usulan agent terakhir; belum disimpan maupun disetujui.
+    #[serde(default)]
+    pub proposal: Option<LabEquipmentDto>,
+    /// Alasan giliran pengusul terakhir tidak menghasilkan usulan.
+    #[serde(default)]
+    pub proposal_error: Option<String>,
 }
 
 /// Password satu role; kosong atau `None` mempertahankan yang lama.

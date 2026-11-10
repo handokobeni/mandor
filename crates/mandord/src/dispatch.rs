@@ -1089,8 +1089,12 @@ fn scoped_route(role: &str, name: &str) -> ScopedRoute {
         // Perlengkapan lab dan password akun uji hanya untuk app (U3 plan
         // 2026-11-10-001).
         (_, name) if AppDispatch::is_lab_method(name) => ScopedRoute::Refused,
+        // Pengusul perlengkapan hanya mengirim usulan (KTD-L14).
+        ("lab_setup", method::LEDGER_TOOL_INFO | method::LEDGER_TOOL_LAB_PROPOSE) => {
+            ScopedRoute::Ledger
+        }
         (role, name)
-            if matches!(role, "permit" | "ask")
+            if matches!(role, "permit" | "ask" | "lab_setup")
                 || matches!(name, method::PERMIT_REQUEST | method::ASK_TOOL_ASK)
                 || AppDispatch::is_questions_method(name) =>
         {
@@ -1233,6 +1237,26 @@ mod tests {
     /// Plan 2026-11-07-001, U5: `ask.tool.ask` hanya untuk peran ask dan
     /// design; peran ask tidak bisa membaca atau mengubah buku AC; method
     /// pertanyaan untuk aplikasi tidak pernah lewat koneksi kapabilitas.
+    /// KTD-L14: token pengusul hanya membaca info dan mengirim usulan.
+    #[test]
+    fn rute_pengusul_lab() {
+        use super::{ScopedRoute, scoped_route};
+        for m in ["ledger.tool.info", "ledger.tool.lab_propose"] {
+            assert_eq!(scoped_route("lab_setup", m), ScopedRoute::Ledger, "{m}");
+        }
+        for m in [
+            "ledger.tool.read",
+            "ledger.tool.set_verdict",
+            "lab.get",
+            "lab.propose",
+            "permit.request",
+            "ask.tool.ask",
+        ] {
+            assert_eq!(scoped_route("lab_setup", m), ScopedRoute::Refused, "{m}");
+        }
+        assert_eq!(scoped_route("verdict", "lab.propose"), ScopedRoute::Refused);
+    }
+
     #[test]
     fn rute_alat_pertanyaan() {
         use super::{ScopedRoute, scoped_route};

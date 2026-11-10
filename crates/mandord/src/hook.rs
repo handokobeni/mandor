@@ -226,7 +226,7 @@ impl PermitHook {
             return deny("hook input has no cwd");
         };
         let decision = match (scope.turn, &self.review) {
-            (TurnKind::Review | TurnKind::Lab, Some(state_path)) => {
+            (TurnKind::Review | TurnKind::Lab | TurnKind::LabSetup, Some(state_path)) => {
                 let outcome = review_state::with_locked(state_path, |state| {
                     pin_origins(state, &self.origins);
                     let d = decide(&scope, call, cwd, Some(state), &FsFacts);
@@ -237,7 +237,7 @@ impl PermitHook {
                 });
                 outcome.unwrap_or_else(|e| deny(&e))
             }
-            (TurnKind::Review | TurnKind::Lab, None) | (_, Some(_)) => {
+            (TurnKind::Review | TurnKind::Lab | TurnKind::LabSetup, None) | (_, Some(_)) => {
                 return deny("the permit file does not match this session");
             }
             _ => decide(&scope, call, cwd, None, &FsFacts),

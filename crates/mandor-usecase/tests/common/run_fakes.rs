@@ -935,6 +935,7 @@ pub struct FakeReviews {
     pub history: Arc<Mutex<Vec<mandor_usecase::run_ports::ReviewRecord>>>,
     pub settings: Arc<Mutex<mandor_usecase::run_ports::ReviewerSettings>>,
     pub chrome: Arc<Mutex<bool>>,
+    pub lab_settings: Arc<Mutex<mandor_usecase::run_ports::LabSettings>>,
 }
 
 impl FakeReviews {
@@ -1120,6 +1121,16 @@ impl mandor_usecase::run_ports::ReviewHistory for FakeReviews {
     }
     async fn chrome_connected(&self) -> bool {
         *self.chrome.lock().unwrap()
+    }
+    async fn lab_settings(&self) -> mandor_usecase::run_ports::LabSettings {
+        self.lab_settings.lock().unwrap().clone()
+    }
+    async fn set_lab_settings(
+        &self,
+        s: &mandor_usecase::run_ports::LabSettings,
+    ) -> Result<(), PortError> {
+        *self.lab_settings.lock().unwrap() = s.clone();
+        Ok(())
     }
 }
 

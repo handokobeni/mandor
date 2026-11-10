@@ -3,10 +3,14 @@
 use mandor_domain::{AcRow, RowStatus, Usage, Verdict};
 use mandor_usecase::PortError;
 use mandor_usecase::run_ports::{
-    LedgerStore, ReviewHistory, ReviewRecord, ReviewStatus, ReviewTrigger, ReviewerSettings,
+    LabSettings, LedgerStore, ReviewHistory, ReviewRecord, ReviewStatus, ReviewTrigger,
+    ReviewerSettings,
 };
 use serde::{Deserialize, Serialize};
 
+use mandor_domain::lab::LabNeed;
+
+use crate::lab_codec::{evidence_json, evidence_of};
 use crate::{Store, StoredReview, StoredVerdict};
 
 /// Kunci setelan reviewer (KTD-30).
@@ -104,6 +108,8 @@ fn verdict_row(v: StoredVerdict) -> AcRow {
     let mut row = AcRow::new(&v.ac_id, v.label.as_deref(), "", RowStatus::Active);
     row.verdict = Verdict::parse(&v.verdict).unwrap_or(Verdict::NotReviewed);
     row.evidence = v.evidence;
+    row.lab_need = v.lab_need.as_deref().and_then(LabNeed::parse);
+    row.evidence_detail = evidence_of(v.evidence_json.as_deref()).unwrap_or_default();
     row
 }
 
@@ -133,16 +139,20 @@ impl LedgerStore for ReviewsStore {
 impl ReviewHistory for ReviewsStore {
     async fn save_review(&self, r: &ReviewRecord) -> Result<(), PortError> {
         self.store.save_review(&to_stored(r)).await?;
-        let verdicts: Vec<StoredVerdict> = r
+        let verdicts = r
             .verdicts
             .iter()
-            .map(|row| StoredVerdict {
-                ac_id: row.ac_id.clone(),
-                label: row.label.clone(),
-                verdict: row.verdict.as_str().to_owned(),
-                evidence: row.evidence.clone(),
+            .map(|row| {
+                Ok(StoredVerdict {
+                    ac_id: row.ac_id.clone(),
+                    label: row.label.clone(),
+                    verdict: row.verdict.as_str().to_owned(),
+                    evidence: row.evidence.clone(),
+                    lab_need: row.lab_need.map(|n| n.as_str().to_owned()),
+                    evidence_json: evidence_json(row.evidence_detail.as_ref())?,
+                })
             })
-            .collect();
+            .collect::<Result<Vec<_>, crate::StoreError>>()?;
         Ok(self.store.save_review_verdicts(&r.id, &verdicts).await?)
     }
 
@@ -191,4 +201,67 @@ impl ReviewHistory for ReviewsStore {
     async fn chrome_connected(&self) -> bool {
         matches!(self.store.setting(CHROME_KEY).await, Ok(Some(v)) if v == "true")
     }
+
+    async fn lab_settings(&self) -> LabSettings {
+        let stored = match self.store.setting(LAB_KEY).await {
+            Ok(Some(raw)) => serde_json::from_str::<StoredLabSettings>(&raw).ok(),
+            Ok(None) => None,
+            Err(e) => {
+                tracing::warn!(error = %e, "setelan lab tidak terbaca; memakai bawaan");
+                None
+            }
+        };
+        stored.map_or_else(LabSettings::default, |s| LabSettings {
+            model: s.model.filter(|m| !m.trim().is_empty()),
+            budget_cents: s.budget_cents,
+            timeout_secs: s.timeout_secs,
+            run_budget_cents: s.run_budget_cents,
+            run_timeout_secs: s.run_timeout_secs,
+        })
+    }
+
+    async fn set_lab_settings(&self, s: &LabSettings) -> Result<(), PortError> {
+        let raw = serde_json::to_string(&StoredLabSettings {
+            model: s.model.clone(),
+            budget_cents: s.budget_cents,
+            timeout_secs: s.timeout_secs,
+            run_budget_cents: s.run_budget_cents,
+            run_timeout_secs: s.run_timeout_secs,
+        })
+        .map_err(|e| PortError::Storage(e.to_string()))?;
+        Ok(self.store.set_setting(LAB_KEY, &raw).await?)
+    }
+}
+
+/// Kunci setelan lab (KTD-L8).
+const LAB_KEY: &str = "lab";
+
+#[derive(Serialize, Deserialize)]
+struct StoredLabSettings {
+    #[serde(default)]
+    model: Option<String>,
+    #[serde(default = "lab_budget")]
+    budget_cents: u32,
+    #[serde(default = "lab_timeout")]
+    timeout_secs: u64,
+    #[serde(default = "lab_run_budget")]
+    run_budget_cents: u32,
+    #[serde(default = "lab_run_timeout")]
+    run_timeout_secs: u64,
+}
+
+fn lab_budget() -> u32 {
+    LabSettings::default().budget_cents
+}
+
+fn lab_timeout() -> u64 {
+    LabSettings::default().timeout_secs
+}
+
+fn lab_run_budget() -> u32 {
+    LabSettings::default().run_budget_cents
+}
+
+fn lab_run_timeout() -> u64 {
+    LabSettings::default().run_timeout_secs
 }

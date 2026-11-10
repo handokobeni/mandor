@@ -4,6 +4,9 @@ use mandor_domain::ac_ledger::{Visual, VisualDetail};
 use mandor_domain::{AcRow, Design, RowStatus, Verdict};
 use serde::{Deserialize, Serialize};
 
+use mandor_domain::lab::LabNeed;
+
+use crate::lab_codec::{evidence_json, evidence_of, lab_need_of, look_json, look_of};
 use crate::{Store, StoreError};
 
 impl Store {
@@ -25,11 +28,14 @@ impl Store {
             let stale = i64::from(r.stale);
             let visual = r.visual.as_str();
             let visual_json = visual_json(&r.visual_detail)?;
+            let lab_need = r.lab_need.map(LabNeed::as_str);
+            let evidence_json = evidence_json(r.evidence_detail.as_ref())?;
+            let look_json = look_json(r.look_recommendation.as_ref())?;
             sqlx::query!(
                 "INSERT INTO ac_rows (run_id, ac_id, position, label, text, design, design_note,
                                       verdict, evidence, stale, status, reason, decided_by, card,
-                                      visual, visual_json)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                                      visual, visual_json, lab_need, evidence_json, look_json)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 run_id,
                 r.ac_id,
                 position,
@@ -45,7 +51,10 @@ impl Store {
                 r.decided_by,
                 r.card,
                 visual,
-                visual_json
+                visual_json,
+                lab_need,
+                evidence_json,
+                look_json
             )
             .execute(&mut *tx)
             .await
@@ -62,7 +71,8 @@ impl Store {
     pub async fn ac_rows(&self, run_id: &str) -> Result<Vec<AcRow>, StoreError> {
         let rows = sqlx::query!(
             "SELECT ac_id, label, text, design, design_note, verdict, evidence, stale, status,
-                    reason, decided_by, card, visual, visual_json
+                    reason, decided_by, card, visual, visual_json, lab_need, evidence_json,
+                    look_json
              FROM ac_rows WHERE run_id = ? ORDER BY position",
             run_id
         )
@@ -86,6 +96,9 @@ impl Store {
                     card: r.card,
                     visual: r.visual,
                     visual_json: r.visual_json,
+                    lab_need: r.lab_need,
+                    evidence_json: r.evidence_json,
+                    look_json: r.look_json,
                 })
             })
             .collect()
@@ -100,7 +113,7 @@ impl Store {
         let rows = sqlx::query!(
             "SELECT a.run_id, a.ac_id, a.label, a.text, a.design, a.design_note, a.verdict,
                     a.evidence, a.stale, a.status, a.reason, a.decided_by, a.card, a.visual,
-                    a.visual_json
+                    a.visual_json, a.lab_need, a.evidence_json, a.look_json
              FROM ac_rows a JOIN runs r ON r.id = a.run_id
              WHERE r.closed = 0 ORDER BY a.run_id, a.position"
         )
@@ -124,6 +137,9 @@ impl Store {
                     card: r.card,
                     visual: r.visual,
                     visual_json: r.visual_json,
+                    lab_need: r.lab_need,
+                    evidence_json: r.evidence_json,
+                    look_json: r.look_json,
                 })?;
                 Ok((r.run_id, row))
             })
@@ -147,6 +163,9 @@ struct Raw {
     card: Option<String>,
     visual: String,
     visual_json: Option<String>,
+    lab_need: Option<String>,
+    evidence_json: Option<String>,
+    look_json: Option<String>,
 }
 
 /// Bentuk simpan [`VisualDetail`] di kolom `visual_json`.
@@ -217,9 +236,9 @@ fn to_row(r: Raw) -> Result<AcRow, StoreError> {
         card: r.card,
         visual: Visual::parse(&r.visual).ok_or_else(|| corrupt("visual", &r.visual))?,
         visual_detail: visual_detail(r.visual_json.as_deref())?,
-        lab_need: None,
-        evidence_detail: None,
-        look_recommendation: None,
+        lab_need: lab_need_of(r.lab_need.as_deref())?,
+        evidence_detail: evidence_of(r.evidence_json.as_deref())?,
+        look_recommendation: look_of(r.look_json.as_deref())?,
     })
 }
 

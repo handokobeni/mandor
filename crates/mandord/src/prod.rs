@@ -388,4 +388,13 @@ impl mandor_usecase::run_ports::ReviewHistory for BroadcastReviews {
     async fn chrome_connected(&self) -> bool {
         self.inner.chrome_connected().await
     }
+    async fn lab_settings(&self) -> mandor_usecase::run_ports::LabSettings {
+        self.inner.lab_settings().await
+    }
+    async fn set_lab_settings(
+        &self,
+        s: &mandor_usecase::run_ports::LabSettings,
+    ) -> Result<(), PortError> {
+        self.inner.set_lab_settings(s).await
+    }
 }

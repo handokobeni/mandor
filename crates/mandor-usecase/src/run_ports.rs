@@ -1075,6 +1075,31 @@ impl Default for ReviewerSettings {
     }
 }
 
+/// Setelan sesi lab (KTD-L8): batas per sesi kartu dan per run.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LabSettings {
+    /// `None` = model reviewer.
+    pub model: Option<String>,
+    /// Batas biaya per sesi lab kartu, dalam sen USD.
+    pub budget_cents: u32,
+    pub timeout_secs: u64,
+    /// Batas biaya semua sesi lab satu run.
+    pub run_budget_cents: u32,
+    pub run_timeout_secs: u64,
+}
+
+impl Default for LabSettings {
+    fn default() -> Self {
+        Self {
+            model: None,
+            budget_cents: 300,
+            timeout_secs: 20 * 60,
+            run_budget_cents: 1500,
+            run_timeout_secs: 90 * 60,
+        }
+    }
+}
+
 /// Riwayat review dan setelan reviewer.
 pub trait ReviewHistory: Send + Sync {
     fn save_review(&self, r: &ReviewRecord) -> impl Future<Output = Result<(), PortError>> + Send;
@@ -1090,6 +1115,12 @@ pub trait ReviewHistory: Send + Sync {
     ) -> impl Future<Output = Result<(), PortError>> + Send;
     /// Ekstensi Claude in Chrome terakhir terdeteksi tersambung (U13).
     fn chrome_connected(&self) -> impl Future<Output = bool> + Send;
+    /// Setelan lab; bawaan bila belum diatur atau rusak.
+    fn lab_settings(&self) -> impl Future<Output = LabSettings> + Send;
+    fn set_lab_settings(
+        &self,
+        s: &LabSettings,
+    ) -> impl Future<Output = Result<(), PortError>> + Send;
 }
 
 /// Status kartu persetujuan yang disimpan (KTD-A11 plan 2026-11-06-001).

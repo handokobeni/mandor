@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "SELECT a.run_id, a.ac_id, a.label, a.text, a.design, a.design_note, a.verdict,\n                    a.evidence, a.stale, a.status, a.reason, a.decided_by, a.card, a.visual,\n                    a.visual_json\n             FROM ac_rows a JOIN runs r ON r.id = a.run_id\n             WHERE r.closed = 0 ORDER BY a.run_id, a.position",
+  "query": "SELECT a.run_id, a.ac_id, a.label, a.text, a.design, a.design_note, a.verdict,\n                    a.evidence, a.stale, a.status, a.reason, a.decided_by, a.card, a.visual,\n                    a.visual_json, a.lab_need, a.evidence_json, a.look_json\n             FROM ac_rows a JOIN runs r ON r.id = a.run_id\n             WHERE r.closed = 0 ORDER BY a.run_id, a.position",
   "describe": {
     "columns": [
       {
@@ -167,6 +167,39 @@
             "name": "visual_json"
           }
         }
+      },
+      {
+        "name": "lab_need",
+        "ordinal": 15,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "ac_rows",
+            "name": "lab_need"
+          }
+        }
+      },
+      {
+        "name": "evidence_json",
+        "ordinal": 16,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "ac_rows",
+            "name": "evidence_json"
+          }
+        }
+      },
+      {
+        "name": "look_json",
+        "ordinal": 17,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "ac_rows",
+            "name": "look_json"
+          }
+        }
       }
     ],
     "parameters": {
@@ -187,8 +220,11 @@
       true,
       true,
       false,
+      true,
+      true,
+      true,
       true
     ]
   },
-  "hash": "1db5a3a2607c457579d60c946115c713b2f4fb9ebe44b85bc845b900118fa765"
+  "hash": "02b97f4d2f8821235bf59057b1355173db5a00a5cd555e4171bef53f861f0157"
 }

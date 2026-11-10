@@ -1447,6 +1447,16 @@ async fn covers_ae1_lab_menguji_calon_setelah_review_biasa() {
     assert!(lab_req.message.contains("ROLES:admin"));
     assert_eq!(st.runs.only().state, RunState::Reviewing);
 
+    // Baris di luar calon lab kartu ini tertutup bagi sesi lab.
+    let a3 = rows[2].ac_id.clone();
+    let token = st.agent.last().req.ledger.unwrap().token;
+    let scope = st.svc.verify_capability(token.expose()).unwrap();
+    assert!(matches!(
+        st.svc
+            .ledger_set_verdict(&scope, &a3, Verdict::Pass, report_with(&["x"]))
+            .await,
+        Err(mandor_usecase::review::LedgerToolError::NotAllowed(_))
+    ));
     let mut pass = report_with(&["Login sebagai admin", "Buka /x"]);
     pass.prepared = Some("akun admin".to_owned());
     set_from_last(&st, &a1, Verdict::Pass, pass).await;

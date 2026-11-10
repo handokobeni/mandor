@@ -75,6 +75,22 @@ impl<D: Deps> RunService<D> {
             .contains_key(run_id)
     }
 
+    /// Selama sesi lab, tool ledger hanya boleh menyentuh calon lab kartu
+    /// yang sedang diuji; baris lain (mis. Fail dari review biasa) tertutup.
+    pub(crate) fn lab_scope(
+        &self,
+        run_id: &str,
+        ac_id: &str,
+    ) -> Result<(), super::LedgerToolError> {
+        let runs = self.lab_runs.lock().unwrap_or_else(PoisonError::into_inner);
+        match runs.get(run_id) {
+            Some(p) if !p.originals.contains_key(ac_id) => Err(super::LedgerToolError::NotAllowed(
+                "this lab session only reports the criteria it was given",
+            )),
+            _ => Ok(()),
+        }
+    }
+
     /// Progres lab bila ada calon lab dan perlengkapan; tanpa perlengkapan,
     /// developer diberi tahu cara menyiapkannya (AE7).
     pub(crate) async fn plan_lab(

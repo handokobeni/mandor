@@ -322,6 +322,7 @@ impl<D: Deps> RunService<D> {
         if scope.role != CapabilityRole::Verdict {
             return Err(LedgerToolError::WrongRole);
         }
+        self.lab_scope(&scope.run_id, ac_id)?;
         if !matches!(verdict, Verdict::Pass | Verdict::Fail | Verdict::CantVerify) {
             return Err(LedgerToolError::NotAllowed(verdict.as_str()));
         }
@@ -476,6 +477,7 @@ impl<D: Deps> RunService<D> {
         if scope.role != CapabilityRole::Verdict {
             return Err(LedgerToolError::WrongRole);
         }
+        self.lab_scope(&scope.run_id, ac_id)?;
         let rows = self.reviews.ac_rows(&scope.run_id).await?;
         if rows
             .iter()
@@ -586,6 +588,7 @@ impl<D: Deps> RunService<D> {
         if scope.role != CapabilityRole::Verdict {
             return Err(LedgerToolError::WrongRole);
         }
+        self.lab_scope(&scope.run_id, ac_id)?;
         if !matches!(result, Visual::Match | Visual::Differs | Visual::CantVerify) {
             return Err(LedgerToolError::NotAllowed(result.as_str()));
         }

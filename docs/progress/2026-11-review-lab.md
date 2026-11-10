@@ -30,6 +30,18 @@ Branch fase 1: `feat/review-lab-phase1`.
 - Review keamanan otomatis atas push PR #28: selama sesi lab, token Verdict bisa menimpa baris di luar calon lab kartu (mis. Fail review biasa). Diperbaiki: `ac_set_verdict`, `ac_recommend_look`, dan `ac_set_visual` hanya menerima calon lab kartu yang sedang diuji.
 - Progres lab hanya di memori (plan: `LabCursor` di `RunRecord`); setelah daemon restart, review yang terputus ditutup rekonsiliasi seperti review biasa.
 
+## Bukti otomatis AE1–AE7
+
+| AE | Test otomatis | Yang belum (uji langsung) |
+|---|---|---|
+| AE1 | `review_lab_data.rs` (snapshot dengan app berhenti, `lab_sql`, restore, sidik cocok); `review_flow.rs::covers_ae1_lab_menguji_calon_setelah_review_biasa` (alur lab setelah review biasa) | Batas atas KB di landlord kelola, sidik sungguhan |
+| AE2 | `review_lab_data.rs` (env database ke host staging → lab data tidak jalan); `lab_data.rs` (`is_local_db`, `app_env_block`) | Database non-lokal sungguhan |
+| AE3 | `review_lab_data.rs` (restore gagal → `restore_failed`, review dan giliran ditahan, retry dan konfirmasi) | Banner dan penahanan di app sungguhan |
+| AE4 | `port.rs::giliran_lab_satu_server_per_role_tanpa_shell` (satu browser per role); `review_flow.rs::covers_ae1_…` (server `playwright_admin`, `ROLES:admin`, prepared menyebut akun); `review_flow.rs::password_akun_uji_disamarkan_di_bukti_dan_temuan`; `login_role_gagal_disebut_di_pesan_lab` | Manager tanpa `admin.profileData` di kelola |
+| AE5 | `lab.rs::calon_lab_hanya_cant_verify_dengan_lab_need`, `calon_data_dikecualikan_bila_lab_data_belum_siap`, `run_grup_dikelompokkan_per_kartu_urut_kemunculan`, `baris_di_luar_gerbang_tidak_jadi_calon`; `review_flow.rs::covers_ae1_…` (baris di luar calon tertutup bagi sesi lab); `batas_lab_per_run_membuat_kartu_sisa_tetap_cant_verify` | Run grup 113 AC di kelola |
+| AE6 | `review_flow.rs::covers_ae6_keputusan_rekomendasi_tampilan`, `rekomendasi_tampilan_hanya_untuk_baris_berbeda` | — |
+| AE7 | `review_flow.rs::covers_ae7_tanpa_perlengkapan_lab_tidak_jalan_dan_ada_catatan`; `mcp.rs` | — |
+
 ## Uji langsung U10 (kelola PGS-1477–1483)
 
 Daemon WSL dipasang ulang dari branch PR #28 pada 2026-11-10 (`mandord install` → `updated`). Installer Windows dibuat dari branch yang sama (Actions run 42791753932) untuk UI Review lab.

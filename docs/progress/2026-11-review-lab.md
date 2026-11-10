@@ -29,3 +29,19 @@ Branch fase 1: `feat/review-lab-phase1`.
 - Review keamanan otomatis lanjutan: pola glob berbasis teks bisa dilewati (`.[e]nv`, `**/*.local`). Diganti tata bahasa sempit: tanpa `[ ? { ! ,` dan spasi, segmen akhir ber-wildcard wajib berakhir ekstensi allowlist, Grep di giliran lab wajib memakai `glob`/`type`.
 - Review keamanan otomatis atas push PR #28: selama sesi lab, token Verdict bisa menimpa baris di luar calon lab kartu (mis. Fail review biasa). Diperbaiki: `ac_set_verdict`, `ac_recommend_look`, dan `ac_set_visual` hanya menerima calon lab kartu yang sedang diuji.
 - Progres lab hanya di memori (plan: `LabCursor` di `RunRecord`); setelah daemon restart, review yang terputus ditutup rekonsiliasi seperti review biasa.
+
+## Uji langsung U10 (kelola PGS-1477–1483)
+
+Daemon WSL dipasang ulang dari branch PR #28 pada 2026-11-10 (`mandord install` → `updated`). Installer Windows dibuat dari branch yang sama (Actions run 42791753932) untuk UI Review lab.
+
+Pembanding: `../integro-kelola/kelola-v2/review-fixtures/keputusan-AC-PGS-1477-1483.md` (cek manual 2026-11-09). AC yang diharapkan diputuskan lab fase 1:
+
+| Kebutuhan | AC | Keputusan manual |
+|---|---|---|
+| Simulasi request | 8612, 8614, 8615, 8633, 8634, 8636, 8637, 8645, 8648, 8660, 8439, 8442, 8664 | Lulus (respons diperlambat, kosong, 403/422/500, koneksi putus) |
+| Role (Manager tanpa admin.profileData) | 8616, 8635, 8643, 9007, 8435, 8656 | Lulus (halaman ditolak, endpoint 403) |
+| Berkas uji | 8436, 8437, 8661, 8662, 8665, 9035 | Lulus (pilih/tolak berkas, batas ukuran, nama berkas) |
+
+Di luar fase 1 (mengubah data, fase 2): 8630, 8631, 8941, 9371, 9372, 8409, 8410, 8418, 8420, 8647, 8421–8441 yang mengunggah nilai, 9424–9426.
+
+Hasil: menunggu.

@@ -207,6 +207,13 @@ mod pg {
         assert_eq!(r.rows, 1);
         assert!(r.text.contains("1\t4"), "{}", r.text);
         assert!(db.run_statement(&lab, "SELECT pg_sleep(3)").await.is_err());
+        // Hasil besar dibaca bertahap dan dipotong, tidak dimuat seluruhnya.
+        let big = db
+            .run_statement(&lab, "SELECT g FROM generate_series(1, 200000) g")
+            .await
+            .unwrap();
+        assert!(big.truncated);
+        assert!(big.rows <= 1_000, "{}", big.rows);
         assert!(
             db.run_statement(&lab, "CREATE TABLE x (a int)")
                 .await

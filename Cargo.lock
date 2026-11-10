@@ -1177,6 +1177,7 @@ dependencies = [
 name = "mandor-store"
 version = "0.1.0"
 dependencies = [
+ "futures",
  "mandor-domain",
  "mandor-usecase",
  "pretty_assertions",

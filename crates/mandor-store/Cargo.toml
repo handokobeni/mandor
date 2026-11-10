@@ -12,6 +12,7 @@ mandor-domain.workspace = true
 mandor-usecase.workspace = true
 sqlx = { workspace = true, features = ["sqlite", "postgres", "runtime-tokio", "migrate", "macros"] }
 secrecy.workspace = true
+futures.workspace = true
 tokio = { workspace = true, features = ["time"] }
 serde.workspace = true
 serde_json.workspace = true

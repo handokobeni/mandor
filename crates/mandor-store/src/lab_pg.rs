@@ -234,33 +234,87 @@ fn cell(row: &PgRow, i: usize) -> String {
     "<value>".to_owned()
 }
 
-/// Baris hasil sebagai teks bertab, dipotong [`MAX_OUTPUT`].
-fn render(rows: &[PgRow]) -> SqlResult {
-    let Some(first) = rows.first() else {
-        return SqlResult {
-            text: "Statement ran; no rows returned.".to_owned(),
+/// Batas jumlah baris yang dibaca dari satu pernyataan.
+const MAX_ROWS: usize = 1_000;
+/// Batas panjang satu sel.
+const MAX_CELL: usize = 2_000;
+
+/// Hasil bertab yang dibangun bertahap; berhenti membaca setelah batas.
+struct Rendered {
+    text: String,
+    rows: usize,
+    truncated: bool,
+}
+
+impl Rendered {
+    fn new() -> Self {
+        Self {
+            text: String::new(),
             rows: 0,
             truncated: false,
-        };
-    };
-    let header: Vec<&str> = first.columns().iter().map(Column::name).collect();
-    let mut text = header.join("\t");
-    let mut truncated = false;
-    for row in rows {
-        let line: Vec<String> = (0..row.len()).map(|i| cell(row, i)).collect();
+        }
+    }
+
+    /// Menambah satu baris; `false` bila batas tercapai dan pembacaan harus
+    /// berhenti.
+    fn push(&mut self, row: &PgRow) -> bool {
+        if self.rows == 0 {
+            let header: Vec<&str> = row.columns().iter().map(Column::name).collect();
+            self.text = header.join("\t");
+        }
+        let line: Vec<String> = (0..row.len())
+            .map(|i| {
+                let mut c = cell(row, i);
+                if c.len() > MAX_CELL {
+                    let mut end = MAX_CELL;
+                    while !c.is_char_boundary(end) {
+                        end -= 1;
+                    }
+                    c.truncate(end);
+                    c.push_str(" [truncated]");
+                }
+                c
+            })
+            .collect();
         let line = line.join("\t");
-        if text.len() + line.len() + 1 > MAX_OUTPUT {
-            truncated = true;
+        if self.rows >= MAX_ROWS || self.text.len() + line.len() + 1 > MAX_OUTPUT {
+            self.truncated = true;
+            return false;
+        }
+        self.text.push('\n');
+        self.text.push_str(&line);
+        self.rows += 1;
+        true
+    }
+
+    fn finish(self) -> SqlResult {
+        if self.rows == 0 && !self.truncated {
+            return SqlResult {
+                text: "Statement ran; no rows returned.".to_owned(),
+                rows: 0,
+                truncated: false,
+            };
+        }
+        SqlResult {
+            text: self.text,
+            rows: self.rows,
+            truncated: self.truncated,
+        }
+    }
+}
+
+/// Membaca baris satu per satu dan berhenti di batas, sehingga hasil besar
+/// tidak pernah dimuat seluruhnya ke memori.
+async fn stream_rows(conn: &mut PgConnection, sql: &str) -> Result<SqlResult, PortError> {
+    use futures::TryStreamExt;
+    let mut out = Rendered::new();
+    let mut rows = sqlx::query(AssertSqlSafe(sql.to_owned())).fetch(conn);
+    while let Some(row) = rows.try_next().await.map_err(db_error)? {
+        if !out.push(&row) {
             break;
         }
-        text.push('\n');
-        text.push_str(&line);
     }
-    SqlResult {
-        text,
-        rows: rows.len(),
-        truncated,
-    }
+    Ok(out.finish())
 }
 
 impl LabDatabase for PgLabDatabase {
@@ -360,14 +414,11 @@ impl LabDatabase for PgLabDatabase {
         check_statement(sql).map_err(|e| PortError::Rejected(e.to_string()))?;
         let limit = self.statement_timeout();
         let mut conn = connect(lab, limit).await?;
-        let rows = tokio::time::timeout(
-            limit + Duration::from_secs(5),
-            sqlx::query(AssertSqlSafe(sql.to_owned())).fetch_all(&mut conn),
-        )
-        .await
-        .map_err(|_| timed_out("the statement"));
+        let out = tokio::time::timeout(limit + Duration::from_secs(5), stream_rows(&mut conn, sql))
+            .await
+            .map_err(|_| timed_out("the statement"));
         close(conn).await;
-        Ok(render(&rows?.map_err(db_error)?))
+        out?
     }
 }
 
@@ -425,7 +476,7 @@ mod tests {
 
     #[test]
     fn hasil_kosong_dijelaskan() {
-        let r = render(&[]);
+        let r = Rendered::new().finish();
         assert_eq!(r.rows, 0);
         assert!(r.text.contains("no rows"));
     }

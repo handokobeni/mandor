@@ -157,6 +157,25 @@
     {#if groups.length === 0 && report.planned_held.length === 0}
       <p class="field-help">No VM cards yet in this cycle.</p>
     {/if}
+    {#if report.lab_data.length > 0}
+      <h3>Lab data needs you <span class="muted mono">{report.lab_data.length}</span></h3>
+      {#each report.lab_data as a (a.repo_id + a.run_id)}
+        <div class="settings-card report-card">
+          <div class="content">
+            <div class="head"><span class="mono key">{a.repo_id}</span></div>
+            <p class="hold">
+              {#if a.phase === 'restore_failed'}
+                <span class="chip" data-tone="failed">Restore failed</span> {a.error ?? 'The lab data was not restored.'}
+                Reviews, app starts, and agent turns for this repo are paused. Open the run to retry the restore.
+              {:else}
+                <span class="chip" data-tone="warning">Waiting</span> Restoring the lab data is still waiting for another
+                database client to disconnect.
+              {/if}
+            </p>
+          </div>
+        </div>
+      {/each}
+    {/if}
     {#if report.planned_held.length > 0}
       <h3>Planned, not started <span class="muted mono">{report.planned_held.length}</span></h3>
       {#each report.planned_held as h (h.record_id)}

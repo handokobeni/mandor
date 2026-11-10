@@ -31,6 +31,17 @@ function appView(runId: string, state: string): AppRunView {
   };
 }
 
+/** Sesi lab data tiruan lewat `?labdata=running|restore_waiting|restore_failed`. */
+function mockDataSession(): LabView['data_session'] {
+  const phase = typeof location !== 'undefined' ? new URLSearchParams(location.search).get('labdata') : null;
+  if (!phase) return null;
+  return {
+    run_id: '1',
+    phase,
+    error: phase === 'restore_failed' ? 'kelola differs from before the lab after restoring' : null
+  };
+}
+
 /** Perlengkapan lab tiruan per repo (plan 2026-11-10-001). */
 const LAB = new Map<string, LabView>();
 function mockLab(method: string, params: Record<string, unknown>): LabView {
@@ -43,7 +54,7 @@ function mockLab(method: string, params: Record<string, unknown>): LabView {
     proposing: false,
     proposal: null,
     proposal_error: null,
-    data_session: null
+    data_session: mockDataSession()
   };
   let next = cur;
   if (method === 'lab.propose') {
@@ -89,6 +100,8 @@ function mockLab(method: string, params: Record<string, unknown>): LabView {
     };
   } else if (method === 'lab.approve') {
     next = { ...cur, approved: true, approved_at_ms: Date.now() };
+  } else if (method === 'lab.retry_restore' || method === 'lab.data_restored') {
+    next = { ...cur, data_session: null };
   }
   LAB.set(repo, next);
   return next;
@@ -936,7 +949,11 @@ function handle(method: string, params: Record<string, unknown>): unknown {
     case 'lab.set':
     case 'lab.approve':
     case 'lab.propose':
+    case 'lab.retry_restore':
+    case 'lab.data_restored':
       return mockLab(method, params);
+    case 'review.lab_start':
+      return {};
     case 'ledger.get': {
       const id = String(params.run_id);
       return ledger(id, acRows(id), scenarioFor(id));

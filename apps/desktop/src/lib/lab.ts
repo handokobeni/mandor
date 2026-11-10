@@ -5,6 +5,7 @@
 import type { AcRowView } from '#lib/protocol/AcRowView.ts';
 import type { LabApproveParams } from '#lib/protocol/LabApproveParams.ts';
 import type { LabDataDto } from '#lib/protocol/LabDataDto.ts';
+import type { LabDataSessionView } from '#lib/protocol/LabDataSessionView.ts';
 import type { LabEquipmentDto } from '#lib/protocol/LabEquipmentDto.ts';
 import type { LabSetParams } from '#lib/protocol/LabSetParams.ts';
 import type { LabView } from '#lib/protocol/LabView.ts';
@@ -64,8 +65,107 @@ export interface LabForm {
   authenticatedUrl: string;
   safePosts: string[];
   fixturesDir: string;
-  /** Bagian lab data (fase 2), diteruskan apa adanya sampai diubah di form. */
-  data: LabDataDto | null;
+  /** Bagian lab data (fase 2); `null` = lab hanya membaca. */
+  data: DataForm | null;
+}
+
+export interface StoreForm {
+  name: string;
+  kind: 'postgres' | 'folder';
+  host: string;
+  port: string;
+  database: string;
+  folder: string;
+  snapshot: string;
+  restore: string;
+  fingerprint: string;
+  testChange: string;
+  labUser: string;
+  /** Password baru; kosong mempertahankan yang tersimpan. */
+  labPassword: string;
+  maintenanceUser: string;
+  maintenancePassword: string;
+  /** Kedua password tersimpan di daemon. */
+  hasCredentials: boolean;
+}
+
+export interface DataForm {
+  scriptsDir: string;
+  stores: StoreForm[];
+  seeds: { name: string; command: string }[];
+}
+
+export function emptyDataForm(): DataForm {
+  return { scriptsDir: '', stores: [], seeds: [] };
+}
+
+export function emptyStore(kind: 'postgres' | 'folder'): StoreForm {
+  return {
+    name: '',
+    kind,
+    host: kind === 'postgres' ? 'localhost' : '',
+    port: kind === 'postgres' ? '5432' : '',
+    database: '',
+    folder: '',
+    snapshot: '',
+    restore: '',
+    fingerprint: '',
+    testChange: '',
+    labUser: '',
+    labPassword: '',
+    maintenanceUser: '',
+    maintenancePassword: '',
+    hasCredentials: false
+  };
+}
+
+function dataForm(d: LabDataDto): DataForm {
+  return {
+    scriptsDir: d.scripts_dir,
+    stores: d.stores.map((s) => ({
+      name: s.name,
+      kind: s.kind === 'folder' ? 'folder' : 'postgres',
+      host: s.host ?? '',
+      port: s.port === null ? '' : String(s.port),
+      database: s.database ?? '',
+      folder: s.folder ?? '',
+      snapshot: s.snapshot,
+      restore: s.restore,
+      fingerprint: s.fingerprint,
+      testChange: s.test_change,
+      labUser: s.lab_user ?? '',
+      labPassword: '',
+      maintenanceUser: s.maintenance_user ?? '',
+      maintenancePassword: '',
+      hasCredentials: s.has_credentials
+    })),
+    seeds: d.seeds.map((s) => ({ name: s.name, command: s.command }))
+  };
+}
+
+function dataDto(d: DataForm): LabDataDto {
+  return {
+    scripts_dir: d.scriptsDir.trim(),
+    stores: d.stores.map((s) => {
+      const pg = s.kind === 'postgres';
+      return {
+        name: s.name.trim(),
+        kind: s.kind,
+        host: pg ? s.host.trim() : null,
+        port: pg && s.port.trim() ? Number(s.port.trim()) : null,
+        database: pg ? s.database.trim() : null,
+        folder: pg ? null : s.folder.trim(),
+        snapshot: s.snapshot.trim(),
+        restore: s.restore.trim(),
+        fingerprint: s.fingerprint.trim(),
+        test_change: s.testChange.trim(),
+        lab_user: null,
+        maintenance_user: null,
+        has_credentials: false
+      };
+    }),
+    seeds: d.seeds.map((s) => ({ name: s.name.trim(), command: s.command.trim() }))
+  };
 }
 
 export function emptyLabForm(): LabForm {
@@ -106,7 +206,7 @@ export function labForm(eq: LabEquipmentDto | null): LabForm {
     authenticatedUrl: eq.login.authenticated_url,
     safePosts: [...eq.safe_posts],
     fixturesDir: eq.fixtures_dir ?? '',
-    data: eq.data
+    data: eq.data ? dataForm(eq.data) : null
   };
 }
 
@@ -131,7 +231,7 @@ function equipment(f: LabForm): LabEquipmentDto {
     },
     safe_posts: f.safePosts.map((p) => p.trim()).filter((p) => p.length > 0),
     fixtures_dir: fixtures.length > 0 ? fixtures : null,
-    data: f.data
+    data: f.data ? dataDto(f.data) : null
   };
 }
 
@@ -143,7 +243,15 @@ export function labSetParams(repoId: string, f: LabForm): LabSetParams {
     passwords: f.accounts
       .filter((a) => a.password.length > 0)
       .map((a) => ({ role: a.role.trim(), password: a.password })),
-    db: []
+    db: (f.data?.stores ?? [])
+      .filter((s) => s.kind === 'postgres')
+      .map((s) => ({
+        store: s.name.trim(),
+        lab_user: s.labUser.trim(),
+        lab_password: s.labPassword.length > 0 ? s.labPassword : null,
+        maintenance_user: s.maintenanceUser.trim(),
+        maintenance_password: s.maintenancePassword.length > 0 ? s.maintenancePassword : null
+      }))
   };
 }
 
@@ -179,7 +287,85 @@ export function validateLabForm(f: LabForm): Record<string, string> {
     if (value.trim().length === 0) errs[key] = 'Required.';
   }
   if (!f.submitPath.trim().startsWith('/')) errs.submitPath = 'A path starting with /.';
+  if (f.data) {
+    const why = validateData(f.data);
+    if (why) errs.data = why;
+  }
   return errs;
+}
+
+/** Pemeriksaan dasar bagian data; daemon memvalidasi perintah dan host. */
+function validateData(d: DataForm): string | null {
+  if (d.scriptsDir.trim().length === 0) return 'Enter the scripts folder.';
+  if (d.stores.length === 0) return 'Add at least one local store.';
+  for (const s of d.stores) {
+    const name = s.name.trim() || 'a store';
+    if (!ROLE.test(s.name.trim())) return `Store names are short lowercase names such as tenant (${name}).`;
+    const commands = [s.snapshot, s.restore, s.fingerprint, s.testChange];
+    if (commands.some((c) => c.trim().length === 0))
+      return `Enter the snapshot, restore, fingerprint, and test change commands of ${name}.`;
+    if (s.kind === 'folder' && !s.folder.trim().startsWith('/')) return `Enter the absolute folder of ${name}.`;
+    if (s.kind === 'postgres') {
+      if (!s.host.trim() || !s.database.trim()) return `Enter the host and database of ${name}.`;
+      if (!s.labUser.trim() || !s.maintenanceUser.trim()) return `Enter the lab and maintenance roles of ${name}.`;
+      const passwords = s.labPassword.length > 0 && s.maintenancePassword.length > 0;
+      if (!s.hasCredentials && !passwords) return `Enter both database passwords of ${name}.`;
+    }
+  }
+  for (const seed of d.seeds) {
+    if (!ROLE.test(seed.name.trim()) || seed.command.trim().length === 0)
+      return 'Each seed needs a short lowercase name and a command.';
+  }
+  return null;
+}
+
+export interface DataBanner {
+  tone: Tone;
+  title: string;
+  body: string;
+  /** Tawarkan Retry restore. */
+  retry: boolean;
+  /** Tawarkan "Data restored, discard snapshot". */
+  restored: boolean;
+}
+
+/** Banner sesi lab data yang memegang data lokal repo (U15). */
+export function dataBanner(s: LabDataSessionView | null): DataBanner | null {
+  if (!s) return null;
+  switch (s.phase) {
+    case 'restore_waiting':
+      return {
+        tone: 'warning',
+        title: 'Restoring the lab data is waiting',
+        body: 'Another database client is connected. Stop that app so Mandor can restore the data; it keeps trying.',
+        retry: false,
+        restored: false
+      };
+    case 'restore_failed':
+      return {
+        tone: 'failed',
+        title: 'The lab data was not restored',
+        body: `${s.error ?? 'The restore failed'}. Reviews, app starts, and agent turns for this repo are paused. Check the database and retry the restore, or confirm the data is restored if you fixed it yourself.`,
+        retry: true,
+        restored: true
+      };
+    default:
+      return {
+        tone: 'working',
+        title: 'The review lab is using the local data',
+        body: 'Mandor stops the app to snapshot and restore. Start, restart, and stop wait until the data is restored.',
+        retry: false,
+        restored: false
+      };
+  }
+}
+
+/** Calon `data` yang ditunda di laptop; tombol Run lab memulai review dengan
+ * lab data (KTD-L23). */
+export function deferredDataRows(rows: AcRowView[]): AcRowView[] {
+  return rows.filter(
+    (r) => r.lab_need === 'data' && r.verdict === 'cant_verify' && (r.evidence ?? '').includes('deferred')
+  );
 }
 
 export interface LabStatus {

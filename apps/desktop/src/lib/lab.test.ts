@@ -2,6 +2,9 @@ import { describe, expect, it } from 'vitest';
 import { counts, gate, gateRows, NO_VISUAL } from '#lib/ac-review.ts';
 import {
   adviceLabel,
+  dataBanner,
+  deferredDataRows,
+  emptyDataForm,
   emptyLabForm,
   evidenceBadges,
   labApproveParams,
@@ -183,5 +186,93 @@ describe('status perlengkapan', () => {
     const ok = labStatus(view({ equipment: EQ, approved: true, approved_at_ms: 1 }));
     expect(ok.text).toBe('Approved');
     expect(ok.setup).toBe(false);
+  });
+});
+
+describe('lab data (fase 2, U15)', () => {
+  const DATA = {
+    scripts_dir: 'review-fixtures/lab',
+    stores: [
+      {
+        name: 'tenant',
+        kind: 'postgres',
+        host: 'localhost',
+        port: 5433,
+        database: 'kelola',
+        folder: null,
+        snapshot: 'snapshot.sh',
+        restore: 'restore.sh',
+        fingerprint: 'fingerprint.sh',
+        test_change: 'change.sh',
+        lab_user: 'lab_min',
+        maintenance_user: 'postgres',
+        has_credentials: true
+      },
+      {
+        name: 'uploads',
+        kind: 'folder',
+        host: null,
+        port: null,
+        database: null,
+        folder: '/srv/uploads',
+        snapshot: 'snap-dir.sh',
+        restore: 'restore-dir.sh',
+        fingerprint: 'fp-dir.sh',
+        test_change: 'touch.sh',
+        lab_user: null,
+        maintenance_user: null,
+        has_credentials: false
+      }
+    ],
+    seeds: [{ name: 'kb', command: 'seed-kb.sh' }]
+  };
+
+  it('password database tidak pernah ditampilkan; yang kosong tidak dikirim', () => {
+    const f = labForm({ ...EQ, data: DATA });
+    expect(f.data?.stores[0].labPassword).toBe('');
+    expect(f.data?.stores[0].hasCredentials).toBe(true);
+    const p = labSetParams('kelola-web', f);
+    expect(p.db).toEqual([
+      { store: 'tenant', lab_user: 'lab_min', lab_password: null, maintenance_user: 'postgres', maintenance_password: null }
+    ]);
+    expect(p.equipment.data?.stores[0]).toMatchObject({ name: 'tenant', kind: 'postgres', port: 5433, database: 'kelola' });
+    expect(p.equipment.data?.stores[1]).toMatchObject({ kind: 'folder', folder: '/srv/uploads', host: null });
+    f.data!.stores[0].labPassword = 'baru';
+    expect(labSetParams('kelola-web', f).db[0].lab_password).toBe('baru');
+  });
+
+  it('validasi bagian data', () => {
+    const f = labForm({ ...EQ, data: DATA });
+    expect(validateLabForm(f)).toEqual({});
+    f.data!.stores[0].snapshot = '';
+    expect(validateLabForm(f).data).toContain('tenant');
+    const g = labForm({ ...EQ, data: DATA });
+    g.data!.stores[0].hasCredentials = false;
+    expect(validateLabForm(g).data).toContain('password');
+    const h = labForm({ ...EQ, data: { ...DATA, stores: [] } });
+    expect(validateLabForm(h).data).toBeDefined();
+    expect(emptyDataForm().stores).toEqual([]);
+  });
+
+  it('banner sesi data', () => {
+    expect(dataBanner(null)).toBeNull();
+    const running = dataBanner({ run_id: 'r1', phase: 'running', error: null });
+    expect(running?.tone).toBe('working');
+    expect(running?.retry).toBe(false);
+    const waiting = dataBanner({ run_id: 'r1', phase: 'restore_waiting', error: null });
+    expect(waiting?.body).toContain('Stop');
+    const failed = dataBanner({ run_id: 'r1', phase: 'restore_failed', error: 'restoring tenant failed' });
+    expect(failed?.tone).toBe('failed');
+    expect(failed?.body).toContain('restoring tenant failed');
+    expect(failed?.retry && failed?.restored).toBe(true);
+  });
+
+  it('calon data yang ditunda menawarkan Run lab', () => {
+    const deferred = row('1', 'cant_verify', {
+      lab_need: 'data',
+      evidence: 'Lab with test data deferred: it changes your local data.'
+    });
+    const other = row('2', 'cant_verify', { lab_need: 'role' });
+    expect(deferredDataRows([deferred, other, row('3', 'pass')]).map((r) => r.ac_id)).toEqual(['1']);
   });
 });

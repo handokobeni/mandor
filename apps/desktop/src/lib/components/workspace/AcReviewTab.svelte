@@ -26,6 +26,9 @@
     VERDICT_META
   } from '#lib/ac-review.ts';
   import { relTime } from '#lib/board.ts';
+  import { deferredDataRows } from '#lib/lab.ts';
+  import * as AlertDialog from '#lib/components/ui/alert-dialog/index.ts';
+  import FlaskConical from '@lucide/svelte/icons/flask-conical';
   import * as Alert from '#lib/components/ui/alert/index.ts';
   import { Badge } from '#lib/components/ui/badge/index.ts';
   import { Button } from '#lib/components/ui/button/index.ts';
@@ -50,6 +53,8 @@
     cards?: GroupCardView[];
     /** URL app dan prototype yang menyala (link halaman di hasil tampilan). */
     urls?: { app: string | null; prototype: string | null };
+    /** Run lab: review dengan lab data untuk calon yang ditunda (KTD-L23). */
+    onrunlab?: () => void;
   }
   let {
     taskKey,
@@ -61,8 +66,11 @@
     onsend,
     onfile,
     cards = [],
-    urls = { app: null, prototype: null }
+    urls = { app: null, prototype: null },
+    onrunlab
   }: Props = $props();
+
+  let offerLab = $state(false);
 
   let focusIdx = $state(0);
   let expanded = $state<Record<string, boolean>>({});
@@ -70,6 +78,7 @@
   let viewing = $state<string | null>(null);
 
   const ledger = $derived(store.ledger);
+  const deferred = $derived(ledger ? deferredDataRows(ledger.rows) : []);
   const rows = $derived(ledger ? activeRows(ledger.rows) : []);
   const removed = $derived(ledger ? removedRows(ledger.rows) : []);
   const g = $derived(gate(rows, ledger?.gate_mode ?? 'block', reviewing));
@@ -195,6 +204,11 @@
           </span>
           <span class="right">
             {#if agentBusy && !reviewing}<span class="muted" id="ac-run-why">Review when the agent is waiting for you after coding.</span>{/if}
+            {#if deferred.length > 0 && onrunlab && !reviewing}
+              <Button variant="outline" size="sm" disabled={agentBusy} onclick={() => (offerLab = true)}>
+                <FlaskConical />Run lab ({deferred.length})
+              </Button>
+            {/if}
             {#if reviewing}
               <Button variant="outline" size="sm" disabled><LoaderCircle class="spin" />Reviewing…</Button>
             {:else}
@@ -325,6 +339,29 @@
     {/if}
     <ReviewHistory history={store.history} {viewing} {now} onview={(id) => (viewing = id)} />
   </div>
+{/if}
+
+{#if offerLab}
+  <AlertDialog.Root open onOpenChange={(o) => !o && (offerLab = false)}>
+    <AlertDialog.Content>
+      <AlertDialog.Header>
+        <AlertDialog.Title>Run the review lab with test data?</AlertDialog.Title>
+        <AlertDialog.Description>
+          This lab changes your local data and stops the app until it restores. Mandor reviews the task again, takes a
+          snapshot of the approved local stores, tests {deferred.length} {deferred.length === 1 ? 'criterion' : 'criteria'}, then restores and checks the data.
+        </AlertDialog.Description>
+      </AlertDialog.Header>
+      <AlertDialog.Footer>
+        <AlertDialog.Cancel>Leave Can't verify for now</AlertDialog.Cancel>
+        <AlertDialog.Action
+          onclick={() => {
+            offerLab = false;
+            onrunlab?.();
+          }}>Run lab now</AlertDialog.Action
+        >
+      </AlertDialog.Footer>
+    </AlertDialog.Content>
+  </AlertDialog.Root>
 {/if}
 
 <style>

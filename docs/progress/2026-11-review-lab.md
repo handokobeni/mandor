@@ -53,3 +53,10 @@ Keputusan pemilik produk 2026-11-10: fase 1 dan fase 2 diuji langsung bersama se
 | Unit | Status | Catatan |
 |---|---|---|
 | U11 | selesai | `mandor-domain::lab_data`: `is_local_db`, `parse_dsn` (host di query string atau beberapa host ditolak), `check_statement`, `role_block` (atribut, keanggotaan, CREATE, TRIGGER, kepemilikan, extension, akses tabel), `other_clients` (gagal tertutup), `scripts_match`, mesin status sesi `next_phase`, `restore_outcome`, `lock_keys`, `check_command`/`validate_data`; `LabEquipment.data` ikut validasi, digest, codec store, dan DTO `LabDataDto` |
+| U12 | selesai | Migrasi `0015_lab_sessions.sql`; port `LabSessions`, `LabDatabase`, `DbCredentials`; `LabSessionsStore` (transisi `UPDATE … WHERE phase = ?`, `pending_recovery`, `holding`); `PgLabDatabase` (sqlx fitur `postgres` tanpa TLS, kueri runtime, koneksi tunggal dengan opsi eksplisit, batas waktu koneksi/katalog/pernyataan, keluaran ≤ 64 KiB). Diuji dengan PostgreSQL 18 sungguhan di kontainer sementara (`MANDOR_E2E=1`) |
+
+Catatan fase 2:
+
+- `ctutils` dinaikkan ke 0.4.8 (RUSTSEC-2026-0385, lewat `sqlx-postgres` → `hkdf`/`digest`); butuh Rust 1.87, toolchain proyek 1.95.
+- KTD-L15 diubah (keputusan pemilik produk 2026-11-10): server boleh melihat alamatnya sebagai alamat privat (jaringan kontainer Docker yang portnya dipublikasikan ke loopback, seperti `postgres-18` kelola-v2), selama host koneksi tetap loopback.
+- Review keamanan otomatis atas U11: pengurai pernyataan SQL bisa dilewati dengan `E''`, `U&''`/`U&""`+`UESCAPE`, dan dollar quote; DSN dengan opsi selain `sslmode`/`application_name`/`connect_timeout` atau percent-encoding. Semuanya kini ditolak.

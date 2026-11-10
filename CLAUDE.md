@@ -37,7 +37,7 @@ mandord (app) ──► mandor-api, mandor-store, mandor-lark, mandor-git, mando
 |---|---|---|
 | `mandor-domain` | Aturan murni: derivasi kolom kanban, state machine alur kerja, keputusan klaim, filter penulis tepercaya, urutan kursor, allowlist transisi status, klasifikasi perintah hook | Tidak ada crate workspace; tidak ada crate I/O (tokio, sqlx, axum, reqwest) |
 | `mandor-usecase` | Orkestrasi dan trait port dalam satu bundel `Deps` | `mandor-domain` |
-| `mandor-store` | Adapter penyimpanan (sqlx SQLite) | usecase, domain; **satu-satunya** pengguna `sqlx` |
+| `mandor-store` | Adapter penyimpanan (sqlx SQLite) dan database lab PostgreSQL | usecase, domain; **satu-satunya** pengguna `sqlx` |
 | `mandor-lark` | Adapter Lark (reqwest) | usecase, domain |
 | `mandor-git`, `mandor-agent`, `mandor-proc` | Adapter git/gh, Claude CLI, dan helper proses | usecase, domain |
 | `mandor-api`, `mandor-protocol` | Server axum WebSocket dan relay stdio, DTO protokol | `mandor-protocol`; **satu-satunya** pengguna `axum` selain app |
@@ -48,7 +48,7 @@ mandord (app) ──► mandor-api, mandor-store, mandor-lark, mandor-git, mando
 
 | Crate | Alasan | Dipakai di |
 |---|---|---|
-| `sqlx` fitur `sqlite` | Allow list hanya menyebut Postgres; daemon lokal tidak punya Postgres | `mandor-store` |
+| `sqlx` fitur `sqlite` dan `postgres` | Allow list hanya menyebut Postgres; daemon menyimpan state di SQLite. Fitur `postgres` (tanpa TLS, hanya kueri runtime tanpa makro) untuk database lab lokal milik app yang direview (plan 2026-11-10-001, KTD-L16) | `mandor-store` |
 | `process-wrap` | Process group (Unix) dan Job Object (Windows) tanpa `unsafe` di kode kita | `mandor-proc` |
 | `ts-rs` | Generate tipe TypeScript dari tipe protokol | `mandor-protocol` |
 | `fd-lock` | Lock file eksklusif single-instance lintas OS | `mandord` |

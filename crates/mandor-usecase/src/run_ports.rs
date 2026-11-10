@@ -348,6 +348,115 @@ pub struct ProxyHit {
     pub write: bool,
 }
 
+/// Satu sesi lab data (plan 2026-11-10-001, U12); tahan restart.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LabSessionRecord {
+    pub id: String,
+    pub run_id: String,
+    pub repo_id: String,
+    /// Kunci penyimpanan yang dipegang, terurut (KTD-L21).
+    pub lock_keys: Vec<String>,
+    pub phase: mandor_domain::lab_data::SessionPhase,
+    /// Folder snapshot milik daemon (0700).
+    pub snapshot_dir: Option<PathBuf>,
+    /// Digest salinan skrip yang dipin (KTD-L18).
+    pub scripts_digest: String,
+    /// Sidik per penyimpanan sebelum lab: `(nama, sidik)`.
+    pub fingerprints: Vec<(String, String)>,
+    pub error: Option<String>,
+    pub created_at_ms: i64,
+    pub updated_at_ms: i64,
+}
+
+/// Penyimpanan status sesi lab data.
+pub trait LabSessions: Send + Sync {
+    fn create_session(
+        &self,
+        rec: &LabSessionRecord,
+    ) -> impl Future<Output = Result<(), PortError>> + Send;
+    fn session(
+        &self,
+        id: &str,
+    ) -> impl Future<Output = Result<Option<LabSessionRecord>, PortError>> + Send;
+    /// Memindah fase hanya bila fase sekarang `from`; `false` bila kalah
+    /// balapan atau sesi tidak ada.
+    fn transition(
+        &self,
+        id: &str,
+        from: mandor_domain::lab_data::SessionPhase,
+        to: mandor_domain::lab_data::SessionPhase,
+        error: Option<&str>,
+        now_ms: i64,
+    ) -> impl Future<Output = Result<bool, PortError>> + Send;
+    fn set_fingerprints(
+        &self,
+        id: &str,
+        fingerprints: &[(String, String)],
+        now_ms: i64,
+    ) -> impl Future<Output = Result<(), PortError>> + Send;
+    /// Sesi yang perlu dipulihkan saat start (KTD-L22).
+    fn pending_recovery(
+        &self,
+    ) -> impl Future<Output = Result<Vec<LabSessionRecord>, PortError>> + Send;
+    /// Sesi yang masih memegang kunci (fase selain `done`).
+    fn holding(&self) -> impl Future<Output = Result<Vec<LabSessionRecord>, PortError>> + Send;
+}
+
+/// Kredensial database lab dari daemon (KTD-L15); password tidak pernah
+/// masuk argv maupun log.
+#[derive(Debug, Clone)]
+pub struct DbCredentials {
+    pub target: mandor_domain::lab_data::DbTarget,
+    pub user: String,
+    pub password: secrecy::SecretString,
+}
+
+/// Hasil satu pernyataan `lab_sql`, sudah dipotong.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SqlResult {
+    pub text: String,
+    pub rows: usize,
+    pub truncated: bool,
+}
+
+/// Akses database lab milik daemon (KTD-L15, KTD-L16, KTD-L20).
+pub trait LabDatabase: Send + Sync {
+    /// Server sungguhan lokal: `inet_server_addr()` null (socket), loopback,
+    /// atau alamat privat jaringan kontainer.
+    fn server_is_local(
+        &self,
+        creds: &DbCredentials,
+    ) -> impl Future<Output = Result<bool, PortError>> + Send;
+    /// Kredensial pemeliharaan boleh membaca semua baris `pg_stat_activity`.
+    fn reads_all_stats(
+        &self,
+        maintenance: &DbCredentials,
+    ) -> impl Future<Output = Result<bool, PortError>> + Send;
+    /// Hak role lab menurut katalog, dibaca dengan kredensial pemeliharaan;
+    /// `tables` = tabel penyimpanan yang wajib bisa dibaca dan ditulis.
+    fn role_privileges(
+        &self,
+        maintenance: &DbCredentials,
+        lab_role: &str,
+    ) -> impl Future<Output = Result<mandor_domain::lab_data::RolePrivileges, PortError>> + Send;
+    /// Baris `pg_stat_activity` dan pid koneksi daemon sendiri.
+    fn activity(
+        &self,
+        maintenance: &DbCredentials,
+    ) -> impl Future<Output = Result<(Vec<mandor_domain::lab_data::PgActivity>, i32), PortError>> + Send;
+    /// Nama tabel di schema pengguna, terurut (deteksi perubahan skema).
+    fn tables(
+        &self,
+        creds: &DbCredentials,
+    ) -> impl Future<Output = Result<Vec<String>, PortError>> + Send;
+    /// Satu pernyataan `lab_sql` dengan role lab, dibatasi waktu.
+    fn run_statement(
+        &self,
+        lab: &DbCredentials,
+        sql: &str,
+    ) -> impl Future<Output = Result<SqlResult, PortError>> + Send;
+}
+
 /// Review lab: perlengkapan, login akun uji, dan proxy per review (plan
 /// 2026-11-10-001).
 pub trait LabPort: Send + Sync {

@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO lab_sessions (id, run_id, repo_id, lock_keys_json, phase, snapshot_dir,\n                 scripts_digest, fingerprints_json, error, created_at_ms, updated_at_ms)\n             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 11
+    },
+    "nullable": []
+  },
+  "hash": "2600c546c8ff108e1b2479fe9fd0bc56d3351714b583e39bcdb7ea9af1587cb5"
+}

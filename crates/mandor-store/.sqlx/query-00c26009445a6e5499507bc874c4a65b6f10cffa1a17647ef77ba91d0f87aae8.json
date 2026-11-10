@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "UPDATE lab_sessions SET phase = ?, error = ?, updated_at_ms = ?\n             WHERE id = ? AND phase = ?",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 5
+    },
+    "nullable": []
+  },
+  "hash": "00c26009445a6e5499507bc874c4a65b6f10cffa1a17647ef77ba91d0f87aae8"
+}

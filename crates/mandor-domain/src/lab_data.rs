@@ -57,6 +57,29 @@ pub fn is_local_db(host: &str) -> bool {
     }
 }
 
+/// Alamat server menurut server itu sendiri (`inet_server_addr()`): kosong
+/// (socket Unix), loopback, atau alamat privat seperti jaringan kontainer
+/// Docker yang portnya dipublikasikan ke loopback (keputusan pemilik produk
+/// 2026-11-10). Host koneksi tetap wajib lokal lewat [`is_local_db`].
+#[must_use]
+pub fn server_addr_local(addr: Option<&str>) -> bool {
+    let Some(addr) = addr.map(str::trim).filter(|a| !a.is_empty()) else {
+        return true;
+    };
+    let bare = addr.split('/').next().unwrap_or(addr);
+    match bare.parse::<IpAddr>() {
+        Ok(IpAddr::V4(v4)) => v4.is_loopback() || v4.is_private(),
+        Ok(IpAddr::V6(v6)) => {
+            v6.is_loopback()
+                || (v6.segments()[0] & 0xfe00) == 0xfc00
+                || v6
+                    .to_ipv4_mapped()
+                    .is_some_and(|v4| v4.is_loopback() || v4.is_private())
+        }
+        Err(_) => false,
+    }
+}
+
 /// Target database: host, port, dan nama database terpisah (KTD-L15).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DbTarget {
@@ -950,6 +973,30 @@ mod tests {
             assert!(!is_local_db(h), "{h}");
         }
         assert!(is_local_db("::ffff:127.0.0.1"));
+    }
+
+    #[test]
+    fn alamat_server_lokal_termasuk_jaringan_kontainer() {
+        for a in [
+            None,
+            Some(""),
+            Some("127.0.0.1"),
+            Some("::1"),
+            Some("172.17.0.2"),
+            Some("10.1.2.3/32"),
+            Some("192.168.1.5"),
+            Some("fd00::5"),
+        ] {
+            assert!(server_addr_local(a), "{a:?}");
+        }
+        for a in [
+            Some("8.8.8.8"),
+            Some("203.0.113.9"),
+            Some("2001:db8::1"),
+            Some("x"),
+        ] {
+            assert!(!server_addr_local(a), "{a:?}");
+        }
     }
 
     #[test]

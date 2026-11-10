@@ -10,7 +10,8 @@ description = "Adapter penyimpanan mandor (sqlx SQLite). Satu-satunya pengguna s
 [dependencies]
 mandor-domain.workspace = true
 mandor-usecase.workspace = true
-sqlx = { workspace = true, features = ["sqlite", "runtime-tokio", "migrate", "macros"] }
+sqlx = { workspace = true, features = ["sqlite", "postgres", "runtime-tokio", "migrate", "macros"] }
+secrecy.workspace = true
 tokio = { workspace = true, features = ["time"] }
 serde.workspace = true
 serde_json.workspace = true

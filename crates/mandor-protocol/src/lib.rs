@@ -412,6 +412,10 @@ fn lab_bindings() -> Result<Vec<(&'static str, String)>, String> {
         one("LabDataDto.ts", LabDataDto::export_to_string(&cfg))?,
         one("LabStoreDto.ts", LabStoreDto::export_to_string(&cfg))?,
         one("LabSeedDto.ts", LabSeedDto::export_to_string(&cfg))?,
+        one(
+            "LabDbSecretInput.ts",
+            LabDbSecretInput::export_to_string(&cfg),
+        )?,
         one("LabLoginDto.ts", LabLoginDto::export_to_string(&cfg))?,
         one(
             "LabPasswordInput.ts",

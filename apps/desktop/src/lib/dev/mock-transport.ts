@@ -66,7 +66,8 @@ function mockLab(method: string, params: Record<string, unknown>): LabView {
           authenticated_url: 'http://localhost:5173/dashboard'
         },
         safe_posts: ['/api/invoices/search'],
-        fixtures_dir: 'review-fixtures'
+        fixtures_dir: 'review-fixtures',
+        data: null
       }
     };
   } else if (method === 'lab.set') {

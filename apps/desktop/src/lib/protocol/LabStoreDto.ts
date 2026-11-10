@@ -4,4 +4,9 @@
  * Satu penyimpanan: `PostgreSQL` lokal (`kind = "postgres"`) atau folder
  * (`kind = "folder"`).
  */
-export type LabStoreDto = { name: string, kind: string, host: string | null, port: number | null, database: string | null, folder: string | null, snapshot: string, restore: string, fingerprint: string, test_change: string, };
+export type LabStoreDto = { name: string, kind: string, host: string | null, port: number | null, database: string | null, folder: string | null, snapshot: string, restore: string, fingerprint: string, test_change: string, 
+/**
+ * Hanya di respons: role lab dan pemeliharaan tersimpan (password tidak
+ * pernah dikirim balik).
+ */
+lab_user: string | null, maintenance_user: string | null, has_credentials: boolean, };

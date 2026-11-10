@@ -1876,6 +1876,14 @@ pub struct LabStoreDto {
     pub restore: String,
     pub fingerprint: String,
     pub test_change: String,
+    /// Hanya di respons: role lab dan pemeliharaan tersimpan (password tidak
+    /// pernah dikirim balik).
+    #[serde(default)]
+    pub lab_user: Option<String>,
+    #[serde(default)]
+    pub maintenance_user: Option<String>,
+    #[serde(default)]
+    pub has_credentials: bool,
 }
 
 /// Seed bernama yang boleh dipanggil reviewer lab.
@@ -1927,6 +1935,33 @@ pub struct LabSetParams {
     pub equipment: LabEquipmentDto,
     #[serde(default)]
     pub passwords: Vec<LabPasswordInput>,
+    /// Kredensial database per penyimpanan `postgres` (KTD-L15).
+    #[serde(default)]
+    pub db: Vec<LabDbSecretInput>,
+}
+
+/// Kredensial database satu penyimpanan: role lab berhak minimum dan role
+/// pemeliharaan untuk snapshot, restore, dan sidik. Password kosong atau
+/// `None` mempertahankan yang lama.
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+pub struct LabDbSecretInput {
+    pub store: String,
+    pub lab_user: String,
+    #[serde(default)]
+    pub lab_password: Option<String>,
+    pub maintenance_user: String,
+    #[serde(default)]
+    pub maintenance_password: Option<String>,
+}
+
+impl std::fmt::Debug for LabDbSecretInput {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("LabDbSecretInput")
+            .field("store", &self.store)
+            .field("lab_user", &self.lab_user)
+            .field("maintenance_user", &self.maintenance_user)
+            .finish_non_exhaustive()
+    }
 }
 
 /// Persetujuan atas perlengkapan yang dilihat developer.

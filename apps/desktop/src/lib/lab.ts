@@ -4,6 +4,7 @@
 
 import type { AcRowView } from '#lib/protocol/AcRowView.ts';
 import type { LabApproveParams } from '#lib/protocol/LabApproveParams.ts';
+import type { LabDataDto } from '#lib/protocol/LabDataDto.ts';
 import type { LabEquipmentDto } from '#lib/protocol/LabEquipmentDto.ts';
 import type { LabSetParams } from '#lib/protocol/LabSetParams.ts';
 import type { LabView } from '#lib/protocol/LabView.ts';
@@ -63,6 +64,8 @@ export interface LabForm {
   authenticatedUrl: string;
   safePosts: string[];
   fixturesDir: string;
+  /** Bagian lab data (fase 2), diteruskan apa adanya sampai diubah di form. */
+  data: LabDataDto | null;
 }
 
 export function emptyLabForm(): LabForm {
@@ -77,7 +80,8 @@ export function emptyLabForm(): LabForm {
     success: '',
     authenticatedUrl: '',
     safePosts: [],
-    fixturesDir: ''
+    fixturesDir: '',
+    data: null
   };
 }
 
@@ -101,7 +105,8 @@ export function labForm(eq: LabEquipmentDto | null): LabForm {
     success: eq.login.success,
     authenticatedUrl: eq.login.authenticated_url,
     safePosts: [...eq.safe_posts],
-    fixturesDir: eq.fixtures_dir ?? ''
+    fixturesDir: eq.fixtures_dir ?? '',
+    data: eq.data
   };
 }
 
@@ -125,7 +130,8 @@ function equipment(f: LabForm): LabEquipmentDto {
       authenticated_url: f.authenticatedUrl.trim()
     },
     safe_posts: f.safePosts.map((p) => p.trim()).filter((p) => p.length > 0),
-    fixtures_dir: fixtures.length > 0 ? fixtures : null
+    fixtures_dir: fixtures.length > 0 ? fixtures : null,
+    data: f.data
   };
 }
 
@@ -136,7 +142,8 @@ export function labSetParams(repoId: string, f: LabForm): LabSetParams {
     equipment: equipment(f),
     passwords: f.accounts
       .filter((a) => a.password.length > 0)
-      .map((a) => ({ role: a.role.trim(), password: a.password }))
+      .map((a) => ({ role: a.role.trim(), password: a.password })),
+    db: []
   };
 }
 

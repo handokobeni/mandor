@@ -57,7 +57,8 @@ const EQ: LabEquipmentDto = {
     authenticated_url: 'http://localhost:5173/admin'
   },
   safe_posts: ['/api/search'],
-  fixtures_dir: 'review-fixtures'
+  fixtures_dir: 'review-fixtures',
+  data: null
 };
 
 function view(extra: Partial<LabView> = {}): LabView {

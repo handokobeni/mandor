@@ -17,3 +17,7 @@ CREATE TABLE lab_sessions (
 );
 CREATE INDEX lab_sessions_by_phase ON lab_sessions (phase);
 CREATE INDEX lab_sessions_by_repo ON lab_sessions (repo_id, phase);
+
+-- Digest salinan skrip lab data yang disetujui (KTD-L18); dikosongkan bersama
+-- persetujuan setiap kali perlengkapan berubah.
+ALTER TABLE repos ADD COLUMN lab_scripts_digest TEXT;

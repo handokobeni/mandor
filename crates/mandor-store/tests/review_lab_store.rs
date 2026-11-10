@@ -133,7 +133,11 @@ async fn simpan_perlengkapan_mengosongkan_persetujuan() {
     assert_eq!(got.equipment, eq);
     assert_eq!(got.approved_digest, None);
 
-    assert!(s.approve_repo_lab("repo1", &eq, "abc", 10).await.unwrap());
+    assert!(
+        s.approve_repo_lab("repo1", &eq, "abc", None, 10)
+            .await
+            .unwrap()
+    );
     let got = s.repo_lab("repo1").await.unwrap().unwrap();
     assert_eq!(got.approved_digest.as_deref(), Some("abc"));
     assert_eq!(got.approved_at_ms, Some(10));
@@ -194,7 +198,11 @@ async fn persetujuan_ditolak_bila_perlengkapan_berubah_sejak_dilihat() {
     let mut changed = eq.clone();
     changed.fixtures_dir = None;
     s.save_repo_lab("repo1", &changed).await.unwrap();
-    assert!(!s.approve_repo_lab("repo1", &eq, "abc", 10).await.unwrap());
+    assert!(
+        !s.approve_repo_lab("repo1", &eq, "abc", None, 10)
+            .await
+            .unwrap()
+    );
     assert_eq!(
         s.repo_lab("repo1").await.unwrap().unwrap().approved_digest,
         None

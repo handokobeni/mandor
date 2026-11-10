@@ -217,6 +217,9 @@ fn to_row(r: Raw) -> Result<AcRow, StoreError> {
         card: r.card,
         visual: Visual::parse(&r.visual).ok_or_else(|| corrupt("visual", &r.visual))?,
         visual_detail: visual_detail(r.visual_json.as_deref())?,
+        lab_need: None,
+        evidence_detail: None,
+        look_recommendation: None,
     })
 }
 

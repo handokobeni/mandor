@@ -237,6 +237,12 @@ pub struct AcRow {
     /// Hasil perbandingan tampilan dengan prototype (R20).
     pub visual: Visual,
     pub visual_detail: VisualDetail,
+    /// Kebutuhan lab untuk baris *Can't verify* (KTD-L7).
+    pub lab_need: Option<crate::lab::LabNeed>,
+    /// Bukti terstruktur (KTD-L12); `evidence` teks tetap untuk tampilan lama.
+    pub evidence_detail: Option<crate::lab::Evidence>,
+    /// Rekomendasi reviewer untuk baris *looks different* (R18).
+    pub look_recommendation: Option<crate::lab::LookRecommendation>,
 }
 
 impl AcRow {
@@ -258,6 +264,9 @@ impl AcRow {
             card: None,
             visual: Visual::NotCompared,
             visual_detail: VisualDetail::default(),
+            lab_need: None,
+            evidence_detail: None,
+            look_recommendation: None,
         }
     }
 

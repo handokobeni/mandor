@@ -331,10 +331,19 @@ pub fn parse_hook_input(raw: &[u8]) -> Result<ToolCall, String> {
         .get("command")
         .and_then(Value::as_str)
         .map(str::to_owned);
-    let paths = ["file_path", "path", "notebook_path", "filename"]
+    let mut paths: Vec<String> = ["file_path", "path", "notebook_path", "filename"]
         .iter()
         .filter_map(|k| input.get(*k).and_then(Value::as_str).map(str::to_owned))
         .collect();
+    // `browser_file_upload` memakai array `paths`; setiap elemen diperiksa
+    // pagar (KTD-L11). Elemen bukan string membuat panggilan ditolak lewat
+    // path yang tidak sah.
+    if let Some(list) = input.get("paths").and_then(Value::as_array) {
+        paths.extend(list.iter().map(|v| {
+            v.as_str()
+                .map_or_else(|| "\0invalid".to_owned(), str::to_owned)
+        }));
+    }
     let text = |k: &str| input.get(k).and_then(Value::as_str).map(str::to_owned);
     Ok(ToolCall {
         tool_name,
@@ -688,5 +697,16 @@ mod tests {
                 .iter()
                 .any(|a| a.contains("commit") || a.contains("push"))
         );
+    }
+
+    #[test]
+    fn array_paths_upload_ikut_diperiksa() {
+        let call = parse_hook_input(
+            br#"{"tool_name":"mcp__playwright_admin__browser_file_upload","tool_input":{"paths":["/lab/fixtures/a.xlsx","/etc/passwd",7]}}"#,
+        )
+        .unwrap();
+        assert_eq!(call.paths.len(), 3);
+        assert_eq!(call.paths[1], "/etc/passwd");
+        assert!(call.paths[2].contains("invalid"));
     }
 }

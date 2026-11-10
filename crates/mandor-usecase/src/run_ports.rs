@@ -358,6 +358,14 @@ pub trait LabPort: Send + Sync {
         &self,
         req: LabLogin<'_>,
     ) -> impl Future<Output = Result<PathBuf, LoginFailure>> + Send;
+    /// Menyalin folder berkas uji repo ke staging milik daemon (KTD-L11):
+    /// hanya berkas biasa, tanpa symlink dan dotfile. `None` bila folder
+    /// sumber tidak ada.
+    fn stage_fixtures(
+        &self,
+        review_id: &str,
+        source: &std::path::Path,
+    ) -> impl Future<Output = Result<Option<PathBuf>, PortError>> + Send;
     /// Menghentikan proxy dan menghapus berkas sesi review.
     fn end_review(&self, review_id: &str) -> impl Future<Output = ()> + Send;
     /// Menyamarkan password akun uji repo dan nilai cookie sesi review di
@@ -945,6 +953,9 @@ pub trait Prompts: Send + Sync {
     /// Pesan pertama sesi reviewer: AC sebagai data, fakta kesiapan, dan
     /// instruksi melapor lewat `ac_set_verdict` (KTD-38).
     fn review_message(&self, brief: &ReviewBrief<'_>) -> String;
+    /// Pesan pertama sesi reviewer lab: AC calon lab sebagai data, role yang
+    /// tersedia, dan folder berkas uji (plan 2026-11-10-001, U7).
+    fn lab_message(&self, brief: &LabBrief<'_>) -> String;
     /// Pesan ke agent pelaksana berisi temuan reviewer sebagai data.
     fn findings_message(&self, rows: &[AcRow]) -> String;
 }
@@ -1077,6 +1088,21 @@ pub struct ReviewBrief<'a> {
     /// Run grup: semua kartu yang disertakan, urut posisi (R12). Kosong untuk
     /// run tunggal.
     pub cards: &'a [Task],
+}
+
+/// Bahan pesan pertama sesi reviewer lab.
+#[derive(Debug, Clone, Copy)]
+pub struct LabBrief<'a> {
+    pub task: &'a Task,
+    /// Baris calon lab kartu ini, dengan bukti reviewer biasa.
+    pub rows: &'a [AcRow],
+    /// Role yang sudah login, mis. `admin`; server-nya `playwright_<role>`.
+    pub roles: &'a [String],
+    /// Role yang gagal login, beserta alasannya.
+    pub unavailable: &'a [(String, String)],
+    pub app_urls: &'a [String],
+    /// Folder staging berkas uji, bila ada.
+    pub fixtures: Option<&'a std::path::Path>,
 }
 
 /// Pemicu review.

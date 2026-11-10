@@ -2,6 +2,7 @@
 
 pub(crate) mod capability;
 mod design;
+pub(crate) mod lab;
 mod ledger;
 pub(crate) mod service;
 pub mod settings;

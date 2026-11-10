@@ -620,6 +620,20 @@ impl mandor_usecase::run_ports::Prompts for PlainMessage {
         format!("CONTINUE SKILL:{}", skill.unwrap_or("-"))
     }
 
+    fn lab_message(&self, b: &mandor_usecase::run_ports::LabBrief<'_>) -> String {
+        let acs: Vec<String> = b.rows.iter().map(|r| r.ac_id.clone()).collect();
+        let gone: Vec<String> = b.unavailable.iter().map(|(r, _)| r.clone()).collect();
+        format!(
+            "LAB {} AC:{} ROLES:{} UNAVAILABLE:{} FIXTURES:{}",
+            b.task.title,
+            acs.join("|"),
+            b.roles.join("|"),
+            gone.join("|"),
+            b.fixtures
+                .map_or("-".to_owned(), |p| p.display().to_string())
+        )
+    }
+
     fn review_message(&self, b: &mandor_usecase::run_ports::ReviewBrief<'_>) -> String {
         let acs: Vec<String> = b.rows.iter().map(|r| r.ac_id.clone()).collect();
         let mut out = format!(

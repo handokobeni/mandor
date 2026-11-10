@@ -20,6 +20,12 @@ use crate::lab_secrets;
 
 /// Batas operasi berkas sesi.
 const FILE_TIMEOUT: Duration = Duration::from_secs(5);
+/// Batas menyalin folder berkas uji.
+const STAGE_TIMEOUT: Duration = Duration::from_secs(60);
+/// Ukuran maksimum satu berkas uji (KTD-L11).
+const MAX_FIXTURE_BYTES: u64 = 50 * 1024 * 1024;
+/// Jumlah maksimum berkas uji yang disalin.
+const MAX_FIXTURES: usize = 500;
 
 /// Adapter [`LabPort`] milik daemon.
 #[derive(Clone)]
@@ -183,6 +189,26 @@ impl LabPort for ProdLab {
         }
     }
 
+    async fn stage_fixtures(
+        &self,
+        review_id: &str,
+        source: &Path,
+    ) -> Result<Option<PathBuf>, PortError> {
+        let target = self.sessions_dir(review_id).join("fixtures");
+        let from = source.to_path_buf();
+        let to = target.clone();
+        let copy = tokio::task::spawn_blocking(move || copy_fixtures(&from, &to));
+        match tokio::time::timeout(STAGE_TIMEOUT, copy).await {
+            Ok(Ok(Ok(true))) => Ok(Some(target)),
+            Ok(Ok(Ok(false))) => Ok(None),
+            Ok(Ok(Err(e))) => Err(PortError::Storage(e.to_string())),
+            Ok(Err(e)) => Err(PortError::Storage(e.to_string())),
+            Err(_) => Err(PortError::Storage(
+                "copying test files timed out".to_owned(),
+            )),
+        }
+    }
+
     async fn redact(
         &self,
         repo_ids: &[String],
@@ -214,6 +240,47 @@ impl LabPort for ProdLab {
         }
         remove_dir(self.sessions_dir(review_id)).await;
     }
+}
+
+/// Menyalin berkas biasa dari `from` ke `to` (0700): symlink, dotfile, dan
+/// berkas di atas batas ukuran dilewati. `false` bila `from` bukan folder.
+/// Sinkron; dipanggil lewat `spawn_blocking`.
+fn copy_fixtures(from: &Path, to: &Path) -> std::io::Result<bool> {
+    let Ok(meta) = std::fs::symlink_metadata(from) else {
+        return Ok(false);
+    };
+    if !meta.is_dir() {
+        return Ok(false);
+    }
+    let mut copied = 0usize;
+    copy_dir(from, to, &mut copied)?;
+    Ok(true)
+}
+
+fn copy_dir(from: &Path, to: &Path, copied: &mut usize) -> std::io::Result<()> {
+    let mut b = std::fs::DirBuilder::new();
+    b.recursive(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::DirBuilderExt;
+        b.mode(0o700);
+    }
+    b.create(to)?;
+    for entry in std::fs::read_dir(from)? {
+        let entry = entry?;
+        let name = entry.file_name();
+        if name.to_string_lossy().starts_with('.') || *copied >= MAX_FIXTURES {
+            continue;
+        }
+        let meta = std::fs::symlink_metadata(entry.path())?;
+        if meta.is_dir() {
+            copy_dir(&entry.path(), &to.join(&name), copied)?;
+        } else if meta.is_file() && meta.len() <= MAX_FIXTURE_BYTES {
+            std::fs::copy(entry.path(), to.join(&name))?;
+            *copied += 1;
+        }
+    }
+    Ok(())
 }
 
 /// Nilai cookie dan `localStorage` di berkas sesi review, untuk penyamaran.
@@ -295,6 +362,25 @@ async fn remove_dir(dir: PathBuf) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn salinan_berkas_uji_tanpa_symlink_dan_dotfile() {
+        let dir = tempfile::tempdir().unwrap_or_else(|e| panic!("{e}"));
+        let src = dir.path().join("src");
+        std::fs::create_dir_all(src.join("kb")).unwrap_or_else(|e| panic!("{e}"));
+        std::fs::write(src.join("kb/a.xlsx"), b"x").unwrap_or_else(|e| panic!("{e}"));
+        std::fs::write(src.join(".env"), b"SECRET=1").unwrap_or_else(|e| panic!("{e}"));
+        #[cfg(unix)]
+        std::os::unix::fs::symlink("/etc/passwd", src.join("pw")).unwrap_or_else(|e| panic!("{e}"));
+        let out = dir.path().join("out");
+        assert!(copy_fixtures(&src, &out).unwrap_or_else(|e| panic!("{e}")));
+        assert!(out.join("kb/a.xlsx").is_file());
+        assert!(!out.join(".env").exists());
+        assert!(!out.join("pw").exists());
+        assert!(
+            !copy_fixtures(&dir.path().join("tidak-ada"), &out).unwrap_or_else(|e| panic!("{e}"))
+        );
+    }
 
     #[test]
     fn nama_aman_untuk_path() {

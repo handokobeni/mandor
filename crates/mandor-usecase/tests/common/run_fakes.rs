@@ -1494,6 +1494,8 @@ pub struct FakeLab {
     pub ended: Arc<Mutex<Vec<String>>>,
     /// Nilai yang disamarkan `redact`.
     pub secrets: Arc<Mutex<Vec<String>>>,
+    /// `(review_id, folder sumber)` per `stage_fixtures`.
+    pub staged: Arc<Mutex<Vec<(String, PathBuf)>>>,
 }
 
 impl Default for FakeLab {
@@ -1508,6 +1510,7 @@ impl Default for FakeLab {
             blocked: Arc::default(),
             ended: Arc::default(),
             secrets: Arc::default(),
+            staged: Arc::default(),
         }
     }
 }
@@ -1581,6 +1584,20 @@ impl mandor_usecase::run_ports::LabPort for FakeLab {
 
     async fn end_review(&self, review_id: &str) {
         self.ended.lock().unwrap().push(review_id.to_owned());
+    }
+
+    async fn stage_fixtures(
+        &self,
+        review_id: &str,
+        source: &Path,
+    ) -> Result<Option<PathBuf>, PortError> {
+        self.staged
+            .lock()
+            .unwrap()
+            .push((review_id.to_owned(), source.to_path_buf()));
+        Ok(Some(PathBuf::from(format!(
+            "/daemon/lab/{review_id}/fixtures"
+        ))))
     }
 
     async fn redact(&self, _repos: &[String], _review_id: &str, texts: Vec<String>) -> Vec<String> {

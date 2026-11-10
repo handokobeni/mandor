@@ -1397,3 +1397,161 @@ async fn rekomendasi_tampilan_hanya_untuk_baris_berbeda() {
     assert_eq!(rec.advice, LookAdvice::Accept);
     assert_eq!(rec.reason, "AC menulis Key Behavior");
 }
+
+/// Verdict dari sesi agent terakhir (review biasa atau lab).
+async fn set_from_last(
+    st: &Station,
+    ac: &str,
+    v: Verdict,
+    report: mandor_usecase::review::VerdictReport,
+) {
+    let token = st.agent.last().req.ledger.unwrap().token;
+    let scope = st.svc.verify_capability(token.expose()).unwrap();
+    st.svc
+        .ledger_set_verdict(&scope, ac, v, report)
+        .await
+        .unwrap();
+}
+
+fn needs(need: mandor_domain::lab::LabNeed) -> mandor_usecase::review::VerdictReport {
+    mandor_usecase::review::VerdictReport {
+        evidence: Some("butuh role lain".to_owned()),
+        lab_need: Some(need),
+        ..mandor_usecase::review::VerdictReport::default()
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn covers_ae1_lab_menguji_calon_setelah_review_biasa() {
+    use mandor_domain::lab::LabNeed;
+    let (lark, clock) = setup();
+    let (st, run, _scope) = browser_review(&lark, &clock).await;
+    let review_id = st.agent.last().req.review.unwrap().review_id;
+    let rows = st.svc.ledger(&run).await.unwrap();
+    let (a1, a2) = (rows[0].ac_id.clone(), rows[1].ac_id.clone());
+    set_from_last(&st, &a1, Verdict::CantVerify, needs(LabNeed::Role)).await;
+    set_from_last(&st, &a2, Verdict::CantVerify, needs(LabNeed::Simulation)).await;
+    st.agent.last().done();
+    eventually(|| st.agent.last().req.review.is_some_and(|r| r.lab.is_some())).await;
+    let lab_req = st.agent.last().req;
+    let lab = lab_req.review.clone().unwrap();
+    assert_eq!(lab.review_id, format!("{review_id}-lab0"));
+    assert_eq!(lab.sessions[0].server, "playwright_admin");
+    assert!(lab.browser);
+    assert_eq!(lab.budget_cents, 300);
+    assert!(
+        lab_req.message.contains(&format!("AC:{a1}|{a2}")),
+        "{}",
+        lab_req.message
+    );
+    assert!(lab_req.message.contains("ROLES:admin"));
+    assert_eq!(st.runs.only().state, RunState::Reviewing);
+
+    let mut pass = report_with(&["Login sebagai admin", "Buka /x"]);
+    pass.prepared = Some("akun admin".to_owned());
+    set_from_last(&st, &a1, Verdict::Pass, pass).await;
+    st.agent.last().done();
+    eventually(|| st.runs.only().state == RunState::AwaitingDev).await;
+    let rows = st.svc.ledger(&run).await.unwrap();
+    let r1 = rows.iter().find(|r| r.ac_id == a1).unwrap();
+    let r2 = rows.iter().find(|r| r.ac_id == a2).unwrap();
+    assert_eq!(r1.verdict, Verdict::Pass);
+    assert_eq!(r2.verdict, Verdict::CantVerify);
+    assert_eq!(r2.lab_need, Some(LabNeed::Simulation));
+    assert!(
+        r2.evidence.as_deref().unwrap().contains("did not report"),
+        "{:?}",
+        r2.evidence
+    );
+    let record = st.reviews.reviews(&run).await.unwrap().remove(0);
+    assert_eq!(record.status, ReviewStatus::Finished);
+    assert!(st.lab.ended.lock().unwrap().contains(&review_id));
+    // Pass lab tidak butuh konfirmasi manual: ia Pass penuh.
+    assert_eq!(r1.effective_verdict(), Verdict::Pass);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn covers_ae7_tanpa_perlengkapan_lab_tidak_jalan_dan_ada_catatan() {
+    use mandor_domain::lab::LabNeed;
+    let (lark, clock) = setup();
+    let (st, run) = waiting_with_app(&lark, &clock).await;
+    st.svc
+        .start_review(&run, ReviewTrigger::Manual, None)
+        .await
+        .unwrap();
+    let ac = st.svc.ledger(&run).await.unwrap()[0].ac_id.clone();
+    set_from_last(&st, &ac, Verdict::CantVerify, needs(LabNeed::Role)).await;
+    st.agent.last().done();
+    eventually(|| st.runs.only().state == RunState::AwaitingDev).await;
+    assert!(st.agent.last().req.review.unwrap().lab.is_none());
+    let chat = st.runs.chat.lock().unwrap().clone();
+    assert!(
+        chat.iter()
+            .any(|(_, c)| matches!(c, mandor_usecase::run_ports::ChatItem::System(t) if t.contains("need the review lab"))),
+        "{chat:?}"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn batas_lab_per_run_membuat_kartu_sisa_tetap_cant_verify() {
+    use mandor_domain::lab::LabNeed;
+    let (lark, clock) = setup();
+    let (st, run, _scope) = browser_review(&lark, &clock).await;
+    st.reviews
+        .set_lab_settings(&mandor_usecase::run_ports::LabSettings {
+            run_budget_cents: 0,
+            ..mandor_usecase::run_ports::LabSettings::default()
+        })
+        .await
+        .unwrap();
+    let ac = st.svc.ledger(&run).await.unwrap()[0].ac_id.clone();
+    set_from_last(&st, &ac, Verdict::CantVerify, needs(LabNeed::File)).await;
+    let before = st.agent.runs.lock().unwrap().len();
+    st.agent.last().done();
+    eventually(|| st.runs.only().state == RunState::AwaitingDev).await;
+    assert_eq!(
+        st.agent.runs.lock().unwrap().len(),
+        before,
+        "tidak ada sesi lab"
+    );
+    let row = st.svc.ledger(&run).await.unwrap()[0].clone();
+    assert_eq!(row.verdict, Verdict::CantVerify);
+    assert!(row.evidence.unwrap().contains("run limit"));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn batal_di_tengah_lab_menutup_review_sebagai_cancelled() {
+    use mandor_domain::lab::LabNeed;
+    let (lark, clock) = setup();
+    let (st, run, _scope) = browser_review(&lark, &clock).await;
+    let ac = st.svc.ledger(&run).await.unwrap()[0].ac_id.clone();
+    set_from_last(&st, &ac, Verdict::CantVerify, needs(LabNeed::Role)).await;
+    st.agent.last().done();
+    eventually(|| st.agent.last().req.review.is_some_and(|r| r.lab.is_some())).await;
+    st.svc.cancel_review(&run).await.unwrap();
+    eventually(|| st.runs.only().state == RunState::AwaitingDev).await;
+    let record = st.reviews.reviews(&run).await.unwrap().remove(0);
+    assert_eq!(record.status, ReviewStatus::Cancelled);
+    let row = st.svc.ledger(&run).await.unwrap()[0].clone();
+    assert_eq!(
+        row.verdict,
+        Verdict::CantVerify,
+        "hasil review biasa dipulihkan"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn login_role_gagal_disebut_di_pesan_lab() {
+    use mandor_domain::lab::LabNeed;
+    let (lark, clock) = setup();
+    let (st, run, _scope) = browser_review(&lark, &clock).await;
+    let ac = st.svc.ledger(&run).await.unwrap()[0].ac_id.clone();
+    set_from_last(&st, &ac, Verdict::CantVerify, needs(LabNeed::Role)).await;
+    *st.lab.login_failure.lock().unwrap() =
+        Some(mandor_usecase::run_ports::LoginFailure::FormNotFound);
+    st.agent.last().done();
+    eventually(|| st.agent.last().req.review.is_some_and(|r| r.lab.is_some())).await;
+    let req = st.agent.last().req;
+    assert!(req.message.contains("UNAVAILABLE:admin"), "{}", req.message);
+    assert!(!req.review.unwrap().browser);
+}

@@ -100,6 +100,11 @@ pub struct RunService<D: Deps> {
     pub(crate) replies_loaded: std::sync::atomic::AtomicBool,
     /// Kursor yang terakhir diantrekan per record, agar tidak diantrekan berulang.
     pub(crate) cursor_sent: Mutex<HashMap<String, String>>,
+    /// Rencana lab per run, dicatat saat review biasa mulai (plan
+    /// 2026-11-10-001, U7); dibangun ulang oleh review berikutnya.
+    pub(crate) lab_plans: Mutex<HashMap<String, crate::review::lab::LabPlan>>,
+    /// Progres lab yang berjalan per run.
+    pub(crate) lab_runs: Mutex<HashMap<String, crate::review::lab::LabProgress>>,
     /// Penghenti run aktif per run ID beserta generasinya.
     stoppers: Mutex<HashMap<String, (i64, StopperOf<D>)>>,
     /// Gerbang drain untuk pembaruan daemon (dibagi dengan daemon).
@@ -171,6 +176,8 @@ impl<D: Deps> RunService<D> {
             replies: Mutex::new(Vec::new()),
             replies_loaded: std::sync::atomic::AtomicBool::new(false),
             cursor_sent: Mutex::new(HashMap::new()),
+            lab_plans: Mutex::new(HashMap::new()),
+            lab_runs: Mutex::new(HashMap::new()),
             cleanup_checked_ms: std::sync::atomic::AtomicI64::new(0),
             cleanup_busy: std::sync::atomic::AtomicBool::new(false),
             stoppers: Mutex::new(HashMap::new()),

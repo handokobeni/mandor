@@ -78,6 +78,7 @@ impl<D: Deps> RunService<D> {
         let readiness = self.readiness(&run, &snapshot).await?;
         let browser = self.prepare_browser(&review_id, &readiness).await;
         let facts = browser.facts.clone();
+        self.plan_lab_for(run_id, &readiness, &browser);
         let settings = self.reviews.reviewer_settings().await;
         let task = self.task_of(&run.record_id).await?;
         let gate: Vec<_> = rows.iter().filter(|r| r.in_gate()).cloned().collect();
@@ -147,6 +148,27 @@ impl<D: Deps> RunService<D> {
             return Err(e);
         }
         Ok(record)
+    }
+
+    /// Rencana lab bila review biasa memakai login perlengkapan (KTD-L7).
+    fn plan_lab_for(&self, run_id: &str, readiness: &ReviewReadiness, browser: &PreparedBrowser) {
+        let facts = &browser.facts;
+        if let (true, Some((repo_id, equipment))) = (facts.browser, &readiness.equipment) {
+            self.remember_lab_plan(
+                run_id,
+                super::lab::LabPlan {
+                    repo_id: repo_id.clone(),
+                    equipment: equipment.clone(),
+                    origins: facts
+                        .app_urls
+                        .iter()
+                        .chain(&facts.prototype_url)
+                        .cloned()
+                        .collect(),
+                    proxy: browser.proxy.clone(),
+                },
+            );
+        }
     }
 
     /// Review boleh dimulai dari keadaan run ini untuk pemicu ini.
@@ -464,14 +486,13 @@ impl<D: Deps> RunService<D> {
     /// disimpan, lalu run kembali ke dev dan antrean berjalan.
     pub(crate) async fn finish_review(
         self: &Arc<Self>,
-        mut run: RunRecord,
+        run: RunRecord,
         generation: i64,
         end: ReviewEnd,
     ) -> Result<(), RunError> {
-        let review_id = run.review_id.take().unwrap_or_default();
+        let review_id = run.review_id.clone().unwrap_or_default();
         self.agent.end_review(&review_id).await;
-        self.lab.end_review(&review_id).await;
-        let mut record = self
+        let record = self
             .reviews
             .reviews(&run.id)
             .await?
@@ -492,6 +513,36 @@ impl<D: Deps> RunService<D> {
         } else {
             ReviewStatus::Failed
         };
+        if status == ReviewStatus::Finished
+            && let Some(progress) = self.plan_lab(&run, &review_id, &rows, &end).await?
+        {
+            return self.start_lab_card(run, generation, progress).await;
+        }
+        self.lab_plans
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .remove(&run.id);
+        self.finish_review_tail(run, generation, end, status).await
+    }
+
+    /// Ekor review: riwayat, ringkasan, lalu run kembali ke dev, Automatic
+    /// fix, atau antrean VM (KTD-L9).
+    pub(crate) async fn finish_review_tail(
+        self: &Arc<Self>,
+        mut run: RunRecord,
+        generation: i64,
+        end: ReviewEnd,
+        status: ReviewStatus,
+    ) -> Result<(), RunError> {
+        let review_id = run.review_id.take().unwrap_or_default();
+        self.lab.end_review(&review_id).await;
+        let mut record = self
+            .reviews
+            .reviews(&run.id)
+            .await?
+            .into_iter()
+            .find(|r| r.id == review_id);
+        let rows = self.reviews.ac_rows(&run.id).await?;
         let stale = match self.code_snapshot(&run).await {
             Ok(now) => now != run.review_snapshot,
             Err(_) => true,

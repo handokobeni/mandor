@@ -62,6 +62,7 @@ fn equipment() -> LabEquipment {
         },
         safe_posts: vec!["/api/search".to_owned()],
         fixtures_dir: Some("review-fixtures".to_owned()),
+        data: None,
     }
 }
 
@@ -143,6 +144,44 @@ async fn simpan_perlengkapan_mengosongkan_persetujuan() {
     let got = s.repo_lab("repo1").await.unwrap().unwrap();
     assert_eq!(got.approved_digest, None);
     assert_eq!(got.approved_at_ms, None);
+}
+
+/// Fase 2: bagian data (penyimpanan, perintah, seed) ikut tersimpan.
+#[tokio::test]
+async fn bagian_data_perlengkapan_bolak_balik() {
+    use mandor_domain::lab_data::{DbTarget, LabData, LabSeed, LabStore, StoreKind};
+    let dir = tempfile::tempdir().unwrap();
+    let s = open(&dir).await;
+    with_run(&s, "run1").await;
+    let store = |name: &str, kind| LabStore {
+        name: name.to_owned(),
+        kind,
+        snapshot: "snapshot.sh".to_owned(),
+        restore: "restore.sh".to_owned(),
+        fingerprint: "fingerprint.sh".to_owned(),
+        test_change: "change.sh".to_owned(),
+    };
+    let mut eq = equipment();
+    eq.data = Some(LabData {
+        scripts_dir: "review-fixtures/lab".to_owned(),
+        stores: vec![
+            store(
+                "tenant",
+                StoreKind::Postgres(DbTarget {
+                    host: "localhost".to_owned(),
+                    port: 5432,
+                    database: "kelola".to_owned(),
+                }),
+            ),
+            store("uploads", StoreKind::Folder("/srv/uploads".to_owned())),
+        ],
+        seeds: vec![LabSeed {
+            name: "kb".to_owned(),
+            command: "seed-kb.sh".to_owned(),
+        }],
+    });
+    s.save_repo_lab("repo1", &eq).await.unwrap();
+    assert_eq!(s.repo_lab("repo1").await.unwrap().unwrap().equipment, eq);
 }
 
 #[tokio::test]

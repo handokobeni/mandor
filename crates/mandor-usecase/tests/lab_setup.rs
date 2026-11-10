@@ -40,6 +40,7 @@ fn proposal() -> LabEquipment {
         },
         safe_posts: vec![],
         fixtures_dir: Some("review-fixtures".to_owned()),
+        data: None,
     }
 }
 

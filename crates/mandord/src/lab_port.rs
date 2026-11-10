@@ -492,6 +492,7 @@ mod tests {
             },
             safe_posts: Vec::new(),
             fixtures_dir: None,
+            data: None,
         };
         let r = lab
             .login(LabLogin {

@@ -6,9 +6,10 @@
 use mandor_domain::lab::{
     LabAccount, LabEquipment, LoginForm, SuccessMarker, equipment_canonical, validate_equipment,
 };
+use mandor_domain::lab_data::{DbTarget, LabData, LabSeed, LabStore, StoreKind};
 use mandor_protocol::{
-    LabAccountDto, LabApproveParams, LabEquipmentDto, LabLoginDto, LabRepoRef, LabSetParams,
-    LabView, RpcError, method,
+    LabAccountDto, LabApproveParams, LabDataDto, LabEquipmentDto, LabLoginDto, LabRepoRef,
+    LabSeedDto, LabSetParams, LabStoreDto, LabView, RpcError, method,
 };
 use serde_json::Value;
 use sha2::{Digest, Sha256};
@@ -177,7 +178,89 @@ fn equipment_dto(eq: &LabEquipment, secrets: &lab_secrets::LabSecrets) -> LabEqu
         },
         safe_posts: eq.safe_posts.clone(),
         fixtures_dir: eq.fixtures_dir.clone(),
+        data: eq.data.as_ref().map(data_dto),
     }
+}
+
+fn data_dto(d: &LabData) -> LabDataDto {
+    LabDataDto {
+        scripts_dir: d.scripts_dir.clone(),
+        stores: d
+            .stores
+            .iter()
+            .map(|s| {
+                let (kind, host, port, database, folder) = match &s.kind {
+                    StoreKind::Postgres(t) => (
+                        "postgres",
+                        Some(t.host.clone()),
+                        Some(t.port),
+                        Some(t.database.clone()),
+                        None,
+                    ),
+                    StoreKind::Folder(p) => ("folder", None, None, None, Some(p.clone())),
+                };
+                LabStoreDto {
+                    name: s.name.clone(),
+                    kind: kind.to_owned(),
+                    host,
+                    port,
+                    database,
+                    folder,
+                    snapshot: s.snapshot.clone(),
+                    restore: s.restore.clone(),
+                    fingerprint: s.fingerprint.clone(),
+                    test_change: s.test_change.clone(),
+                }
+            })
+            .collect(),
+        seeds: d
+            .seeds
+            .iter()
+            .map(|s| LabSeedDto {
+                name: s.name.clone(),
+                command: s.command.clone(),
+            })
+            .collect(),
+    }
+}
+
+fn data_of(d: LabDataDto) -> Result<LabData, RpcError> {
+    let trim = |s: String| s.trim().to_owned();
+    let stores = d
+        .stores
+        .into_iter()
+        .map(|s| {
+            let kind = match s.kind.as_str() {
+                "postgres" => StoreKind::Postgres(DbTarget {
+                    host: s.host.map(trim).unwrap_or_default(),
+                    port: s.port.unwrap_or(5432),
+                    database: s.database.map(trim).unwrap_or_default(),
+                }),
+                "folder" => StoreKind::Folder(s.folder.map(trim).unwrap_or_default()),
+                other => return Err(rejected(format!("unknown store kind: {other}"))),
+            };
+            Ok(LabStore {
+                name: trim(s.name),
+                kind,
+                snapshot: trim(s.snapshot),
+                restore: trim(s.restore),
+                fingerprint: trim(s.fingerprint),
+                test_change: trim(s.test_change),
+            })
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok(LabData {
+        scripts_dir: trim(d.scripts_dir),
+        stores,
+        seeds: d
+            .seeds
+            .into_iter()
+            .map(|s| LabSeed {
+                name: trim(s.name),
+                command: trim(s.command),
+            })
+            .collect(),
+    })
 }
 
 pub(super) fn equipment_of(d: LabEquipmentDto) -> Result<LabEquipment, RpcError> {
@@ -214,6 +297,7 @@ pub(super) fn equipment_of(d: LabEquipmentDto) -> Result<LabEquipment, RpcError>
             .fixtures_dir
             .map(|f| f.trim().to_owned())
             .filter(|f| !f.is_empty()),
+        data: d.data.map(data_of).transpose()?,
     })
 }
 
@@ -241,6 +325,7 @@ mod tests {
             },
             safe_posts: vec![],
             fixtures_dir: Some(" ".to_owned()),
+            data: None,
         }
     }
 
@@ -253,6 +338,52 @@ mod tests {
         let back = equipment_dto(&eq, &secrets);
         assert!(!back.accounts[0].has_password);
         assert_eq!(back.login, dto().login);
+    }
+
+    /// Fase 2: bagian data bolak-balik lewat DTO; jenis penyimpanan asing
+    /// ditolak.
+    #[test]
+    fn bagian_data_bolak_balik_lewat_dto() {
+        let store = |name: &str, kind: &str| LabStoreDto {
+            name: name.to_owned(),
+            kind: kind.to_owned(),
+            host: (kind == "postgres").then(|| " localhost ".to_owned()),
+            port: (kind == "postgres").then_some(5433),
+            database: (kind == "postgres").then(|| "kelola".to_owned()),
+            folder: (kind == "folder").then(|| "/srv/uploads".to_owned()),
+            snapshot: "snapshot.sh".to_owned(),
+            restore: "restore.sh".to_owned(),
+            fingerprint: "fingerprint.sh".to_owned(),
+            test_change: "change.sh".to_owned(),
+        };
+        let mut d = dto();
+        d.data = Some(LabDataDto {
+            scripts_dir: "review-fixtures/lab".to_owned(),
+            stores: vec![store("tenant", "postgres"), store("uploads", "folder")],
+            seeds: vec![LabSeedDto {
+                name: "kb".to_owned(),
+                command: "seed-kb.sh".to_owned(),
+            }],
+        });
+        let eq = equipment_of(d).unwrap_or_else(|e| panic!("{e:?}"));
+        let data = eq.data.clone().unwrap_or_else(|| panic!("data"));
+        assert_eq!(
+            data.stores[0].kind,
+            StoreKind::Postgres(DbTarget {
+                host: "localhost".to_owned(),
+                port: 5433,
+                database: "kelola".to_owned()
+            })
+        );
+        let back = equipment_dto(&eq, &lab_secrets::LabSecrets::default());
+        assert_eq!(back.data.map(|d| d.stores.len()), Some(2));
+        let mut bad = dto();
+        bad.data = Some(LabDataDto {
+            scripts_dir: "x".to_owned(),
+            stores: vec![store("s3", "s3")],
+            seeds: vec![],
+        });
+        assert!(equipment_of(bad).is_err());
     }
 
     #[test]

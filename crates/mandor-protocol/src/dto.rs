@@ -1843,6 +1843,46 @@ pub struct LabEquipmentDto {
     pub safe_posts: Vec<String>,
     #[serde(default)]
     pub fixtures_dir: Option<String>,
+    /// Lab data (fase 2); `None` = lab hanya membaca.
+    #[serde(default)]
+    pub data: Option<LabDataDto>,
+}
+
+/// Penyimpanan, perintah, dan seed lab data (KTD-L17, KTD-L19).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+pub struct LabDataDto {
+    /// Folder skrip di repo, relatif; dipin saat persetujuan.
+    pub scripts_dir: String,
+    pub stores: Vec<LabStoreDto>,
+    #[serde(default)]
+    pub seeds: Vec<LabSeedDto>,
+}
+
+/// Satu penyimpanan: `PostgreSQL` lokal (`kind = "postgres"`) atau folder
+/// (`kind = "folder"`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+pub struct LabStoreDto {
+    pub name: String,
+    pub kind: String,
+    #[serde(default)]
+    pub host: Option<String>,
+    #[serde(default)]
+    pub port: Option<u16>,
+    #[serde(default)]
+    pub database: Option<String>,
+    #[serde(default)]
+    pub folder: Option<String>,
+    pub snapshot: String,
+    pub restore: String,
+    pub fingerprint: String,
+    pub test_change: String,
+}
+
+/// Seed bernama yang boleh dipanggil reviewer lab.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+pub struct LabSeedDto {
+    pub name: String,
+    pub command: String,
 }
 
 /// Perlengkapan lab beserta status persetujuan.

@@ -45,3 +45,11 @@ Pembanding: `../integro-kelola/kelola-v2/review-fixtures/keputusan-AC-PGS-1477-1
 Di luar fase 1 (mengubah data, fase 2): 8630, 8631, 8941, 9371, 9372, 8409, 8410, 8418, 8420, 8647, 8421–8441 yang mengunggah nilai, 9424–9426.
 
 Hasil: menunggu.
+
+## Fase 2
+
+Keputusan pemilik produk 2026-11-10: fase 1 dan fase 2 diuji langsung bersama setelah fase 2 selesai. Fase 2 dikerjakan di branch `feat/review-lab-phase2` yang bercabang dari `feat/review-lab-phase1`; PR fase 2 berbasis PR #28.
+
+| Unit | Status | Catatan |
+|---|---|---|
+| U11 | selesai | `mandor-domain::lab_data`: `is_local_db`, `parse_dsn` (host di query string atau beberapa host ditolak), `check_statement`, `role_block` (atribut, keanggotaan, CREATE, TRIGGER, kepemilikan, extension, akses tabel), `other_clients` (gagal tertutup), `scripts_match`, mesin status sesi `next_phase`, `restore_outcome`, `lock_keys`, `check_command`/`validate_data`; `LabEquipment.data` ikut validasi, digest, codec store, dan DTO `LabDataDto` |

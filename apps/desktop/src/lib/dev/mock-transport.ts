@@ -42,7 +42,8 @@ function mockLab(method: string, params: Record<string, unknown>): LabView {
     approved_at_ms: null,
     proposing: false,
     proposal: null,
-    proposal_error: null
+    proposal_error: null,
+    data_session: null
   };
   let next = cur;
   if (method === 'lab.propose') {

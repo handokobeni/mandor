@@ -37,9 +37,12 @@ async fn sesi_bolak_balik_dan_sidik_tersimpan() {
     s.create_session(&rec).await.unwrap();
     assert_eq!(s.session("s1").await.unwrap(), Some(rec.clone()));
     let fps = vec![("tenant".to_owned(), "aa".to_owned())];
-    s.set_fingerprints("s1", &fps, 5).await.unwrap();
+    s.set_snapshot("s1", std::path::Path::new("/snap/s1"), &fps, 5)
+        .await
+        .unwrap();
     let got = s.session("s1").await.unwrap().unwrap();
     assert_eq!(got.fingerprints, fps);
+    assert_eq!(got.snapshot_dir, Some("/snap/s1".into()));
     assert_eq!(got.updated_at_ms, 5);
     assert_eq!(s.session("tidak-ada").await.unwrap(), None);
 }

@@ -47,6 +47,13 @@ impl<D: Deps> RunService<D> {
         dev_message: Option<String>,
     ) -> Result<(), RunError> {
         let _work = self.enter_work()?;
+        // Restore lab gagal menahan giliran baru untuk repo itu, kecuali
+        // giliran lab milik sesi data sendiri (R6, KTD-L21).
+        if req.review.as_ref().is_none_or(|r| r.lab.is_none())
+            && let Some(reason) = self.data_blocked(&run.repo_id).await
+        {
+            return Err(RunError::LabData(reason));
+        }
         let expected = run.generation;
         let mut req = req;
         // Giliran implementasi dan plan di laptop meminta izin lewat kartu;

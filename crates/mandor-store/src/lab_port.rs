@@ -151,15 +151,19 @@ impl LabSessions for LabSessionsStore {
         Ok(res.rows_affected() == 1)
     }
 
-    async fn set_fingerprints(
+    async fn set_snapshot(
         &self,
         id: &str,
+        dir: &std::path::Path,
         fingerprints: &[(String, String)],
         now_ms: i64,
     ) -> Result<(), PortError> {
         let raw = json(&fingerprints)?;
+        let dir = dir.display().to_string();
         sqlx::query!(
-            "UPDATE lab_sessions SET fingerprints_json = ?, updated_at_ms = ? WHERE id = ?",
+            "UPDATE lab_sessions SET snapshot_dir = ?, fingerprints_json = ?, updated_at_ms = ?
+             WHERE id = ?",
+            dir,
             raw,
             now_ms,
             id

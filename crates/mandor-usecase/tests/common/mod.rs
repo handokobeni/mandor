@@ -635,7 +635,9 @@ impl mandor_usecase::run_ports::Prompts for PlainMessage {
             gone.join("|"),
             b.fixtures
                 .map_or("-".to_owned(), |p| p.display().to_string())
-        )
+        ) + &b.data.map_or(String::new(), |(st, se)| {
+            format!(" DATA:{}/{}", st.join("|"), se.join("|"))
+        })
     }
 
     fn review_message(&self, b: &mandor_usecase::run_ports::ReviewBrief<'_>) -> String {

@@ -1310,6 +1310,49 @@ pub struct LedgerToolInfo {
     /// plan 2026-11-07-001, KTD-Q5).
     #[serde(default)]
     pub ask: bool,
+    /// Sesi lab data berjalan: alat `lab_sql` dan `lab_seed` tersedia.
+    #[serde(default)]
+    pub data: bool,
+}
+
+/// Parameter `ledger.tool.lab_sql`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct LedgerToolLabSql {
+    pub store: String,
+    pub statement: String,
+}
+
+/// Parameter `ledger.tool.lab_seed`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct LedgerToolLabSeed {
+    pub name: String,
+}
+
+/// Hasil `lab_sql`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct LabSqlView {
+    pub text: String,
+    pub rows: u64,
+    pub truncated: bool,
+}
+
+/// Parameter `lab.data_restored`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+pub struct LabDataRestored {
+    pub repo_id: String,
+    /// Buang snapshot yang disimpan.
+    #[serde(default)]
+    pub discard_snapshot: bool,
+}
+
+/// Sesi lab data yang masih memegang data lokal repo (banner U15).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+pub struct LabDataSessionView {
+    pub run_id: String,
+    /// `snapshotting`, `running`, `restoring`, `restore_waiting`,
+    /// `restore_failed`.
+    pub phase: String,
+    pub error: Option<String>,
 }
 
 /// Satu pilihan `ask.tool.ask`.
@@ -1628,6 +1671,18 @@ pub struct OvernightReportView {
     pub reviewed_without_fix: u32,
     /// Kartu Planned yang ditahan (R15 plan 2026-10-30-001).
     pub planned_held: Vec<HeldPlannedView>,
+    /// Lab data yang menahan repo (restore gagal atau menunggu klien lain).
+    #[serde(default)]
+    pub lab_data: Vec<LabDataAlertView>,
+}
+
+/// Peringatan lab data di laporan pagi.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+pub struct LabDataAlertView {
+    pub repo_id: String,
+    pub run_id: String,
+    pub phase: String,
+    pub error: Option<String>,
 }
 
 /// Run kartu selesai (plan `2026-11-03-001`).
@@ -1910,6 +1965,9 @@ pub struct LabView {
     /// Alasan giliran pengusul terakhir tidak menghasilkan usulan.
     #[serde(default)]
     pub proposal_error: Option<String>,
+    /// Sesi lab data yang memegang data lokal repo, bila ada.
+    #[serde(default)]
+    pub data_session: Option<LabDataSessionView>,
 }
 
 /// Password satu role; kosong atau `None` mempertahankan yang lama.

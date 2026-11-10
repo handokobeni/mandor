@@ -37,6 +37,7 @@ pub struct ProdLab {
     tracker: TaskTracker,
     shutdown: CancellationToken,
     proxies: Arc<Mutex<HashMap<String, LabProxy>>>,
+    data: Arc<crate::lab_data_port::DataOps>,
 }
 
 impl std::fmt::Debug for ProdLab {
@@ -56,6 +57,7 @@ impl ProdLab {
         env: Vec<(String, String)>,
         tracker: TaskTracker,
         shutdown: CancellationToken,
+        data: Arc<crate::lab_data_port::DataOps>,
     ) -> Self {
         Self {
             store,
@@ -65,6 +67,7 @@ impl ProdLab {
             tracker,
             shutdown,
             proxies: Arc::default(),
+            data,
         }
     }
 
@@ -242,6 +245,96 @@ impl LabPort for ProdLab {
         }
         remove_dir(self.sessions_dir(review_id)).await;
     }
+
+    type Sessions = mandor_store::LabSessionsStore;
+    fn sessions(&self) -> &mandor_store::LabSessionsStore {
+        &self.data.sessions
+    }
+
+    async fn data_prepare(
+        &self,
+        repo_id: &str,
+        worktree: &Path,
+    ) -> Result<Result<mandor_usecase::run_ports::DataReady, String>, PortError> {
+        Ok(self.data.prepare(repo_id, worktree).await)
+    }
+
+    async fn data_other_clients(&self, repo_id: &str) -> Option<String> {
+        self.data.other_clients(repo_id).await
+    }
+
+    async fn data_lock(
+        &self,
+        keys: &[String],
+        _session_id: &str,
+        wait: Duration,
+    ) -> mandor_usecase::run_ports::LockOutcome {
+        self.data.lock(keys, wait).await
+    }
+
+    async fn data_mark(
+        &self,
+        keys: &[String],
+        session_id: &str,
+        phase: mandor_domain::lab_data::SessionPhase,
+    ) {
+        self.data.mark(keys, session_id, phase).await;
+    }
+
+    async fn data_release(&self, keys: &[String]) {
+        self.data.release(keys).await;
+    }
+
+    async fn data_clear_stale(&self, active_keys: &[String]) {
+        self.data.clear_stale(active_keys).await;
+    }
+
+    async fn data_snapshot(
+        &self,
+        repo_id: &str,
+        session_id: &str,
+    ) -> Result<(PathBuf, Vec<(String, String)>), String> {
+        self.data.snapshot(repo_id, session_id).await
+    }
+
+    async fn data_fingerprints(
+        &self,
+        repo_id: &str,
+        snapshot: &Path,
+    ) -> Result<Vec<(String, String)>, String> {
+        self.data.fingerprints(repo_id, snapshot).await
+    }
+
+    async fn data_restore(
+        &self,
+        repo_id: &str,
+        snapshot: &Path,
+        before: &[(String, String)],
+    ) -> mandor_usecase::run_ports::RestoreResult {
+        self.data.restore(repo_id, snapshot, before).await
+    }
+
+    async fn data_discard(&self, snapshot: &Path) {
+        self.data.discard(snapshot).await;
+    }
+
+    async fn data_sql(
+        &self,
+        repo_id: &str,
+        store: &str,
+        sql: &str,
+    ) -> Result<mandor_usecase::run_ports::SqlResult, PortError> {
+        self.data.sql(repo_id, store, sql).await
+    }
+
+    async fn data_seed(
+        &self,
+        repo_id: &str,
+        name: &str,
+        worktree: &Path,
+    ) -> Result<String, PortError> {
+        self.data.seed(repo_id, name, worktree).await
+    }
 }
 
 /// Menyalin berkas biasa dari `from` ke `to` (0700): symlink, dotfile, dan
@@ -398,6 +491,18 @@ async fn remove_dir(dir: PathBuf) {
 mod tests {
     use super::*;
 
+    async fn test_data(dir: &tempfile::TempDir) -> Arc<crate::lab_data_port::DataOps> {
+        let store = Store::open(&dir.path().join("data.db"))
+            .await
+            .unwrap_or_else(|e| panic!("{e}"));
+        crate::lab_data_port::DataOps::new(
+            store,
+            dir.path().join("lab"),
+            crate::lab_exec::LabExec::new(dir.path().join("lab"), Vec::new()),
+            crate::lab_lock::LabLocks::new(dir.path().join("locks"), 0),
+        )
+    }
+
     #[test]
     fn salinan_berkas_uji_tanpa_symlink_dan_dotfile() {
         let dir = tempfile::tempdir().unwrap_or_else(|e| panic!("{e}"));
@@ -474,6 +579,7 @@ mod tests {
             Vec::new(),
             TaskTracker::new(),
             CancellationToken::new(),
+            test_data(&dir).await,
         );
         let eq = LabEquipment {
             accounts: vec![mandor_domain::lab::LabAccount {
@@ -514,6 +620,7 @@ mod tests {
             Vec::new(),
             TaskTracker::new(),
             CancellationToken::new(),
+            test_data(&dir).await,
         );
         assert!(!none.playwright_installed());
     }
@@ -531,6 +638,7 @@ mod tests {
             Vec::new(),
             TaskTracker::new(),
             CancellationToken::new(),
+            test_data(&dir).await,
         );
         let url = lab
             .start_proxy(

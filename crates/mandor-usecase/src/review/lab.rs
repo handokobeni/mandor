@@ -36,14 +36,17 @@ pub(crate) struct LabPlan {
     pub equipment: LabEquipment,
     pub origins: Vec<String>,
     pub proxy: Option<String>,
+    /// Lab data boleh berjalan: VM, atau developer memilih Run lab di laptop
+    /// (KTD-L23).
+    pub data_allowed: bool,
 }
 
 /// Progres lab satu review.
 #[derive(Debug, Clone)]
 pub(crate) struct LabProgress {
-    review_id: String,
-    plan: LabPlan,
-    cards: Vec<CardCandidates>,
+    pub(crate) review_id: String,
+    pub(crate) plan: LabPlan,
+    pub(crate) cards: Vec<CardCandidates>,
     index: usize,
     started_ms: i64,
     /// Biaya review biasa ditambah semua sesi lab.
@@ -56,6 +59,11 @@ pub(crate) struct LabProgress {
     originals: HashMap<String, AcRow>,
     fixtures: Option<PathBuf>,
     fixtures_staged: bool,
+    /// Sesi lab data yang berjalan (U14).
+    pub(crate) data: Option<super::lab_data::DataSession>,
+    pub(crate) data_attempted: bool,
+    /// Reviewer lab mengubah data lewat `lab_sql`/`lab_seed` di kartu ini.
+    pub(crate) data_changed: bool,
 }
 
 impl<D: Deps> RunService<D> {
@@ -105,8 +113,9 @@ impl<D: Deps> RunService<D> {
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
             .remove(&run.id);
-        // Fase 1: lab data belum tersedia (R4–R8 fase 2).
-        let cards = lab_candidates(rows, false);
+        // Calon `data` hanya bila perlengkapan punya bagian data (fase 2).
+        let data = plan.as_ref().is_some_and(|p| p.equipment.data.is_some());
+        let cards = lab_candidates(rows, data);
         if cards.is_empty() {
             return Ok(None);
         }
@@ -132,6 +141,9 @@ impl<D: Deps> RunService<D> {
             originals: HashMap::new(),
             fixtures: None,
             fixtures_staged: false,
+            data: None,
+            data_attempted: false,
+            data_changed: false,
         }))
     }
 
@@ -143,6 +155,7 @@ impl<D: Deps> RunService<D> {
         generation: i64,
         mut progress: LabProgress,
     ) -> Result<(), RunError> {
+        self.begin_data(&run, &mut progress).await?;
         if progress.index >= progress.cards.len() {
             return self.finish_lab(run, generation, progress).await;
         }
@@ -176,6 +189,10 @@ impl<D: Deps> RunService<D> {
             unavailable: &unavailable,
             app_urls: &progress.plan.origins,
             fixtures: progress.fixtures.as_deref(),
+            data: progress
+                .data
+                .as_ref()
+                .map(|d| (d.ready.sql_stores.as_slice(), d.ready.seeds.as_slice())),
         });
         let session = format!("{}-lab{}", progress.review_id, progress.index);
         let reviewer = self.reviews.reviewer_settings().await;
@@ -271,6 +288,32 @@ impl<D: Deps> RunService<D> {
         }
         progress.index += 1;
         progress.originals.clear();
+        progress.data_changed = false;
+        if progress.index < progress.cards.len()
+            && let Some(session) = progress.data.clone()
+            && !self.data_between_cards(&run.id, &session).await
+        {
+            progress.data = None;
+            let rows = self.reviews.ac_rows(&run.id).await?;
+            let rest: Vec<String> = progress.cards[progress.index..]
+                .iter()
+                .flat_map(|c| c.ac_ids.clone())
+                .filter(|id| {
+                    rows.iter().any(|r| {
+                        &r.ac_id == id && r.lab_need == Some(mandor_domain::lab::LabNeed::Data)
+                    })
+                })
+                .collect();
+            self.note_rows(
+                &run.id,
+                &rest,
+                "Can't verify: the lab data could not be restored between cards.",
+            )
+            .await?;
+            for c in &mut progress.cards[progress.index..] {
+                c.ac_ids.retain(|id| !rest.contains(id));
+            }
+        }
         self.start_lab_card(run, generation, progress).await
     }
 
@@ -279,8 +322,9 @@ impl<D: Deps> RunService<D> {
         self: &Arc<Self>,
         run: RunRecord,
         generation: i64,
-        progress: LabProgress,
+        mut progress: LabProgress,
     ) -> Result<(), RunError> {
+        self.end_data(&run.id, &mut progress).await;
         let mut end = progress.review_end;
         end.cost_usd = Some(progress.cost_usd);
         let status = if self.review_cancelled(&run.id, &progress.review_id).await {
@@ -344,7 +388,12 @@ impl<D: Deps> RunService<D> {
     }
 
     /// Menambahkan catatan ke bukti baris `ac_ids` (verdict tetap).
-    async fn note_rows(&self, run_id: &str, ac_ids: &[String], note: &str) -> Result<(), RunError> {
+    pub(crate) async fn note_rows(
+        &self,
+        run_id: &str,
+        ac_ids: &[String],
+        note: &str,
+    ) -> Result<(), RunError> {
         let mut rows = self.reviews.ac_rows(run_id).await?;
         for r in rows.iter_mut().filter(|r| ac_ids.contains(&r.ac_id)) {
             r.evidence = Some(with_note(r.evidence.as_deref(), note));

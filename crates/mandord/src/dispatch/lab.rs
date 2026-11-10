@@ -25,6 +25,8 @@ impl AppDispatch {
             method::LAB_SET,
             method::LAB_APPROVE,
             method::LAB_PROPOSE,
+            method::LAB_RETRY_RESTORE,
+            method::LAB_DATA_RESTORED,
         ]
         .contains(&name)
     }
@@ -33,6 +35,26 @@ impl AppDispatch {
         match name {
             method::LAB_SET => self.lab_set(params(v)?).await,
             method::LAB_APPROVE => self.lab_approve(params(v)?).await,
+            method::LAB_RETRY_RESTORE => {
+                let p: LabRepoRef = params(v)?;
+                self.session()
+                    .await?
+                    .runs
+                    .retry_lab_restore(&p.repo_id)
+                    .await
+                    .map_err(super::run_error)?;
+                self.lab_view(&p.repo_id).await
+            }
+            method::LAB_DATA_RESTORED => {
+                let p: mandor_protocol::LabDataRestored = params(v)?;
+                self.session()
+                    .await?
+                    .runs
+                    .confirm_lab_data_restored(&p.repo_id, p.discard_snapshot)
+                    .await
+                    .map_err(super::run_error)?;
+                self.lab_view(&p.repo_id).await
+            }
             method::LAB_PROPOSE => {
                 let p: LabRepoRef = params(v)?;
                 self.session()
@@ -60,9 +82,12 @@ impl AppDispatch {
         let secrets = lab_secrets::load(&self.app.cfg.lab_root(), repo_id)
             .await
             .map_err(internal)?;
-        let setup = match self.app.session().await {
-            Some(s) => s.runs.lab_setup_status(repo_id),
-            None => mandor_usecase::review::LabSetupStatus::default(),
+        let (setup, data_session) = match self.app.session().await {
+            Some(s) => (
+                s.runs.lab_setup_status(repo_id),
+                s.runs.lab_data_session(repo_id).await,
+            ),
+            None => (mandor_usecase::review::LabSetupStatus::default(), None),
         };
         ok(&LabView {
             repo_id: repo_id.to_owned(),
@@ -72,6 +97,11 @@ impl AppDispatch {
             proposing: setup.running,
             proposal: setup.proposal.map(|eq| equipment_dto(&eq, &secrets)),
             proposal_error: setup.error,
+            data_session: data_session.map(|d| mandor_protocol::LabDataSessionView {
+                run_id: d.run_id,
+                phase: d.phase.as_str().to_owned(),
+                error: d.error,
+            }),
         })
     }
 

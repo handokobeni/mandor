@@ -38,6 +38,9 @@ tracing.workspace = true
 tracing-subscriber = { workspace = true, features = ["fmt", "json", "env-filter", "std"] }
 process-wrap = { workspace = true, features = ["tokio1", "process-session", "kill-on-drop"] }
 
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
 [dev-dependencies]
 tempfile.workspace = true
 pretty_assertions.workspace = true

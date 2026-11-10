@@ -238,6 +238,22 @@ pub fn lab_message(brief: &mandor_usecase::run_ports::LabBrief<'_>, nonce: &str)
             "- Account `{role}` is not available ({reason}); rate criteria that need it cant_verify with that reason."
         );
     }
+    if let Some((stores, seeds)) = brief.data {
+        let _ = writeln!(
+            out,
+            "- Lab data is on: saves through the app are allowed for this card, and you may prepare data with mcp__mandor__lab_sql (stores: {}) or mcp__mandor__lab_seed (seeds: {}). Mandor restores the data after the card.",
+            if stores.is_empty() {
+                "none".to_owned()
+            } else {
+                stores.join(", ")
+            },
+            if seeds.is_empty() {
+                "none".to_owned()
+            } else {
+                seeds.join(", ")
+            },
+        );
+    }
     match brief.fixtures {
         Some(dir) => {
             let _ = writeln!(out, "- Test files folder: {}", dir.display());
@@ -1145,8 +1161,13 @@ mod tests {
                 unavailable: &gone,
                 app_urls: &["http://localhost:5173".to_owned()],
                 fixtures: Some(std::path::Path::new("/lab/fixtures")),
+                data: Some((&["tenant".to_owned()], &["kb".to_owned()])),
             },
             "n0nce",
+        );
+        assert!(
+            msg.contains("mcp__mandor__lab_sql (stores: tenant)"),
+            "{msg}"
         );
         assert!(msg.contains("mcp__playwright_admin__"), "{msg}");
         assert!(msg.contains("`manager` is not available"), "{msg}");

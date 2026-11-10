@@ -136,9 +136,7 @@ impl LabExec {
         crate::lab_secrets::private_dir(&self.lab_root, repo_id)
     }
 
-    /// Digest isi folder skrip di worktree (untuk `scripts_match`; dipakai
-    /// orkestrasi lab data di U14).
-    #[cfg(test)]
+    /// Digest isi folder skrip di worktree (untuk `scripts_match`).
     ///
     /// # Errors
     /// Folder tidak ada, melewati symlink, terlalu besar, atau tidak terbaca.

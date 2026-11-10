@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "UPDATE lab_sessions SET snapshot_dir = ?, fingerprints_json = ?, updated_at_ms = ?\n             WHERE id = ?",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 4
+    },
+    "nullable": []
+  },
+  "hash": "2e2d0191d4082076f116cc05b7d47a6fa50744a636bab220015a19335e8b0d62"
+}

@@ -70,6 +70,7 @@ function view(extra: Partial<LabView> = {}): LabView {
     proposing: false,
     proposal: null,
     proposal_error: null,
+    data_session: null,
     ...extra
   };
 }

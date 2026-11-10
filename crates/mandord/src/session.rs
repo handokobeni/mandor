@@ -216,6 +216,8 @@ async fn startup_maintenance(runs: &Arc<RunService<Prod>>) {
             tracing::info!(?marked, "run terputus ditandai gagal");
         }
     }
+    // Sesi lab data yang terputus dipulihkan di latar (KTD-L22).
+    runs.spawn_lab_recovery();
 }
 
 /// Store run milik Base aktif. Run hanya dibaca di Base asalnya karena Base
@@ -280,14 +282,38 @@ async fn build_agent(cfg: &Config, rpc_port: u16) -> anyhow::Result<ClaudeAgent>
 
 /// Port review lab: perlengkapan, login akun uji, dan proxy review.
 async fn lab_port(env: &SessionEnv<'_>) -> crate::lab_port::ProdLab {
+    let login = login_env(env.cfg).await;
+    let exec = crate::lab_exec::LabExec::new(
+        env.cfg.lab_root(),
+        mandor_agent::claude::guardrails::clean_env(&login),
+    );
+    let locks =
+        crate::lab_lock::LabLocks::new(env.cfg.lab_lock_dir(), owner_uid(&env.cfg.home).await);
+    let data =
+        crate::lab_data_port::DataOps::new(env.store.clone(), env.cfg.lab_root(), exec, locks);
     crate::lab_port::ProdLab::new(
         env.store.clone(),
         env.cfg.lab_root(),
         env.cfg.playwright_mcp.clone(),
-        playwright_env(&login_env(env.cfg).await),
+        playwright_env(&login),
         env.tracker.clone(),
         env.parent.clone(),
+        data,
     )
+}
+
+/// uid pemilik direktori data daemon (penanda kunci lab data, KTD-L21).
+async fn owner_uid(home: &std::path::Path) -> u32 {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        tokio::fs::metadata(home).await.map_or(0, |m| m.uid())
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = home;
+        0
+    }
 }
 
 /// Environment proses Playwright login milik daemon: hanya yang perlu untuk

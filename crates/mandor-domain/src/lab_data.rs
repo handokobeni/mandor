@@ -166,6 +166,46 @@ fn split_host_port(hostport: &str) -> Result<(String, u16), DsnError> {
     }
 }
 
+/// Env database app harus lokal (KTD-L15): setiap key `.env` yang diteruskan
+/// ke app wajib ada; nilai DSN `postgres://` harus menunjuk host lokal, dan
+/// key yang berakhiran `HOST` harus bernilai host lokal. Alasan pertama, atau
+/// `None` bila lokal.
+#[must_use]
+pub fn app_env_block(pairs: &[(String, String)], keys: &[String]) -> Option<String> {
+    for key in keys {
+        let Some((_, value)) = pairs.iter().find(|(k, _)| k == key) else {
+            return Some(format!(
+                "lab only runs against local databases ({key} is declared but missing in .env)"
+            ));
+        };
+        let value = value.trim();
+        if value.starts_with("postgres://") || value.starts_with("postgresql://") {
+            match parse_dsn(value) {
+                Ok(t) if is_local_db(&t.host) => {}
+                Ok(t) => {
+                    return Some(format!(
+                        "lab only runs against local databases ({key} points to {})",
+                        t.host
+                    ));
+                }
+                Err(e) => {
+                    return Some(format!(
+                        "lab only runs against local databases ({key}: {e})"
+                    ));
+                }
+            }
+        } else if key.to_ascii_uppercase().ends_with("HOST")
+            && !value.is_empty()
+            && !is_local_db(value)
+        {
+            return Some(format!(
+                "lab only runs against local databases ({key} points to {value})"
+            ));
+        }
+    }
+    None
+}
+
 // ---------------------------------------------------------------------------
 // Pernyataan SQL (KTD-L16, lapisan kedua)
 
@@ -997,6 +1037,34 @@ mod tests {
         ] {
             assert!(!server_addr_local(a), "{a:?}");
         }
+    }
+
+    /// AE2: env app yang menunjuk staging menghentikan lab data.
+    #[test]
+    fn env_database_app_harus_lokal() {
+        let env = |pairs: &[(&str, &str)]| -> Vec<(String, String)> {
+            pairs
+                .iter()
+                .map(|(k, v)| ((*k).to_owned(), (*v).to_owned()))
+                .collect()
+        };
+        let keys = |k: &[&str]| -> Vec<String> { k.iter().map(|s| (*s).to_owned()).collect() };
+        let local = env(&[
+            ("DATABASE_URL", "postgres://u:p@127.0.0.1:5433/kelola"),
+            ("DB_HOST", "localhost"),
+            ("VITE_API_URL", "https://api.example.com"),
+        ]);
+        assert_eq!(
+            app_env_block(&local, &keys(&["DATABASE_URL", "DB_HOST", "VITE_API_URL"])),
+            None
+        );
+        let staging = env(&[("DATABASE_URL", "postgres://u@db.staging.example.com/kelola")]);
+        assert!(
+            app_env_block(&staging, &keys(&["DATABASE_URL"]))
+                .is_some_and(|m| m.contains("db.staging.example.com"))
+        );
+        assert!(app_env_block(&env(&[("PGHOST", "10.0.0.5")]), &keys(&["PGHOST"])).is_some());
+        assert!(app_env_block(&local, &keys(&["MISSING"])).is_some_and(|m| m.contains("missing")));
     }
 
     #[test]

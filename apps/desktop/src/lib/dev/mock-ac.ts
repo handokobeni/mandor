@@ -1,6 +1,6 @@
 // Data AC review tiruan untuk `/?mock` (Rilis 2). Skenario dipilih per run, atau
 // dipaksa lewat `?ac=<nama>`: design, current, blocked, confirm, warn, stale,
-// reviewing, failed, tracker, pass, no_ac, no_source.
+// reviewing, failed, tracker, pass, no_ac, no_source, lab.
 
 import type { AcLedgerView } from '#lib/protocol/AcLedgerView.ts';
 import { NO_VISUAL } from '#lib/ac-review.ts';
@@ -83,8 +83,59 @@ function current(): AcRowView[] {
   ];
 }
 
+/** Hasil review lab: Pass lab dengan langkah, simulasi request, Can't verify
+ * yang butuh data, dan rekomendasi tampilan (plan 2026-11-10-001). */
+function labRows(): AcRowView[] {
+  const ev = (extra: Partial<NonNullable<AcRowView['evidence_detail']>>) => ({
+    steps: [],
+    screenshots: [],
+    prepared: null,
+    simulated: 'none',
+    blocked_requests: [],
+    lab: true,
+    ...extra
+  });
+  const rows = current();
+  rows[0] = {
+    ...rows[0],
+    evidence: '1. Sign in as manager 2. Open /invoices 3. The Paid chip is hidden',
+    evidence_detail: ev({
+      steps: ['Sign in as manager', 'Open /invoices', 'The Paid chip is hidden for this role'],
+      screenshots: ['manager-ac1-0.png'],
+      prepared: 'Account manager (no admin.profileData)'
+    })
+  };
+  rows[1] = {
+    ...rows[1],
+    look_recommendation: {
+      advice: 'accept',
+      reason: 'The AC says the date range follows the filters; the prototype layout is an older draft.'
+    }
+  };
+  rows[2] = {
+    ...rows[2],
+    verdict: 'pass',
+    selectable: false,
+    evidence: '1. Make GET /api/invoices return 500 2. The list shows "Could not load invoices" with Retry',
+    evidence_detail: ev({
+      steps: ['Make GET /api/invoices return 500 in the page', 'The list shows "Could not load invoices" with Retry'],
+      prepared: 'fetch patched to return 500 for /api/invoices',
+      simulated: 'request'
+    })
+  };
+  rows[3] = {
+    ...rows[3],
+    lab_need: 'data',
+    evidence: 'The review proxy blocked a save request (POST http://localhost:5173/api/invoices); this check needs prepared data.',
+    evidence_detail: ev({ blocked_requests: [{ method: 'POST', url: 'http://localhost:5173/api/invoices' }] })
+  };
+  return rows;
+}
+
 export function scenarioRows(name: string): AcRowView[] {
   switch (name) {
+    case 'lab':
+      return labRows();
     case 'no_ac':
       return [];
     case 'design':

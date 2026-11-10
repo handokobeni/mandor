@@ -40,7 +40,7 @@ export function validateLark(form: LarkForm, secretSaved: boolean): LarkErrors {
   return Object.fromEntries(Object.entries(errors).filter(([, v]) => v !== undefined)) as LarkErrors;
 }
 
-export type RepoList = 'companions' | 'reviewers' | 'allowed' | 'env';
+export type RepoList = 'companions' | 'reviewers' | 'allowed' | 'env' | 'posts';
 
 /** Error untuk satu item baru di daftar pengaturan repo; `null` bila boleh ditambahkan. */
 export function validateListItem(list: RepoList, raw: string, existing: string[]): string | null {
@@ -50,6 +50,7 @@ export function validateListItem(list: RepoList, raw: string, existing: string[]
   if (list === 'reviewers' && !/^ou_[a-z0-9]{6,}$/.test(v)) return 'Lark open_ids start with ou_, e.g. ou_51aa6c.';
   if (list === 'allowed' && !/^[A-Z][A-Za-z]+(\(.+\))?$/.test(v)) return 'Use a tool pattern such as Bash(pnpm test *).';
   if (list === 'env' && !ENV_KEY.test(v)) return 'Use a variable name such as VITE_API_URL (no value).';
+  if (list === 'posts' && (!v.startsWith('/') || /[\s?#]/.test(v))) return 'Use a path such as /api/search (no query string).';
   if (existing.includes(v)) return 'Already in the list.';
   return null;
 }

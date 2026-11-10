@@ -3,6 +3,8 @@
 // AC dari tracker; `resync` memuat ulang semuanya.
 
 import type { AcLedgerView } from '#lib/protocol/AcLedgerView.ts';
+import type { AcRowView } from '#lib/protocol/AcRowView.ts';
+import type { FindingView } from '#lib/protocol/FindingView.ts';
 import type { LedgerRowsEvent } from '#lib/protocol/LedgerRowsEvent.ts';
 import type { ReviewView } from '#lib/protocol/ReviewView.ts';
 import type { RunEventView } from '#lib/protocol/RunEventView.ts';
@@ -12,6 +14,8 @@ import type { VisualScreenshotView } from '#lib/protocol/VisualScreenshotView.ts
 export class LedgerStore {
   ledger = $state<AcLedgerView | null>(null);
   history = $state<ReviewView[]>([]);
+  /** Temuan reviewer di luar AC (R19); tidak memengaruhi hitungan. */
+  findings = $state<FindingView[]>([]);
   error = $state<string | null>(null);
   private rpc: Rpc | null = null;
   private runId: string | null = null;
@@ -23,6 +27,7 @@ export class LedgerStore {
     this.runId = runId;
     this.ledger = null;
     this.history = [];
+    this.findings = [];
     this.off = [
       rpc.on('ledger.updated', (p) => this.applyRows(p as LedgerRowsEvent)),
       rpc.on('review.progress', (p) => {
@@ -59,23 +64,46 @@ export class LedgerStore {
     }
   }
 
-  /** Screenshot hasil tampilan baris (run VM) sebagai data URL. */
-  async screenshot(acId: string, index: number): Promise<string> {
+  /** Screenshot hasil tampilan baris, atau bukti verdict bila `evidence`,
+   * sebagai data URL. */
+  async screenshot(acId: string, index: number, evidence = false): Promise<string> {
     if (!this.rpc || !this.runId) throw new Error('No run attached');
-    const view = await this.rpc.request<VisualScreenshotView>('review.screenshot', {
+    const params: Record<string, unknown> = { run_id: this.runId, ac_id: acId, index };
+    if (evidence) params.evidence = true;
+    const view = await this.rpc.request<VisualScreenshotView>('review.screenshot', params);
+    return view.data_url;
+  }
+
+  /** Approve atau Reject rekomendasi tampilan reviewer (R18). */
+  async decideLook(acId: string, approve: boolean): Promise<void> {
+    if (!this.rpc || !this.runId || !this.ledger) return;
+    const rows = await this.rpc.request<AcRowView[]>('ledger.look_decision', {
       run_id: this.runId,
       ac_id: acId,
-      index
+      approve
     });
-    return view.data_url;
+    if (this.ledger) this.ledger = { ...this.ledger, rows };
   }
 
   async loadHistory(): Promise<void> {
     if (!this.rpc || !this.runId) return;
-    try {
-      this.history = await this.rpc.request<ReviewView[]>('review.history', { run_id: this.runId });
-    } catch {
-      this.history = [];
-    }
+    const rpc = this.rpc;
+    const runId = this.runId;
+    await Promise.all([
+      (async () => {
+        try {
+          this.history = await rpc.request<ReviewView[]>('review.history', { run_id: runId });
+        } catch {
+          this.history = [];
+        }
+      })(),
+      (async () => {
+        try {
+          this.findings = await rpc.request<FindingView[]>('review.findings', { run_id: runId });
+        } catch {
+          this.findings = [];
+        }
+      })()
+    ]);
   }
 }

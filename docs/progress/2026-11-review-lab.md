@@ -77,6 +77,42 @@ Status 2026-11-10: **uji langsung ditunda** atas keputusan pemilik produk. Temua
 - Review keamanan otomatis atas perubahan itu: jalur tidak langsung kini ikut dinilai. Hak per kolom pada foreign table (`has_any_column_privilege`), view bertingkat di atas foreign table (rekursif lewat `pg_rewrite`, karena view berjalan dengan hak pemiliknya), dan fungsi SECURITY DEFINER bukan milik extension yang bisa dijalankan role lab (dihitung untuk setiap extension, gagal tertutup). Putaran berikutnya menambah hak TRUNCATE (didukung `postgres_fdw` sejak PG 14) dan tabel induk partisi/pewarisan dari foreign table (akses lewat induk hanya memeriksa hak induk). Ketiganya diuji di PostgreSQL 18 sungguhan; DB kelola tidak punya jalur itu.
 - `landlord` lokal: EXECUTE semua fungsi `dblink` dicabut dari PUBLIC (kelola-api memakai `postgres` superuser, tidak terpengaruh). Ketiga DB kelola kini lolos `role_block` untuk `mandor_lab`.
 
+### Skenario uji langsung bersama: kartu PGS-1582
+
+Kartu uji `PGS-1582` di Base copy board (`Sv1NbPJh5aD7SesHvtGlmga8g2f`), repo `kelola-api` (workspace kelola-v2), 8 AC yang dulu diverifikasi manual di PGS-1477–1483:
+
+| AC | Kebutuhan | Asal | Yang dibuktikan |
+|---|---|---|---|
+| AC-1 batas atas KB berubah, nilai ditandai tidak valid | data (landlord) | AC-8941 | AE1 |
+| AC-2 nilai disimpan apa adanya saat batas atas turun | data (landlord + tenant) | AC-9424 | AE1 |
+| AC-3 batas atas satu corporate tidak memengaruhi corporate lain | data (Pentest 2026) | AC-9425 | isolasi |
+| AC-4 template mengikuti KB terpasang di aspek | data (tenant) | AC-8418 | AE1 |
+| AC-5 KB bernilai 0 tampil Not visible | data (tenant) | AC-8410 | AE1 |
+| AC-6 Manager tanpa admin.profileData ditolak | role | AC-8616 | AE4 |
+| AC-7 skeleton saat data lambat | simulasi | AC-8612 | fase 1 |
+| AC-8 modal upload menerima xlsx | berkas | AC-8436 | fase 1 |
+
+Persiapan (developer):
+
+1. Pasang installer Windows fase 2 (Actions run 42840860088).
+2. Hentikan kelola-api (8090) dan kelola-web (3000) yang menyala di luar Mandor; tutup pgAdmin.
+3. Set password `mandor_lab` (`\password mandor_lab` di `postgres-vector`).
+4. Settings → Repos → kelola-web → Review lab: akun Default (admin) dan `manager` (Manager tanpa admin.profileData), form login, folder berkas uji `review-fixtures/files`, lalu bagian Lab with test data: folder skrip `review-fixtures/lab`, database `landlord`, `stagingintegro_db`, `pentest2026_db` (localhost:57432, role lab `mandor_lab`, pemeliharaan `postgres`), perintah `snapshot.sh`/`restore.sh`/`fingerprint.sh`/`test-change.sh`. Save, Approve (uji bolak-balik tiap database).
+
+Jalannya uji:
+
+5. Sidik awal ketiga DB dicatat asisten (skrip `fingerprint.sh`, baca saja).
+6. Start PGS-1582. Asisten meng-commit `review-fixtures/` ke branch run kelola-web saja.
+7. Run app dari run, lalu AC review → Run review. Harapan: AC-6, AC-7, AC-8 diputuskan lab fase 1 (badge Lab; AC-7 Simulated request); AC-1–AC-5 Can't verify "Lab with test data deferred" dan tombol Run lab (5).
+8. Run lab → Run lab now. Harapan: banner "The review lab is using the local data", app berhenti untuk snapshot lalu menyala; AC-1–AC-5 diputuskan lab dengan badge Prepared with SQL; app berhenti lagi untuk restore; banner hilang.
+9. Sesudah lab: sidik ketiga DB sama dengan langkah 5, folder snapshot terhapus, tidak ada nilai KB uji, perubahan batas atas, atau data Pentest 2026 yang tersisa.
+
+Uji negatif:
+
+10. AE3: saat lab data berjalan, berkas snapshot satu database dibuat tidak terbaca → restore gagal → banner "The lab data was not restored", Start app/review/giliran agent ditolak. Izin dikembalikan → Retry restore → sidik sama, penahanan lepas.
+11. AE2: env app run `PGHOST` diarahkan ke host non-lokal → lab data tidak berjalan dengan alasan "lab only runs against local databases".
+12. AE7 sudah terlihat bila review dijalankan sebelum perlengkapan disetujui (catatan penyiapan, AC calon lab tetap Can't verify).
+
 Perbaikan test flaky (ditemukan saat `make check`):
 
 - `lab_proxy::tests::berhenti_melepas_port` (fase 1, PR #28): bind ulang ke port yang baru dilepas bisa kalah dari test paralel. Kini diperiksa bahwa proxy tidak lagi menjawab di port itu.

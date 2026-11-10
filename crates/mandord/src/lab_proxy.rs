@@ -545,6 +545,20 @@ mod tests {
         tokio::time::timeout(Duration::from_secs(5), tracker.wait())
             .await
             .unwrap_or_else(|e| panic!("{e}"));
-        assert!(TcpListener::bind(("127.0.0.1", port)).await.is_ok());
+        // Accept task pemilik listener sudah selesai (tracker kosong), jadi
+        // listener dilepas. Port itu bisa langsung dipakai ulang test paralel,
+        // maka yang diperiksa: proxy kita tidak lagi menjawab di sana.
+        if let Ok(mut s) = TcpStream::connect(("127.0.0.1", port)).await {
+            let _ = s
+                .write_all(b"CONNECT example.com:443 HTTP/1.1\r\nHost: example.com:443\r\n\r\n")
+                .await;
+            let mut buf = vec![0u8; 512];
+            let n = tokio::time::timeout(Duration::from_secs(2), s.read(&mut buf))
+                .await
+                .map_or(Ok(0), |r| r)
+                .unwrap_or(0);
+            let resp = String::from_utf8_lossy(&buf[..n]).to_ascii_lowercase();
+            assert!(!resp.contains("x-mandor-proxy"), "{resp}");
+        }
     }
 }

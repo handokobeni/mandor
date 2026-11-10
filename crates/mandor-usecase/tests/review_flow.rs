@@ -1290,6 +1290,30 @@ async fn tulis_yang_diblokir_proxy_membuat_cant_verify_tetapi_origin_lain_tidak(
             .unwrap()
             .contains("POST http://localhost:5173/api/kb")
     );
+
+    // URL tanpa query string; AC tak dikenal tidak menghabiskan penolakan.
+    st.lab.blocked.lock().unwrap().insert(
+        st.agent.last().req.review.unwrap().review_id,
+        vec![hit(
+            "POST",
+            "http://localhost:5173/api/kb?token=abc123",
+            true,
+        )],
+    );
+    assert!(
+        st.svc
+            .ledger_set_verdict(&scope, "tidak-ada", Verdict::Fail, report_with(&["x"]))
+            .await
+            .is_err()
+    );
+    let rows = st
+        .svc
+        .ledger_set_verdict(&scope, &a1, Verdict::CantVerify, report_with(&["x"]))
+        .await
+        .unwrap();
+    let r1 = rows.iter().find(|x| x.ac_id == a1).unwrap();
+    let blocked = r1.evidence_detail.clone().unwrap().blocked_requests;
+    assert_eq!(blocked[0].url, "http://localhost:5173/api/kb");
 }
 
 #[tokio::test(flavor = "multi_thread")]

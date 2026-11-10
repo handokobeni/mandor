@@ -327,7 +327,10 @@ impl<D: Deps> RunService<D> {
             ));
         }
         let rows = self.reviews.ac_rows(&scope.run_id).await?;
-        if rows.iter().any(|r| r.ac_id == ac_id && !r.in_gate()) {
+        let Some(row) = rows.iter().find(|r| r.ac_id == ac_id) else {
+            return Err(LedgerToolError::UnknownAc(ac_id.to_owned()));
+        };
+        if !row.in_gate() {
             return Err(LedgerToolError::NotAllowed("ac outside the gate"));
         }
         let ctx = self.review_context(&scope.run_id).await;
@@ -339,7 +342,24 @@ impl<D: Deps> RunService<D> {
         let mut verdict = verdict;
         let mut lab_need = report.lab_need;
         let mut evidence_text = report.evidence.clone();
-        let hits = self.lab.take_blocked(&ctx.review_id);
+        // Diambil setelah baris dipastikan ada, agar penolakan tidak hilang.
+        let mut hits = self.lab.take_blocked(&ctx.review_id);
+        // URL disimpan tanpa query string, lalu disamarkan seperti teks bukti.
+        let urls: Vec<String> = hits
+            .iter()
+            .map(|h| {
+                h.request
+                    .url
+                    .split(['?', '#'])
+                    .next()
+                    .unwrap_or_default()
+                    .to_owned()
+            })
+            .collect();
+        let urls = self.lab.redact(&ctx.repos, &ctx.review_id, urls).await;
+        for (h, url) in hits.iter_mut().zip(urls) {
+            h.request.url = url;
+        }
         // Error dari request tulis yang diblokir proxy bukan perilaku app
         // (KTD-L6): verdict menjadi Can't verify yang perlu lab data.
         if let Some(w) = hits.iter().find(|h| h.write)

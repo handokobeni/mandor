@@ -391,13 +391,25 @@ fn secret_name(segment: &str) -> bool {
         || SECRET_NAME_MARKERS.iter().any(|m| s.contains(m))
 }
 
+/// Ekstensi kode dan dokumen yang boleh diakhiri pola ber-wildcard; tidak ada
+/// yang bisa menjadi akhiran berkas env (mis. `.local`, `.production`).
+const SEARCH_EXTENSIONS: &[&str] = &[
+    "ts", "tsx", "js", "jsx", "mjs", "cjs", "svelte", "vue", "py", "rs", "go", "java", "kt", "rb",
+    "php", "cs", "sql", "md", "mdx", "json", "yaml", "yml", "toml", "html", "css", "scss", "txt",
+    "csv", "graphql", "prisma", "xml", "sh",
+];
+
 /// Pola berkas pencarian lab dengan tata bahasa sempit (KTD-L10, KTD-L14):
-/// tanpa kelas karakter, `?`, alternatif, atau negasi; tidak ada segmen yang
-/// menyebut dotfile atau nama rahasia; segmen terakhir yang memakai `*`
-/// harus berakhir dengan ekstensi literal, mis. `**/*.ts`. Pola seperti `*`,
-/// `.e*v`, atau `.[e]nv` ditolak karena bisa mengenai `.env`.
+/// satu pola tanpa spasi, koma, kelas karakter, `?`, alternatif, atau
+/// negasi; tidak ada segmen yang menyebut dotfile atau nama rahasia; segmen
+/// terakhir yang memakai `*` harus berakhir dengan ekstensi dari
+/// [`SEARCH_EXTENSIONS`], mis. `**/*.ts`. Pola seperti `*`, `.e*v`,
+/// `.[e]nv`, atau `**/*.local` ditolak karena bisa mengenai `.env*`.
 fn search_glob_allowed(glob: &str) -> bool {
-    if glob.is_empty() || glob.contains(['[', ']', '?', '{', '}', '!', '\\']) {
+    if glob.is_empty()
+        || glob.contains(['[', ']', '?', '{', '}', '!', '\\', ','])
+        || glob.chars().any(char::is_whitespace)
+    {
         return false;
     }
     let segments: Vec<&str> = glob.split('/').filter(|s| !s.is_empty()).collect();
@@ -418,11 +430,12 @@ fn search_glob_allowed(glob: &str) -> bool {
     match last.rfind('*') {
         None => !last.starts_with('.') || *last == ".env.example",
         Some(i) => {
-            let suffix = &last[i + 1..];
+            let suffix = last[i + 1..].to_ascii_lowercase();
+            let ext = suffix.rsplit('.').next().unwrap_or_default();
             !last.starts_with('.')
-                && suffix.len() >= 2
                 && suffix.starts_with('.')
                 && !suffix.contains("env")
+                && SEARCH_EXTENSIONS.contains(&ext)
         }
     }
 }

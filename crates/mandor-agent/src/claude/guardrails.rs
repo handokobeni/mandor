@@ -348,7 +348,8 @@ pub fn parse_hook_input(raw: &[u8]) -> Result<ToolCall, String> {
     // Pola berkas pencarian; `pattern` milik Grep adalah regex isi, bukan
     // berkas, jadi hanya diambil untuk Glob.
     let globs: Vec<String> = match tool_name.as_str() {
-        // `type` ripgrep (mis. `ts`) membatasi ke ekstensi bahasa itu.
+        // `type` ripgrep (mis. `ts`) dipetakan ke pola ekstensi; pagar lab
+        // hanya menerima ekstensi dari allowlist-nya, jadi tipe lain ditolak.
         "Grep" => text("glob")
             .into_iter()
             .chain(text("type").map(|t| format!("**/*.{t}")))

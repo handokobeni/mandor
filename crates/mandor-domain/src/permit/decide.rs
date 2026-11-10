@@ -1260,6 +1260,7 @@ mod tests {
             "**/.env.example",
             "README.md",
             "db/seed*.ts",
+            "**/*.test.ts",
         ] {
             assert!(!denied(&search("Grep", g)), "Grep {g}");
             assert!(!denied(&search("Glob", g)), "Glob {g}");
@@ -1283,6 +1284,11 @@ mod tests {
             "../x/*.ts",
             "**/*.key",
             "*.env",
+            "**/*.local",
+            "**/*.production",
+            "*.ts,.env",
+            "*.ts .env",
+            "**/*.rust",
         ] {
             assert!(denied(&search("Grep", g)), "Grep {g}");
             assert!(denied(&search("Glob", g)), "Glob {g}");

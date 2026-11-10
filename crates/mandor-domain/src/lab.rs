@@ -452,6 +452,29 @@ pub fn is_loopback_host(host: &str) -> bool {
         || host.parse::<Ipv4Addr>().is_ok_and(|ip| ip.is_loopback())
 }
 
+/// Penanda pengganti nilai rahasia di bukti.
+pub const REDACTED: &str = "[redacted]";
+
+/// Mengganti setiap kemunculan nilai rahasia di `text` (KTD-L12). Nilai
+/// pendek (< 4 karakter) dilewati agar teks biasa tidak rusak; nilai panjang
+/// diganti lebih dulu agar nilai yang memuat nilai lain tetap tersamarkan.
+#[must_use]
+pub fn redact_values(text: &str, values: &[&str]) -> String {
+    let mut sorted: Vec<&str> = values
+        .iter()
+        .copied()
+        .filter(|v| v.chars().count() >= 4)
+        .collect();
+    sorted.sort_by_key(|v| std::cmp::Reverse(v.len()));
+    let mut out = text.to_owned();
+    for v in sorted {
+        if out.contains(v) {
+            out = out.replace(v, REDACTED);
+        }
+    }
+    out
+}
+
 /// Kebijakan proxy lab satu review (KTD-L6).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ProxyPolicy {
@@ -505,15 +528,19 @@ pub fn proxy_decision(policy: &ProxyPolicy, req: ProxyRequest<'_>) -> Result<(),
     match req {
         ProxyRequest::Connect { authority } => {
             let target = authority.to_ascii_lowercase();
-            let known = policy
+            let scheme = policy
                 .origins
                 .iter()
-                .filter_map(|o| o.split_once("://").map(|(_, a)| a))
-                .any(|a| a == target);
-            if known {
-                Ok(())
-            } else {
-                Err(ProxyBlock::OtherOrigin)
+                .filter_map(|o| o.split_once("://"))
+                .find(|(_, a)| *a == target)
+                .map(|(s, _)| s);
+            match scheme {
+                None => Err(ProxyBlock::OtherOrigin),
+                // Terowongan mentah ke origin HTTP tidak bisa diperiksa proxy,
+                // jadi hanya dibuka saat tulis diizinkan (sesi lab data).
+                // WebSocket app HTTP tidak tersambung di luar sesi data.
+                Some("http") if !policy.write_allowed => Err(ProxyBlock::Write),
+                Some(_) => Ok(()),
             }
         }
         ProxyRequest::Http { method, url } => {
@@ -1009,7 +1036,7 @@ mod tests {
 
     #[test]
     fn connect_hanya_ke_host_port_origin_run() {
-        let p = policy(false);
+        let p = policy(true);
         let connect = |authority| ProxyRequest::Connect { authority };
         assert_eq!(proxy_decision(&p, connect("localhost:3000")), Ok(()));
         assert_eq!(proxy_decision(&p, connect("API.localhost:8080")), Ok(()));
@@ -1020,6 +1047,35 @@ mod tests {
                 "{a}"
             );
         }
+    }
+
+    #[test]
+    fn connect_ke_origin_http_ditolak_di_luar_sesi_data() {
+        let connect = |authority| ProxyRequest::Connect { authority };
+        let p = policy(false);
+        assert_eq!(
+            proxy_decision(&p, connect("localhost:3000")),
+            Err(ProxyBlock::Write)
+        );
+        let https = ProxyPolicy::new(&["https://app.test".to_owned()], &[]);
+        assert_eq!(proxy_decision(&https, connect("app.test:443")), Ok(()));
+    }
+
+    #[test]
+    fn nilai_rahasia_disamarkan() {
+        let out = redact_values(
+            "login a@uji.test dengan rahasia-9 dan cookie abcd1234efgh",
+            &["rahasia-9", "abcd1234efgh", "ab", "rahasia-9-panjang"],
+        );
+        assert_eq!(
+            out,
+            "login a@uji.test dengan [redacted] dan cookie [redacted]"
+        );
+        assert_eq!(
+            redact_values("x rahasia-9-panjang", &["rahasia-9", "rahasia-9-panjang"]),
+            "x [redacted]"
+        );
+        assert_eq!(redact_values("abc", &["ab"]), "abc");
     }
 
     #[test]

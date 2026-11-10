@@ -1286,6 +1286,46 @@ pub struct LedgerToolSetVerdict {
     pub verdict: String,
     #[serde(default)]
     pub evidence: Option<String>,
+    /// Kebutuhan lab untuk `cant_verify`: `role`, `simulation`, `file`, `data`
+    /// (plan 2026-11-10-001, KTD-L7).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub lab_need: Option<String>,
+    /// Langkah bernomor (R16).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub steps: Vec<String>,
+    /// Nama berkas screenshot dari tool browser.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub screenshots: Vec<String>,
+    /// Data, akun, dan simulasi yang disiapkan (R20).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub prepared: Option<String>,
+    /// `none` atau `request`; `sql` hanya diisi daemon.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub simulated: Option<String>,
+}
+
+/// Parameter `ledger.tool.report_finding`: temuan di luar AC (R19).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct LedgerToolReportFinding {
+    /// Kartu asal (`record_id`) di run grup.
+    #[serde(default)]
+    pub card: Option<String>,
+    pub title: String,
+    pub detail: String,
+    #[serde(default)]
+    pub steps: Vec<String>,
+    #[serde(default)]
+    pub screenshots: Vec<String>,
+}
+
+/// Parameter `ledger.tool.recommend_look`: rekomendasi untuk baris *looks
+/// different* (R18).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct LedgerToolRecommendLook {
+    pub ac_id: String,
+    /// `accept` atau `follow_prototype`.
+    pub recommendation: String,
+    pub reason: String,
 }
 
 /// Parameter `ledger.tool.set_visual` (plan 2026-11-03-002, KTD-P6).

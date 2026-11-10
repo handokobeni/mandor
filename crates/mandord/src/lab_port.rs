@@ -183,6 +183,26 @@ impl LabPort for ProdLab {
         }
     }
 
+    async fn redact(
+        &self,
+        repo_ids: &[String],
+        review_id: &str,
+        texts: Vec<String>,
+    ) -> Vec<String> {
+        let mut values: Vec<String> = Vec::new();
+        for repo in repo_ids {
+            if let Ok(s) = lab_secrets::load(&self.lab_root, repo).await {
+                values.extend(s.exposed_values());
+            }
+        }
+        values.extend(session_values(&self.sessions_dir(review_id)).await);
+        let refs: Vec<&str> = values.iter().map(String::as_str).collect();
+        texts
+            .iter()
+            .map(|t| mandor_domain::lab::redact_values(t, &refs))
+            .collect()
+    }
+
     async fn end_review(&self, review_id: &str) {
         let proxy = self
             .proxies
@@ -194,6 +214,43 @@ impl LabPort for ProdLab {
         }
         remove_dir(self.sessions_dir(review_id)).await;
     }
+}
+
+/// Nilai cookie dan `localStorage` di berkas sesi review, untuk penyamaran.
+async fn session_values(dir: &Path) -> Vec<String> {
+    let mut out = Vec::new();
+    let Ok(Ok(mut entries)) = tokio::time::timeout(FILE_TIMEOUT, tokio::fs::read_dir(dir)).await
+    else {
+        return out;
+    };
+    while let Ok(Ok(Some(e))) = tokio::time::timeout(FILE_TIMEOUT, entries.next_entry()).await {
+        if e.path().extension().and_then(|x| x.to_str()) != Some("json") {
+            continue;
+        }
+        let Ok(Ok(body)) = tokio::time::timeout(FILE_TIMEOUT, tokio::fs::read(e.path())).await
+        else {
+            continue;
+        };
+        out.extend(state_values(&body));
+    }
+    out
+}
+
+/// Nilai cookie dan `localStorage` dari satu `storageState`.
+fn state_values(body: &[u8]) -> Vec<String> {
+    let Ok(v) = serde_json::from_slice::<serde_json::Value>(body) else {
+        return Vec::new();
+    };
+    let cookies = v["cookies"].as_array().into_iter().flatten();
+    let storage = v["origins"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .flat_map(|o| o["localStorage"].as_array().into_iter().flatten());
+    cookies
+        .chain(storage)
+        .filter_map(|c| c["value"].as_str().map(str::to_owned))
+        .collect()
 }
 
 fn failure(c: LoginCategory) -> LoginFailure {
@@ -244,6 +301,14 @@ mod tests {
         assert_eq!(safe_name("rv-1_a"), "rv-1_a");
         assert_eq!(safe_name("../x"), "___x");
         assert_eq!(safe_name("a/b c"), "a_b_c");
+    }
+
+    #[test]
+    fn nilai_sesi_dibaca_dari_storage_state() {
+        let body = br#"{"cookies":[{"name":"sesi","value":"tok-abc-123"}],
+            "origins":[{"origin":"http://x","localStorage":[{"name":"jwt","value":"eyJhbGciOi"}]}]}"#;
+        assert_eq!(state_values(body), ["tok-abc-123", "eyJhbGciOi"]);
+        assert!(state_values(b"bukan json").is_empty());
     }
 
     #[test]

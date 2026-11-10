@@ -120,7 +120,7 @@ async fn peran_design_mengisi_kolom_design_dan_ditolak_mengisi_verdict() {
 
     assert_eq!(
         st.svc
-            .ledger_set_verdict(&scope, "ac1", Verdict::Pass, Some("ok"))
+            .ledger_set_verdict(&scope, "ac1", Verdict::Pass, common::report(Some("ok")))
             .await
             .unwrap_err(),
         LedgerToolError::WrongRole
@@ -152,7 +152,7 @@ async fn peran_verdict_hanya_lulus_gagal_atau_tidak_bisa_dipastikan_dan_bukti_di
     let long = "x".repeat(5_000);
     let rows = st
         .svc
-        .ledger_set_verdict(&scope, "ac2", Verdict::Fail, Some(&long))
+        .ledger_set_verdict(&scope, "ac2", Verdict::Fail, common::report(Some(&long)))
         .await
         .unwrap();
     let evidence = rows[1].evidence.clone().unwrap();
@@ -165,7 +165,9 @@ async fn peran_verdict_hanya_lulus_gagal_atau_tidak_bisa_dipastikan_dan_bukti_di
         Verdict::NotReviewed,
     ] {
         assert!(matches!(
-            st.svc.ledger_set_verdict(&scope, "ac2", v, None).await,
+            st.svc
+                .ledger_set_verdict(&scope, "ac2", v, common::report(None))
+                .await,
             Err(LedgerToolError::NotAllowed(_))
         ));
     }
@@ -530,9 +532,10 @@ async fn covers_ae7_tanpa_prototype_menyala_tampilan_tidak_bisa_dicatat() {
     ));
 }
 
-/// Plan 2026-11-03-002, U7: screenshot hanya disalin untuk run VM.
+/// Plan 2026-11-10-001, KTD-L12: review laptop juga memakai Playwright,
+/// jadi screenshot disalin daemon seperti di VM.
 #[tokio::test]
-async fn screenshot_laptop_diabaikan() {
+async fn screenshot_laptop_juga_disalin() {
     use mandor_domain::ac_ledger::Visual;
     let (_lark, _clock, st, run) = visual_run(true).await;
     let token = st.svc.issue_capability(&run, CapabilityRole::Verdict);
@@ -544,6 +547,6 @@ async fn screenshot_laptop_diabaikan() {
         .ledger_set_visual(&scope, "ac1", Visual::Differs, r)
         .await
         .unwrap();
-    assert!(rows[0].visual_detail.screenshots.is_empty());
-    assert!(st.agent.kept.lock().unwrap().is_empty());
+    assert!(!rows[0].visual_detail.screenshots.is_empty());
+    assert!(!st.agent.kept.lock().unwrap().is_empty());
 }

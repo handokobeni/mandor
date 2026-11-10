@@ -351,6 +351,14 @@ pub trait LabPort: Send + Sync {
     ) -> impl Future<Output = Result<PathBuf, LoginFailure>> + Send;
     /// Menghentikan proxy dan menghapus berkas sesi review.
     fn end_review(&self, review_id: &str) -> impl Future<Output = ()> + Send;
+    /// Menyamarkan password akun uji repo dan nilai cookie sesi review di
+    /// teks bukti (KTD-L12). Urutan dan jumlah teks sama dengan masukan.
+    fn redact(
+        &self,
+        repo_ids: &[String],
+        review_id: &str,
+        texts: Vec<String>,
+    ) -> impl Future<Output = Vec<String>> + Send;
 }
 
 /// Konteks agent untuk run workspace.
@@ -1205,6 +1213,18 @@ pub trait ReviewHistory: Send + Sync {
     ) -> impl Future<Output = Result<(), PortError>> + Send;
     /// Ekstensi Claude in Chrome terakhir terdeteksi tersambung (U13).
     fn chrome_connected(&self) -> impl Future<Output = bool> + Send;
+    /// Menyimpan temuan reviewer di luar AC (R19).
+    fn save_finding(
+        &self,
+        review_id: &str,
+        finding: &mandor_domain::lab::Finding,
+        at_ms: i64,
+    ) -> impl Future<Output = Result<(), PortError>> + Send;
+    /// Temuan semua review run: `(review_id, temuan)`.
+    fn findings(
+        &self,
+        run_id: &str,
+    ) -> impl Future<Output = Result<Vec<(String, mandor_domain::lab::Finding)>, PortError>> + Send;
     /// Setelan lab; bawaan bila belum diatur atau rusak.
     fn lab_settings(&self) -> impl Future<Output = LabSettings> + Send;
     fn set_lab_settings(

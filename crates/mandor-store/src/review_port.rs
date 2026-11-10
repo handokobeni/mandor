@@ -202,6 +202,22 @@ impl ReviewHistory for ReviewsStore {
         matches!(self.store.setting(CHROME_KEY).await, Ok(Some(v)) if v == "true")
     }
 
+    async fn save_finding(
+        &self,
+        review_id: &str,
+        finding: &mandor_domain::lab::Finding,
+        at_ms: i64,
+    ) -> Result<(), PortError> {
+        Ok(self.store.save_finding(review_id, finding, at_ms).await?)
+    }
+
+    async fn findings(
+        &self,
+        run_id: &str,
+    ) -> Result<Vec<(String, mandor_domain::lab::Finding)>, PortError> {
+        Ok(self.store.run_findings(run_id).await?)
+    }
+
     async fn lab_settings(&self) -> LabSettings {
         let stored = match self.store.setting(LAB_KEY).await {
             Ok(Some(raw)) => serde_json::from_str::<StoredLabSettings>(&raw).ok(),

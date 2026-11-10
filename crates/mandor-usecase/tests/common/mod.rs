@@ -677,3 +677,11 @@ impl mandor_usecase::run_ports::Prompts for PlainMessage {
         )
     }
 }
+
+/// Laporan verdict hanya dengan teks bukti.
+pub fn report(evidence: Option<&str>) -> mandor_usecase::review::VerdictReport {
+    mandor_usecase::review::VerdictReport {
+        evidence: evidence.map(str::to_owned),
+        ..mandor_usecase::review::VerdictReport::default()
+    }
+}

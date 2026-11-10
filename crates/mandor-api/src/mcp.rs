@@ -7,8 +7,8 @@
 use std::future::Future;
 
 use mandor_protocol::{
-    AskToolQuestion, LedgerToolInfo, LedgerToolSetDesign, LedgerToolSetVerdict,
-    LedgerToolSetVisual, RpcError, method,
+    AskToolQuestion, LedgerToolInfo, LedgerToolRecommendLook, LedgerToolReportFinding,
+    LedgerToolSetDesign, LedgerToolSetVerdict, LedgerToolSetVisual, RpcError, method,
 };
 use serde_json::{Value, json};
 
@@ -87,9 +87,9 @@ impl<R: LedgerRpc> McpSession<R> {
         match role.as_str() {
             "design" => tools.extend([read_tool(), design_tool()]),
             "verdict" => {
-                tools.extend([read_tool(), verdict_tool()]);
+                tools.extend([read_tool(), verdict_tool(), finding_tool()]);
                 if flags.0 {
-                    tools.push(visual_tool());
+                    tools.extend([visual_tool(), recommend_look_tool()]);
                 }
             }
             _ => {}
@@ -120,6 +120,14 @@ impl<R: LedgerRpc> McpSession<R> {
             },
             "ac_set_visual" => match serde_json::from_value::<LedgerToolSetVisual>(args) {
                 Ok(p) => self.call_with(method::LEDGER_TOOL_SET_VISUAL, &p).await,
+                Err(e) => return tool_error(&format!("invalid arguments: {e}")),
+            },
+            "ac_report_finding" => match serde_json::from_value::<LedgerToolReportFinding>(args) {
+                Ok(p) => self.call_with(method::LEDGER_TOOL_REPORT_FINDING, &p).await,
+                Err(e) => return tool_error(&format!("invalid arguments: {e}")),
+            },
+            "ac_recommend_look" => match serde_json::from_value::<LedgerToolRecommendLook>(args) {
+                Ok(p) => self.call_with(method::LEDGER_TOOL_RECOMMEND_LOOK, &p).await,
                 Err(e) => return tool_error(&format!("invalid arguments: {e}")),
             },
             "ask_developer" => match serde_json::from_value::<AskToolQuestion>(args) {
@@ -189,15 +197,56 @@ fn design_tool() -> Value {
 fn verdict_tool() -> Value {
     json!({
         "name": "ac_set_verdict",
-        "description": "Record the review verdict for one acceptance criterion: pass, fail, or cant_verify, with evidence as plain text (file:line, test result, or numbered browser steps). Never paste page data or secrets.",
+        "description": "Record the review verdict for one acceptance criterion: pass, fail, or cant_verify, with evidence as plain text (file:line, test result, or a summary). When you used the browser, also give the numbered steps you took and the screenshot file names; a pass checked in the browser needs steps. For cant_verify, set lab_need when the criterion needs another role, a simulated request failure, a test file, or prepared data. Never paste page data or secrets.",
         "inputSchema": {
             "type": "object",
             "properties": {
                 "ac_id": {"type": "string", "description": "ac_id from ac_ledger_read"},
                 "verdict": {"type": "string", "enum": ["pass", "fail", "cant_verify"]},
                 "evidence": {"type": "string"},
+                "steps": {"type": "array", "items": {"type": "string"}, "description": "Numbered steps, one per item, in order"},
+                "screenshots": {"type": "array", "items": {"type": "string"}, "description": "Screenshot file names saved by the browser tool (name only)"},
+                "prepared": {"type": "string", "description": "Which account, data, and simulated requests this check used"},
+                "simulated": {"type": "string", "enum": ["none", "request"], "description": "request when you slowed down or failed app requests in the page"},
+                "lab_need": {"type": "string", "enum": ["role", "simulation", "file", "data"], "description": "Only with cant_verify: what the review lab must prepare"},
             },
             "required": ["ac_id", "verdict", "evidence"],
+            "additionalProperties": false,
+        },
+    })
+}
+
+fn finding_tool() -> Value {
+    json!({
+        "name": "ac_report_finding",
+        "description": "Report a problem you noticed that no acceptance criterion covers (for example a bug seen while testing). It is listed separately and does not change any verdict. Never paste page data or secrets.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "card": {"type": "string", "description": "Card record_id in a group run"},
+                "title": {"type": "string"},
+                "detail": {"type": "string"},
+                "steps": {"type": "array", "items": {"type": "string"}},
+                "screenshots": {"type": "array", "items": {"type": "string"}},
+            },
+            "required": ["title", "detail"],
+            "additionalProperties": false,
+        },
+    })
+}
+
+fn recommend_look_tool() -> Value {
+    json!({
+        "name": "ac_recommend_look",
+        "description": "For a criterion you recorded as differs with ac_set_visual, recommend what the developer should decide: accept (the app follows the acceptance criterion and the difference from the prototype is accepted) or follow_prototype (change the app to match the prototype), with a short reason. The developer approves or rejects it.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "ac_id": {"type": "string", "description": "ac_id from ac_ledger_read"},
+                "recommendation": {"type": "string", "enum": ["accept", "follow_prototype"]},
+                "reason": {"type": "string"},
+            },
+            "required": ["ac_id", "recommendation", "reason"],
             "additionalProperties": false,
         },
     })
@@ -359,7 +408,12 @@ mod tests {
                 .cloned()
                 .unwrap_or_default();
             let names: Vec<&str> = tools.iter().filter_map(|t| t["name"].as_str()).collect();
-            assert_eq!(names, ["ac_ledger_read", extra], "{role}");
+            let want: Vec<&str> = if role == "verdict" {
+                vec!["ac_ledger_read", extra, "ac_report_finding"]
+            } else {
+                vec!["ac_ledger_read", extra]
+            };
+            assert_eq!(names, want, "{role}");
             assert_eq!(
                 tools[0]["annotations"]["readOnlyHint"], true,
                 "ac_ledger_read hanya membaca"
@@ -437,7 +491,16 @@ mod tests {
             .iter()
             .filter_map(|t| t["name"].as_str().map(str::to_owned))
             .collect();
-        assert_eq!(names, ["ac_ledger_read", "ac_set_verdict", "ac_set_visual"]);
+        assert_eq!(
+            names,
+            [
+                "ac_ledger_read",
+                "ac_set_verdict",
+                "ac_report_finding",
+                "ac_set_visual",
+                "ac_recommend_look"
+            ]
+        );
         let out = ask(
             &mut s,
             json!({"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"ac_set_visual","arguments":{
@@ -467,7 +530,10 @@ mod tests {
                 vec!["ac_ledger_read", "ac_set_design", "ask_developer"],
             ),
             ("design", vec!["ac_ledger_read", "ac_set_design"]),
-            ("verdict+ask", vec!["ac_ledger_read", "ac_set_verdict"]),
+            (
+                "verdict+ask",
+                vec!["ac_ledger_read", "ac_set_verdict", "ac_report_finding"],
+            ),
             ("ask", vec![]),
         ] {
             let fake = rpc(role);

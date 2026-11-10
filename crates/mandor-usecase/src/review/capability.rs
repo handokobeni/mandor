@@ -7,12 +7,17 @@
 use std::sync::{Arc, PoisonError};
 
 use mandor_domain::ac_ledger::{Visual, valid_page_path};
+use mandor_domain::lab::{
+    Evidence, Finding, LabNeed, LookAdvice, LookRecommendation, Simulated, check_lab_need,
+};
 use mandor_domain::{AcRow, Design, Verdict};
 use secrecy::{ExposeSecret, SecretString};
 
 use crate::ports::{Deps, Ids};
 use crate::run::RunService;
-use crate::run_ports::{AgentPort, AppRecord, AppRecords, LedgerStore, RunStore};
+use crate::run_ports::{
+    AgentPort, AppRecord, AppRecords, LabPort, LedgerStore, ReviewHistory, RunStore,
+};
 
 /// Batas panjang bukti reviewer per AC.
 const EVIDENCE_MAX: usize = 2_000;
@@ -104,6 +109,42 @@ impl From<crate::PortError> for LedgerToolError {
     fn from(e: crate::PortError) -> Self {
         Self::Storage(e.to_string())
     }
+}
+
+/// Laporan verdict satu baris dari reviewer (alat `ac_set_verdict`).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct VerdictReport {
+    pub evidence: Option<String>,
+    pub lab_need: Option<LabNeed>,
+    pub steps: Vec<String>,
+    pub screenshots: Vec<String>,
+    pub prepared: Option<String>,
+    pub simulated: Simulated,
+}
+
+/// Konteks review berjalan untuk tool ledger.
+#[derive(Debug, Clone, Default)]
+struct ReviewContext {
+    review_id: String,
+    repos: Vec<String>,
+    browser: bool,
+}
+
+/// Teks bukti setelah disamarkan.
+struct RedactedTexts {
+    evidence: Option<String>,
+    prepared: Option<String>,
+    steps: Vec<String>,
+}
+
+/// Langkah bernomor sebagai teks bukti lama.
+fn numbered(steps: &[String]) -> String {
+    steps
+        .iter()
+        .enumerate()
+        .map(|(i, s)| format!("{}. {s}", i + 1))
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 /// Laporan tampilan satu baris dari reviewer (alat `ac_set_visual`).
@@ -270,7 +311,7 @@ impl<D: Deps> RunService<D> {
         scope: &CapabilityScope,
         ac_id: &str,
         verdict: Verdict,
-        evidence: Option<&str>,
+        report: VerdictReport,
     ) -> Result<Vec<AcRow>, LedgerToolError> {
         if scope.role != CapabilityRole::Verdict {
             return Err(LedgerToolError::WrongRole);
@@ -278,19 +319,213 @@ impl<D: Deps> RunService<D> {
         if !matches!(verdict, Verdict::Pass | Verdict::Fail | Verdict::CantVerify) {
             return Err(LedgerToolError::NotAllowed(verdict.as_str()));
         }
+        check_lab_need(verdict, report.lab_need)
+            .map_err(|_| LedgerToolError::NotAllowed("lab_need is only for cant_verify"))?;
+        if report.simulated == Simulated::Sql {
+            return Err(LedgerToolError::NotAllowed(
+                "simulated sql is set by Mandor",
+            ));
+        }
         let rows = self.reviews.ac_rows(&scope.run_id).await?;
         if rows.iter().any(|r| r.ac_id == ac_id && !r.in_gate()) {
             return Err(LedgerToolError::NotAllowed("ac outside the gate"));
         }
+        let ctx = self.review_context(&scope.run_id).await;
+        if verdict == Verdict::Pass && ctx.browser && report.steps.is_empty() {
+            return Err(LedgerToolError::NotAllowed(
+                "a pass checked in the browser needs numbered steps",
+            ));
+        }
+        let mut verdict = verdict;
+        let mut lab_need = report.lab_need;
+        let mut evidence_text = report.evidence.clone();
+        let hits = self.lab.take_blocked(&ctx.review_id);
+        // Error dari request tulis yang diblokir proxy bukan perilaku app
+        // (KTD-L6): verdict menjadi Can't verify yang perlu lab data.
+        if let Some(w) = hits.iter().find(|h| h.write)
+            && matches!(verdict, Verdict::Pass | Verdict::Fail)
+        {
+            verdict = Verdict::CantVerify;
+            lab_need = Some(LabNeed::Data);
+            evidence_text = Some(format!(
+                "The review proxy blocked a save request ({} {}); this check needs prepared data.",
+                w.request.method, w.request.url
+            ));
+        }
+        let screenshots = self
+            .keep_screenshots(&scope.run_id, ac_id, &report.screenshots)
+            .await;
+        let texts = self
+            .redacted(&ctx, evidence_text, report.prepared.clone(), &report.steps)
+            .await;
+        let detail = Evidence {
+            steps: texts.steps,
+            screenshots,
+            prepared: texts.prepared,
+            simulated: report.simulated,
+            blocked_requests: hits.into_iter().map(|h| h.request).collect(),
+        };
+        let text = texts
+            .evidence
+            .or_else(|| (!detail.steps.is_empty()).then(|| numbered(&detail.steps)));
+        let has_detail = detail != Evidence::default();
         self.update_row(&scope.run_id, ac_id, |r| {
             r.verdict = verdict;
-            r.evidence = evidence.map(truncate_evidence).filter(|e| !e.is_empty());
+            r.evidence = text
+                .as_deref()
+                .map(truncate_evidence)
+                .filter(|e| !e.is_empty());
+            r.lab_need = lab_need;
+            r.evidence_detail = has_detail.then_some(detail);
             r.stale = false;
             // Keputusan dev lama tetap di baris; review run grup memulihkannya
             // bila verdict tidak berubah (R18). Run tunggal sudah mengosongkannya
             // saat review dimulai.
         })
         .await
+    }
+
+    /// Tool `ac_report_finding` (peran Verdict): temuan di luar AC disimpan
+    /// terpisah dan tidak mengubah verdict mana pun (R19).
+    ///
+    /// # Errors
+    /// Peran salah, judul kosong, atau penyimpanan gagal.
+    pub async fn ledger_report_finding(
+        &self,
+        scope: &CapabilityScope,
+        finding: Finding,
+    ) -> Result<(), LedgerToolError> {
+        if scope.role != CapabilityRole::Verdict {
+            return Err(LedgerToolError::WrongRole);
+        }
+        if finding.title.trim().is_empty() {
+            return Err(LedgerToolError::NotAllowed("empty title"));
+        }
+        let ctx = self.review_context(&scope.run_id).await;
+        let mut texts = self
+            .lab
+            .redact(
+                &ctx.repos,
+                &ctx.review_id,
+                vec![finding.title.clone(), finding.detail.clone()],
+            )
+            .await
+            .into_iter();
+        let steps = self
+            .lab
+            .redact(&ctx.repos, &ctx.review_id, finding.evidence.steps.clone())
+            .await;
+        let screenshots = self
+            .keep_screenshots(&scope.run_id, "finding", &finding.evidence.screenshots)
+            .await;
+        let clean = Finding {
+            card: finding.card,
+            title: truncate_evidence(&texts.next().unwrap_or_default()),
+            detail: truncate_evidence(&texts.next().unwrap_or_default()),
+            evidence: Evidence {
+                steps: steps.iter().map(|s| truncate_evidence(s)).collect(),
+                screenshots,
+                ..Evidence::default()
+            },
+        };
+        self.reviews
+            .save_finding(&ctx.review_id, &clean, self.now())
+            .await?;
+        Ok(())
+    }
+
+    /// Tool `ac_recommend_look` (peran Verdict): rekomendasi untuk baris
+    /// *looks different*; developer yang memutuskan (R18).
+    ///
+    /// # Errors
+    /// Peran salah, baris bukan *looks different*, atau penyimpanan gagal.
+    pub async fn ledger_recommend_look(
+        &self,
+        scope: &CapabilityScope,
+        ac_id: &str,
+        advice: LookAdvice,
+        reason: &str,
+    ) -> Result<Vec<AcRow>, LedgerToolError> {
+        if scope.role != CapabilityRole::Verdict {
+            return Err(LedgerToolError::WrongRole);
+        }
+        let rows = self.reviews.ac_rows(&scope.run_id).await?;
+        if rows
+            .iter()
+            .any(|r| r.ac_id == ac_id && r.visual != Visual::Differs)
+        {
+            return Err(LedgerToolError::NotAllowed(
+                "recommendations are only for rows that look different",
+            ));
+        }
+        let ctx = self.review_context(&scope.run_id).await;
+        let reason = self
+            .lab
+            .redact(&ctx.repos, &ctx.review_id, vec![reason.to_owned()])
+            .await
+            .into_iter()
+            .next()
+            .unwrap_or_default();
+        self.update_row(&scope.run_id, ac_id, |r| {
+            r.look_recommendation = Some(LookRecommendation {
+                advice,
+                reason: truncate_evidence(&reason),
+            });
+        })
+        .await
+    }
+
+    /// Review berjalan untuk run: id, repo anggota, dan apakah browser dipakai.
+    async fn review_context(&self, run_id: &str) -> ReviewContext {
+        let Ok(Some(run)) = self.runs.get(run_id).await else {
+            return ReviewContext::default();
+        };
+        let review_id = run.review_id.clone().unwrap_or_default();
+        let browser = self
+            .reviews
+            .reviews(run_id)
+            .await
+            .ok()
+            .and_then(|all| all.into_iter().find(|r| r.id == review_id))
+            .is_some_and(|r| r.browser_used);
+        let repos = self.members(&run).await.map_or_else(
+            |_| vec![run.repo_id.clone()],
+            |m| m.iter().map(|m| m.repo.id.clone()).collect(),
+        );
+        ReviewContext {
+            review_id,
+            repos,
+            browser,
+        }
+    }
+
+    /// Teks bukti yang sudah disamarkan: bukti (dan data yang disiapkan),
+    /// serta langkah.
+    async fn redacted(
+        &self,
+        ctx: &ReviewContext,
+        evidence: Option<String>,
+        prepared: Option<String>,
+        steps: &[String],
+    ) -> RedactedTexts {
+        let (has_evidence, has_prepared) = (evidence.is_some(), prepared.is_some());
+        let all: Vec<String> = evidence
+            .into_iter()
+            .chain(prepared)
+            .chain(steps.iter().cloned())
+            .collect();
+        let mut out = self
+            .lab
+            .redact(&ctx.repos, &ctx.review_id, all)
+            .await
+            .into_iter();
+        let evidence = if has_evidence { out.next() } else { None };
+        let prepared = if has_prepared { out.next() } else { None };
+        RedactedTexts {
+            evidence,
+            prepared: prepared.map(|p| truncate_evidence(&p)),
+            steps: out.map(|s| truncate_evidence(&s)).collect(),
+        }
     }
 
     /// URL dan revisi prototype yang sedang menyala untuk run ini, bila ada.
@@ -359,10 +594,10 @@ impl<D: Deps> RunService<D> {
         .await
     }
 
-    /// Salinan screenshot reviewer untuk run VM; laptop tidak menyimpannya
-    /// (R21). Salinan yang gagal hanya dicatat; hasil tampilan tetap disimpan.
+    /// Salinan screenshot reviewer milik daemon, di laptop dan VM (R16).
+    /// Salinan yang gagal hanya dicatat; hasil tetap disimpan.
     async fn keep_screenshots(&self, run_id: &str, ac_id: &str, names: &[String]) -> Vec<String> {
-        if names.is_empty() || !self.is_vm() {
+        if names.is_empty() {
             return Vec::new();
         }
         let review_id = match self.runs.get(run_id).await {

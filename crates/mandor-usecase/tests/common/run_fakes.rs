@@ -936,6 +936,7 @@ pub struct FakeReviews {
     pub settings: Arc<Mutex<mandor_usecase::run_ports::ReviewerSettings>>,
     pub chrome: Arc<Mutex<bool>>,
     pub lab_settings: Arc<Mutex<mandor_usecase::run_ports::LabSettings>>,
+    pub findings: Arc<Mutex<Vec<(String, mandor_domain::lab::Finding)>>>,
 }
 
 impl FakeReviews {
@@ -1124,6 +1125,24 @@ impl mandor_usecase::run_ports::ReviewHistory for FakeReviews {
     }
     async fn lab_settings(&self) -> mandor_usecase::run_ports::LabSettings {
         self.lab_settings.lock().unwrap().clone()
+    }
+    async fn save_finding(
+        &self,
+        review_id: &str,
+        finding: &mandor_domain::lab::Finding,
+        _at_ms: i64,
+    ) -> Result<(), PortError> {
+        self.findings
+            .lock()
+            .unwrap()
+            .push((review_id.to_owned(), finding.clone()));
+        Ok(())
+    }
+    async fn findings(
+        &self,
+        _run_id: &str,
+    ) -> Result<Vec<(String, mandor_domain::lab::Finding)>, PortError> {
+        Ok(self.findings.lock().unwrap().clone())
     }
     async fn set_lab_settings(
         &self,
@@ -1473,6 +1492,8 @@ pub struct FakeLab {
     pub proxy_fails: Arc<Mutex<bool>>,
     pub blocked: Arc<Mutex<HashMap<String, Vec<mandor_usecase::run_ports::ProxyHit>>>>,
     pub ended: Arc<Mutex<Vec<String>>>,
+    /// Nilai yang disamarkan `redact`.
+    pub secrets: Arc<Mutex<Vec<String>>>,
 }
 
 impl Default for FakeLab {
@@ -1486,6 +1507,7 @@ impl Default for FakeLab {
             proxy_fails: Arc::default(),
             blocked: Arc::default(),
             ended: Arc::default(),
+            secrets: Arc::default(),
         }
     }
 }
@@ -1559,5 +1581,14 @@ impl mandor_usecase::run_ports::LabPort for FakeLab {
 
     async fn end_review(&self, review_id: &str) {
         self.ended.lock().unwrap().push(review_id.to_owned());
+    }
+
+    async fn redact(&self, _repos: &[String], _review_id: &str, texts: Vec<String>) -> Vec<String> {
+        let secrets = self.secrets.lock().unwrap().clone();
+        let refs: Vec<&str> = secrets.iter().map(String::as_str).collect();
+        texts
+            .iter()
+            .map(|t| mandor_domain::lab::redact_values(t, &refs))
+            .collect()
     }
 }

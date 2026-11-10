@@ -493,9 +493,16 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn connect_ke_origin_run_menjadi_terowongan() {
+    async fn connect_ke_origin_run_menjadi_terowongan_saat_sesi_data() {
         let (app, _) = upstream(true).await;
         let (p, _t, _c) = proxy_for(app, &[]).await;
+        let blocked = send(
+            p.port(),
+            &format!("CONNECT 127.0.0.1:{app} HTTP/1.1\r\nHost: 127.0.0.1:{app}\r\n\r\n"),
+        )
+        .await;
+        assert!(blocked.starts_with("HTTP/1.1 418"), "{blocked}");
+        p.set_write_allowed(true);
         let mut s = TcpStream::connect(("127.0.0.1", p.port()))
             .await
             .unwrap_or_else(|e| panic!("{e}"));

@@ -3,9 +3,9 @@
 use mandor_domain::{Design, Verdict};
 use mandor_protocol::{
     AcLedgerView, ChromeCheckParams, ChromeCheckView, ErrorCode, LedgerToolInfo,
-    LedgerToolSetDesign, LedgerToolSetVerdict, LedgerToolSetVisual, ReadinessConfirmations,
-    ReviewFindings, ReviewReadinessView, ReviewStart, ReviewVerdictView, ReviewView,
-    ReviewerSettingsView, RpcError, RunRef, method,
+    LedgerToolRecommendLook, LedgerToolReportFinding, LedgerToolSetDesign, LedgerToolSetVerdict,
+    LedgerToolSetVisual, ReadinessConfirmations, ReviewFindings, ReviewReadinessView, ReviewStart,
+    ReviewVerdictView, ReviewView, ReviewerSettingsView, RpcError, RunRef, method,
 };
 use mandor_usecase::review::{CapabilityRole, CapabilityScope, LedgerToolError};
 use mandor_usecase::run_ports::{ReviewRecord, ReviewTrigger, ReviewerSettings};
@@ -27,7 +27,13 @@ pub(super) enum LedgerTool {
     SetVerdict {
         ac_id: String,
         verdict: Verdict,
-        evidence: Option<String>,
+        report: mandor_usecase::review::VerdictReport,
+    },
+    ReportFinding(mandor_domain::lab::Finding),
+    RecommendLook {
+        ac_id: String,
+        advice: mandor_domain::lab::LookAdvice,
+        reason: String,
     },
     /// `report.screenshots`: nama berkas dari reviewer; adapter agent
     /// memeriksanya sebelum disalin (run VM, KTD-P8).
@@ -56,10 +62,52 @@ pub(super) fn ledger_tool(name: &str, v: Value) -> Result<LedgerTool, RpcError> 
             let p: LedgerToolSetVerdict = params(v)?;
             let verdict =
                 Verdict::parse(&p.verdict).ok_or_else(|| invalid("verdict", &p.verdict))?;
+            let lab_need = p
+                .lab_need
+                .as_deref()
+                .map(|n| {
+                    mandor_domain::lab::LabNeed::parse(n).ok_or_else(|| invalid("lab_need", n))
+                })
+                .transpose()?;
+            let simulated = match p.simulated.as_deref() {
+                None => mandor_domain::lab::Simulated::None,
+                Some(raw) => mandor_domain::lab::Simulated::parse(raw)
+                    .ok_or_else(|| invalid("simulated", raw))?,
+            };
             Ok(LedgerTool::SetVerdict {
                 ac_id: p.ac_id,
                 verdict,
-                evidence: p.evidence,
+                report: mandor_usecase::review::VerdictReport {
+                    evidence: p.evidence,
+                    lab_need,
+                    steps: p.steps,
+                    screenshots: p.screenshots,
+                    prepared: p.prepared,
+                    simulated,
+                },
+            })
+        }
+        method::LEDGER_TOOL_REPORT_FINDING => {
+            let p: LedgerToolReportFinding = params(v)?;
+            Ok(LedgerTool::ReportFinding(mandor_domain::lab::Finding {
+                card: p.card,
+                title: p.title,
+                detail: p.detail,
+                evidence: mandor_domain::lab::Evidence {
+                    steps: p.steps,
+                    screenshots: p.screenshots,
+                    ..mandor_domain::lab::Evidence::default()
+                },
+            }))
+        }
+        method::LEDGER_TOOL_RECOMMEND_LOOK => {
+            let p: LedgerToolRecommendLook = params(v)?;
+            let advice = mandor_domain::lab::LookAdvice::parse(&p.recommendation)
+                .ok_or_else(|| invalid("recommendation", &p.recommendation))?;
+            Ok(LedgerTool::RecommendLook {
+                ac_id: p.ac_id,
+                advice,
+                reason: p.reason,
             })
         }
         method::LEDGER_TOOL_SET_VISUAL => {
@@ -304,10 +352,26 @@ impl AppDispatch {
             LedgerTool::SetVerdict {
                 ac_id,
                 verdict,
-                evidence,
+                report,
             } => {
                 s.runs
-                    .ledger_set_verdict(&scope, &ac_id, verdict, evidence.as_deref())
+                    .ledger_set_verdict(&scope, &ac_id, verdict, report)
+                    .await
+            }
+            LedgerTool::ReportFinding(finding) => {
+                s.runs
+                    .ledger_report_finding(&scope, finding)
+                    .await
+                    .map_err(|e| tool_error(&e))?;
+                return ok(&serde_json::json!({"recorded": true}));
+            }
+            LedgerTool::RecommendLook {
+                ac_id,
+                advice,
+                reason,
+            } => {
+                s.runs
+                    .ledger_recommend_look(&scope, &ac_id, advice, &reason)
                     .await
             }
             LedgerTool::SetVisual {
@@ -504,9 +568,36 @@ mod tests {
             LedgerTool::SetVerdict {
                 ac_id: "rec1".to_owned(),
                 verdict: Verdict::CantVerify,
-                evidence: Some("x".to_owned()),
+                report: mandor_usecase::review::VerdictReport {
+                    evidence: Some("x".to_owned()),
+                    ..mandor_usecase::review::VerdictReport::default()
+                },
             }
         );
+        let t = ledger_tool(
+            method::LEDGER_TOOL_SET_VERDICT,
+            serde_json::json!({"ac_id": "rec1", "verdict": "cant_verify", "evidence": "x",
+                "lab_need": "role", "steps": ["Buka /admin"], "simulated": "request"}),
+        )
+        .unwrap();
+        let LedgerTool::SetVerdict { report, .. } = t else {
+            panic!("bukan SetVerdict");
+        };
+        assert_eq!(report.lab_need, Some(mandor_domain::lab::LabNeed::Role));
+        assert_eq!(report.simulated, mandor_domain::lab::Simulated::Request);
+        assert!(
+            ledger_tool(
+                method::LEDGER_TOOL_SET_VERDICT,
+                serde_json::json!({"ac_id": "rec1", "verdict": "pass", "lab_need": "x"}),
+            )
+            .is_err()
+        );
+        let t = ledger_tool(
+            method::LEDGER_TOOL_RECOMMEND_LOOK,
+            serde_json::json!({"ac_id": "rec1", "recommendation": "accept", "reason": "ikut AC"}),
+        )
+        .unwrap();
+        assert!(matches!(t, LedgerTool::RecommendLook { .. }));
         let t = ledger_tool(
             method::LEDGER_TOOL_SET_DESIGN,
             serde_json::json!({"ac_id": "rec1", "design": "in_design"}),

@@ -49,6 +49,16 @@ impl LabSecrets {
             .filter(|p| !p.expose_secret().is_empty())
     }
 
+    /// Nilai password untuk penyamaran bukti (KTD-L12); tidak pernah dicatat.
+    #[must_use]
+    pub fn exposed_values(&self) -> Vec<String> {
+        self.by_role
+            .values()
+            .map(|p| p.expose_secret().to_owned())
+            .filter(|p| !p.is_empty())
+            .collect()
+    }
+
     /// Menggabungkan input UI: password kosong mempertahankan yang lama, role
     /// yang tidak lagi ada di perlengkapan dihapus.
     #[must_use]

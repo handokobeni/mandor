@@ -402,7 +402,10 @@ fn report_verdict(st: &Station, ac: &str, v: mandor_domain::Verdict) {
     let scope = st.svc.verify_capability(token.expose()).unwrap();
     let rt = tokio::runtime::Handle::current();
     tokio::task::block_in_place(|| {
-        rt.block_on(st.svc.ledger_set_verdict(&scope, ac, v, Some("x")))
+        rt.block_on(
+            st.svc
+                .ledger_set_verdict(&scope, ac, v, common::report(Some("x"))),
+        )
     })
     .unwrap();
 }

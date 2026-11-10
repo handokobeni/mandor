@@ -9,7 +9,7 @@ mod snapshot;
 
 pub use capability::{
     CapabilityRole, CapabilityScope, CapabilityToken, LedgerAccess, LedgerToolError, PermitGrant,
-    VisualReport,
+    VerdictReport, VisualReport,
 };
 pub use design::{
     DesignCheck, DesignRoot, DesignSources, PathProbe, Prototype, SourceCheck, check_source,

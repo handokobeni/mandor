@@ -41,6 +41,10 @@ pub mod method {
     pub const LEDGER_TOOL_SET_VERDICT: &str = "ledger.tool.set_verdict";
     /// Koneksi kapabilitas, peran verdict: `LedgerToolSetVisual`.
     pub const LEDGER_TOOL_SET_VISUAL: &str = "ledger.tool.set_visual";
+    /// Koneksi kapabilitas, peran verdict: `LedgerToolReportFinding` (R19).
+    pub const LEDGER_TOOL_REPORT_FINDING: &str = "ledger.tool.report_finding";
+    /// Koneksi kapabilitas, peran verdict: `LedgerToolRecommendLook` (R18).
+    pub const LEDGER_TOOL_RECOMMEND_LOOK: &str = "ledger.tool.recommend_look";
     /// Koneksi kapabilitas, peran ask atau design di laptop: `AskToolQuestion`
     /// → teks balasan alat (plan 2026-11-07-001).
     pub const ASK_TOOL_ASK: &str = "ask.tool.ask";

@@ -59,7 +59,10 @@ fn verdict(st: &Station, ac: &str, v: Verdict, evidence: &str) {
     let scope = st.svc.verify_capability(token.expose()).unwrap();
     let rt = tokio::runtime::Handle::current();
     tokio::task::block_in_place(|| {
-        rt.block_on(st.svc.ledger_set_verdict(&scope, ac, v, Some(evidence)))
+        let mut report = common::report(Some(evidence));
+        // Pass lewat browser butuh langkah bernomor (R16).
+        report.steps = vec![evidence.to_owned()];
+        rt.block_on(st.svc.ledger_set_verdict(&scope, ac, v, report))
     })
     .unwrap();
 }
@@ -1132,4 +1135,241 @@ async fn waiting_with_app(lark: &FakeLark, clock: &FakeClock) -> (Station, Strin
     st.apps.save_app_record(&app).await.unwrap();
     st.apps.set_app_owner(Some(&run)).await.unwrap();
     (st, run)
+}
+
+/// Review berjalan dengan browser (perlengkapan lab disetujui) dan token
+/// verdict.
+async fn browser_review(
+    lark: &FakeLark,
+    clock: &FakeClock,
+) -> (Station, String, mandor_usecase::review::CapabilityScope) {
+    let (st, run) = waiting_with_app(lark, clock).await;
+    lab_ready(&st);
+    st.svc
+        .start_review(&run, ReviewTrigger::Manual, None)
+        .await
+        .unwrap();
+    assert!(st.agent.last().req.review.unwrap().browser);
+    let token = st.agent.last().req.ledger.unwrap().token;
+    let scope = st.svc.verify_capability(token.expose()).unwrap();
+    (st, run, scope)
+}
+
+fn report_with(steps: &[&str]) -> mandor_usecase::review::VerdictReport {
+    mandor_usecase::review::VerdictReport {
+        evidence: Some("diperiksa di browser".to_owned()),
+        steps: steps.iter().map(|s| (*s).to_owned()).collect(),
+        ..mandor_usecase::review::VerdictReport::default()
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn pass_lewat_browser_butuh_langkah_dan_bukti_tersimpan() {
+    use mandor_domain::lab::Simulated;
+    use mandor_usecase::review::LedgerToolError;
+    let (lark, clock) = setup();
+    let (st, run, scope) = browser_review(&lark, &clock).await;
+    let ac = st.svc.ledger(&run).await.unwrap()[0].ac_id.clone();
+    assert!(matches!(
+        st.svc
+            .ledger_set_verdict(&scope, &ac, Verdict::Pass, report_with(&[]))
+            .await,
+        Err(LedgerToolError::NotAllowed(_))
+    ));
+    let mut r = report_with(&["Buka /admin", "Klik Save"]);
+    r.evidence = None;
+    r.screenshots = vec!["admin.png".to_owned()];
+    r.simulated = Simulated::Request;
+    r.prepared = Some("akun admin; POST /api/kb digagalkan 500".to_owned());
+    let rows = st
+        .svc
+        .ledger_set_verdict(&scope, &ac, Verdict::Pass, r)
+        .await
+        .unwrap();
+    let row = rows.iter().find(|x| x.ac_id == ac).unwrap();
+    assert_eq!(row.verdict, Verdict::Pass);
+    assert_eq!(
+        row.evidence.as_deref(),
+        Some("1. Buka /admin\n2. Klik Save")
+    );
+    let detail = row.evidence_detail.clone().unwrap();
+    assert_eq!(detail.simulated, Simulated::Request);
+    assert_eq!(detail.steps.len(), 2);
+    assert!(!detail.screenshots.is_empty());
+    assert!(detail.prepared.unwrap().contains("POST /api/kb"));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn lab_need_dan_sql_dari_agent_ditolak() {
+    use mandor_domain::lab::{LabNeed, Simulated};
+    use mandor_usecase::review::LedgerToolError;
+    let (lark, clock) = setup();
+    let (st, run, scope) = browser_review(&lark, &clock).await;
+    let ac = st.svc.ledger(&run).await.unwrap()[0].ac_id.clone();
+    let mut r = report_with(&["x"]);
+    r.lab_need = Some(LabNeed::Role);
+    assert!(matches!(
+        st.svc
+            .ledger_set_verdict(&scope, &ac, Verdict::Pass, r)
+            .await,
+        Err(LedgerToolError::NotAllowed(_))
+    ));
+    let mut r = report_with(&["x"]);
+    r.simulated = Simulated::Sql;
+    assert!(matches!(
+        st.svc
+            .ledger_set_verdict(&scope, &ac, Verdict::Fail, r)
+            .await,
+        Err(LedgerToolError::NotAllowed(_))
+    ));
+    let mut r = report_with(&[]);
+    r.lab_need = Some(LabNeed::Role);
+    let rows = st
+        .svc
+        .ledger_set_verdict(&scope, &ac, Verdict::CantVerify, r)
+        .await
+        .unwrap();
+    assert_eq!(
+        rows.iter().find(|x| x.ac_id == ac).unwrap().lab_need,
+        Some(LabNeed::Role)
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn tulis_yang_diblokir_proxy_membuat_cant_verify_tetapi_origin_lain_tidak() {
+    use mandor_domain::lab::{BlockedRequest, LabNeed};
+    use mandor_usecase::run_ports::ProxyHit;
+    let (lark, clock) = setup();
+    let (st, run, scope) = browser_review(&lark, &clock).await;
+    let review_id = st.agent.last().req.review.unwrap().review_id;
+    let rows = st.svc.ledger(&run).await.unwrap();
+    let (a1, a2) = (rows[0].ac_id.clone(), rows[1].ac_id.clone());
+    let hit = |method: &str, url: &str, write: bool| ProxyHit {
+        at_ms: 1,
+        request: BlockedRequest {
+            method: method.to_owned(),
+            url: url.to_owned(),
+        },
+        write,
+    };
+    st.lab.blocked.lock().unwrap().insert(
+        review_id.clone(),
+        vec![hit("GET", "https://fonts.example.com/a.css", false)],
+    );
+    let rows = st
+        .svc
+        .ledger_set_verdict(&scope, &a1, Verdict::Fail, report_with(&["Klik Save"]))
+        .await
+        .unwrap();
+    let r1 = rows.iter().find(|x| x.ac_id == a1).unwrap();
+    assert_eq!(
+        r1.verdict,
+        Verdict::Fail,
+        "blokir origin lain tidak mengubah verdict"
+    );
+    assert_eq!(
+        r1.evidence_detail.clone().unwrap().blocked_requests.len(),
+        1
+    );
+
+    st.lab.blocked.lock().unwrap().insert(
+        review_id,
+        vec![hit("POST", "http://localhost:5173/api/kb", true)],
+    );
+    let rows = st
+        .svc
+        .ledger_set_verdict(&scope, &a2, Verdict::Pass, report_with(&["Klik Save"]))
+        .await
+        .unwrap();
+    let r2 = rows.iter().find(|x| x.ac_id == a2).unwrap();
+    assert_eq!(r2.verdict, Verdict::CantVerify);
+    assert_eq!(r2.lab_need, Some(LabNeed::Data));
+    assert!(
+        r2.evidence
+            .as_deref()
+            .unwrap()
+            .contains("POST http://localhost:5173/api/kb")
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn password_akun_uji_disamarkan_di_bukti_dan_temuan() {
+    let (lark, clock) = setup();
+    let (st, run, scope) = browser_review(&lark, &clock).await;
+    st.lab
+        .secrets
+        .lock()
+        .unwrap()
+        .push("rahasia-uji-9".to_owned());
+    let ac = st.svc.ledger(&run).await.unwrap()[0].ac_id.clone();
+    let rows = st
+        .svc
+        .ledger_set_verdict(
+            &scope,
+            &ac,
+            Verdict::Pass,
+            report_with(&["Isi password rahasia-uji-9", "Klik Sign in"]),
+        )
+        .await
+        .unwrap();
+    let row = rows.iter().find(|x| x.ac_id == ac).unwrap();
+    let steps = row.evidence_detail.clone().unwrap().steps;
+    assert_eq!(steps[0], "Isi password [redacted]");
+    assert!(
+        !row.evidence
+            .clone()
+            .unwrap_or_default()
+            .contains("rahasia-uji-9")
+    );
+
+    let before = st.svc.ledger(&run).await.unwrap();
+    st.svc
+        .ledger_report_finding(
+            &scope,
+            mandor_domain::lab::Finding {
+                card: None,
+                title: "Tombol Save tidak aktif".to_owned(),
+                detail: "Setelah login rahasia-uji-9 tombol mati".to_owned(),
+                evidence: mandor_domain::lab::Evidence::default(),
+            },
+        )
+        .await
+        .unwrap();
+    let findings = st.reviews.findings.lock().unwrap().clone();
+    assert_eq!(findings.len(), 1);
+    assert_eq!(findings[0].1.detail, "Setelah login [redacted] tombol mati");
+    assert_eq!(
+        st.svc.ledger(&run).await.unwrap(),
+        before,
+        "temuan tidak mengubah verdict"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn rekomendasi_tampilan_hanya_untuk_baris_berbeda() {
+    use mandor_domain::ac_ledger::Visual;
+    use mandor_domain::lab::LookAdvice;
+    use mandor_usecase::review::LedgerToolError;
+    let (lark, clock) = setup();
+    let (st, run, scope) = browser_review(&lark, &clock).await;
+    let ac = st.svc.ledger(&run).await.unwrap()[0].ac_id.clone();
+    assert!(matches!(
+        st.svc
+            .ledger_recommend_look(&scope, &ac, LookAdvice::Accept, "ikut AC")
+            .await,
+        Err(LedgerToolError::NotAllowed(_))
+    ));
+    {
+        let mut ledgers = st.reviews.ledgers.lock().unwrap();
+        let rows = ledgers.get_mut(&run).unwrap();
+        rows[0].visual = Visual::Differs;
+    }
+    let rows = st
+        .svc
+        .ledger_recommend_look(&scope, &ac, LookAdvice::Accept, "AC menulis Key Behavior")
+        .await
+        .unwrap();
+    let rec = rows[0].look_recommendation.clone().unwrap();
+    assert_eq!(rec.advice, LookAdvice::Accept);
+    assert_eq!(rec.reason, "AC menulis Key Behavior");
 }

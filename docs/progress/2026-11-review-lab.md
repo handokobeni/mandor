@@ -96,7 +96,7 @@ Persiapan (developer):
 
 1. Pasang installer Windows fase 2 (Actions run 42840860088).
 2. Hentikan kelola-api (8090) dan kelola-web (3000) yang menyala di luar Mandor; tutup pgAdmin.
-3. Set password `mandor_lab` (`\password mandor_lab` di `postgres-vector`).
+3. Password `mandor_lab` sudah disamakan dengan `PGPASSWORD` di `.env` kelola-api (keputusan pemilik produk 2026-11-10: hanya lokal, tidak perlu password baru); role lab tetap bukan superuser.
 4. Settings → Repos → kelola-web → Review lab: akun Default (admin) dan `manager` (Manager tanpa admin.profileData), form login, folder berkas uji `review-fixtures/files`, lalu bagian Lab with test data: folder skrip `review-fixtures/lab`, database `landlord`, `stagingintegro_db`, `pentest2026_db` (localhost:57432, role lab `mandor_lab`, pemeliharaan `postgres`), perintah `snapshot.sh`/`restore.sh`/`fingerprint.sh`/`test-change.sh`. Save, Approve (uji bolak-balik tiap database).
 
 Jalannya uji:

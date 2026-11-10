@@ -6,7 +6,7 @@ Panduan menyiapkan review Acceptance Criteria (AC) di Mandor: sumber desain, app
 
 1. **Start**: pilih sumber desain (opsional) dan skill reviewer. Fase plan membandingkan setiap AC dengan desain dan mengisi kolom Design (In design, Partly, Missing, Conflicts).
 2. **Approve plan**: di tab Plan, tandai AC yang desainnya lebih baru dengan **Follow design**. AC itu keluar dari gerbang, dan selisih desain ditulis ke field `mandor_design_gaps` di kartu Lark.
-3. **Review**: tombol **Push & create PR** memulai review bila AC belum direview. Reviewer membaca kode dan test, dan bila app web berjalan, mencoba app di browser Playwright headless dengan akun uji Default. Hasil per AC: Pass, Fail, atau Can't verify. AC yang butuh role lain, simulasi kegagalan, atau berkas uji lalu diuji **review lab** (lihat `review-lab.md`).
+3. **Review**: tombol **Push & create PR** memulai review bila AC belum direview. Reviewer membaca kode dan test, dan bila app web berjalan, mencoba app di browser Playwright headless dengan akun uji Default. Hasil per AC: Pass, Fail, atau Can't verify. AC yang butuh role lain, simulasi kegagalan, berkas uji, atau data uji di penyimpanan lokal lalu diuji **review lab** (lihat `review-lab.md`).
 4. **Gerbang**: AC Fail memblokir push (mode Block) atau menjadi peringatan (mode Warn). AC Can't verify harus Anda konfirmasi. **Push anyway** butuh alasan dan dicatat di PR.
 5. **PR**: deskripsi PR berisi ringkasan AC.
 

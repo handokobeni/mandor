@@ -46,6 +46,14 @@ Di luar fase 1 (mengubah data, fase 2): 8630, 8631, 8941, 9371, 9372, 8409, 8410
 
 Hasil: menunggu.
 
+Rencana uji fase 2 (bersama fase 1, setelah daemon dipasang ulang dengan biner fase 2):
+
+1. Buat role `mandor_lab` berhak minimum di database lokal kelola-v2 (tenant dan landlord) dan skrip snapshot/restore/sidik/test change di `review-fixtures/lab` repo kelola; setujui perlengkapan data (tenant, landlord, folder unggahan) dengan uji bolak-balik.
+2. Run lab di PGS-1477–1483: AC data di atas dan isolasi antar-corporate (Pentest 2026), termasuk batas atas KB di landlord (AE1).
+3. Sesudah setiap lab: sidik semua penyimpanan sama dengan sebelum lab, folder snapshot terhapus, tidak ada KB uji, nilai uji, atau data corporate kedua yang tersisa.
+4. AE2: arahkan sementara ke database non-lokal, harap "lab only runs against local databases".
+5. AE3: paksa restore gagal (skrip restore keluar non-nol), periksa banner, penahanan Start/review/giliran agent, lalu Retry restore.
+
 ## Fase 2
 
 Keputusan pemilik produk 2026-11-10: fase 1 dan fase 2 diuji langsung bersama setelah fase 2 selesai. Fase 2 dikerjakan di branch `feat/review-lab-phase2` yang bercabang dari `feat/review-lab-phase1`; PR fase 2 berbasis PR #28.
@@ -56,6 +64,8 @@ Keputusan pemilik produk 2026-11-10: fase 1 dan fase 2 diuji langsung bersama se
 | U12 | selesai | Migrasi `0015_lab_sessions.sql`; port `LabSessions`, `LabDatabase`, `DbCredentials`; `LabSessionsStore` (transisi `UPDATE … WHERE phase = ?`, `pending_recovery`, `holding`); `PgLabDatabase` (sqlx fitur `postgres` tanpa TLS, kueri runtime, koneksi tunggal dengan opsi eksplisit, batas waktu koneksi/katalog/pernyataan, keluaran ≤ 64 KiB). Diuji dengan PostgreSQL 18 sungguhan di kontainer sementara (`MANDOR_E2E=1`) |
 | U13 | selesai | `mandord::lab_exec`: salinan skrip baca-saja di `<lab_root>/<repo>/private/scripts/<digest>/` (symlink ditolak, digest atas path, bit eksekusi, dan isi); perintah sebagai argv tanpa shell dari salinan, env bersih + `PG*` dari daemon (pemeliharaan untuk snapshot/restore/sidik, role lab + `MANDOR_WORKTREE` untuk seed), batas 300 detik dengan process group, keluaran ≤ 64 KiB disamarkan; folder snapshot 0700, mode berkas dikencangkan ke 0600. Uji bolak-balik persetujuan (database lokal, `pg_read_all_stats`, `role_block`, sidik berubah lalu kembali, seed hanya role lab) dipasang di `lab.approve`; kredensial database per penyimpanan di berkas secret; digest persetujuan menyertakan digest skrip (`repos.lab_scripts_digest`) |
 | U14 | selesai | Orkestrasi `review/lab_data.rs`: sebelum kartu pertama dengan calon `data` → persiapan (skrip sama dengan salinan, database lokal, role, akses tabel, env app lokal), kunci, klien lain, sesi `snapshotting` → app berhenti → snapshot + sidik → app menyala → `running` dan proxy boleh menulis; sidik antar kartu dan restore bila berbeda; akhir lab → restore + sidik → `done`/`restore_waiting`(coba ulang di latar)/`restore_failed`. `restore_failed` menahan review, giliran agent, dan Start/Stop app repo itu (Stop diizinkan saat `restore_waiting`). Pemulihan saat start (`recover_lab_data`, kunci diambil ulang, penanda yatim dihapus). `lab_sql`/`lab_seed` (verdict kartu bertanda SQL otomatis), RPC `review.lab_start`, `lab.retry_restore`, `lab.data_restored`, `LabView.data_session`, peringatan di laporan pagi. Daemon: `lab_lock` (berkas kunci `O_NOFOLLOW` 0666, guard dipegang thread, penanda `.dirty`), `lab_data_port` (operasi lewat `lab_exec`, `PgLabDatabase`, secret), `MANDOR_LAB_LOCK_DIR`. Daftar tabel ikut sidik untuk deteksi perubahan skema |
+| U15 | selesai | Settings → Repos → Review lab: bagian "Lab with test data" (folder skrip, penyimpanan database/folder dengan role lab dan pemeliharaan, seed), persetujuan dengan batas 30 menit untuk uji bolak-balik. Tab AC review: tombol **Run lab (N)** untuk calon data yang ditunda, dengan dialog konfirmasi. `LabBanner` di workspace (sesi berjalan, restore menunggu, restore gagal dengan Retry restore dan Data restored). Peringatan lab data di laporan pagi. Mock `?labdata=`; Vitest 282 lulus, `bun check` hijau, tampilan diperiksa di `/?mock` |
+| U16 | sebagian | Runbook `review-lab.md` bagian 5 (skrip, role, persetujuan, sesi, restore gagal), risiko dan masalah umum fase 2; `ac-review.md`; rencana aktif di `CLAUDE.md`. Uji langsung bersama U10 menunggu developer |
 
 Catatan fase 2:
 

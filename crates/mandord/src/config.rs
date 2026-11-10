@@ -385,6 +385,13 @@ impl Config {
         self.home.join("mandor.db")
     }
 
+    /// Akar perlengkapan review lab (secret, sesi, snapshot), di bawah
+    /// `~/.mandor` sehingga selalu ditolak hook agent (KTD-L2).
+    #[must_use]
+    pub fn lab_root(&self) -> PathBuf {
+        self.home.join("lab")
+    }
+
     /// Berkas pengaturan Lark (0600).
     #[must_use]
     pub fn lark_settings_path(&self) -> PathBuf {

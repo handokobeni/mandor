@@ -1701,3 +1701,88 @@ pub struct ApprovalAnswerParams {
     /// `deny` | `allow_once` | `allow_run`.
     pub answer: String,
 }
+
+/// Repo untuk method `lab.*`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+pub struct LabRepoRef {
+    pub repo_id: String,
+}
+
+/// Satu akun uji. Password tidak pernah dikirim balik; hanya `has_password`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+pub struct LabAccountDto {
+    pub role: String,
+    pub username: String,
+    /// Akun untuk review biasa (R15).
+    pub default: bool,
+    /// Hanya di respons; diabaikan saat menyimpan.
+    #[serde(default)]
+    pub has_password: bool,
+}
+
+/// Form login satu halaman (KTD-L4).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+pub struct LabLoginDto {
+    pub url: String,
+    pub username_field: String,
+    pub password_field: String,
+    pub submit: String,
+    pub submit_path: String,
+    /// `path` atau `text`.
+    pub success_kind: String,
+    pub success: String,
+    pub authenticated_url: String,
+}
+
+/// Perlengkapan lab repo (KTD-L3).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+pub struct LabEquipmentDto {
+    pub accounts: Vec<LabAccountDto>,
+    pub login: LabLoginDto,
+    #[serde(default)]
+    pub safe_posts: Vec<String>,
+    #[serde(default)]
+    pub fixtures_dir: Option<String>,
+}
+
+/// Perlengkapan lab beserta status persetujuan.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+pub struct LabView {
+    pub repo_id: String,
+    pub equipment: Option<LabEquipmentDto>,
+    pub approved: bool,
+    #[ts(type = "number | null")]
+    pub approved_at_ms: Option<i64>,
+}
+
+/// Password satu role; kosong atau `None` mempertahankan yang lama.
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+pub struct LabPasswordInput {
+    pub role: String,
+    pub password: Option<String>,
+}
+
+/// `Debug` tidak pernah menampilkan password (R11).
+impl std::fmt::Debug for LabPasswordInput {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("LabPasswordInput")
+            .field("role", &self.role)
+            .field("password", &self.password.as_ref().map(|_| "<hidden>"))
+            .finish()
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+pub struct LabSetParams {
+    pub repo_id: String,
+    pub equipment: LabEquipmentDto,
+    #[serde(default)]
+    pub passwords: Vec<LabPasswordInput>,
+}
+
+/// Persetujuan atas perlengkapan yang dilihat developer.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+pub struct LabApproveParams {
+    pub repo_id: String,
+    pub equipment: LabEquipmentDto,
+}

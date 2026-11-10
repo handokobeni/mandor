@@ -83,6 +83,15 @@ pub mod method {
     pub const APP_LOGS: &str = "app.logs";
     /// Nama kunci `.env` folder asli (`EnvKeysParams` → `EnvKeysView`).
     pub const APP_ENV_KEYS: &str = "app.env_keys";
+    /// Perlengkapan review lab repo (`LabRepoRef` → `LabView`); hanya koneksi
+    /// token penuh (plan 2026-11-10-001, U3).
+    pub const LAB_GET: &str = "lab.get";
+    /// Menyimpan perlengkapan dan password akun uji (`LabSetParams` →
+    /// `LabView`); persetujuan dikosongkan.
+    pub const LAB_SET: &str = "lab.set";
+    /// Menyetujui perlengkapan yang dilihat developer (`LabApproveParams` →
+    /// `LabView`).
+    pub const LAB_APPROVE: &str = "lab.approve";
     /// Sumber desain terdaftar (`Vec<DesignSourceView>`).
     pub const DESIGN_SOURCES_LIST: &str = "design_sources.list";
     /// `DesignSourceAdd` → `DesignSourceView`.
@@ -564,6 +573,23 @@ fn review_bindings() -> Result<Vec<(&'static str, String)>, String> {
         one(
             "ReviewerSettingsView.ts",
             ReviewerSettingsView::export_to_string(&cfg),
+        )?,
+        one("LabRepoRef.ts", LabRepoRef::export_to_string(&cfg))?,
+        one("LabView.ts", LabView::export_to_string(&cfg))?,
+        one(
+            "LabEquipmentDto.ts",
+            LabEquipmentDto::export_to_string(&cfg),
+        )?,
+        one("LabAccountDto.ts", LabAccountDto::export_to_string(&cfg))?,
+        one("LabLoginDto.ts", LabLoginDto::export_to_string(&cfg))?,
+        one(
+            "LabPasswordInput.ts",
+            LabPasswordInput::export_to_string(&cfg),
+        )?,
+        one("LabSetParams.ts", LabSetParams::export_to_string(&cfg))?,
+        one(
+            "LabApproveParams.ts",
+            LabApproveParams::export_to_string(&cfg),
         )?,
         one("AppMemberView.ts", AppMemberView::export_to_string(&cfg))?,
         one("AppChangesView.ts", AppChangesView::export_to_string(&cfg))?,

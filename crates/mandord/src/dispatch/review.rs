@@ -167,11 +167,11 @@ fn readiness_view(r: mandor_usecase::review::ReviewReadiness) -> ReviewReadiness
             database: r.confirmed.database,
             login: r.confirmed.login,
         },
+        // Browser review siap: Playwright terpasang dan ada sumber login
+        // (KTD-L1). Nama field lama dipertahankan untuk app.
+        chrome_connected: r.driver.installed
+            && r.driver.login != mandor_usecase::review::LoginKind::None,
         app_urls: r.app_urls,
-        chrome_connected: matches!(
-            r.driver,
-            mandor_usecase::review::BrowserDriver::Chrome { connected: true }
-        ),
     }
 }
 

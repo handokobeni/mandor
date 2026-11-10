@@ -410,6 +410,7 @@ impl Deps for FakeDeps {
     type Waiter = approval_fakes::FakeWaiter;
     type Permits = approval_fakes::FakePermits;
     type Questions = approval_fakes::FakeQuestions;
+    type Lab = run_fakes::FakeLab;
 }
 
 pub mod approval_fakes;
@@ -475,6 +476,7 @@ pub struct Station {
     pub waiter: approval_fakes::FakeWaiter,
     pub permits: approval_fakes::FakePermits,
     pub questions: approval_fakes::FakeQuestions,
+    pub lab: run_fakes::FakeLab,
 }
 
 pub fn station(lark: &FakeLark, clock: &FakeClock, me: &str) -> Station {
@@ -501,6 +503,7 @@ fn station_of(l: Laptop) -> Station {
     let waiter = approval_fakes::FakeWaiter::default();
     let permits = approval_fakes::FakePermits::default();
     let questions = approval_fakes::FakeQuestions::default();
+    let lab = run_fakes::FakeLab::default();
     let ports = mandor_usecase::RunPorts::<FakeDeps> {
         git: git.clone(),
         agent: agent.clone(),
@@ -517,6 +520,7 @@ fn station_of(l: Laptop) -> Station {
         waiter: waiter.clone(),
         permits: permits.clone(),
         questions: questions.clone(),
+        lab: lab.clone(),
     };
     let svc = Arc::new(mandor_usecase::RunService::new(Arc::new(svc), ports));
     Station {
@@ -536,6 +540,7 @@ fn station_of(l: Laptop) -> Station {
         waiter,
         permits,
         questions,
+        lab,
     }
 }
 

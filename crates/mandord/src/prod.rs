@@ -41,6 +41,7 @@ impl Deps for Prod {
     type Waiter = crate::approval_waiter::TokioWaiter;
     type Permits = crate::permit_facts::DiskPermits;
     type Questions = crate::question_events::BroadcastQuestions;
+    type Lab = crate::lab_port::ProdLab;
 }
 
 pub fn now_ms() -> i64 {

@@ -1516,6 +1516,7 @@ mod tests {
         for tool in [
             "browser_evaluate",
             "browser_run_code",
+            "browser_run_code_unsafe",
             "browser_file_upload",
             "browser_install",
             "browser_tabs",

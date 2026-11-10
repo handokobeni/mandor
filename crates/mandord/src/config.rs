@@ -71,6 +71,9 @@ pub struct Config {
     /// developer untuk clone, worktree, dan berkas run (`MANDOR_GROUP_DIR`,
     /// KTD-62).
     pub vm_agent: Option<VmAgent>,
+    /// Biner MCP Playwright untuk review di laptop dan VM (KTD-L1 plan
+    /// 2026-11-10-001); `None` bila tidak ditemukan saat start.
+    pub playwright_mcp: Option<PathBuf>,
 }
 
 /// Agent di VM sebagai user Linux terpisah (KTD-62 plan VM).
@@ -136,6 +139,28 @@ pub fn playwright_mcp_of(raw: Option<&str>) -> Result<PathBuf, String> {
             "MANDOR_PLAYWRIGHT_MCP must be an absolute path, got {p:?}"
         )),
     }
+}
+
+/// Biner Playwright MCP di laptop: `MANDOR_PLAYWRIGHT_MCP` bila diisi
+/// (harus absolut), selain itu lokasi pemasangan yang dikenal: npm prefix
+/// pengguna (`~/.local/bin/playwright-mcp`) lalu pemasangan global.
+///
+/// # Errors
+/// Pesan untuk pengguna bila `MANDOR_PLAYWRIGHT_MCP` bukan path absolut.
+pub fn laptop_playwright(
+    raw: Option<&str>,
+    user_home: &Path,
+    exists: impl Fn(&Path) -> bool,
+) -> Result<Option<PathBuf>, String> {
+    if raw.is_some_and(|r| !r.trim().is_empty()) {
+        return playwright_mcp_of(raw).map(Some);
+    }
+    let candidates = [
+        user_home.join(".local/bin/playwright-mcp"),
+        PathBuf::from("/usr/local/bin/playwright-mcp"),
+        PathBuf::from(DEFAULT_PLAYWRIGHT_MCP),
+    ];
+    Ok(candidates.into_iter().find(|p| exists(p)))
 }
 
 impl VmAgent {
@@ -341,6 +366,15 @@ impl Config {
             std::env::var("HOSTNAME").ok().as_deref(),
             role,
         );
+        let playwright_mcp = match &vm_agent {
+            Some(v) => Some(v.playwright_mcp.clone()),
+            None => laptop_playwright(
+                std::env::var("MANDOR_PLAYWRIGHT_MCP").ok().as_deref(),
+                &user_home,
+                std::path::Path::is_file,
+            )
+            .map_err(anyhow::Error::msg)?,
+        };
         let keep_awake_cmd = std::env::var("MANDOR_KEEP_AWAKE_CMD")
             .ok()
             .filter(|v| !v.trim().is_empty())
@@ -368,6 +402,7 @@ impl Config {
             role,
             daemon_id,
             vm_agent,
+            playwright_mcp,
         })
     }
 
@@ -536,6 +571,27 @@ mod tests {
         for bad in ["5100", "5199-5100", "0-10", "a-b", "5100-70000"] {
             assert!(PortRange::parse(bad).is_err(), "{bad}");
         }
+    }
+
+    #[test]
+    fn playwright_laptop_dari_env_atau_lokasi_dikenal() {
+        use super::laptop_playwright;
+        let home = std::path::Path::new("/home/dev");
+        assert_eq!(
+            laptop_playwright(Some("/opt/pw/playwright-mcp"), home, |_| false),
+            Ok(Some("/opt/pw/playwright-mcp".into()))
+        );
+        assert!(laptop_playwright(Some("playwright-mcp"), home, |_| true).is_err());
+        assert_eq!(
+            laptop_playwright(None, home, |p| p.ends_with(".local/bin/playwright-mcp")),
+            Ok(Some("/home/dev/.local/bin/playwright-mcp".into()))
+        );
+        assert_eq!(
+            laptop_playwright(None, home, |p| p
+                == std::path::Path::new("/usr/local/bin/mcp-server-playwright")),
+            Ok(Some("/usr/local/bin/mcp-server-playwright".into()))
+        );
+        assert_eq!(laptop_playwright(Some(" "), home, |_| false), Ok(None));
     }
 
     #[test]

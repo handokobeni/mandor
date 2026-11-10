@@ -1456,3 +1456,108 @@ impl mandor_usecase::review::DesignSources for FakeDesign {
             .collect())
     }
 }
+
+/// Satu login akun uji: `(review_id, repo_id, role, proxy)`.
+pub type LoginCall = (String, String, String, Option<String>);
+
+/// Review lab di memori (plan 2026-11-10-001): perlengkapan, login, proxy.
+#[derive(Clone)]
+pub struct FakeLab {
+    pub installed: Arc<Mutex<bool>>,
+    pub equipment: Arc<Mutex<HashMap<String, mandor_domain::lab::LabEquipment>>>,
+    /// `None` = login berhasil.
+    pub login_failure: Arc<Mutex<Option<mandor_usecase::run_ports::LoginFailure>>>,
+    /// `(review_id, repo_id, role, proxy)` per login.
+    pub logins: Arc<Mutex<Vec<LoginCall>>>,
+    pub proxies: Arc<Mutex<Vec<(String, mandor_domain::lab::ProxyPolicy)>>>,
+    pub proxy_fails: Arc<Mutex<bool>>,
+    pub blocked: Arc<Mutex<HashMap<String, Vec<mandor_usecase::run_ports::ProxyHit>>>>,
+    pub ended: Arc<Mutex<Vec<String>>>,
+}
+
+impl Default for FakeLab {
+    fn default() -> Self {
+        Self {
+            installed: Arc::new(Mutex::new(true)),
+            equipment: Arc::default(),
+            login_failure: Arc::default(),
+            logins: Arc::default(),
+            proxies: Arc::default(),
+            proxy_fails: Arc::default(),
+            blocked: Arc::default(),
+            ended: Arc::default(),
+        }
+    }
+}
+
+impl mandor_usecase::run_ports::LabPort for FakeLab {
+    fn playwright_installed(&self) -> bool {
+        *self.installed.lock().unwrap()
+    }
+
+    async fn approved_equipment(
+        &self,
+        repo_id: &str,
+    ) -> Result<Option<mandor_domain::lab::LabEquipment>, PortError> {
+        Ok(self.equipment.lock().unwrap().get(repo_id).cloned())
+    }
+
+    async fn start_proxy(
+        &self,
+        review_id: &str,
+        policy: mandor_domain::lab::ProxyPolicy,
+    ) -> Result<String, PortError> {
+        if *self.proxy_fails.lock().unwrap() {
+            return Err(PortError::Storage("port busy".to_owned()));
+        }
+        self.proxies
+            .lock()
+            .unwrap()
+            .push((review_id.to_owned(), policy));
+        Ok(format!("http://127.0.0.1:9/{review_id}"))
+    }
+
+    fn take_blocked(&self, review_id: &str) -> Vec<mandor_usecase::run_ports::ProxyHit> {
+        self.blocked
+            .lock()
+            .unwrap()
+            .remove(review_id)
+            .unwrap_or_default()
+    }
+
+    fn set_proxy_writes(&self, review_id: &str, allowed: bool) {
+        if let Some((_, p)) = self
+            .proxies
+            .lock()
+            .unwrap()
+            .iter_mut()
+            .rev()
+            .find(|(id, _)| id == review_id)
+        {
+            p.write_allowed = allowed;
+        }
+    }
+
+    async fn login(
+        &self,
+        req: mandor_usecase::run_ports::LabLogin<'_>,
+    ) -> Result<PathBuf, mandor_usecase::run_ports::LoginFailure> {
+        self.logins.lock().unwrap().push((
+            req.review_id.to_owned(),
+            req.repo_id.to_owned(),
+            req.role.to_owned(),
+            req.proxy.map(str::to_owned),
+        ));
+        match *self.login_failure.lock().unwrap() {
+            Some(f) => Err(f),
+            None => Ok(PathBuf::from(format!(
+                "/daemon/lab/{}/{}.json",
+                req.review_id, req.role
+            ))),
+        }
+    }
+
+    async fn end_review(&self, review_id: &str) {
+        self.ended.lock().unwrap().push(review_id.to_owned());
+    }
+}

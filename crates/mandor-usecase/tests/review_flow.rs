@@ -327,15 +327,18 @@ async fn covers_ae5_browser_hanya_bila_semua_syarat_kesiapan_terpenuhi() {
         .insert("repo1".to_owned(), "tree-s2".to_owned());
     st.apps.save_app_record(&app).await.unwrap();
     cycle(&st, &run).await;
-    assert_eq!(reason(&st), "Login not confirmed");
-
-    app.login_confirmed = true;
-    st.apps.save_app_record(&app).await.unwrap();
-    cycle(&st, &run).await;
-    assert_eq!(reason(&st), "Claude in Chrome extension not connected");
+    assert_eq!(
+        reason(&st),
+        "No test login is prepared for unattended review"
+    );
     assert!(!st.agent.last().req.review.unwrap().browser);
 
-    *st.reviews.chrome.lock().unwrap() = true;
+    *st.lab.installed.lock().unwrap() = false;
+    lab_ready(&st);
+    cycle(&st, &run).await;
+    assert_eq!(reason(&st), "Playwright is not installed");
+
+    *st.lab.installed.lock().unwrap() = true;
     st.svc
         .start_review(&run, ReviewTrigger::Manual, Some("qa:review"))
         .await
@@ -345,6 +348,23 @@ async fn covers_ae5_browser_hanya_bila_semua_syarat_kesiapan_terpenuhi() {
     assert!(review.browser);
     assert_eq!(review.origins, ["http://localhost:5173"]);
     assert!(req.message.contains("SKILL:qa:review"));
+    // Covers R15: review biasa login dengan akun default lewat proxy.
+    let proxy = review.proxy.clone().unwrap();
+    assert_eq!(
+        st.lab.logins.lock().unwrap().last().unwrap(),
+        &(
+            review.review_id.clone(),
+            "repo1".to_owned(),
+            "admin".to_owned(),
+            Some(proxy)
+        )
+    );
+    assert_eq!(review.sessions.len(), 1);
+    assert_eq!(review.sessions[0].server, "playwright");
+    let (_, policy) = st.lab.proxies.lock().unwrap().last().cloned().unwrap();
+    assert!(!policy.write_allowed);
+    assert_eq!(policy.origins, ["http://localhost:5173"]);
+    assert!(policy.safe_posts.contains(&"/api/login".to_owned()));
 
     // Uji browser dimatikan untuk repo.
     st.agent.last().done();
@@ -447,7 +467,7 @@ async fn app_lama(auto: bool) -> (FakeLark, FakeClock, Station, String) {
         auto_restart: auto,
         ..AppSettings::default()
     };
-    *st.reviews.chrome.lock().unwrap() = true;
+    lab_ready(&st);
     st.svc.start("rec1", "repo1", None).await.unwrap();
     st.agent.last().done();
     eventually(|| st.runs.only().state == RunState::AwaitingDev).await;
@@ -536,7 +556,7 @@ async fn tanpa_setelan_restart_otomatis_app_lama_tidak_disentuh() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn restart_otomatis_tidak_merebut_app_run_lain_dan_butuh_login_terkonfirmasi() {
+async fn restart_otomatis_tidak_merebut_app_run_lain_dan_butuh_sumber_login() {
     // App run lain sedang menyala: tidak dihentikan.
     let (_lark, _clock, st, run) = app_lama(true).await;
     st.apps.set_app_owner(Some("run-lain")).await.unwrap();
@@ -550,11 +570,10 @@ async fn restart_otomatis_tidak_merebut_app_run_lain_dan_butuh_login_terkonfirma
     st.agent.last().done();
     eventually(|| st.runs.only().state == RunState::AwaitingDev).await;
 
-    // Login belum pernah dikonfirmasi: restart tidak berguna, dilewati.
+    // Tidak ada sumber login (perlengkapan lab belum disetujui): restart
+    // tidak berguna, dilewati.
     let (_lark, _clock, st, run) = app_lama(true).await;
-    let mut rec = st.apps.record(&run).unwrap();
-    rec.login_confirmed = false;
-    st.apps.save_app_record(&rec).await.unwrap();
+    st.lab.equipment.lock().unwrap().clear();
     st.svc
         .start_review(&run, ReviewTrigger::Manual, None)
         .await
@@ -681,7 +700,7 @@ async fn laptop_tidak_menyalakan_app_yang_belum_menyala() {
         auto_restart: true,
         ..AppSettings::default()
     };
-    *st.reviews.chrome.lock().unwrap() = true;
+    lab_ready(&st);
     st.svc.start("rec1", "repo1", None).await.unwrap();
     st.agent.last().done();
     eventually(|| st.runs.only().state == RunState::AwaitingDev).await;
@@ -786,7 +805,7 @@ async fn with_running_prototype() -> (FakeLark, FakeClock, Station, String) {
         ..AppSettings::default()
     };
     st.repos.repos.lock().unwrap()[0].app = app.clone();
-    *st.reviews.chrome.lock().unwrap() = true;
+    lab_ready(&st);
     st.svc.start("rec1", "repo1", None).await.unwrap();
     st.agent.last().done();
     eventually(|| st.runs.only().state == RunState::AwaitingDev).await;
@@ -1010,4 +1029,107 @@ async fn covers_ae5_penolakan_reviewer_tercatat_satu_item_chat_tanpa_kartu() {
         .collect();
     assert_eq!(denied.len(), 1, "{denied:?}");
     assert!(st.approvals.cards.lock().unwrap().is_empty(), "tanpa kartu");
+}
+
+/// Perlengkapan lab disetujui untuk repo1 dengan akun default `admin`.
+fn lab_ready(st: &Station) {
+    use mandor_domain::lab::{LabAccount, LabEquipment, LoginForm, SuccessMarker};
+    st.lab.equipment.lock().unwrap().insert(
+        "repo1".to_owned(),
+        LabEquipment {
+            accounts: vec![LabAccount {
+                role: "admin".to_owned(),
+                username: "admin@uji.test".to_owned(),
+                default: true,
+            }],
+            login: LoginForm {
+                url: "http://localhost:5173/login".to_owned(),
+                username_field: "#email".to_owned(),
+                password_field: "#password".to_owned(),
+                submit: "text=Sign in".to_owned(),
+                submit_path: "/api/login".to_owned(),
+                success: SuccessMarker::PathPrefix("/admin".to_owned()),
+                authenticated_url: "http://localhost:5173/admin".to_owned(),
+            },
+            safe_posts: vec![],
+            fixtures_dir: None,
+        },
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn login_gagal_membuat_review_tanpa_browser_dan_proxy_dibersihkan() {
+    let (lark, clock) = setup();
+    let (st, run) = waiting_with_app(&lark, &clock).await;
+    lab_ready(&st);
+    *st.lab.login_failure.lock().unwrap() =
+        Some(mandor_usecase::run_ports::LoginFailure::NotSignedIn);
+    st.svc
+        .start_review(&run, ReviewTrigger::Manual, None)
+        .await
+        .unwrap();
+    let req = st.agent.last().req;
+    let review = req.review.clone().unwrap();
+    assert!(!review.browser);
+    assert!(review.sessions.is_empty());
+    assert!(
+        req.message
+            .contains("Test login failed for admin: the signed-in page did not appear"),
+        "{}",
+        req.message
+    );
+    st.agent.last().done();
+    eventually(|| st.runs.only().state == RunState::AwaitingDev).await;
+    assert!(st.lab.ended.lock().unwrap().contains(&review.review_id));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn app_bukan_loopback_tidak_login_dengan_akun_uji() {
+    let (lark, clock) = setup();
+    let (st, run) = waiting_with_app(&lark, &clock).await;
+    lab_ready(&st);
+    let mut app = st.apps.app_record(&run).await.unwrap().unwrap();
+    app.members[0].url = Some("https://staging.example.com".to_owned());
+    st.apps.save_app_record(&app).await.unwrap();
+    st.svc
+        .start_review(&run, ReviewTrigger::Manual, None)
+        .await
+        .unwrap();
+    let review = st.agent.last().req.review.unwrap();
+    assert!(!review.browser);
+    assert!(st.lab.logins.lock().unwrap().is_empty());
+}
+
+/// Run Web menunggu dev dengan app menyala dari kode terbaru.
+async fn waiting_with_app(lark: &FakeLark, clock: &FakeClock) -> (Station, String) {
+    let st = station(lark, clock, "ou_me");
+    st.repos.repos.lock().unwrap()[0].app = AppSettings {
+        test_mode: TestMode::Web,
+        start_command: Some("bun run dev".to_owned()),
+        port: Some(5173),
+        browser_tests: true,
+        ..AppSettings::default()
+    };
+    st.svc.start("rec1", "repo1", None).await.unwrap();
+    st.agent.last().done();
+    eventually(|| st.runs.only().state == RunState::AwaitingDev).await;
+    let run = st.runs.only().id;
+    let wt: PathBuf = st.runs.only().worktree.unwrap();
+    st.git.st().trees.insert(wt, "tree-s2".to_owned());
+    let app = AppRecord {
+        run_id: run.clone(),
+        state: AppRunState::Running,
+        members: vec![AppMemberRecord {
+            repo_id: "repo1".to_owned(),
+            url: Some("http://localhost:5173".to_owned()),
+            pgid: Some(1),
+            state: AppRunState::Running,
+            prototype: None,
+        }],
+        snapshot: [("repo1".to_owned(), "tree-s2".to_owned())].into(),
+        ..AppRecord::default()
+    };
+    st.apps.save_app_record(&app).await.unwrap();
+    st.apps.set_app_owner(Some(&run)).await.unwrap();
+    (st, run)
 }

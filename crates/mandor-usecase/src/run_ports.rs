@@ -261,6 +261,96 @@ pub struct ReviewRequest {
     /// Batas biaya `--max-budget-usd`, dalam sen.
     pub budget_cents: u32,
     pub timeout: std::time::Duration,
+    /// Proxy allowlist review (`--proxy-server`, KTD-L6).
+    pub proxy: Option<String>,
+    /// Sesi login per server Playwright (KTD-L5).
+    pub sessions: Vec<BrowserSession>,
+}
+
+/// Sesi login satu server Playwright: berkas `storageState` milik daemon yang
+/// disalin adapter agent ke folder konfigurasi MCP.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BrowserSession {
+    /// Nama server MCP, mis. `playwright` atau `playwright_admin`.
+    pub server: String,
+    pub state: PathBuf,
+}
+
+/// Kegagalan login akun uji (KTD-L4); tanpa teks dari halaman.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LoginFailure {
+    NotInstalled,
+    NoPassword,
+    Timeout,
+    FormNotFound,
+    NotSignedIn,
+    SessionNotKept,
+    Failed,
+}
+
+impl LoginFailure {
+    #[must_use]
+    pub fn reason(self) -> &'static str {
+        match self {
+            Self::NotInstalled => "Playwright is not installed",
+            Self::NoPassword => "no password is saved",
+            Self::Timeout => "the login took too long",
+            Self::FormNotFound => "the login form was not found",
+            Self::NotSignedIn => "the signed-in page did not appear",
+            Self::SessionNotKept => "the session did not stay signed in",
+            Self::Failed => "Playwright reported an error",
+        }
+    }
+}
+
+/// Satu permintaan login akun uji.
+#[derive(Debug, Clone, Copy)]
+pub struct LabLogin<'a> {
+    pub review_id: &'a str,
+    pub repo_id: &'a str,
+    pub equipment: &'a mandor_domain::lab::LabEquipment,
+    pub role: &'a str,
+    pub origins: &'a [String],
+    pub proxy: Option<&'a str>,
+}
+
+/// Request yang ditolak proxy review, dengan waktunya.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ProxyHit {
+    pub at_ms: i64,
+    pub request: mandor_domain::lab::BlockedRequest,
+    /// Request tulis ke origin run (bukan origin lain).
+    pub write: bool,
+}
+
+/// Review lab: perlengkapan, login akun uji, dan proxy per review (plan
+/// 2026-11-10-001).
+pub trait LabPort: Send + Sync {
+    /// Biner Playwright MCP tersedia.
+    fn playwright_installed(&self) -> bool;
+    /// Perlengkapan repo yang sudah disetujui; `None` bila belum ada atau
+    /// belum disetujui.
+    fn approved_equipment(
+        &self,
+        repo_id: &str,
+    ) -> impl Future<Output = Result<Option<mandor_domain::lab::LabEquipment>, PortError>> + Send;
+    /// Menyalakan proxy review; mengembalikan URL `--proxy-server`.
+    fn start_proxy(
+        &self,
+        review_id: &str,
+        policy: mandor_domain::lab::ProxyPolicy,
+    ) -> impl Future<Output = Result<String, PortError>> + Send;
+    /// Penolakan proxy sejak panggilan sebelumnya.
+    fn take_blocked(&self, review_id: &str) -> Vec<ProxyHit>;
+    /// Mengizinkan request tulis lewat proxy (sesi lab data `running`, KTD-L6).
+    fn set_proxy_writes(&self, review_id: &str, allowed: bool);
+    /// Login akun uji; berkas `storageState` milik daemon.
+    fn login(
+        &self,
+        req: LabLogin<'_>,
+    ) -> impl Future<Output = Result<PathBuf, LoginFailure>> + Send;
+    /// Menghentikan proxy dan menghapus berkas sesi review.
+    fn end_review(&self, review_id: &str) -> impl Future<Output = ()> + Send;
 }
 
 /// Konteks agent untuk run workspace.

@@ -41,6 +41,14 @@ impl LabSecrets {
             .is_some_and(|p| !p.expose_secret().is_empty())
     }
 
+    /// Password role, bila ada.
+    #[must_use]
+    pub fn password(&self, role: &str) -> Option<&SecretString> {
+        self.by_role
+            .get(role)
+            .filter(|p| !p.expose_secret().is_empty())
+    }
+
     /// Menggabungkan input UI: password kosong mempertahankan yang lama, role
     /// yang tidak lagi ada di perlengkapan dihapus.
     #[must_use]

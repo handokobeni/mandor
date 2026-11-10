@@ -452,6 +452,94 @@ pub fn is_loopback_host(host: &str) -> bool {
         || host.parse::<Ipv4Addr>().is_ok_and(|ip| ip.is_loopback())
 }
 
+/// Kebijakan proxy lab satu review (KTD-L6).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ProxyPolicy {
+    /// Origin run yang boleh dihubungi (bentuk [`origin_of`]).
+    pub origins: Vec<String>,
+    /// Request tulis ke app diizinkan: hanya selama sesi lab data `running`.
+    pub write_allowed: bool,
+    /// Path POST baca-saja yang disetujui, termasuk path submit login.
+    pub safe_posts: Vec<String>,
+}
+
+impl ProxyPolicy {
+    /// Kebijakan untuk origin run; origin tidak sah dibuang.
+    #[must_use]
+    pub fn new(origins: &[String], safe_posts: &[String]) -> Self {
+        let mut normalized: Vec<String> = origins.iter().filter_map(|o| origin_of(o)).collect();
+        normalized.sort();
+        normalized.dedup();
+        Self {
+            origins: normalized,
+            write_allowed: false,
+            safe_posts: safe_posts.to_vec(),
+        }
+    }
+}
+
+/// Request yang sampai di proxy lab.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ProxyRequest<'a> {
+    /// Request HTTP biasa dengan URL absolut.
+    Http { method: &'a str, url: &'a str },
+    /// Terowongan `CONNECT host:port` (WebSocket dan HTTPS).
+    Connect { authority: &'a str },
+}
+
+/// Alasan proxy menolak request.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ProxyBlock {
+    /// Tujuan bukan origin run.
+    OtherOrigin,
+    /// Request tulis ke app di luar sesi lab data.
+    Write,
+}
+
+/// Keputusan proxy lab (KTD-L6): hanya origin run, dan di luar sesi data
+/// hanya method baca serta path POST baca-saja yang disetujui.
+///
+/// # Errors
+/// [`ProxyBlock`] bila request ditolak.
+pub fn proxy_decision(policy: &ProxyPolicy, req: ProxyRequest<'_>) -> Result<(), ProxyBlock> {
+    match req {
+        ProxyRequest::Connect { authority } => {
+            let target = authority.to_ascii_lowercase();
+            let known = policy
+                .origins
+                .iter()
+                .filter_map(|o| o.split_once("://").map(|(_, a)| a))
+                .any(|a| a == target);
+            if known {
+                Ok(())
+            } else {
+                Err(ProxyBlock::OtherOrigin)
+            }
+        }
+        ProxyRequest::Http { method, url } => {
+            let Some(origin) = origin_of(url) else {
+                return Err(ProxyBlock::OtherOrigin);
+            };
+            if !policy.origins.contains(&origin) {
+                return Err(ProxyBlock::OtherOrigin);
+            }
+            let method = method.to_ascii_uppercase();
+            if matches!(method.as_str(), "GET" | "HEAD" | "OPTIONS") || policy.write_allowed {
+                return Ok(());
+            }
+            let safe = method == "POST" && policy.safe_posts.iter().any(|p| p == path_of(url));
+            if safe { Ok(()) } else { Err(ProxyBlock::Write) }
+        }
+    }
+}
+
+/// Path URL tanpa query dan fragmen; `/` bila kosong.
+fn path_of(url: &str) -> &str {
+    let rest = url.split_once("://").map_or(url, |(_, r)| r);
+    let path = rest.find('/').map_or("/", |i| &rest[i..]);
+    path.split(['?', '#']).next().unwrap_or("/")
+}
+
 /// AC calon lab untuk satu kartu (`None` di run tunggal).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CardCandidates {
@@ -827,6 +915,111 @@ mod tests {
         }
         assert!(is_http_loopback_origin("http://localhost:3000"));
         assert!(!is_http_loopback_origin("https://localhost:3000"));
+    }
+
+    fn policy(write: bool) -> ProxyPolicy {
+        let mut p = ProxyPolicy::new(
+            &[
+                "http://localhost:3000/".to_owned(),
+                "http://api.localhost:8080".to_owned(),
+            ],
+            &["/api/search".to_owned(), "/api/auth/login".to_owned()],
+        );
+        p.write_allowed = write;
+        p
+    }
+
+    fn http<'a>(method: &'a str, url: &'a str) -> ProxyRequest<'a> {
+        ProxyRequest::Http { method, url }
+    }
+
+    #[test]
+    fn proxy_hanya_origin_run() {
+        let p = policy(false);
+        assert_eq!(
+            proxy_decision(&p, http("GET", "http://localhost:3000/admin?x=1")),
+            Ok(())
+        );
+        assert_eq!(
+            proxy_decision(&p, http("GET", "http://api.localhost:8080/v1")),
+            Ok(())
+        );
+        for url in [
+            "https://example.com/",
+            "http://127.0.0.1:7878/",
+            "http://localhost:3001/",
+            "https://localhost:3000/",
+            "ftp://localhost:3000/",
+        ] {
+            assert_eq!(
+                proxy_decision(&p, http("GET", url)),
+                Err(ProxyBlock::OtherOrigin),
+                "{url}"
+            );
+        }
+    }
+
+    #[test]
+    fn proxy_menolak_tulis_di_luar_sesi_data() {
+        let p = policy(false);
+        for m in ["POST", "PUT", "PATCH", "DELETE", "post"] {
+            assert_eq!(
+                proxy_decision(&p, http(m, "http://localhost:3000/api/kb")),
+                Err(ProxyBlock::Write),
+                "{m}"
+            );
+        }
+        assert_eq!(
+            proxy_decision(&p, http("HEAD", "http://localhost:3000/x")),
+            Ok(())
+        );
+        assert_eq!(
+            proxy_decision(&p, http("OPTIONS", "http://localhost:3000/x")),
+            Ok(())
+        );
+        assert_eq!(
+            proxy_decision(
+                &policy(true),
+                http("DELETE", "http://localhost:3000/api/kb")
+            ),
+            Ok(())
+        );
+    }
+
+    #[test]
+    fn proxy_meneruskan_post_baca_saja_yang_disetujui() {
+        let p = policy(false);
+        assert_eq!(
+            proxy_decision(&p, http("POST", "http://localhost:3000/api/search?q=a")),
+            Ok(())
+        );
+        assert_eq!(
+            proxy_decision(&p, http("POST", "http://localhost:3000/api/auth/login")),
+            Ok(())
+        );
+        assert_eq!(
+            proxy_decision(&p, http("PUT", "http://localhost:3000/api/search")),
+            Err(ProxyBlock::Write)
+        );
+        assert_eq!(
+            proxy_decision(&p, http("POST", "http://localhost:3000/api/search/extra")),
+            Err(ProxyBlock::Write)
+        );
+    }
+
+    #[test]
+    fn connect_hanya_ke_host_port_origin_run() {
+        let p = policy(false);
+        let connect = |authority| ProxyRequest::Connect { authority };
+        assert_eq!(proxy_decision(&p, connect("localhost:3000")), Ok(()));
+        assert_eq!(proxy_decision(&p, connect("API.localhost:8080")), Ok(()));
+        for a in ["example.com:443", "localhost:7878", "127.0.0.1:3000"] {
+            assert_eq!(
+                proxy_decision(&p, connect(a)),
+                Err(ProxyBlock::OtherOrigin),
+                "{a}"
+            );
+        }
     }
 
     #[test]

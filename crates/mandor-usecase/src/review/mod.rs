@@ -15,4 +15,6 @@ pub use design::{
     DesignCheck, DesignRoot, DesignSources, PathProbe, Prototype, SourceCheck, check_source,
 };
 pub use ledger::LedgerRefresh;
-pub use service::{AppReadiness, BrowserDriver, Confirmations, ReviewReadiness};
+pub use service::{
+    AppReadiness, BrowserDriver, Confirmations, DEFAULT_BROWSER_SERVER, LoginKind, ReviewReadiness,
+};

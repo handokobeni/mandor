@@ -27,6 +27,8 @@ mod dispatch;
 mod hook;
 #[cfg(target_os = "linux")]
 mod install;
+mod lab_port;
+mod lab_proxy;
 mod lab_secrets;
 mod login;
 mod logins;

@@ -14,7 +14,7 @@ use crate::hook::{
     DesignRoot, ToolCall, Verdict, check_design_path, classify_planning, classify_vm,
     classify_with_mcp, in_protected_dir, is_credential_path, is_write_tool, program_name,
 };
-use crate::hook_review::{ReviewState, classify_review};
+use crate::hook_review::{LabGuard, ReviewState, classify_lab, classify_review};
 
 /// Jenis giliran agent.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -22,6 +22,8 @@ pub enum TurnKind {
     Implement,
     Plan,
     Review,
+    /// Reviewer lab (plan 2026-11-10-001, KTD-L10).
+    Lab,
 }
 
 impl TurnKind {
@@ -31,6 +33,7 @@ impl TurnKind {
             Self::Implement => "implement",
             Self::Plan => "plan",
             Self::Review => "review",
+            Self::Lab => "lab",
         }
     }
 
@@ -40,6 +43,7 @@ impl TurnKind {
             "implement" => Some(Self::Implement),
             "plan" => Some(Self::Plan),
             "review" => Some(Self::Review),
+            "lab" => Some(Self::Lab),
             _ => None,
         }
     }
@@ -71,6 +75,8 @@ pub struct Scope {
     /// Folder milik daemon yang tidak boleh dibaca atau ditulis agent (mis.
     /// folder berkas izin, KTD-A4).
     pub private: Vec<String>,
+    /// Folder staging berkas uji giliran lab (KTD-L11).
+    pub fixtures: Option<String>,
 }
 
 /// Fakta filesystem dari pemanggil (hook atau daemon).
@@ -135,10 +141,24 @@ pub fn decide(
             || Verdict::Deny("mandor: review state is missing; tool call denied".to_owned()),
             |state| classify_review(call, state, &scope.mcp),
         ),
+        TurnKind::Lab => review.map_or_else(
+            || Verdict::Deny("mandor: review state is missing; tool call denied".to_owned()),
+            |state| {
+                let guard = LabGuard {
+                    fixtures: scope.fixtures.as_deref(),
+                };
+                classify_lab(call, state, &scope.mcp, guard)
+            },
+        ),
         TurnKind::Plan => classify_planning(call, &scope.mcp),
         TurnKind::Implement => classify_with_mcp(call, &scope.mcp),
     };
     if let Verdict::Deny(reason) = verdict {
+        return Decision::Deny(reason);
+    }
+    if scope.turn == TurnKind::Lab
+        && let Some(reason) = lab_paths(scope, call, cwd, facts)
+    {
         return Decision::Deny(reason);
     }
     if is_write_tool(&call.tool_name) {
@@ -169,6 +189,35 @@ pub fn decide(
     } else {
         Decision::Undecided("not in this turn's allowlist".to_owned())
     }
+}
+
+/// Path giliran lab setelah diselesaikan (KTD-L10, KTD-L11): baca hanya di
+/// akar run atau staging berkas uji, upload hanya berkas di staging yang bukan
+/// symlink.
+fn lab_paths(scope: &Scope, call: &ToolCall, cwd: &str, facts: &impl PathFacts) -> Option<String> {
+    let root = canonical_or(facts, &scope.run_root);
+    let staging = scope.fixtures.as_deref().map(|f| canonical_or(facts, f));
+    let upload = call.tool_name.ends_with("__browser_file_upload");
+    call.paths.iter().find_map(|raw| {
+        if upload && facts.is_symlink(raw) {
+            return Some(format!(
+                "mandor: `{raw}` is a link; upload a regular test file"
+            ));
+        }
+        let Some(path) = resolve(facts, cwd, raw) else {
+            return Some(format!("mandor: path `{raw}` cannot be resolved"));
+        };
+        if let Some(reason) = crate::hook_review::lab_read_violation(&path) {
+            return Some(reason);
+        }
+        let in_staging = staging.as_deref().is_some_and(|s| under(&path, s));
+        let ok = if upload {
+            in_staging
+        } else {
+            in_staging || under(&path, &root)
+        };
+        (!ok).then(|| format!("mandor: `{raw}` is outside this lab's files"))
+    })
 }
 
 /// Folder milik daemon, pagar VM, dan akar sumber desain, dengan path yang
@@ -793,6 +842,7 @@ mod tests {
             members: vec!["/run/kelola-api".to_owned(), "/run/kelola-web".to_owned()],
             vm_run_dir: None,
             private: vec!["/home/u/permit".to_owned()],
+            fixtures: None,
         }
     }
 
@@ -1068,5 +1118,90 @@ mod tests {
             request_key("X", &json!({"b": {"y": 1, "x": [2]}, "a": 0}), "/", None),
             request_key("X", &json!({"a": 0, "b": {"x": [2], "y": 1}}), "/", None)
         );
+    }
+
+    /// Plan 2026-11-10-001, KTD-L10/KTD-L11: giliran lab membaca hanya di akar
+    /// run atau staging; upload hanya dari staging dan bukan symlink.
+    #[test]
+    fn giliran_lab_membatasi_baca_dan_upload() {
+        let mut lab = scope(TurnKind::Lab);
+        lab.fixtures = Some("/outside".to_owned());
+        lab.mcp = vec!["mandor".to_owned()];
+        let state = ReviewState {
+            origins: vec!["http://localhost:5173".to_owned()],
+            ..ReviewState::default()
+        };
+        let read = |p: &str| ToolCall {
+            tool_name: "Read".to_owned(),
+            paths: vec![p.to_owned()],
+            ..ToolCall::default()
+        };
+        let decide_lab = |c: &ToolCall| decide(&lab, c, "/run/kelola-api", Some(&state), &fs());
+        assert!(!matches!(decide_lab(&read("src/a.ts")), Decision::Deny(_)));
+        assert!(!matches!(
+            decide_lab(&read("/outside/docs")),
+            Decision::Deny(_)
+        ));
+        // Symlink keluar dari akar run ditolak setelah diselesaikan.
+        assert!(matches!(
+            decide_lab(&read("keys/id_rsa")),
+            Decision::Deny(_)
+        ));
+        assert!(matches!(
+            decide_lab(&read("/home/u/permit")),
+            Decision::Deny(_)
+        ));
+        let bash = ToolCall {
+            tool_name: "Bash".to_owned(),
+            command: Some("git status".to_owned()),
+            ..ToolCall::default()
+        };
+        assert!(matches!(decide_lab(&bash), Decision::Deny(_)));
+        // Tanpa state review, giliran lab ditolak.
+        assert!(matches!(
+            decide(&lab, &read("src/a.ts"), "/run/kelola-api", None, &fs()),
+            Decision::Deny(_)
+        ));
+    }
+
+    #[test]
+    fn upload_lab_dari_symlink_ditolak() {
+        let mut lab = scope(TurnKind::Lab);
+        lab.fixtures = Some("/run/kelola-api".to_owned());
+        let mut state = ReviewState {
+            origins: vec!["http://localhost:5173".to_owned()],
+            ..ReviewState::default()
+        };
+        state.pages.insert(
+            "playwright_admin".to_owned(),
+            crate::hook_review::TabState {
+                url: Some("http://localhost:5173/".to_owned()),
+                settled: true,
+            },
+        );
+        let upload = |p: &str| ToolCall {
+            tool_name: "mcp__playwright_admin__browser_file_upload".to_owned(),
+            paths: vec![p.to_owned()],
+            ..ToolCall::default()
+        };
+        let d = |c: &ToolCall| decide(&lab, c, "/run/kelola-api", Some(&state), &fs());
+        assert!(!matches!(
+            d(&upload("/run/kelola-api/package.json")),
+            Decision::Deny(_)
+        ));
+        assert!(
+            matches!(d(&upload("/run/kelola-api/k")), Decision::Deny(_)),
+            "symlink"
+        );
+        assert!(
+            matches!(d(&upload("/run/kelola-api/keys")), Decision::Deny(_)),
+            "keluar staging setelah diselesaikan"
+        );
+    }
+
+    #[test]
+    fn jenis_giliran_lab_bolak_balik() {
+        assert_eq!(TurnKind::parse("lab"), Some(TurnKind::Lab));
+        assert_eq!(TurnKind::Lab.as_str(), "lab");
     }
 }

@@ -715,6 +715,7 @@ fn review_request(
         timeout: Duration::from_secs(settings.timeout_secs.max(60)),
         proxy: None,
         sessions: Vec::new(),
+        lab: None,
     }
 }
 

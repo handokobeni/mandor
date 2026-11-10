@@ -265,6 +265,15 @@ pub struct ReviewRequest {
     pub proxy: Option<String>,
     /// Sesi login per server Playwright (KTD-L5).
     pub sessions: Vec<BrowserSession>,
+    /// Giliran reviewer lab (KTD-L10); `None` = review biasa.
+    pub lab: Option<LabTurn>,
+}
+
+/// Giliran reviewer lab (plan 2026-11-10-001).
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct LabTurn {
+    /// Folder staging berkas uji milik daemon (KTD-L11).
+    pub fixtures: Option<PathBuf>,
 }
 
 /// Sesi login satu server Playwright: berkas `storageState` milik daemon yang

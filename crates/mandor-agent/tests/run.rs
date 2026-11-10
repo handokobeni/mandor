@@ -331,6 +331,7 @@ async fn sesi_reviewer_dihentikan_saat_melewati_batas_waktu() {
             timeout: Duration::from_millis(500),
             proxy: None,
             sessions: Vec::new(),
+            lab: None,
         }),
         permit: None,
         ask: false,

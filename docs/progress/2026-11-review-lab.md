@@ -10,6 +10,7 @@ Branch fase 1: `feat/review-lab-phase1`.
 | U17 | selesai | `mandor-domain::lab::proxy_decision`, `mandord::lab_proxy` (hyper), dipasang ke review di U4 |
 | U4 | selesai | Playwright MCP untuk review di laptop dan VM (Chrome dihapus dari review); `LabPort` (`ProdLab`) untuk perlengkapan, login daemon, proxy; klien login `mandor-agent::playwright_login` diuji dengan Playwright sungguhan |
 | U5 | selesai | `ac_set_verdict` dengan langkah, screenshot, data disiapkan, `simulated`, `lab_need`; Pass lewat browser wajib langkah; tulis yang diblokir proxy membuat Can't verify `lab_need: data`; penyamaran password dan nilai cookie; `ac_report_finding`, `ac_recommend_look` |
+| U6 | selesai | `TurnKind::Lab`, `classify_lab` (evaluate, upload dari staging, tanpa Bash, baca dibatasi), parser `mcp__playwright[_<role>]__`, state halaman per server (berkas state lama tetap terbaca), spec agent giliran lab dengan satu server per role, prompt reviewer lab |
 
 ## Catatan
 

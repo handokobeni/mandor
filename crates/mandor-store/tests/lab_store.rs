@@ -279,6 +279,19 @@ mod pg {
         let p = db.role_privileges(admin, "lab_min").await.unwrap();
         assert_eq!(block(&p), None, "{p:?}");
         exec(&["DROP FUNCTION remote_count()"]).await;
+        // TRUNCATE lewat postgres_fdw, dan foreign table sebagai partisi:
+        // akses ke tabel induk hanya memeriksa hak induk.
+        exec(&["GRANT TRUNCATE ON remote_kb TO lab_min"]).await;
+        blocked(&db.role_privileges(admin, "lab_min").await.unwrap());
+        exec(&[
+            "REVOKE TRUNCATE ON remote_kb FROM lab_min",
+            "CREATE TABLE kb_parts (id int) PARTITION BY RANGE (id)",
+            "CREATE FOREIGN TABLE kb_remote_part PARTITION OF kb_parts FOR VALUES FROM (0) TO (100) SERVER landlord_server OPTIONS (table_name 'kb_values')",
+            "GRANT SELECT ON kb_parts TO lab_min",
+        ])
+        .await;
+        blocked(&db.role_privileges(admin, "lab_min").await.unwrap());
+        exec(&["DROP TABLE kb_parts"]).await;
     }
 
     #[tokio::test]

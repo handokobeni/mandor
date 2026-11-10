@@ -145,8 +145,10 @@ const TABLES: &str = concat!(
 /// - Kolom kedua: fungsi extension yang bisa dijalankan, selain handler dan
 ///   validator foreign data wrapper.
 /// - Kolom ketiga: USAGE pada wrapper atau server FDW milik extension, atau
-///   hak tabel maupun kolom pada foreign table servernya atau view (bertingkat)
-///   di atasnya, karena view berjalan dengan hak pemiliknya.
+///   hak tabel (termasuk TRUNCATE) maupun kolom pada foreign table servernya,
+///   view (bertingkat) di atasnya karena view berjalan dengan hak pemiliknya,
+///   dan tabel induk partisi/pewarisan karena akses lewat induk hanya memeriksa
+///   hak induk.
 /// - Fungsi SECURITY DEFINER bukan milik extension yang bisa dijalankan role
 ///   dihitung sebagai jalur untuk setiap extension (gagal tertutup): fungsi itu
 ///   berjalan dengan hak pemiliknya dan bisa memanggil dblink atau foreign
@@ -156,11 +158,12 @@ WITH RECURSIVE reach(fdw, rel) AS ( \
     SELECT s.srvfdw, ft.ftrelid FROM pg_foreign_table ft \
       JOIN pg_foreign_server s ON s.oid = ft.ftserver \
   UNION \
-    SELECT r.fdw, rw.ev_class FROM reach r \
-      JOIN pg_depend d ON d.refclassid = 'pg_class'::regclass AND d.refobjid = r.rel \
-        AND d.classid = 'pg_rewrite'::regclass \
-      JOIN pg_rewrite rw ON rw.oid = d.objid \
-    WHERE rw.ev_class <> r.rel), \
+    SELECT r.fdw, up.rel FROM reach r CROSS JOIN LATERAL ( \
+      SELECT rw.ev_class FROM pg_depend d JOIN pg_rewrite rw ON rw.oid = d.objid \
+      WHERE d.refclassid = 'pg_class'::regclass AND d.refobjid = r.rel \
+        AND d.classid = 'pg_rewrite'::regclass AND rw.ev_class <> r.rel \
+      UNION ALL \
+      SELECT i.inhparent FROM pg_inherits i WHERE i.inhrelid = r.rel) AS up(rel)), \
 definer AS ( \
   SELECT EXISTS ( \
     SELECT 1 FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace \
@@ -182,7 +185,7 @@ SELECT e.extname::text, \
         OR EXISTS (SELECT 1 FROM pg_foreign_server s \
                    WHERE s.srvfdw = w.oid AND has_server_privilege($1, s.oid, 'USAGE')) \
         OR EXISTS (SELECT 1 FROM reach r WHERE r.fdw = w.oid \
-                   AND (has_table_privilege($1, r.rel, 'SELECT, INSERT, UPDATE, DELETE') \
+                   AND (has_table_privilege($1, r.rel, 'SELECT, INSERT, UPDATE, DELETE, TRUNCATE') \
                      OR has_any_column_privilege($1, r.rel, 'SELECT, INSERT, UPDATE, REFERENCES'))))) \
 FROM pg_extension e ORDER BY 1";
 

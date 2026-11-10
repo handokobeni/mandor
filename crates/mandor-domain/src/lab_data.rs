@@ -72,7 +72,9 @@ pub enum DsnError {
     NotPostgres,
     #[error("the database URL names several hosts")]
     SeveralHosts,
-    #[error("the database URL sets the host in its query string")]
+    #[error(
+        "the database URL has options that can change the server; use only sslmode, application_name or connect_timeout"
+    )]
     HostInQuery,
     #[error("the database URL has an invalid port")]
     BadPort,
@@ -81,6 +83,8 @@ pub enum DsnError {
 }
 
 const PG_DEFAULT_PORT: u16 = 5432;
+/// Opsi query string DSN yang diizinkan.
+const DSN_SAFE_OPTIONS: &[&str] = &["sslmode", "application_name", "connect_timeout"];
 
 /// Mengurai `postgres://user:pass@host:port/db?opsi` dari env app. Beberapa
 /// host atau `host`/`hostaddr` di query string ditolak: driver bisa memakai
@@ -94,15 +98,16 @@ pub fn parse_dsn(dsn: &str) -> Result<DbTarget, DsnError> {
         .or_else(|| dsn.strip_prefix("postgresql://"))
         .ok_or(DsnError::NotPostgres)?;
     let (main, query) = rest.split_once('?').unwrap_or((rest, ""));
-    let host_in_query = query.split('&').any(|kv| {
-        let key = kv
-            .split('=')
-            .next()
-            .unwrap_or_default()
-            .to_ascii_lowercase();
-        key == "host" || key == "hostaddr"
+    // Hanya opsi yang tidak bisa mengganti server; host, hostaddr, service,
+    // passfile, port, dan percent-encoding ditolak (KTD-L15).
+    let safe_query = query.split('&').filter(|kv| !kv.is_empty()).all(|kv| {
+        let key = kv.split('=').next().unwrap_or_default();
+        !kv.contains('%') && DSN_SAFE_OPTIONS.contains(&key)
     });
-    if host_in_query {
+    if !safe_query {
+        return Err(DsnError::HostInQuery);
+    }
+    if main.contains('%') {
         return Err(DsnError::HostInQuery);
     }
     let (authority, path) = main.split_once('/').unwrap_or((main, ""));
@@ -200,8 +205,13 @@ pub fn check_statement(sql: &str) -> Result<(), StatementError> {
     if body.contains(';') {
         return Err(StatementError::Several);
     }
-    if body.contains("$$") {
-        return Err(StatementError::Forbidden("$$".to_owned()));
+    // Aturan kutip PostgreSQL (dollar quote, E'' dengan backslash, U&'')
+    // berbeda dari pengurai di sini; bentuk itu ditolak seluruhnya.
+    if let Some(bad) = ["$", "\\"].into_iter().find(|t| body.contains(t)) {
+        return Err(StatementError::Forbidden(bad.to_owned()));
+    }
+    if escape_string_prefix(body) {
+        return Err(StatementError::Forbidden("E'' or U&'' strings".to_owned()));
     }
     let words: Vec<&str> = body
         .split(|c: char| !(c.is_ascii_alphanumeric() || c == '_'))
@@ -218,6 +228,31 @@ pub fn check_statement(sql: &str) -> Result<(), StatementError> {
         return Err(StatementError::SetRole);
     }
     Ok(())
+}
+
+/// Ada string `E'...'` atau `U&'...'`: huruf `e` atau `u&` tepat sebelum kutip
+/// tunggal yang bukan bagian dari identifier lain.
+fn escape_string_prefix(body: &str) -> bool {
+    let bytes = body.as_bytes();
+    let ident = |at: usize| bytes[at].is_ascii_alphanumeric() || bytes[at] == b'_';
+    let mut in_string = false;
+    for (i, b) in bytes.iter().enumerate() {
+        if *b != b'\'' {
+            continue;
+        }
+        if in_string {
+            in_string = false;
+            continue;
+        }
+        in_string = true;
+        let e_prefix = i >= 1 && bytes[i - 1] == b'e' && (i < 2 || !ident(i - 2));
+        let u_prefix =
+            i >= 2 && bytes[i - 1] == b'&' && bytes[i - 2] == b'u' && (i < 3 || !ident(i - 3));
+        if e_prefix || u_prefix {
+            return true;
+        }
+    }
+    false
 }
 
 /// Membuang komentar `--` dan `/* */` (termasuk bersarang) di luar string.
@@ -933,6 +968,18 @@ mod tests {
             Ok(("::1".to_owned(), 5432))
         );
         assert_eq!(parse_dsn("mysql://x/y"), Err(DsnError::NotPostgres));
+        for bad in [
+            "postgres://u@localhost/db?%68ost=prod",
+            "postgres://u@localhost/db?service=prod",
+            "postgres://u@localhost/db?passfile=/tmp/p",
+            "postgres://u@localhost/db?port=6000",
+            "postgres://u@local%68ost/db",
+        ] {
+            assert_eq!(parse_dsn(bad), Err(DsnError::HostInQuery), "{bad}");
+        }
+        assert!(
+            parse_dsn("postgres://u@localhost/db?sslmode=disable&application_name=api").is_ok()
+        );
         assert_eq!(
             parse_dsn("postgres://u@localhost"),
             Err(DsnError::NoDatabase)
@@ -959,6 +1006,11 @@ mod tests {
             "select set_config('role','x',false)",
             "SELECT 1; DROP TABLE t",
             "select pg_read_file('/etc/passwd')",
+            "select E'\\x27; drop table t'",
+            "select e'a'",
+            "select U&'\\0063opy'",
+            "select $x$ copy $x$",
+            "select $1",
             "  ",
         ] {
             assert!(check_statement(sql).is_err(), "{sql}");
@@ -966,6 +1018,7 @@ mod tests {
         for sql in [
             "UPDATE corporate_configs SET kb_max = 2 WHERE id = 7",
             "INSERT INTO kb_values (employee_id, score) VALUES (3, 1);",
+            "SELECT * FROM t WHERE kind = 'e' AND note = 'it''s'",
             "SELECT count(*) FROM kb_values -- cek\n",
             "select 'create' as label",
         ] {

@@ -319,7 +319,7 @@ impl LabExec {
             .env_policy(EnvPolicy::Explicit(env))
             .scrub_tokens()
             .timeout(self.timeout);
-        match mandor_proc::run(&cmd).await {
+        match run_settled(&cmd).await {
             Ok(out) => Ok(ExecResult {
                 success: out.success(),
                 timed_out: false,
@@ -563,6 +563,32 @@ impl LabExec {
         }
         Ok(())
     }
+}
+
+/// Percobaan exec saat salinan skrip masih "text file busy".
+const BUSY_ATTEMPTS: u32 = 5;
+const BUSY_BACKOFF: Duration = Duration::from_millis(50);
+
+/// Menjalankan perintah; exec yang gagal ETXTBSY dicoba ulang sebentar.
+/// Salinan skrip baru saja ditulis daemon, dan fork di thread lain bisa
+/// sesaat mewarisi fd tulisnya sebelum exec anaknya menutupnya.
+async fn run_settled(cmd: &Cmd) -> Result<mandor_proc::Output, ProcError> {
+    let mut attempt = 1;
+    loop {
+        match mandor_proc::run(cmd).await {
+            Err(e) if text_busy(&e) && attempt < BUSY_ATTEMPTS => {
+                tokio::time::sleep(BUSY_BACKOFF * attempt).await;
+                attempt += 1;
+            }
+            other => return other,
+        }
+    }
+}
+
+/// Exec gagal karena berkas program masih terbuka untuk ditulis (ETXTBSY).
+fn text_busy(e: &ProcError) -> bool {
+    matches!(e, ProcError::Spawn { source, .. }
+        if source.kind() == std::io::ErrorKind::ExecutableFileBusy)
 }
 
 /// Potongan pendek keluaran untuk alasan penolakan.
@@ -1299,5 +1325,26 @@ mod tests {
             round_trip(&f, &data, &FakeDb { foreign: false }, &by_store).await,
             Ok(())
         );
+    }
+
+    /// Exec berkas yang baru disalin bisa gagal ETXTBSY bila thread lain
+    /// sedang fork; hanya kegagalan itu yang dicoba ulang.
+    #[test]
+    fn hanya_text_file_busy_yang_dicoba_ulang() {
+        let busy = ProcError::Spawn {
+            program: "fp.sh".to_owned(),
+            source: std::io::Error::from_raw_os_error(26),
+        };
+        assert!(text_busy(&busy));
+        let missing = ProcError::Spawn {
+            program: "fp.sh".to_owned(),
+            source: std::io::Error::from(std::io::ErrorKind::NotFound),
+        };
+        assert!(!text_busy(&missing));
+        let timeout = ProcError::Timeout {
+            program: "fp.sh".to_owned(),
+            after: Duration::from_secs(1),
+        };
+        assert!(!text_busy(&timeout));
     }
 }

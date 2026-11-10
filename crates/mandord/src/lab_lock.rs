@@ -218,18 +218,28 @@ impl LabLocks {
             {
                 continue;
             }
-            if read_marker(&path).is_some_and(|m| m.uid == self.uid) {
+            if read_marker(&path).is_some_and(|(owner, _)| owner == self.uid) {
                 let _ = tokio::fs::remove_file(&path).await;
             }
         }
     }
 
+    /// Penanda milik user lain, ditentukan dari pemilik berkas (bukan isi
+    /// JSON). Penanda yang tidak terbaca dianggap kotor (gagal tertutup).
     fn foreign_marker(&self, key: &str) -> Option<Marker> {
-        read_marker(&self.marker_path(key)).filter(|m| m.uid != self.uid)
+        let (owner, marker) = read_marker(&self.marker_path(key))?;
+        if owner == self.uid && marker.is_some() {
+            return None;
+        }
+        Some(marker.unwrap_or_else(|| Marker {
+            uid: owner,
+            session: "unknown".to_owned(),
+            phase: "unknown".to_owned(),
+        }))
     }
 
     fn own_marker(&self, key: &str) -> bool {
-        read_marker(&self.marker_path(key)).is_some_and(|m| m.uid == self.uid)
+        read_marker(&self.marker_path(key)).is_some_and(|(owner, _)| owner == self.uid)
     }
 }
 
@@ -287,21 +297,47 @@ fn set_shared(_f: &File) -> std::io::Result<()> {
     Ok(())
 }
 
+/// Penanda ditulis 0644 milik penulisnya; user lain hanya bisa membacanya.
 fn write_marker(path: &Path, m: &Marker) -> std::io::Result<()> {
     let body = serde_json::to_vec(m).map_err(std::io::Error::other)?;
     let mut f = no_follow(OpenOptions::new().write(true).create(true).truncate(true)).open(path)?;
-    set_shared(&f)?;
+    set_readable(&f)?;
     f.write_all(&body)
 }
 
-fn read_marker(path: &Path) -> Option<Marker> {
+/// Pemilik berkas penanda dan isinya (`None` bila tidak bisa diurai).
+fn read_marker(path: &Path) -> Option<(u32, Option<Marker>)> {
     let mut f = no_follow(OpenOptions::new().read(true)).open(path).ok()?;
+    let owner = file_owner(&f);
     let mut body = Vec::new();
-    Read::by_ref(&mut f)
+    let parsed = Read::by_ref(&mut f)
         .take(4096)
         .read_to_end(&mut body)
-        .ok()?;
-    serde_json::from_slice(&body).ok()
+        .ok()
+        .and_then(|_| serde_json::from_slice(&body).ok());
+    Some((owner, parsed))
+}
+
+#[cfg(unix)]
+fn file_owner(f: &File) -> u32 {
+    use std::os::unix::fs::MetadataExt;
+    f.metadata().map_or(u32::MAX, |m| m.uid())
+}
+
+#[cfg(not(unix))]
+fn file_owner(_f: &File) -> u32 {
+    0
+}
+
+#[cfg(unix)]
+fn set_readable(f: &File) -> std::io::Result<()> {
+    use std::os::unix::fs::PermissionsExt;
+    f.set_permissions(std::fs::Permissions::from_mode(0o644))
+}
+
+#[cfg(not(unix))]
+fn set_readable(_f: &File) -> std::io::Result<()> {
+    Ok(())
 }
 
 #[cfg(test)]
@@ -313,11 +349,17 @@ mod tests {
         LabLocks::new(dir.to_path_buf(), uid).with_poll(Duration::from_millis(20))
     }
 
+    /// uid user test (pemilik berkas yang ditulis test).
+    fn me_uid(dir: &Path) -> u32 {
+        use std::os::unix::fs::MetadataExt;
+        std::fs::metadata(dir).unwrap().uid()
+    }
+
     #[tokio::test]
     async fn kunci_eksklusif_dan_dilepas() {
         let dir = tempfile::tempdir().unwrap();
-        let a = locks(dir.path(), 1000);
-        let b = locks(dir.path(), 1000);
+        let a = locks(dir.path(), me_uid(dir.path()));
+        let b = locks(dir.path(), me_uid(dir.path()));
         let keys = vec!["pg:local:5432/kelola".to_owned(), "dir:/srv/up".to_owned()];
         assert_eq!(
             a.acquire(&keys, Duration::from_secs(1)).await,
@@ -341,7 +383,8 @@ mod tests {
     async fn penanda_user_lain() {
         let dir = tempfile::tempdir().unwrap();
         let keys = vec!["pg:local:5432/kelola".to_owned()];
-        let other = locks(dir.path(), 2000);
+        let real = me_uid(dir.path());
+        let other = locks(dir.path(), real);
         assert_eq!(
             other.acquire(&keys, Duration::from_secs(1)).await,
             LockOutcome::Acquired
@@ -352,7 +395,9 @@ mod tests {
         other.release(&[]).await;
         // Pemegang mati (kunci lepas) tetapi penanda tetap ada.
         drop(other);
-        let me = locks(dir.path(), 1000);
+        // Daemon user lain (uid berbeda): penanda dinilai dari pemilik
+        // berkas, bukan dari isi JSON.
+        let me = locks(dir.path(), real + 1);
         assert!(matches!(
             me.acquire(&keys, Duration::from_millis(200)).await,
             LockOutcome::RestoreFailed(m) if m.contains("s-lain")
@@ -360,12 +405,18 @@ mod tests {
         write_marker(
             &me.marker_path(&keys[0]),
             &Marker {
-                uid: 2000,
+                uid: real + 1,
                 session: "s-lain".to_owned(),
                 phase: "running".to_owned(),
             },
         )
         .unwrap();
+        assert_eq!(
+            me.acquire(&keys, Duration::from_millis(100)).await,
+            LockOutcome::Locked
+        );
+        // Penanda rusak dianggap kotor (gagal tertutup).
+        std::fs::write(me.marker_path(&keys[0]), b"bukan json").unwrap();
         assert_eq!(
             me.acquire(&keys, Duration::from_millis(100)).await,
             LockOutcome::Locked
@@ -376,7 +427,7 @@ mod tests {
     async fn penanda_sendiri_dihapus_saat_lepas_dan_start() {
         let dir = tempfile::tempdir().unwrap();
         let keys = vec!["pg:local:5432/kelola".to_owned()];
-        let me = locks(dir.path(), 1000);
+        let me = locks(dir.path(), me_uid(dir.path()));
         assert_eq!(
             me.acquire(&keys, Duration::from_secs(1)).await,
             LockOutcome::Acquired
@@ -389,7 +440,7 @@ mod tests {
         write_marker(
             &me.marker_path("dir:/x"),
             &Marker {
-                uid: 1000,
+                uid: 0,
                 session: "lama".to_owned(),
                 phase: "running".to_owned(),
             },
@@ -403,7 +454,7 @@ mod tests {
     async fn symlink_di_folder_kunci_ditolak() {
         let dir = tempfile::tempdir().unwrap();
         let keys = vec!["pg:local:5432/kelola".to_owned()];
-        let me = locks(dir.path(), 1000);
+        let me = locks(dir.path(), me_uid(dir.path()));
         std::os::unix::fs::symlink("/etc/passwd", me.lock_path(&keys[0])).unwrap();
         assert_eq!(
             me.acquire(&keys, Duration::from_millis(100)).await,
@@ -416,7 +467,7 @@ mod tests {
         use std::os::unix::fs::PermissionsExt;
         let dir = tempfile::tempdir().unwrap();
         let keys = vec!["dir:/srv/up".to_owned()];
-        let me = locks(dir.path(), 1000);
+        let me = locks(dir.path(), me_uid(dir.path()));
         assert_eq!(
             me.acquire(&keys, Duration::from_secs(1)).await,
             LockOutcome::Acquired

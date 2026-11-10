@@ -40,6 +40,8 @@ pub(crate) struct DataSession {
     pub snapshot: PathBuf,
     pub before: Vec<(String, String)>,
     pub worktree: PathBuf,
+    /// Review pemilik sesi; dipakai untuk menyamarkan nilai cookie sesi.
+    pub review_id: String,
 }
 
 /// Baris calon `data` di kartu-kartu progres.
@@ -202,6 +204,7 @@ impl<D: Deps> RunService<D> {
             snapshot,
             before,
             worktree,
+            review_id: progress.review_id.clone(),
         })
     }
 
@@ -584,7 +587,11 @@ impl<D: Deps> RunService<D> {
         self.mark_data_changed(&scope.run_id);
         let mut texts = self
             .lab
-            .redact(std::slice::from_ref(&session.repo_id), "", vec![out.text])
+            .redact(
+                std::slice::from_ref(&session.repo_id),
+                &session.review_id,
+                vec![out.text],
+            )
             .await;
         Ok(SqlResult {
             text: texts.pop().unwrap_or_default(),
@@ -616,7 +623,11 @@ impl<D: Deps> RunService<D> {
             .map_err(|e| super::LedgerToolError::Invalid(e.to_string()))?;
         let mut texts = self
             .lab
-            .redact(std::slice::from_ref(&session.repo_id), "", vec![out])
+            .redact(
+                std::slice::from_ref(&session.repo_id),
+                &session.review_id,
+                vec![out],
+            )
             .await;
         Ok(texts.pop().unwrap_or_default())
     }
@@ -715,6 +726,7 @@ impl<D: Deps> RunService<D> {
             snapshot: rec.snapshot_dir.clone()?,
             before: rec.fingerprints.clone(),
             worktree: PathBuf::new(),
+            review_id: String::new(),
         })
     }
 
@@ -916,5 +928,6 @@ fn fallback(rec: &LabSessionRecord) -> DataSession {
         snapshot: PathBuf::new(),
         before: Vec::new(),
         worktree: PathBuf::new(),
+        review_id: String::new(),
     }
 }

@@ -172,38 +172,73 @@ fn split_host_port(hostport: &str) -> Result<(String, u16), DsnError> {
 /// `None` bila lokal.
 #[must_use]
 pub fn app_env_block(pairs: &[(String, String)], keys: &[String]) -> Option<String> {
+    let blocked = |key: &str, what: &str| {
+        Some(format!(
+            "lab only runs against local databases ({key} {what})"
+        ))
+    };
     for key in keys {
         let Some((_, value)) = pairs.iter().find(|(k, _)| k == key) else {
-            return Some(format!(
-                "lab only runs against local databases ({key} is declared but missing in .env)"
-            ));
+            return blocked(key, "is declared but missing in .env");
         };
         let value = value.trim();
-        if value.starts_with("postgres://") || value.starts_with("postgresql://") {
-            match parse_dsn(value) {
+        let lower = value.to_ascii_lowercase();
+        let upper = key.to_ascii_uppercase();
+        let db_key = ["DB", "DATABASE", "PG", "SQL", "POSTGRES"]
+            .iter()
+            .any(|m| upper.contains(m));
+        if lower.starts_with("postgres://") || lower.starts_with("postgresql://") {
+            let normalized = format!(
+                "postgres://{}",
+                &value[value.find("://").map_or(0, |i| i + 3)..]
+            );
+            match parse_dsn(&normalized) {
                 Ok(t) if is_local_db(&t.host) => {}
-                Ok(t) => {
-                    return Some(format!(
-                        "lab only runs against local databases ({key} points to {})",
-                        t.host
-                    ));
-                }
-                Err(e) => {
-                    return Some(format!(
-                        "lab only runs against local databases ({key}: {e})"
-                    ));
-                }
+                Ok(t) => return blocked(key, &format!("points to {}", t.host)),
+                Err(e) => return blocked(key, &e.to_string()),
             }
-        } else if key.to_ascii_uppercase().ends_with("HOST")
+        } else if let Some(host) = url_host(&lower).filter(|_| db_key) {
+            if !is_local_db(&host) {
+                return blocked(key, &format!("points to {host}"));
+            }
+        } else if let Some(host) = libpq_host(&lower) {
+            if !is_local_db(&host) {
+                return blocked(key, &format!("points to {host}"));
+            }
+        } else if ["HOST", "ADDR", "SERVER"]
+            .iter()
+            .any(|s| upper.ends_with(s))
             && !value.is_empty()
             && !is_local_db(value)
         {
-            return Some(format!(
-                "lab only runs against local databases ({key} points to {value})"
-            ));
+            return blocked(key, &format!("points to {value}"));
         }
     }
     None
+}
+
+/// Host URL `skema://[user@]host[:port]/...`.
+fn url_host(value: &str) -> Option<String> {
+    let rest = &value[value.find("://")? + 3..];
+    let authority = rest.split(['/', '?', '#']).next().unwrap_or_default();
+    let hostport = authority.rsplit_once('@').map_or(authority, |(_, h)| h);
+    let host = if let Some(v6) = hostport.strip_prefix('[') {
+        v6.split(']').next().unwrap_or_default()
+    } else {
+        hostport.split([':', ',']).next().unwrap_or_default()
+    };
+    Some(host.to_owned())
+}
+
+/// Host di string koneksi libpq `host=... dbname=...`.
+fn libpq_host(value: &str) -> Option<String> {
+    value
+        .split_whitespace()
+        .find_map(|kv| {
+            kv.strip_prefix("host=")
+                .or_else(|| kv.strip_prefix("hostaddr="))
+        })
+        .map(|h| h.trim_matches('\'').to_owned())
 }
 
 // ---------------------------------------------------------------------------
@@ -1065,6 +1100,33 @@ mod tests {
         );
         assert!(app_env_block(&env(&[("PGHOST", "10.0.0.5")]), &keys(&["PGHOST"])).is_some());
         assert!(app_env_block(&local, &keys(&["MISSING"])).is_some_and(|m| m.contains("missing")));
+        // Skema huruf besar, skema lain di key database, dan string libpq.
+        for (k, v) in [
+            ("DATABASE_URL", "POSTGRES://u@db.staging.example.com/kelola"),
+            ("DB_URL", "mysql://u@10.0.0.5/x"),
+            ("PG_CONN", "host=db.prod dbname=kelola"),
+            ("DB_ADDR", "10.0.0.5"),
+            ("DATABASE_URL", "postgres://u@localhost/db?host=prod"),
+        ] {
+            assert!(
+                app_env_block(&env(&[(k, v)]), &keys(&[k])).is_some(),
+                "{k}={v}"
+            );
+        }
+        assert_eq!(
+            app_env_block(
+                &env(&[("PG_CONN", "host=127.0.0.1 dbname=k")]),
+                &keys(&["PG_CONN"])
+            ),
+            None
+        );
+        assert_eq!(
+            app_env_block(
+                &env(&[("REDIS_URL", "redis://cache.example.com")]),
+                &keys(&["REDIS_URL"])
+            ),
+            None
+        );
     }
 
     #[test]

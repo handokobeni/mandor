@@ -54,6 +54,20 @@ Rencana uji fase 2 (bersama fase 1, setelah daemon dipasang ulang dengan biner f
 4. AE2: arahkan sementara ke database non-lokal, harap "lab only runs against local databases".
 5. AE3: paksa restore gagal (skrip restore keluar non-nol), periksa banner, penahanan Start/review/giliran agent, lalu Retry restore.
 
+Status 2026-11-10: **uji langsung ditunda** atas keputusan pemilik produk. Temuan saat persiapan:
+
+- Run PGS-1477–1483 sudah ditutup dan branch-nya sudah di-merge, jadi uji butuh run terbuka baru untuk kartu kelola.
+- Skrip lab dicocokkan dengan salinan di worktree run, jadi `review-fixtures/lab` harus ada di branch run kelola-web (ter-commit di `talentlytica/kelola-web` atau di branch run). Tempatnya diputuskan saat uji.
+- Perlengkapan data ada di kelola-web (app yang diuji di browser), sedangkan database dipakai kelola-api; app run multi-repo dihentikan dan dinyalakan bersama, sehingga snapshot dan restore mencakup keduanya.
+- Penyimpanan: Postgres lokal `postgres-vector` (127.0.0.1:57432, Docker) dengan DB `landlord`, `stagingintegro_db`, dan `pentest2026_db`, plus folder unggahan.
+- Role `mandor_lab` sudah dibuat (bukan superuser, tanpa CREATEDB/CREATEROLE/BYPASSRLS, tanpa password). Hak: `SELECT, INSERT, UPDATE, DELETE` pada tabel biasa, `SELECT` pada view, `USAGE, SELECT` pada sequence di skema `public` ketiga DB. Tidak ada hak pada 15 foreign table `postgres_fdw` di DB tenant, supaya SQL lab di tenant tidak menulis ke landlord lewat FDW. Password diset developer (`ALTER ROLE mandor_lab PASSWORD …`) lalu diisi di Settings.
+- Yang perlu diamati saat uji: `landlord` memuat extension `dblink`, dan `role_block` bisa menolaknya.
+
+Perbaikan test flaky (ditemukan saat `make check`):
+
+- `lab_proxy::tests::berhenti_melepas_port` (fase 1, PR #28): bind ulang ke port yang baru dilepas bisa kalah dari test paralel. Kini diperiksa bahwa proxy tidak lagi menjawab di port itu.
+- `lab_exec::tests::seed_dengan_role_lain_ditolak` (fase 2): exec salinan skrip gagal `ETXTBSY` (text file busy) karena fork paralel. Balapan yang sama mungkin terjadi di produksi (persetujuan menyalin lalu langsung menjalankan skrip), jadi `lab_exec` kini mencoba ulang exec maks. 5 kali, hanya untuk `ETXTBSY`.
+
 ## Fase 2
 
 Keputusan pemilik produk 2026-11-10: fase 1 dan fase 2 diuji langsung bersama setelah fase 2 selesai. Fase 2 dikerjakan di branch `feat/review-lab-phase2` yang bercabang dari `feat/review-lab-phase1`; PR fase 2 berbasis PR #28.
@@ -65,7 +79,7 @@ Keputusan pemilik produk 2026-11-10: fase 1 dan fase 2 diuji langsung bersama se
 | U13 | selesai | `mandord::lab_exec`: salinan skrip baca-saja di `<lab_root>/<repo>/private/scripts/<digest>/` (symlink ditolak, digest atas path, bit eksekusi, dan isi); perintah sebagai argv tanpa shell dari salinan, env bersih + `PG*` dari daemon (pemeliharaan untuk snapshot/restore/sidik, role lab + `MANDOR_WORKTREE` untuk seed), batas 300 detik dengan process group, keluaran ≤ 64 KiB disamarkan; folder snapshot 0700, mode berkas dikencangkan ke 0600. Uji bolak-balik persetujuan (database lokal, `pg_read_all_stats`, `role_block`, sidik berubah lalu kembali, seed hanya role lab) dipasang di `lab.approve`; kredensial database per penyimpanan di berkas secret; digest persetujuan menyertakan digest skrip (`repos.lab_scripts_digest`) |
 | U14 | selesai | Orkestrasi `review/lab_data.rs`: sebelum kartu pertama dengan calon `data` → persiapan (skrip sama dengan salinan, database lokal, role, akses tabel, env app lokal), kunci, klien lain, sesi `snapshotting` → app berhenti → snapshot + sidik → app menyala → `running` dan proxy boleh menulis; sidik antar kartu dan restore bila berbeda; akhir lab → restore + sidik → `done`/`restore_waiting`(coba ulang di latar)/`restore_failed`. `restore_failed` menahan review, giliran agent, dan Start/Stop app repo itu (Stop diizinkan saat `restore_waiting`). Pemulihan saat start (`recover_lab_data`, kunci diambil ulang, penanda yatim dihapus). `lab_sql`/`lab_seed` (verdict kartu bertanda SQL otomatis), RPC `review.lab_start`, `lab.retry_restore`, `lab.data_restored`, `LabView.data_session`, peringatan di laporan pagi. Daemon: `lab_lock` (berkas kunci `O_NOFOLLOW` 0666, guard dipegang thread, penanda `.dirty`), `lab_data_port` (operasi lewat `lab_exec`, `PgLabDatabase`, secret), `MANDOR_LAB_LOCK_DIR`. Daftar tabel ikut sidik untuk deteksi perubahan skema |
 | U15 | selesai | Settings → Repos → Review lab: bagian "Lab with test data" (folder skrip, penyimpanan database/folder dengan role lab dan pemeliharaan, seed), persetujuan dengan batas 30 menit untuk uji bolak-balik. Tab AC review: tombol **Run lab (N)** untuk calon data yang ditunda, dengan dialog konfirmasi. `LabBanner` di workspace (sesi berjalan, restore menunggu, restore gagal dengan Retry restore dan Data restored). Peringatan lab data di laporan pagi. Mock `?labdata=`; Vitest 282 lulus, `bun check` hijau, tampilan diperiksa di `/?mock` |
-| U16 | sebagian | Runbook `review-lab.md` bagian 5 (skrip, role, persetujuan, sesi, restore gagal), risiko dan masalah umum fase 2; `ac-review.md`; rencana aktif di `CLAUDE.md`. Uji langsung bersama U10 menunggu developer |
+| U16 | sebagian | Runbook `review-lab.md` bagian 5 (skrip, role, persetujuan, sesi, restore gagal), risiko dan masalah umum fase 2; `ac-review.md`; rencana aktif di `CLAUDE.md`; role `mandor_lab` disiapkan. Uji langsung bersama U10 ditunda pemilik produk |
 
 Catatan fase 2:
 

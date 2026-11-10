@@ -96,7 +96,7 @@ Lingkungan perintah penyimpanan: `MANDOR_STORE`, `MANDOR_SNAPSHOT_DIR`, `MANDOR_
 
 | Role | Hak | Dipakai oleh |
 |---|---|---|
-| Lab (mis. `mandor_lab`) | Hanya `SELECT`, `INSERT`, `UPDATE`, `DELETE` pada tabel app. Bukan superuser, tanpa `CREATEDB`/`CREATEROLE`/`BYPASSRLS`, bukan anggota role lain, tidak memiliki objek, tanpa `CREATE` atau `TRIGGER` | Tool `lab_sql` reviewer dan seed |
+| Lab (mis. `mandor_lab`) | Hanya `SELECT`, `INSERT`, `UPDATE`, `DELETE` pada tabel app. Bukan superuser, tanpa `CREATEDB`/`CREATEROLE`/`BYPASSRLS`, bukan anggota role lain, tidak memiliki objek, tanpa `CREATE` atau `TRIGGER`, dan tidak bisa memakai `dblink`, `postgres_fdw`, atau `file_fdw` | Tool `lab_sql` reviewer dan seed |
 | Pemeliharaan (mis. `postgres`) | Superuser atau anggota `pg_read_all_stats` | Snapshot, restore, sidik, dan pemeriksaan klien lain |
 
 Contoh role lab untuk satu database:
@@ -108,6 +108,20 @@ GRANT USAGE ON SCHEMA public TO mandor_lab;
 GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO mandor_lab;
 GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO mandor_lab;
 ```
+
+`dblink`, `postgres_fdw`, dan `file_fdw` boleh terpasang bila role lab tidak bisa memakainya. Fungsi `dblink` bawaannya bisa dijalankan PUBLIC, jadi cabut dulu:
+
+```sql
+DO $$ DECLARE r record; BEGIN
+  FOR r IN SELECT p.oid::regprocedure AS f FROM pg_depend d JOIN pg_proc p ON p.oid = d.objid
+           JOIN pg_extension e ON e.oid = d.refobjid
+           WHERE d.classid = 'pg_proc'::regclass AND d.deptype = 'e' AND e.extname = 'dblink' LOOP
+    EXECUTE format('REVOKE EXECUTE ON FUNCTION %s FROM PUBLIC', r.f);
+  END LOOP;
+END $$;
+```
+
+Untuk `postgres_fdw`, jangan beri role lab USAGE pada server atau hak pada foreign table; user mapping cukup untuk role app.
 
 Server harus lokal: `inet_server_addr()` berupa loopback, socket Unix, atau alamat privat (database di Docker terlihat dengan IP kontainer). Password kedua role disimpan di `secrets.json` (0600) dan tidak pernah ditampilkan lagi.
 

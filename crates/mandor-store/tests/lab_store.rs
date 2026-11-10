@@ -167,6 +167,72 @@ mod pg {
         c.close().await.unwrap();
     }
 
+    async fn exec(sqls: &[&'static str]) {
+        let mut c = sqlx::PgConnection::connect(
+            "postgres://postgres:mandor-e2e@127.0.0.1:55432/postgres?sslmode=disable",
+        )
+        .await
+        .unwrap();
+        for sql in sqls {
+            sqlx::query(*sql).execute(&mut c).await.unwrap();
+        }
+        c.close().await.unwrap();
+    }
+
+    async fn extensions_follow_usability(db: &PgLabDatabase, admin: &DbCredentials) {
+        let block = |p: &mandor_domain::lab_data::RolePrivileges| role_block(p);
+        exec(&[
+            "DROP EXTENSION IF EXISTS dblink CASCADE",
+            "DROP EXTENSION IF EXISTS postgres_fdw CASCADE",
+            "CREATE EXTENSION dblink",
+        ])
+        .await;
+        // Fungsi dblink bisa dijalankan PUBLIC: role lab bisa membuka koneksi.
+        let p = db.role_privileges(admin, "lab_min").await.unwrap();
+        assert_eq!(
+            block(&p),
+            Some(LabDataBlock::Extension("dblink".to_owned())),
+            "{p:?}"
+        );
+        exec(&["REVOKE EXECUTE ON ALL FUNCTIONS IN SCHEMA public FROM PUBLIC"]).await;
+        let p = db.role_privileges(admin, "lab_min").await.unwrap();
+        assert_eq!(block(&p), None, "{p:?}");
+        // postgres_fdw milik app: fungsi handler bisa dijalankan PUBLIC, tetapi
+        // tanpa USAGE server dan tanpa user mapping role lab tidak bisa memakai.
+        exec(&[
+            "CREATE EXTENSION postgres_fdw",
+            "CREATE SERVER landlord_server FOREIGN DATA WRAPPER postgres_fdw OPTIONS (dbname 'postgres')",
+            "CREATE USER MAPPING FOR postgres SERVER landlord_server OPTIONS (user 'postgres', password 'mandor-e2e')",
+            "CREATE FOREIGN TABLE remote_kb (id int) SERVER landlord_server OPTIONS (table_name 'kb_values')",
+        ])
+        .await;
+        let p = db.role_privileges(admin, "lab_min").await.unwrap();
+        assert_eq!(block(&p), None, "{p:?}");
+        exec(&["GRANT SELECT ON remote_kb TO lab_min"]).await;
+        let p = db.role_privileges(admin, "lab_min").await.unwrap();
+        assert_eq!(
+            block(&p),
+            Some(LabDataBlock::Extension("postgres_fdw".to_owned())),
+            "{p:?}"
+        );
+        exec(&[
+            "REVOKE SELECT ON remote_kb FROM lab_min",
+            "GRANT USAGE ON FOREIGN SERVER landlord_server TO lab_min",
+        ])
+        .await;
+        let p = db.role_privileges(admin, "lab_min").await.unwrap();
+        assert_eq!(
+            block(&p),
+            Some(LabDataBlock::Extension("postgres_fdw".to_owned())),
+            "{p:?}"
+        );
+        exec(&[
+            "DROP EXTENSION postgres_fdw CASCADE",
+            "DROP EXTENSION dblink CASCADE",
+        ])
+        .await;
+    }
+
     #[tokio::test]
     async fn adapter_pada_postgres_sungguhan() {
         if !enabled() {
@@ -190,6 +256,8 @@ mod pg {
             matches!(role_block(&wide), Some(LabDataBlock::MemberOf(r)) if r == "pg_read_all_data")
         );
         assert!(db.role_privileges(&admin, "tidak_ada").await.is_err());
+        // Extension terlarang hanya menolak bila role lab bisa memakainya.
+        extensions_follow_usability(&db, &admin).await;
         // pg_stat_activity terbaca beserta pid sendiri.
         let (rows, own) = db.activity(&admin).await.unwrap();
         assert!(rows.iter().any(|r| r.pid == own));

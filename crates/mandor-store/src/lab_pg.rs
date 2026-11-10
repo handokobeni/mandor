@@ -9,7 +9,8 @@
 use std::time::Duration;
 
 use mandor_domain::lab_data::{
-    PgActivity, RoleAttribute, RolePrivileges, check_statement, is_local_db, server_addr_local,
+    ExtensionAccess, PgActivity, RoleAttribute, RolePrivileges, check_statement, is_local_db,
+    server_addr_local,
 };
 use mandor_usecase::PortError;
 use mandor_usecase::run_ports::{DbCredentials, LabDatabase, SqlResult};
@@ -139,6 +140,27 @@ const TABLES: &str = concat!(
     "WHERE c.relkind IN ('r', 'p') AND n.nspname NOT IN ('pg_catalog', 'information_schema') ",
     "AND n.nspname NOT LIKE 'pg\\_toast%' ORDER BY 1"
 );
+/// Extension terpasang dan jalur yang bisa dipakai role `$1`: fungsi yang bisa
+/// dijalankan (selain handler/validator foreign data wrapper), dan USAGE pada
+/// wrapper atau server FDW milik extension atau hak pada foreign table-nya.
+const EXTENSION_USE: &str = "\
+SELECT e.extname::text, \
+  EXISTS ( \
+    SELECT 1 FROM pg_depend d JOIN pg_proc p ON p.oid = d.objid \
+    WHERE d.classid = 'pg_proc'::regclass AND d.refobjid = e.oid AND d.deptype = 'e' \
+      AND NOT EXISTS (SELECT 1 FROM pg_foreign_data_wrapper w \
+                      WHERE w.fdwhandler = p.oid OR w.fdwvalidator = p.oid) \
+      AND has_function_privilege($1, p.oid, 'EXECUTE')), \
+  EXISTS ( \
+    SELECT 1 FROM pg_depend d JOIN pg_foreign_data_wrapper w ON w.oid = d.objid \
+    WHERE d.classid = 'pg_foreign_data_wrapper'::regclass AND d.refobjid = e.oid AND d.deptype = 'e' \
+      AND (has_foreign_data_wrapper_privilege($1, w.oid, 'USAGE') OR EXISTS ( \
+        SELECT 1 FROM pg_foreign_server s WHERE s.srvfdw = w.oid \
+          AND (has_server_privilege($1, s.oid, 'USAGE') OR EXISTS ( \
+            SELECT 1 FROM pg_foreign_table ft WHERE ft.ftserver = s.oid \
+              AND has_table_privilege($1, ft.ftrelid, 'SELECT, INSERT, UPDATE, DELETE')))))) \
+FROM pg_extension e ORDER BY 1";
+
 const ROLE_OWNED: &str = "SELECT ( \
        (SELECT count(*) FROM pg_class WHERE relowner = r.oid) \
      + (SELECT count(*) FROM pg_proc WHERE proowner = r.oid) \
@@ -198,12 +220,20 @@ async fn privileges(conn: &mut PgConnection, role: &str) -> Result<RolePrivilege
     .map_err(db_error)?;
     let extensions = tokio::time::timeout(
         CATALOG_TIMEOUT,
-        sqlx::query_scalar::<_, String>("SELECT extname::text FROM pg_extension ORDER BY 1")
+        sqlx::query_as::<_, (String, bool, bool)>(EXTENSION_USE)
+            .bind(role.to_owned())
             .fetch_all(&mut *conn),
     )
     .await
     .map_err(|_| timed_out("reading extensions"))?
-    .map_err(db_error)?;
+    .map_err(db_error)?
+    .into_iter()
+    .map(|(name, functions, wrapper)| ExtensionAccess {
+        name,
+        functions,
+        wrapper,
+    })
+    .collect();
     Ok(RolePrivileges {
         attributes,
         member_of: strings(conn, ROLE_MEMBERSHIP, role).await?,

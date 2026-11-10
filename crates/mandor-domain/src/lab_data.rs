@@ -22,7 +22,9 @@ pub enum LabDataBlock {
     Trigger(String),
     #[error("the lab database role owns {0} database objects")]
     OwnsObjects(u64),
-    #[error("extension {0} is installed in the lab database")]
+    #[error(
+        "the lab database role can use extension {0}; revoke its functions, wrapper, or servers from the role and PUBLIC"
+    )]
     Extension(String),
     #[error("lab database role has no access to {0}")]
     NoAccess(String),
@@ -434,10 +436,45 @@ pub struct RolePrivileges {
     pub trigger_on: Vec<String>,
     /// Jumlah objek milik role.
     pub owned_objects: u64,
-    /// Extension terpasang di database lab.
-    pub extensions: Vec<String>,
+    /// Extension terpasang di database lab, dengan apakah role lab bisa
+    /// memakainya.
+    pub extensions: Vec<ExtensionAccess>,
     /// Tabel penyimpanan yang tidak bisa di-SELECT/INSERT/UPDATE/DELETE role.
     pub missing_access: Vec<String>,
+}
+
+/// Satu extension terpasang dan jalur yang bisa dipakai role lab.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ExtensionAccess {
+    pub name: String,
+    /// Role bisa menjalankan fungsi extension selain handler/validator FDW.
+    pub functions: bool,
+    /// Role punya USAGE pada wrapper atau server FDW extension, atau hak pada
+    /// foreign table-nya.
+    pub wrapper: bool,
+}
+
+impl ExtensionAccess {
+    #[must_use]
+    pub fn new(name: &str, functions: bool, wrapper: bool) -> Self {
+        Self {
+            name: name.to_owned(),
+            functions,
+            wrapper,
+        }
+    }
+
+    /// Role lab bisa memakai extension terlarang ini untuk keluar dari
+    /// database lab. `dblink` membuka koneksi lewat fungsinya; fungsi
+    /// `postgres_fdw`/`file_fdw` hanya handler, validator, dan pengelola
+    /// koneksi role itu sendiri, jadi jalurnya hanya wrapper.
+    fn forbidden_use(&self) -> bool {
+        match self.name.to_ascii_lowercase().as_str() {
+            "dblink" => self.functions || self.wrapper,
+            "postgres_fdw" | "file_fdw" => self.wrapper,
+            _ => false,
+        }
+    }
 }
 
 /// Atribut role `PostgreSQL` yang membuat role lab ditolak.
@@ -462,8 +499,6 @@ impl RoleAttribute {
         }
     }
 }
-
-const FORBIDDEN_EXTENSIONS: &[&str] = &["dblink", "postgres_fdw", "file_fdw"];
 
 /// Alasan pertama role lab tidak boleh dipakai; `None` bila hanya punya hak
 /// baca/tulis data biasa.
@@ -491,12 +526,8 @@ pub fn role_block(p: &RolePrivileges) -> Option<LabDataBlock> {
     if p.owned_objects > 0 {
         return Some(LabDataBlock::OwnsObjects(p.owned_objects));
     }
-    if let Some(e) = p
-        .extensions
-        .iter()
-        .find(|e| FORBIDDEN_EXTENSIONS.contains(&e.to_ascii_lowercase().as_str()))
-    {
-        return Some(LabDataBlock::Extension(e.clone()));
+    if let Some(e) = p.extensions.iter().find(|e| e.forbidden_use()) {
+        return Some(LabDataBlock::Extension(e.name.clone()));
     }
     p.missing_access
         .first()
@@ -1257,8 +1288,30 @@ mod tests {
             Some(LabDataBlock::OwnsObjects(3))
         );
         assert_eq!(
-            with(|p| p.extensions = vec!["plpgsql".to_owned(), "postgres_fdw".to_owned()]),
+            with(|p| p.extensions = vec![
+                ExtensionAccess::new("plpgsql", true, false),
+                ExtensionAccess::new("postgres_fdw", false, true),
+            ]),
             Some(LabDataBlock::Extension("postgres_fdw".to_owned()))
+        );
+        // Terpasang tetapi tidak bisa dipakai role lab: diizinkan. Fungsi
+        // postgres_fdw yang bisa dijalankan PUBLIC (handler, pengelola
+        // koneksi) tidak membuka jalan tanpa wrapper/server.
+        assert_eq!(
+            with(|p| p.extensions = vec![
+                ExtensionAccess::new("dblink", false, false),
+                ExtensionAccess::new("postgres_fdw", true, false),
+                ExtensionAccess::new("file_fdw", true, false),
+            ]),
+            None
+        );
+        assert_eq!(
+            with(|p| p.extensions = vec![ExtensionAccess::new("DBLINK", true, false)]),
+            Some(LabDataBlock::Extension("DBLINK".to_owned()))
+        );
+        assert_eq!(
+            with(|p| p.extensions = vec![ExtensionAccess::new("dblink", false, true)]),
+            Some(LabDataBlock::Extension("dblink".to_owned()))
         );
         assert_eq!(
             with(|p| p.missing_access = vec!["kb_new".to_owned()]),

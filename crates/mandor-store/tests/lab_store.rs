@@ -226,11 +226,59 @@ mod pg {
             Some(LabDataBlock::Extension("postgres_fdw".to_owned())),
             "{p:?}"
         );
+        indirect_paths_block(db, admin, &block).await;
         exec(&[
             "DROP EXTENSION postgres_fdw CASCADE",
             "DROP EXTENSION dblink CASCADE",
         ])
         .await;
+    }
+
+    async fn indirect_paths_block(
+        db: &PgLabDatabase,
+        admin: &DbCredentials,
+        block: &impl Fn(&mandor_domain::lab_data::RolePrivileges) -> Option<LabDataBlock>,
+    ) {
+        // Jalur tidak langsung: hak per kolom, view (bertingkat) di atas
+        // foreign table, dan fungsi SECURITY DEFINER berjalan dengan hak
+        // pemiliknya.
+        let blocked = |p: &mandor_domain::lab_data::RolePrivileges| {
+            assert_eq!(
+                block(p),
+                Some(LabDataBlock::Extension("postgres_fdw".to_owned())),
+                "{p:?}"
+            );
+        };
+        exec(&[
+            "REVOKE USAGE ON FOREIGN SERVER landlord_server FROM lab_min",
+            "GRANT SELECT (id) ON remote_kb TO lab_min",
+        ])
+        .await;
+        blocked(&db.role_privileges(admin, "lab_min").await.unwrap());
+        exec(&[
+            "REVOKE SELECT (id) ON remote_kb FROM lab_min",
+            "CREATE VIEW remote_v1 AS SELECT id FROM remote_kb",
+            "CREATE VIEW remote_v2 AS SELECT id FROM remote_v1",
+            "GRANT SELECT ON remote_v2 TO lab_min",
+        ])
+        .await;
+        blocked(&db.role_privileges(admin, "lab_min").await.unwrap());
+        exec(&[
+            "DROP VIEW remote_v2",
+            "DROP VIEW remote_v1",
+            "CREATE FUNCTION remote_count() RETURNS bigint LANGUAGE sql SECURITY DEFINER AS 'SELECT 1::bigint'",
+        ])
+        .await;
+        // Fungsi SECURITY DEFINER dihitung untuk setiap extension terlarang.
+        let p = db.role_privileges(admin, "lab_min").await.unwrap();
+        assert!(
+            matches!(block(&p), Some(LabDataBlock::Extension(_))),
+            "{p:?}"
+        );
+        exec(&["REVOKE EXECUTE ON FUNCTION remote_count() FROM PUBLIC"]).await;
+        let p = db.role_privileges(admin, "lab_min").await.unwrap();
+        assert_eq!(block(&p), None, "{p:?}");
+        exec(&["DROP FUNCTION remote_count()"]).await;
     }
 
     #[tokio::test]

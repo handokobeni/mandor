@@ -140,10 +140,34 @@ const TABLES: &str = concat!(
     "WHERE c.relkind IN ('r', 'p') AND n.nspname NOT IN ('pg_catalog', 'information_schema') ",
     "AND n.nspname NOT LIKE 'pg\\_toast%' ORDER BY 1"
 );
-/// Extension terpasang dan jalur yang bisa dipakai role `$1`: fungsi yang bisa
-/// dijalankan (selain handler/validator foreign data wrapper), dan USAGE pada
-/// wrapper atau server FDW milik extension atau hak pada foreign table-nya.
+/// Extension terpasang dan jalur yang bisa dipakai role `$1`.
+///
+/// - Kolom kedua: fungsi extension yang bisa dijalankan, selain handler dan
+///   validator foreign data wrapper.
+/// - Kolom ketiga: USAGE pada wrapper atau server FDW milik extension, atau
+///   hak tabel maupun kolom pada foreign table servernya atau view (bertingkat)
+///   di atasnya, karena view berjalan dengan hak pemiliknya.
+/// - Fungsi SECURITY DEFINER bukan milik extension yang bisa dijalankan role
+///   dihitung sebagai jalur untuk setiap extension (gagal tertutup): fungsi itu
+///   berjalan dengan hak pemiliknya dan bisa memanggil dblink atau foreign
+///   table.
 const EXTENSION_USE: &str = "\
+WITH RECURSIVE reach(fdw, rel) AS ( \
+    SELECT s.srvfdw, ft.ftrelid FROM pg_foreign_table ft \
+      JOIN pg_foreign_server s ON s.oid = ft.ftserver \
+  UNION \
+    SELECT r.fdw, rw.ev_class FROM reach r \
+      JOIN pg_depend d ON d.refclassid = 'pg_class'::regclass AND d.refobjid = r.rel \
+        AND d.classid = 'pg_rewrite'::regclass \
+      JOIN pg_rewrite rw ON rw.oid = d.objid \
+    WHERE rw.ev_class <> r.rel), \
+definer AS ( \
+  SELECT EXISTS ( \
+    SELECT 1 FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace \
+    WHERE p.prosecdef AND n.nspname NOT IN ('pg_catalog', 'information_schema') \
+      AND NOT EXISTS (SELECT 1 FROM pg_depend d WHERE d.classid = 'pg_proc'::regclass \
+                      AND d.objid = p.oid AND d.deptype = 'e') \
+      AND has_function_privilege($1, p.oid, 'EXECUTE')) AS callable) \
 SELECT e.extname::text, \
   EXISTS ( \
     SELECT 1 FROM pg_depend d JOIN pg_proc p ON p.oid = d.objid \
@@ -151,14 +175,15 @@ SELECT e.extname::text, \
       AND NOT EXISTS (SELECT 1 FROM pg_foreign_data_wrapper w \
                       WHERE w.fdwhandler = p.oid OR w.fdwvalidator = p.oid) \
       AND has_function_privilege($1, p.oid, 'EXECUTE')), \
-  EXISTS ( \
+  (SELECT callable FROM definer) OR EXISTS ( \
     SELECT 1 FROM pg_depend d JOIN pg_foreign_data_wrapper w ON w.oid = d.objid \
     WHERE d.classid = 'pg_foreign_data_wrapper'::regclass AND d.refobjid = e.oid AND d.deptype = 'e' \
-      AND (has_foreign_data_wrapper_privilege($1, w.oid, 'USAGE') OR EXISTS ( \
-        SELECT 1 FROM pg_foreign_server s WHERE s.srvfdw = w.oid \
-          AND (has_server_privilege($1, s.oid, 'USAGE') OR EXISTS ( \
-            SELECT 1 FROM pg_foreign_table ft WHERE ft.ftserver = s.oid \
-              AND has_table_privilege($1, ft.ftrelid, 'SELECT, INSERT, UPDATE, DELETE')))))) \
+      AND (has_foreign_data_wrapper_privilege($1, w.oid, 'USAGE') \
+        OR EXISTS (SELECT 1 FROM pg_foreign_server s \
+                   WHERE s.srvfdw = w.oid AND has_server_privilege($1, s.oid, 'USAGE')) \
+        OR EXISTS (SELECT 1 FROM reach r WHERE r.fdw = w.oid \
+                   AND (has_table_privilege($1, r.rel, 'SELECT, INSERT, UPDATE, DELETE') \
+                     OR has_any_column_privilege($1, r.rel, 'SELECT, INSERT, UPDATE, REFERENCES'))))) \
 FROM pg_extension e ORDER BY 1";
 
 const ROLE_OWNED: &str = "SELECT ( \

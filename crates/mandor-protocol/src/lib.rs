@@ -48,6 +48,11 @@ pub mod method {
     /// Koneksi kapabilitas, peran `lab_setup`: usulan perlengkapan lab
     /// (`LabEquipmentDto` tanpa password) → `{"saved": true}` (KTD-L14).
     pub const LEDGER_TOOL_LAB_PROPOSE: &str = "ledger.tool.lab_propose";
+    /// Approve atau Reject rekomendasi tampilan (`LookDecisionParams` →
+    /// `Vec<AcRowView>`, R18).
+    pub const LEDGER_LOOK_DECISION: &str = "ledger.look_decision";
+    /// Temuan reviewer di luar AC (`RunRef` → `Vec<FindingView>`, R19).
+    pub const REVIEW_FINDINGS_LIST: &str = "review.findings";
     /// Koneksi kapabilitas, peran ask atau design di laptop: `AskToolQuestion`
     /// → teks balasan alat (plan 2026-11-07-001).
     pub const ASK_TOOL_ASK: &str = "ask.tool.ask";
@@ -371,7 +376,50 @@ pub fn ts_bindings() -> Result<Vec<(&'static str, String)>, String> {
     .chain(group_bindings()?)
     .chain(prototype_bindings()?)
     .chain(approval_bindings()?)
+    .chain(lab_bindings()?)
     .collect())
+}
+
+/// Tipe review lab (plan 2026-11-10-001).
+fn lab_bindings() -> Result<Vec<(&'static str, String)>, String> {
+    use ts_rs::{Config, TS};
+    let cfg = Config::new();
+    let one = |name: &'static str, s: Result<String, ts_rs::ExportError>| {
+        s.map(|body| (name, body)).map_err(|e| e.to_string())
+    };
+    Ok(vec![
+        one("LabRepoRef.ts", LabRepoRef::export_to_string(&cfg))?,
+        one(
+            "BlockedRequestView.ts",
+            BlockedRequestView::export_to_string(&cfg),
+        )?,
+        one("EvidenceView.ts", EvidenceView::export_to_string(&cfg))?,
+        one(
+            "LookRecommendationView.ts",
+            LookRecommendationView::export_to_string(&cfg),
+        )?,
+        one(
+            "LookDecisionParams.ts",
+            LookDecisionParams::export_to_string(&cfg),
+        )?,
+        one("FindingView.ts", FindingView::export_to_string(&cfg))?,
+        one("LabView.ts", LabView::export_to_string(&cfg))?,
+        one(
+            "LabEquipmentDto.ts",
+            LabEquipmentDto::export_to_string(&cfg),
+        )?,
+        one("LabAccountDto.ts", LabAccountDto::export_to_string(&cfg))?,
+        one("LabLoginDto.ts", LabLoginDto::export_to_string(&cfg))?,
+        one(
+            "LabPasswordInput.ts",
+            LabPasswordInput::export_to_string(&cfg),
+        )?,
+        one("LabSetParams.ts", LabSetParams::export_to_string(&cfg))?,
+        one(
+            "LabApproveParams.ts",
+            LabApproveParams::export_to_string(&cfg),
+        )?,
+    ])
 }
 
 /// Tipe kartu persetujuan (plan 2026-11-06-001).
@@ -583,23 +631,6 @@ fn review_bindings() -> Result<Vec<(&'static str, String)>, String> {
         one(
             "ReviewerSettingsView.ts",
             ReviewerSettingsView::export_to_string(&cfg),
-        )?,
-        one("LabRepoRef.ts", LabRepoRef::export_to_string(&cfg))?,
-        one("LabView.ts", LabView::export_to_string(&cfg))?,
-        one(
-            "LabEquipmentDto.ts",
-            LabEquipmentDto::export_to_string(&cfg),
-        )?,
-        one("LabAccountDto.ts", LabAccountDto::export_to_string(&cfg))?,
-        one("LabLoginDto.ts", LabLoginDto::export_to_string(&cfg))?,
-        one(
-            "LabPasswordInput.ts",
-            LabPasswordInput::export_to_string(&cfg),
-        )?,
-        one("LabSetParams.ts", LabSetParams::export_to_string(&cfg))?,
-        one(
-            "LabApproveParams.ts",
-            LabApproveParams::export_to_string(&cfg),
         )?,
         one("AppMemberView.ts", AppMemberView::export_to_string(&cfg))?,
         one("AppChangesView.ts", AppChangesView::export_to_string(&cfg))?,

@@ -390,6 +390,7 @@ impl<D: Deps> RunService<D> {
             prepared: texts.prepared,
             simulated: report.simulated,
             blocked_requests: hits.into_iter().map(|h| h.request).collect(),
+            lab: self.lab_running(&scope.run_id),
         };
         let text = texts
             .evidence
@@ -660,6 +661,67 @@ impl<D: Deps> RunService<D> {
             .and_then(|r| r.visual_detail.screenshots.get(index).cloned())
             .ok_or(crate::RunError::NotFound("screenshot"))?;
         Ok(self.agent.screenshot(run_id, &name).await?)
+    }
+
+    /// Screenshot bukti verdict ke-`index` milik baris (R16).
+    ///
+    /// # Errors
+    /// Baris atau screenshot tidak ada, atau salinan tidak terbaca.
+    pub async fn evidence_screenshot(
+        &self,
+        run_id: &str,
+        ac_id: &str,
+        index: usize,
+    ) -> Result<Vec<u8>, crate::RunError> {
+        let rows = self.reviews.ac_rows(run_id).await?;
+        let name = rows
+            .iter()
+            .find(|r| r.ac_id == ac_id)
+            .and_then(|r| r.evidence_detail.as_ref())
+            .and_then(|d| d.screenshots.get(index).cloned())
+            .ok_or(crate::RunError::NotFound("screenshot"))?;
+        Ok(self.agent.screenshot(run_id, &name).await?)
+    }
+
+    /// Keputusan dev atas rekomendasi reviewer untuk baris *looks different*
+    /// (R18, KTD-L13): Approve pada `accept` menerima perbedaan; Reject dan
+    /// `follow_prototype` membiarkan baris tetap menahan push.
+    ///
+    /// # Errors
+    /// Baris tidak ada atau tanpa rekomendasi, review sedang berjalan, atau
+    /// penyimpanan gagal.
+    pub async fn decide_look_recommendation(
+        &self,
+        run_id: &str,
+        ac_id: &str,
+        approve: bool,
+        by: Option<&str>,
+    ) -> Result<Vec<AcRow>, crate::RunError> {
+        let run = self.load(run_id).await?;
+        if run.state == mandor_domain::RunState::Reviewing {
+            return Err(crate::RunError::InvalidState("review is running"));
+        }
+        let mut rows = self.reviews.ac_rows(run_id).await?;
+        let row = rows
+            .iter_mut()
+            .find(|r| r.ac_id == ac_id)
+            .ok_or(crate::RunError::NotFound("acceptance criterion"))?;
+        if !mandor_domain::ac_ledger::decide_look(row, approve, by) {
+            return Err(crate::RunError::InvalidState("no recommendation to decide"));
+        }
+        self.reviews.save_ac_rows(run_id, &rows).await?;
+        Ok(rows)
+    }
+
+    /// Temuan reviewer di luar AC untuk run (R19): `(review_id, temuan)`.
+    ///
+    /// # Errors
+    /// Penyimpanan gagal.
+    pub async fn run_findings(
+        &self,
+        run_id: &str,
+    ) -> Result<Vec<(String, Finding)>, crate::RunError> {
+        Ok(self.reviews.findings(run_id).await?)
     }
 
     async fn update_row(

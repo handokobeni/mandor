@@ -607,6 +607,26 @@ pub fn design_gaps_text(rows: &[AcRow], limit: usize) -> String {
     out
 }
 
+/// Keputusan dev atas rekomendasi reviewer untuk baris *looks different*
+/// (R18, KTD-L13). Approve pada `accept` menerima perbedaan dengan alasan
+/// rekomendasi; Approve pada `follow_prototype` dan Reject membiarkan baris
+/// *looks different* sehingga push tetap tertahan. Rekomendasi selalu
+/// dihapus. `false` bila baris tidak berbeda atau tanpa rekomendasi.
+pub fn decide_look(r: &mut AcRow, approve: bool, by: Option<&str>) -> bool {
+    if r.visual != Visual::Differs {
+        return false;
+    }
+    let Some(rec) = r.look_recommendation.take() else {
+        return false;
+    };
+    if approve && rec.advice == crate::lab::LookAdvice::Accept {
+        r.visual = Visual::Accepted;
+        r.visual_detail.decision_reason = Some(rec.reason);
+        r.visual_detail.decided_by = by.map(str::to_owned);
+    }
+    true
+}
+
 #[cfg(test)]
 mod tests {
     use pretty_assertions::assert_eq;
@@ -873,6 +893,45 @@ mod tests {
         r.verdict = verdict;
         r.visual = v;
         r
+    }
+
+    /// R18, AE6: Approve rekomendasi accept menerima perbedaan; Reject dan
+    /// `follow_prototype` membiarkan baris tetap berbeda.
+    #[test]
+    fn keputusan_rekomendasi_tampilan() {
+        use crate::lab::{LookAdvice, LookRecommendation};
+        let rec = |advice| {
+            let mut r = visual_row(Verdict::Pass, Visual::Differs);
+            r.look_recommendation = Some(LookRecommendation {
+                advice,
+                reason: "App follows the AC spelling".to_owned(),
+            });
+            r
+        };
+        let mut a = rec(LookAdvice::Accept);
+        assert!(decide_look(&mut a, true, Some("Beni")));
+        assert_eq!(a.visual, Visual::Accepted);
+        assert_eq!(
+            a.visual_detail.decision_reason.as_deref(),
+            Some("App follows the AC spelling")
+        );
+        assert_eq!(a.visual_detail.decided_by.as_deref(), Some("Beni"));
+        assert!(a.look_recommendation.is_none());
+
+        let mut rejected = rec(LookAdvice::Accept);
+        assert!(decide_look(&mut rejected, false, Some("Beni")));
+        assert_eq!(rejected.visual, Visual::Differs);
+        assert!(rejected.look_recommendation.is_none());
+
+        let mut follow = rec(LookAdvice::FollowPrototype);
+        assert!(decide_look(&mut follow, true, Some("Beni")));
+        assert_eq!(follow.visual, Visual::Differs);
+
+        let mut none = visual_row(Verdict::Pass, Visual::Differs);
+        assert!(!decide_look(&mut none, true, None));
+        let mut matched = rec(LookAdvice::Accept);
+        matched.visual = Visual::Match;
+        assert!(!decide_look(&mut matched, true, None));
     }
 
     #[test]

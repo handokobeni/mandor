@@ -20,6 +20,8 @@ struct StoredEvidence {
     simulated: String,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     blocked: Vec<StoredBlocked>,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    lab: bool,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -43,6 +45,7 @@ pub(crate) fn evidence_json(e: Option<&Evidence>) -> Result<Option<String>, Stor
                 url: b.url.clone(),
             })
             .collect(),
+        lab: e.lab,
     })
     .map(Some)
     .map_err(StoreError::internal)
@@ -64,6 +67,7 @@ pub(crate) fn evidence_of(raw: Option<&str>) -> Result<Option<Evidence>, StoreEr
                 url: b.url,
             })
             .collect(),
+        lab: s.lab,
     }))
 }
 

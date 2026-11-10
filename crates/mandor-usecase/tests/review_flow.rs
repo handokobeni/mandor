@@ -1468,6 +1468,9 @@ async fn covers_ae1_lab_menguji_calon_setelah_review_biasa() {
     assert!(st.lab.ended.lock().unwrap().contains(&review_id));
     // Pass lab tidak butuh konfirmasi manual: ia Pass penuh.
     assert_eq!(r1.effective_verdict(), Verdict::Pass);
+    // Badge "Lab" hanya untuk verdict dari giliran lab.
+    assert!(r1.evidence_detail.as_ref().is_some_and(|d| d.lab));
+    assert!(!r2.evidence_detail.as_ref().is_some_and(|d| d.lab));
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -1554,4 +1557,95 @@ async fn login_role_gagal_disebut_di_pesan_lab() {
     let req = st.agent.last().req;
     assert!(req.message.contains("UNAVAILABLE:admin"), "{}", req.message);
     assert!(!req.review.unwrap().browser);
+}
+
+/// R18, AE6 (KTD-L13): Approve rekomendasi accept menerima perbedaan; Reject
+/// membiarkan baris *looks different*; baris tanpa rekomendasi ditolak.
+#[tokio::test(flavor = "multi_thread")]
+async fn covers_ae6_keputusan_rekomendasi_tampilan() {
+    use mandor_domain::ac_ledger::Visual;
+    use mandor_domain::lab::{LookAdvice, LookRecommendation};
+    let (lark, clock) = setup();
+    let (st, run) = waiting_with_app(&lark, &clock).await;
+    let mut rows = st.svc.ledger(&run).await.unwrap();
+    for r in rows.iter_mut().take(2) {
+        r.visual = Visual::Differs;
+        r.look_recommendation = Some(LookRecommendation {
+            advice: LookAdvice::Accept,
+            reason: "App follows the AC: Key Behavior".to_owned(),
+        });
+    }
+    rows[2].visual = Visual::Differs;
+    let (a1, a2, a3) = (
+        rows[0].ac_id.clone(),
+        rows[1].ac_id.clone(),
+        rows[2].ac_id.clone(),
+    );
+    st.reviews.ledgers.lock().unwrap().insert(run.clone(), rows);
+
+    let rows = st
+        .svc
+        .decide_look_recommendation(&run, &a1, true, Some("Beni"))
+        .await
+        .unwrap();
+    let r1 = rows.iter().find(|r| r.ac_id == a1).unwrap();
+    assert_eq!(r1.visual, Visual::Accepted);
+    assert_eq!(r1.visual_detail.decided_by.as_deref(), Some("Beni"));
+
+    let rows = st
+        .svc
+        .decide_look_recommendation(&run, &a2, false, Some("Beni"))
+        .await
+        .unwrap();
+    let r2 = rows.iter().find(|r| r.ac_id == a2).unwrap();
+    assert_eq!(r2.visual, Visual::Differs, "push tetap tertahan");
+    assert!(r2.look_recommendation.is_none());
+
+    assert!(matches!(
+        st.svc
+            .decide_look_recommendation(&run, &a3, true, None)
+            .await,
+        Err(RunError::InvalidState(_))
+    ));
+    assert!(matches!(
+        st.svc
+            .decide_look_recommendation(&run, "tidak-ada", true, None)
+            .await,
+        Err(RunError::NotFound(_))
+    ));
+}
+
+/// R16, R19: screenshot bukti verdict bisa dibaca dan temuan run terdaftar.
+#[tokio::test(flavor = "multi_thread")]
+async fn screenshot_bukti_dan_temuan_run() {
+    let (lark, clock) = setup();
+    let (st, run, scope) = browser_review(&lark, &clock).await;
+    let ac = st.svc.ledger(&run).await.unwrap()[0].ac_id.clone();
+    let mut r = report_with(&["Buka /x"]);
+    r.screenshots = vec!["page.png".to_owned()];
+    st.svc
+        .ledger_set_verdict(&scope, &ac, Verdict::Pass, r)
+        .await
+        .unwrap();
+    let bytes = st.svc.evidence_screenshot(&run, &ac, 0).await.unwrap();
+    assert_eq!(bytes, format!("{run}/{ac}-0.png").into_bytes());
+    assert!(matches!(
+        st.svc.evidence_screenshot(&run, &ac, 1).await,
+        Err(RunError::NotFound(_))
+    ));
+    st.svc
+        .ledger_report_finding(
+            &scope,
+            mandor_domain::lab::Finding {
+                card: None,
+                title: "Toast overlaps the header".to_owned(),
+                detail: "Seen while saving".to_owned(),
+                evidence: mandor_domain::lab::Evidence::default(),
+            },
+        )
+        .await
+        .unwrap();
+    let findings = st.svc.run_findings(&run).await.unwrap();
+    assert_eq!(findings.len(), 1);
+    assert_eq!(findings[0].1.title, "Toast overlaps the header");
 }

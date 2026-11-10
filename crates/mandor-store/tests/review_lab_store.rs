@@ -40,6 +40,7 @@ fn evidence() -> Evidence {
             method: "POST".to_owned(),
             url: "http://localhost:3000/api/x".to_owned(),
         }],
+        lab: true,
     }
 }
 

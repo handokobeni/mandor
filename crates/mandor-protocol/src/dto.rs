@@ -979,6 +979,58 @@ pub struct VisualScreenshotParams {
     pub run_id: String,
     pub ac_id: String,
     pub index: u32,
+    /// Screenshot bukti verdict (`AcRowView.evidence_detail`), bukan hasil
+    /// tampilan (plan 2026-11-10-001, R16).
+    #[serde(default)]
+    pub evidence: bool,
+}
+
+/// Request yang ditolak proxy review (KTD-L6).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+pub struct BlockedRequestView {
+    pub method: String,
+    pub url: String,
+}
+
+/// Bukti terstruktur verdict (R16, R17, R20).
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, TS)]
+pub struct EvidenceView {
+    pub steps: Vec<String>,
+    /// Nama salinan screenshot; dibaca lewat `review.screenshot` dengan
+    /// `evidence: true`.
+    pub screenshots: Vec<String>,
+    pub prepared: Option<String>,
+    /// `none`, `request`, atau `sql`.
+    pub simulated: String,
+    pub blocked_requests: Vec<BlockedRequestView>,
+    /// Verdict dari reviewer lab (badge "Lab").
+    pub lab: bool,
+}
+
+/// Rekomendasi reviewer untuk baris *looks different* (R18).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+pub struct LookRecommendationView {
+    /// `accept` atau `follow_prototype`.
+    pub advice: String,
+    pub reason: String,
+}
+
+/// Parameter `ledger.look_decision`: Approve atau Reject rekomendasi.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+pub struct LookDecisionParams {
+    pub run_id: String,
+    pub ac_id: String,
+    pub approve: bool,
+}
+
+/// Temuan reviewer di luar AC (R19).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+pub struct FindingView {
+    pub review_id: String,
+    pub card: Option<String>,
+    pub title: String,
+    pub detail: String,
+    pub steps: Vec<String>,
 }
 
 /// Screenshot sebagai data URL gambar.
@@ -1019,6 +1071,14 @@ pub struct AcRowView {
     pub visual: String,
     #[serde(default)]
     pub visual_detail: VisualDetailView,
+    /// Kebutuhan lab untuk Can't verify: `data`, `role`, `simulation`,
+    /// `file` (plan 2026-11-10-001).
+    #[serde(default)]
+    pub lab_need: Option<String>,
+    #[serde(default)]
+    pub evidence_detail: Option<EvidenceView>,
+    #[serde(default)]
+    pub look_recommendation: Option<LookRecommendationView>,
 }
 
 /// Hasil `ledger.get`: buku AC run setelah refresh dari tracker.

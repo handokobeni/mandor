@@ -348,7 +348,11 @@ pub fn parse_hook_input(raw: &[u8]) -> Result<ToolCall, String> {
     // Pola berkas pencarian; `pattern` milik Grep adalah regex isi, bukan
     // berkas, jadi hanya diambil untuk Glob.
     let globs: Vec<String> = match tool_name.as_str() {
-        "Grep" => text("glob").into_iter().collect(),
+        // `type` ripgrep (mis. `ts`) membatasi ke ekstensi bahasa itu.
+        "Grep" => text("glob")
+            .into_iter()
+            .chain(text("type").map(|t| format!("**/*.{t}")))
+            .collect(),
         "Glob" => text("pattern").into_iter().collect(),
         _ => Vec::new(),
     };
@@ -728,6 +732,10 @@ mod tests {
         let glob = parse_hook_input(br#"{"tool_name":"Glob","tool_input":{"pattern":"**/*.pem"}}"#)
             .unwrap();
         assert_eq!(glob.globs, ["**/*.pem"]);
+        let typed =
+            parse_hook_input(br#"{"tool_name":"Grep","tool_input":{"pattern":"x","type":"ts"}}"#)
+                .unwrap();
+        assert_eq!(typed.globs, ["**/*.ts"]);
         let read = parse_hook_input(
             br#"{"tool_name":"Read","tool_input":{"file_path":"a","pattern":"x"}}"#,
         )

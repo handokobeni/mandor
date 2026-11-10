@@ -363,26 +363,68 @@ pub fn lab_read_violation(path: &str) -> Option<String> {
     denied.then(|| format!("mandor: the review lab cannot read `{path}`"))
 }
 
-/// Pola pencarian yang bisa mengenai berkas env (selain `.env.example`) atau
-/// kredensial; pencarian lab tidak boleh menjangkaunya.
-fn secret_glob(glob: &str) -> bool {
-    let g = glob.to_ascii_lowercase();
-    let env = g.contains(".env") && !g.ends_with(".env.example");
-    let wide_env = g.contains("env*") || g.contains("*env") || g.contains("{.env");
-    env || wide_env
-        || crate::hook::is_credential_path(&g)
-        || [
-            "id_rsa",
-            "id_ed25519",
-            ".pem",
-            ".key",
-            "secret",
-            "credential",
-            ".ssh",
-            ".aws",
-        ]
-        .iter()
-        .any(|m| g.contains(m))
+/// Penanda nama berkas rahasia untuk pola pencarian lab.
+const SECRET_NAME_MARKERS: &[&str] = &[
+    "id_rsa",
+    "id_ed25519",
+    "id_ecdsa",
+    ".pem",
+    ".key",
+    ".p12",
+    ".pfx",
+    "secret",
+    "credential",
+    "token",
+    "password",
+    ".ssh",
+    ".aws",
+    ".netrc",
+    ".npmrc",
+    ".pgpass",
+];
+
+/// Nama berkas atau folder literal yang tidak boleh dicari lab.
+fn secret_name(segment: &str) -> bool {
+    let s = segment.to_ascii_lowercase();
+    let env = (s == ".env" || s.starts_with(".env.")) && s != ".env.example";
+    env || crate::hook::is_credential_path(&format!("/{s}/"))
+        || SECRET_NAME_MARKERS.iter().any(|m| s.contains(m))
+}
+
+/// Pola berkas pencarian lab dengan tata bahasa sempit (KTD-L10, KTD-L14):
+/// tanpa kelas karakter, `?`, alternatif, atau negasi; tidak ada segmen yang
+/// menyebut dotfile atau nama rahasia; segmen terakhir yang memakai `*`
+/// harus berakhir dengan ekstensi literal, mis. `**/*.ts`. Pola seperti `*`,
+/// `.e*v`, atau `.[e]nv` ditolak karena bisa mengenai `.env`.
+fn search_glob_allowed(glob: &str) -> bool {
+    if glob.is_empty() || glob.contains(['[', ']', '?', '{', '}', '!', '\\']) {
+        return false;
+    }
+    let segments: Vec<&str> = glob.split('/').filter(|s| !s.is_empty()).collect();
+    let Some((last, dirs)) = segments.split_last() else {
+        return false;
+    };
+    let dir_ok = |seg: &&str| {
+        *seg == "**"
+            || (!seg.starts_with('.') && !secret_name(seg))
+            || (*seg == "." || *seg == "..")
+    };
+    if !dirs.iter().all(dir_ok) || dirs.contains(&"..") {
+        return false;
+    }
+    if secret_name(last) {
+        return false;
+    }
+    match last.rfind('*') {
+        None => !last.starts_with('.') || *last == ".env.example",
+        Some(i) => {
+            let suffix = &last[i + 1..];
+            !last.starts_with('.')
+                && suffix.len() >= 2
+                && suffix.starts_with('.')
+                && !suffix.contains("env")
+        }
+    }
 }
 
 /// Memutuskan tool call giliran lab (KTD-L10): Playwright per role dengan
@@ -415,8 +457,16 @@ fn files_or_ledger(call: &ToolCall, allowed_mcp: &[String], context: &str) -> Ve
     if let Some(reason) = call.paths.iter().find_map(|p| lab_read_violation(p)) {
         return Verdict::Deny(reason);
     }
-    if let Some(glob) = call.globs.iter().find(|g| secret_glob(g)) {
-        return deny(&format!("searching `{glob}` is not available {context}"));
+    if let Some(glob) = call.globs.iter().find(|g| !search_glob_allowed(g)) {
+        return deny(&format!(
+            "the search pattern `{glob}` is not available {context}; use a plain pattern such as **/*.ts"
+        ));
+    }
+    // Grep tanpa pola berkas bisa membaca isi dotfile; wajib `glob` atau `type`.
+    if call.tool_name == "Grep" && call.globs.is_empty() {
+        return deny(&format!(
+            "Grep needs a glob such as **/*.ts or a type {context}"
+        ));
     }
     if LAB_TOOLS.contains(&call.tool_name.as_str()) {
         return Verdict::Allow;

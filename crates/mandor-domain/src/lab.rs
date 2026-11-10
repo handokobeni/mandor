@@ -115,6 +115,8 @@ pub struct Evidence {
     pub prepared: Option<String>,
     pub simulated: Simulated,
     pub blocked_requests: Vec<BlockedRequest>,
+    /// Verdict dicatat oleh giliran reviewer lab (badge "Lab"); diisi daemon.
+    pub lab: bool,
 }
 
 /// Temuan reviewer di luar AC (R19); tidak mengubah verdict.

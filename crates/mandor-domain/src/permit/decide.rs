@@ -1230,8 +1230,9 @@ mod tests {
         let denied = |c: &ToolCall| matches!(d(c), Decision::Deny(_));
         assert!(!denied(&call("Read", Some("README.md"))));
         assert!(!denied(&call("Read", Some(".env.example"))));
-        assert!(!denied(&call("Grep", None)));
         assert!(!denied(&call("mcp__mandor__lab_propose", None)));
+        // Grep tanpa pola berkas bisa membaca dotfile.
+        assert!(denied(&call("Grep", None)));
         assert!(denied(&call("Read", Some(".env"))));
         assert!(denied(&call("Read", Some("config/.env.local"))));
         assert!(denied(&call(
@@ -1252,8 +1253,17 @@ mod tests {
             globs: vec![glob.to_owned()],
             ..ToolCall::default()
         };
-        assert!(!denied(&search("Grep", "*.ts")));
-        assert!(!denied(&search("Glob", "**/.env.example")));
+        for g in [
+            "*.ts",
+            "**/*.tsx",
+            "src/**/*.sql",
+            "**/.env.example",
+            "README.md",
+            "db/seed*.ts",
+        ] {
+            assert!(!denied(&search("Grep", g)), "Grep {g}");
+            assert!(!denied(&search("Glob", g)), "Glob {g}");
+        }
         for g in [
             "**/.env",
             ".env*",
@@ -1262,6 +1272,17 @@ mod tests {
             "**/id_rsa",
             "*.pem",
             "**/secrets.json",
+            ".[e]nv",
+            "?env",
+            "**/.e*v",
+            "*",
+            "**/*",
+            "{.env,a}",
+            "!*.ts",
+            ".git/config",
+            "../x/*.ts",
+            "**/*.key",
+            "*.env",
         ] {
             assert!(denied(&search("Grep", g)), "Grep {g}");
             assert!(denied(&search("Glob", g)), "Glob {g}");

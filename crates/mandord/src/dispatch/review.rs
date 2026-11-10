@@ -148,11 +148,12 @@ pub(super) fn ledger_tool(name: &str, v: Value) -> Result<LedgerTool, RpcError> 
 async fn screenshot_call(s: &crate::session::LarkSession, v: Value) -> Result<Value, RpcError> {
     let p: mandor_protocol::VisualScreenshotParams = params(v)?;
     let index = usize::try_from(p.index).unwrap_or(usize::MAX);
-    let bytes = s
-        .runs
-        .visual_screenshot(&p.run_id, &p.ac_id, index)
-        .await
-        .map_err(run_error)?;
+    let bytes = if p.evidence {
+        s.runs.evidence_screenshot(&p.run_id, &p.ac_id, index).await
+    } else {
+        s.runs.visual_screenshot(&p.run_id, &p.ac_id, index).await
+    }
+    .map_err(run_error)?;
     ok(&mandor_protocol::VisualScreenshotView {
         data_url: data_url(&bytes),
     })
@@ -467,14 +468,44 @@ impl AppDispatch {
             method::SETTINGS_REVIEWER_GET,
             method::SETTINGS_REVIEWER_SET,
             method::REVIEW_SCREENSHOT,
+            method::LEDGER_LOOK_DECISION,
+            method::REVIEW_FINDINGS_LIST,
         ]
         .contains(&name)
+    }
+
+    /// Keputusan rekomendasi tampilan dan daftar temuan (plan 2026-11-10-001).
+    async fn lab_review_call(
+        &self,
+        s: &crate::session::LarkSession,
+        name: &str,
+        v: Value,
+    ) -> Result<Value, RpcError> {
+        if name == method::LEDGER_LOOK_DECISION {
+            let p: mandor_protocol::LookDecisionParams = params(v)?;
+            let by = self.app.lark_status().await.name;
+            let rows = s
+                .runs
+                .decide_look_recommendation(&p.run_id, &p.ac_id, p.approve, by.as_deref())
+                .await
+                .map_err(run_error)?;
+            return ok(&rows.iter().map(ac_row_view).collect::<Vec<_>>());
+        }
+        let p: RunRef = params(v)?;
+        let all = s.runs.run_findings(&p.run_id).await.map_err(run_error)?;
+        ok(&all
+            .iter()
+            .map(|(id, f)| crate::views::finding_view(id, f))
+            .collect::<Vec<_>>())
     }
 
     pub(super) async fn review_call(&self, name: &str, v: Value) -> Result<Value, RpcError> {
         let s = self.session().await?;
         match name {
             method::REVIEW_SCREENSHOT => screenshot_call(&s, v).await,
+            method::LEDGER_LOOK_DECISION | method::REVIEW_FINDINGS_LIST => {
+                self.lab_review_call(&s, name, v).await
+            }
             method::LEDGER_GET => {
                 let p: RunRef = params(v)?;
                 let r = s.runs.refresh_ledger(&p.run_id).await.map_err(run_error)?;

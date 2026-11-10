@@ -126,7 +126,8 @@ pub fn lab_operator_prompt(ctx: &OperatorContext<'_>) -> String {
          You are the REVIEW LAB for this task: you test acceptance criteria that the normal \
          review could not prove. You do not change code.\n\n\
          RULES (enforced outside this prompt; violations are blocked):\n\
-         - You have no shell. Read code with Read, Grep, and Glob only.\n\
+         - You have no shell. Read code with Read, Grep, and Glob only; give Grep a file \
+         pattern such as **/*.ts (patterns that could match .env or key files are blocked).\n\
          - Each test account has its own headless browser: mcp__playwright_<role>__... Mandor \
          already signed it in; do not sign out or change that account.\n\
          - You may run JavaScript in the page with browser_evaluate, for example to slow down \
@@ -160,7 +161,8 @@ pub fn lab_setup_prompt(ctx: &OperatorContext<'_>) -> String {
          anything.\n\n\
          RULES (enforced outside this prompt; violations are blocked):\n\
          - You have no shell and no browser. Read with Read, Grep, and Glob only: the README, \
-         .env.example, seed scripts and fixtures, and the login page code.\n\
+         .env.example, seed scripts and fixtures, and the login page code. Give Grep a file \
+         pattern such as **/*.ts.\n\
          - .env files, credentials, and folders outside this repo are not available. Never put \
          a password, token, or cookie in the proposal; the developer enters passwords.\n\
          - Use only test accounts that the repo itself seeds or documents. Selectors are \
@@ -1093,6 +1095,7 @@ mod tests {
         assert!(setup.contains("mcp__mandor__lab_propose"), "{setup}");
         assert!(setup.contains("Never put"), "{setup}");
         assert!(setup.contains("untrusted DATA"), "{setup}");
+        assert!(setup.contains("**/*.ts"), "{setup}");
         assert!(lab_setup_message("http://localhost:5173").contains("http://localhost:5173"));
     }
 

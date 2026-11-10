@@ -1589,12 +1589,13 @@ impl mandor_usecase::run_ports::LabPort for FakeLab {
     async fn stage_fixtures(
         &self,
         review_id: &str,
-        source: &Path,
+        worktree: &Path,
+        dir: &str,
     ) -> Result<Option<PathBuf>, PortError> {
         self.staged
             .lock()
             .unwrap()
-            .push((review_id.to_owned(), source.to_path_buf()));
+            .push((review_id.to_owned(), worktree.join(dir)));
         Ok(Some(PathBuf::from(format!(
             "/daemon/lab/{review_id}/fixtures"
         ))))

@@ -358,13 +358,15 @@ pub trait LabPort: Send + Sync {
         &self,
         req: LabLogin<'_>,
     ) -> impl Future<Output = Result<PathBuf, LoginFailure>> + Send;
-    /// Menyalin folder berkas uji repo ke staging milik daemon (KTD-L11):
-    /// hanya berkas biasa, tanpa symlink dan dotfile. `None` bila folder
-    /// sumber tidak ada.
+    /// Menyalin folder berkas uji `dir` (relatif terhadap `worktree`) ke
+    /// staging milik daemon (KTD-L11): hanya berkas biasa, tanpa symlink dan
+    /// dotfile; folder yang jalurnya melewati symlink ditolak. `None` bila
+    /// folder sumber tidak ada.
     fn stage_fixtures(
         &self,
         review_id: &str,
-        source: &std::path::Path,
+        worktree: &std::path::Path,
+        dir: &str,
     ) -> impl Future<Output = Result<Option<PathBuf>, PortError>> + Send;
     /// Menghentikan proxy dan menghapus berkas sesi review.
     fn end_review(&self, review_id: &str) -> impl Future<Output = ()> + Send;

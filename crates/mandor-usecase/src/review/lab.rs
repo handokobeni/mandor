@@ -395,7 +395,7 @@ impl<D: Deps> RunService<D> {
         };
         match self
             .lab
-            .stage_fixtures(&progress.review_id, &worktree.join(dir))
+            .stage_fixtures(&progress.review_id, &worktree, &dir)
             .await
         {
             Ok(staged) => progress.fixtures = staged,

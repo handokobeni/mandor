@@ -192,12 +192,14 @@ impl LabPort for ProdLab {
     async fn stage_fixtures(
         &self,
         review_id: &str,
-        source: &Path,
+        worktree: &Path,
+        dir: &str,
     ) -> Result<Option<PathBuf>, PortError> {
         let target = self.sessions_dir(review_id).join("fixtures");
-        let from = source.to_path_buf();
+        let root = worktree.to_path_buf();
+        let rel = dir.to_owned();
         let to = target.clone();
-        let copy = tokio::task::spawn_blocking(move || copy_fixtures(&from, &to));
+        let copy = tokio::task::spawn_blocking(move || copy_fixtures(&root, &rel, &to));
         match tokio::time::timeout(STAGE_TIMEOUT, copy).await {
             Ok(Ok(Ok(true))) => Ok(Some(target)),
             Ok(Ok(Ok(false))) => Ok(None),
@@ -245,16 +247,49 @@ impl LabPort for ProdLab {
 /// Menyalin berkas biasa dari `from` ke `to` (0700): symlink, dotfile, dan
 /// berkas di atas batas ukuran dilewati. `false` bila `from` bukan folder.
 /// Sinkron; dipanggil lewat `spawn_blocking`.
-fn copy_fixtures(from: &Path, to: &Path) -> std::io::Result<bool> {
-    let Ok(meta) = std::fs::symlink_metadata(from) else {
+fn copy_fixtures(root: &Path, dir: &str, to: &Path) -> std::io::Result<bool> {
+    let Some(from) = fixtures_source(root, dir)? else {
         return Ok(false);
     };
-    if !meta.is_dir() {
-        return Ok(false);
-    }
     let mut copied = 0usize;
-    copy_dir(from, to, &mut copied)?;
+    copy_dir(&from, to, &mut copied)?;
     Ok(true)
+}
+
+/// Folder sumber berkas uji di bawah `root`. Setiap bagian jalur diperiksa
+/// tanpa mengikuti symlink, lalu jalur kanonisnya harus tetap di bawah
+/// `root` kanonis; symlink di bagian mana pun ditolak sebagai error.
+fn fixtures_source(root: &Path, dir: &str) -> std::io::Result<Option<PathBuf>> {
+    let mut path = root.to_path_buf();
+    for part in Path::new(dir).components() {
+        let std::path::Component::Normal(name) = part else {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "test files folder must be a plain relative path",
+            ));
+        };
+        path.push(name);
+        let Ok(meta) = std::fs::symlink_metadata(&path) else {
+            return Ok(None);
+        };
+        if meta.file_type().is_symlink() {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "test files folder passes through a symlink",
+            ));
+        }
+        if !meta.is_dir() {
+            return Ok(None);
+        }
+    }
+    let base = std::fs::canonicalize(root)?;
+    if !std::fs::canonicalize(&path)?.starts_with(&base) {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "test files folder is outside the worktree",
+        ));
+    }
+    Ok(Some(path))
 }
 
 fn copy_dir(from: &Path, to: &Path, copied: &mut usize) -> std::io::Result<()> {
@@ -368,18 +403,35 @@ mod tests {
         let dir = tempfile::tempdir().unwrap_or_else(|e| panic!("{e}"));
         let src = dir.path().join("src");
         std::fs::create_dir_all(src.join("kb")).unwrap_or_else(|e| panic!("{e}"));
+        let root = dir.path();
         std::fs::write(src.join("kb/a.xlsx"), b"x").unwrap_or_else(|e| panic!("{e}"));
         std::fs::write(src.join(".env"), b"SECRET=1").unwrap_or_else(|e| panic!("{e}"));
         #[cfg(unix)]
         std::os::unix::fs::symlink("/etc/passwd", src.join("pw")).unwrap_or_else(|e| panic!("{e}"));
         let out = dir.path().join("out");
-        assert!(copy_fixtures(&src, &out).unwrap_or_else(|e| panic!("{e}")));
+        assert!(copy_fixtures(root, "src", &out).unwrap_or_else(|e| panic!("{e}")));
         assert!(out.join("kb/a.xlsx").is_file());
         assert!(!out.join(".env").exists());
         assert!(!out.join("pw").exists());
-        assert!(
-            !copy_fixtures(&dir.path().join("tidak-ada"), &out).unwrap_or_else(|e| panic!("{e}"))
-        );
+        assert!(!copy_fixtures(root, "tidak-ada", &out).unwrap_or_else(|e| panic!("{e}")));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn folder_berkas_uji_lewat_symlink_ditolak() {
+        let dir = tempfile::tempdir().unwrap_or_else(|e| panic!("{e}"));
+        let outside = dir.path().join("rahasia");
+        std::fs::create_dir_all(outside.join("kb")).unwrap_or_else(|e| panic!("{e}"));
+        std::fs::write(outside.join("kb/id_rsa"), b"k").unwrap_or_else(|e| panic!("{e}"));
+        let root = dir.path().join("wt");
+        std::fs::create_dir_all(&root).unwrap_or_else(|e| panic!("{e}"));
+        std::os::unix::fs::symlink(&outside, root.join("fixtures"))
+            .unwrap_or_else(|e| panic!("{e}"));
+        let out = dir.path().join("out");
+        assert!(copy_fixtures(&root, "fixtures/kb", &out).is_err());
+        assert!(copy_fixtures(&root, "fixtures", &out).is_err());
+        assert!(copy_fixtures(&root, "../rahasia", &out).is_err());
+        assert!(!out.join("id_rsa").exists());
     }
 
     #[test]

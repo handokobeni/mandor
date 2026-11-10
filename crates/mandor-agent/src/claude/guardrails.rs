@@ -345,10 +345,18 @@ pub fn parse_hook_input(raw: &[u8]) -> Result<ToolCall, String> {
         }));
     }
     let text = |k: &str| input.get(k).and_then(Value::as_str).map(str::to_owned);
+    // Pola berkas pencarian; `pattern` milik Grep adalah regex isi, bukan
+    // berkas, jadi hanya diambil untuk Glob.
+    let globs: Vec<String> = match tool_name.as_str() {
+        "Grep" => text("glob").into_iter().collect(),
+        "Glob" => text("pattern").into_iter().collect(),
+        _ => Vec::new(),
+    };
     Ok(ToolCall {
         tool_name,
         command,
         paths,
+        globs,
         url: text("url"),
         tab_id: input.get("tabId").and_then(Value::as_u64),
         action: text("action"),
@@ -708,5 +716,22 @@ mod tests {
         assert_eq!(call.paths.len(), 3);
         assert_eq!(call.paths[1], "/etc/passwd");
         assert!(call.paths[2].contains("invalid"));
+    }
+
+    #[test]
+    fn pola_berkas_grep_dan_glob_diurai() {
+        let grep = parse_hook_input(
+            br#"{"tool_name":"Grep","tool_input":{"pattern":"DB_PASS","glob":"**/.env"}}"#,
+        )
+        .unwrap();
+        assert_eq!(grep.globs, ["**/.env"]);
+        let glob = parse_hook_input(br#"{"tool_name":"Glob","tool_input":{"pattern":"**/*.pem"}}"#)
+            .unwrap();
+        assert_eq!(glob.globs, ["**/*.pem"]);
+        let read = parse_hook_input(
+            br#"{"tool_name":"Read","tool_input":{"file_path":"a","pattern":"x"}}"#,
+        )
+        .unwrap();
+        assert!(read.globs.is_empty());
     }
 }

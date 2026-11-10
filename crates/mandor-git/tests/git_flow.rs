@@ -939,3 +939,41 @@ async fn rollback_tidak_menghapus_worktree_yang_masih_punya_perubahan() {
     assert!(!port.worktree_exists(&fresh).await);
     assert!(sh(&f.repo, &["branch", "--list", "mandor/pgs-3-baru"]).is_empty());
 }
+
+/// KTD-L14 plan 2026-11-10-001: pengusul perlengkapan membaca salinan bersih
+/// berisi berkas ter-commit saja, tanpa `.env` atau berkas lain yang tidak
+/// dilacak di checkout developer.
+#[tokio::test]
+async fn salinan_bersih_tanpa_berkas_tak_terlacak() {
+    let f = fixture();
+    std::fs::write(f.repo.join(".env"), "DB_PASSWORD=rahasia\n").unwrap();
+    std::fs::write(f.repo.join("catatan.txt"), "lokal\n").unwrap();
+    let wt = f
+        .git
+        .clean_checkout(&f.repo, "lab-setup-r1", "main")
+        .await
+        .unwrap();
+    assert!(wt.starts_with(f.root.join("workspaces")));
+    assert!(wt.join("README.md").is_file());
+    assert!(!wt.join(".env").exists());
+    assert!(!wt.join("catatan.txt").exists());
+    // Sisa salinan lama diganti salinan baru.
+    std::fs::write(wt.join("sisa.txt"), "x").unwrap();
+    let again = f
+        .git
+        .clean_checkout(&f.repo, "lab-setup-r1", "main")
+        .await
+        .unwrap();
+    assert_eq!(again, wt);
+    assert!(!again.join("sisa.txt").exists());
+    f.git.remove_worktree(&f.repo, &wt, None).await;
+    assert!(!wt.exists());
+    // Branch lokal tidak dibuat.
+    assert!(!sh(&f.repo, &["branch", "--list"]).contains("lab-setup"));
+    for bad in ["../luar", "a/b", ""] {
+        assert!(
+            f.git.clean_checkout(&f.repo, bad, "main").await.is_err(),
+            "{bad}"
+        );
+    }
+}

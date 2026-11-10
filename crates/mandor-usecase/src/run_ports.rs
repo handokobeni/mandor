@@ -118,6 +118,19 @@ pub trait GitPort: Send + Sync {
         branch: &str,
     ) -> impl Future<Output = Result<(), PortError>> + Send;
     fn worktree_exists(&self, worktree: &Path) -> impl Future<Output = bool> + Send;
+    /// Salinan bersih branch default repo tanpa berkas yang tidak dilacak
+    /// (pengusul perlengkapan lab, KTD-L14); dihapus dengan
+    /// [`Self::discard_clean_checkout`].
+    fn clean_checkout(
+        &self,
+        repo: &RepoInfo,
+    ) -> impl Future<Output = Result<PathBuf, PortError>> + Send;
+    /// Menghapus salinan bersih; tidak pernah gagal.
+    fn discard_clean_checkout(
+        &self,
+        repo: &RepoInfo,
+        path: &Path,
+    ) -> impl Future<Output = ()> + Send;
     /// Ukuran folder dalam byte (berkas di bawahnya, tanpa mengikuti symlink),
     /// dibatasi waktu (plan `2026-11-03-001`, KTD-C3).
     fn dir_size(&self, path: &Path) -> impl Future<Output = Result<u64, PortError>> + Send;

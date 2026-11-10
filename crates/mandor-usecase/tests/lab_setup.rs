@@ -50,12 +50,16 @@ fn setup_scope(st: &Station) -> mandor_usecase::review::CapabilityScope {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn giliran_pengusul_berjalan_di_worktree_utama_dengan_batas_sendiri() {
+async fn giliran_pengusul_berjalan_di_salinan_bersih_dengan_batas_sendiri() {
     let st = station(&FakeLark::default(), &FakeClock::default(), "ou_me");
     web_repo(&st);
     st.svc.propose_lab("repo1").await.unwrap();
     let req = st.agent.last().req;
-    assert_eq!(req.worktree, std::path::PathBuf::from("/repo"));
+    // Salinan bersih branch default, bukan checkout developer (KTD-L14).
+    assert_eq!(
+        req.worktree,
+        std::path::PathBuf::from("/wt/lab-setup-repo1")
+    );
     assert_eq!(req.message, "LAB SETUP http://localhost:5173");
     assert_eq!(req.ledger.as_ref().unwrap().role, CapabilityRole::LabSetup);
     let review = req.review.unwrap();
@@ -104,6 +108,15 @@ async fn usulan_valid_menjadi_draf_tanpa_persetujuan() {
     );
     let review_id = st.agent.last().req.review.unwrap().review_id;
     assert!(st.agent.ended_reviews.lock().unwrap().contains(&review_id));
+    // Salinan bersih dihapus.
+    assert!(
+        st.git
+            .state
+            .lock()
+            .unwrap()
+            .removed_roots
+            .contains(&std::path::PathBuf::from("/wt/lab-setup-repo1"))
+    );
 }
 
 #[tokio::test(flavor = "multi_thread")]

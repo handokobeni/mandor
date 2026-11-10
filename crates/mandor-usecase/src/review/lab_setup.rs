@@ -1,10 +1,12 @@
 //! Agent pengusul perlengkapan lab (plan 2026-11-10-001, U8, KTD-L14).
 //!
-//! Giliran `LabSetup` membaca worktree utama repo tanpa shell, browser, berkas
-//! env, maupun kredensial, lalu mengirim usulan lewat tool `lab_propose`.
+//! Giliran `LabSetup` membaca salinan bersih branch default repo (hanya berkas
+//! ter-commit, tanpa `.env` milik developer) tanpa shell, browser, maupun
+//! kredensial, lalu mengirim usulan lewat tool `lab_propose`.
 //! Usulan yang lolos validasi disimpan sebagai draf di memori; developer
 //! memeriksa, mengisi password, menyimpan, lalu menyetujuinya lewat `lab.*`.
 
+use std::path::PathBuf;
 use std::sync::{Arc, PoisonError};
 use std::time::Duration;
 
@@ -15,8 +17,8 @@ use super::capability::{CapabilityRole, CapabilityScope, LedgerAccess, LedgerToo
 use crate::ports::{Deps, Ids};
 use crate::run::{RunError, RunService};
 use crate::run_ports::{
-    AgentPort, AgentRequest, AgentRunHandle, LabTurn, Prompts, Repos, ReviewHistory, ReviewRequest,
-    SessionRef, Spawner,
+    AgentPort, AgentRequest, AgentRunHandle, GitPort, LabTurn, Prompts, RepoInfo, Repos,
+    ReviewHistory, ReviewRequest, SessionRef, Spawner,
 };
 
 /// Batas biaya giliran pengusul, dalam sen.
@@ -47,6 +49,8 @@ pub struct LabSetupStatus {
 pub(crate) struct SetupProgress {
     status: LabSetupStatus,
     invalid: u8,
+    /// Salinan bersih yang dibaca agent; dihapus saat giliran berakhir.
+    checkout: Option<(RepoInfo, PathBuf)>,
 }
 
 fn setup_key(repo_id: &str) -> String {
@@ -54,8 +58,8 @@ fn setup_key(repo_id: &str) -> String {
 }
 
 impl<D: Deps> RunService<D> {
-    /// Memulai giliran pengusul perlengkapan lab di worktree utama repo
-    /// (RPC `lab.propose`). Hasilnya dibaca lewat [`Self::lab_setup_status`].
+    /// Memulai giliran pengusul perlengkapan lab di salinan bersih branch
+    /// default repo (RPC `lab.propose`). Hasilnya dibaca lewat [`Self::lab_setup_status`].
     ///
     /// # Errors
     /// Repo tidak ada, URL app belum diisi, giliran pengusul repo ini masih
@@ -84,13 +88,28 @@ impl<D: Deps> RunService<D> {
                     running: true,
                     ..LabSetupStatus::default()
                 },
-                invalid: 0,
+                ..SetupProgress::default()
             };
         }
         let review_id = format!("labsetup-{}", self.sync.ids.nonce());
+        let checkout = match self.git.clean_checkout(&repo).await {
+            Ok(path) => path,
+            Err(e) => {
+                self.end_setup(&key, &review_id, Some(e.to_string())).await;
+                return Err(e.into());
+            }
+        };
+        if let Some(entry) = self
+            .lab_setups
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .get_mut(&key)
+        {
+            entry.checkout = Some((repo.clone(), checkout.clone()));
+        }
         let model = self.reviews.lab_settings().await.model;
         let req = AgentRequest {
-            worktree: repo.path.clone(),
+            worktree: checkout,
             branch: repo.default_branch.clone(),
             session: SessionRef::New(self.sync.ids.nonce()),
             message: self.prompts.lab_setup_message(&app_url),
@@ -229,15 +248,21 @@ impl<D: Deps> RunService<D> {
     async fn end_setup(&self, key: &str, review_id: &str, error: Option<String>) {
         self.revoke_capabilities(key);
         self.agent.end_review(review_id).await;
-        let mut setups = self
-            .lab_setups
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner);
-        if let Some(entry) = setups.get_mut(key) {
-            entry.status.running = false;
-            if entry.status.proposal.is_none() {
-                entry.status.error = Some(error.unwrap_or_else(|| NO_PROPOSAL.to_owned()));
-            }
+        let checkout = {
+            let mut setups = self
+                .lab_setups
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner);
+            setups.get_mut(key).and_then(|entry| {
+                entry.status.running = false;
+                if entry.status.proposal.is_none() {
+                    entry.status.error = Some(error.unwrap_or_else(|| NO_PROPOSAL.to_owned()));
+                }
+                entry.checkout.take()
+            })
+        };
+        if let Some((repo, path)) = checkout {
+            self.git.discard_clean_checkout(&repo, &path).await;
         }
     }
 }

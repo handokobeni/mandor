@@ -1247,6 +1247,25 @@ mod tests {
         assert!(denied(&call("mcp__playwright__browser_navigate", None)));
         assert!(denied(&call("mcp__claude-in-chrome__navigate", None)));
         assert!(denied(&call("mcp__lain__alat", None)));
+        let search = |tool: &str, glob: &str| ToolCall {
+            tool_name: tool.to_owned(),
+            globs: vec![glob.to_owned()],
+            ..ToolCall::default()
+        };
+        assert!(!denied(&search("Grep", "*.ts")));
+        assert!(!denied(&search("Glob", "**/.env.example")));
+        for g in [
+            "**/.env",
+            ".env*",
+            "**/*env*",
+            "config/.env.local",
+            "**/id_rsa",
+            "*.pem",
+            "**/secrets.json",
+        ] {
+            assert!(denied(&search("Grep", g)), "Grep {g}");
+            assert!(denied(&search("Glob", g)), "Glob {g}");
+        }
         let bash = ToolCall {
             tool_name: "Bash".to_owned(),
             command: Some("cat README.md".to_owned()),

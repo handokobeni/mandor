@@ -23,4 +23,5 @@ Branch fase 1: `feat/review-lab-phase1`.
 - Review keamanan otomatis: `CONNECT` ke origin HTTP di luar sesi data bisa melewati blokir tulis. Diperbaiki: terowongan ke origin HTTP hanya saat tulis diizinkan (KTD-L6 diperbarui).
 - Draf usulan perlengkapan (U8) hanya di memori dan tidak menimpa perlengkapan tersimpan; setelah restart developer cukup menekan "Propose from repo" lagi.
 - Review keamanan otomatis: folder berkas uji bisa dialihkan lewat symlink di tengah jalur. Diperbaiki: tiap bagian jalur diperiksa tanpa mengikuti symlink dan jalur kanonis harus tetap di worktree.
+- Review keamanan otomatis atas U8: pengusul membaca checkout developer (berisi `.env` tak terlacak) dan Grep/Glob tanpa path bisa menjangkau berkas env. Diperbaiki: pengusul berjalan di salinan bersih branch default (`git worktree add --detach`, hanya berkas ter-commit, dihapus setelah giliran), dan pola `glob` Grep / `pattern` Glob yang mengenai env atau kredensial ditolak di giliran lab dan pengusul.
 - Progres lab hanya di memori (plan: `LabCursor` di `RunRecord`); setelah daemon restart, review yang terputus ditutup rekonsiliasi seperti review biasa.

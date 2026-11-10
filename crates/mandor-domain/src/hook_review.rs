@@ -363,6 +363,28 @@ pub fn lab_read_violation(path: &str) -> Option<String> {
     denied.then(|| format!("mandor: the review lab cannot read `{path}`"))
 }
 
+/// Pola pencarian yang bisa mengenai berkas env (selain `.env.example`) atau
+/// kredensial; pencarian lab tidak boleh menjangkaunya.
+fn secret_glob(glob: &str) -> bool {
+    let g = glob.to_ascii_lowercase();
+    let env = g.contains(".env") && !g.ends_with(".env.example");
+    let wide_env = g.contains("env*") || g.contains("*env") || g.contains("{.env");
+    env || wide_env
+        || crate::hook::is_credential_path(&g)
+        || [
+            "id_rsa",
+            "id_ed25519",
+            ".pem",
+            ".key",
+            "secret",
+            "credential",
+            ".ssh",
+            ".aws",
+        ]
+        .iter()
+        .any(|m| g.contains(m))
+}
+
 /// Memutuskan tool call giliran lab (KTD-L10): Playwright per role dengan
 /// JavaScript di halaman dan upload dari staging, baca berkas tanpa shell,
 /// dan tool MCP ledger.
@@ -392,6 +414,9 @@ pub fn classify_lab_setup(call: &ToolCall, allowed_mcp: &[String]) -> Verdict {
 fn files_or_ledger(call: &ToolCall, allowed_mcp: &[String], context: &str) -> Verdict {
     if let Some(reason) = call.paths.iter().find_map(|p| lab_read_violation(p)) {
         return Verdict::Deny(reason);
+    }
+    if let Some(glob) = call.globs.iter().find(|g| secret_glob(g)) {
+        return deny(&format!("searching `{glob}` is not available {context}"));
     }
     if LAB_TOOLS.contains(&call.tool_name.as_str()) {
         return Verdict::Allow;

@@ -145,6 +145,16 @@ impl GitPort for FakeGit {
             .removed_roots
             .push(root.to_path_buf());
     }
+    async fn clean_checkout(&self, repo: &RepoInfo) -> Result<PathBuf, PortError> {
+        let path = PathBuf::from(format!("/wt/lab-setup-{}", repo.id));
+        self.state.lock().unwrap().worktrees.insert(path.clone());
+        Ok(path)
+    }
+    async fn discard_clean_checkout(&self, _repo: &RepoInfo, path: &Path) {
+        let mut st = self.state.lock().unwrap();
+        st.worktrees.remove(path);
+        st.removed_roots.push(path.to_path_buf());
+    }
     async fn worktree_exists(&self, wt: &Path) -> bool {
         self.state.lock().unwrap().worktrees.contains(wt)
     }

@@ -210,6 +210,13 @@ pub fn check_statement(sql: &str) -> Result<(), StatementError> {
     if let Some(bad) = ["$", "\\"].into_iter().find(|t| body.contains(t)) {
         return Err(StatementError::Forbidden(bad.to_owned()));
     }
+    // `U&'..'` dan `U&".."` (dengan atau tanpa UESCAPE) bisa menyandikan nama
+    // terlarang sebagai kode Unicode.
+    if body.contains("&'") || body.contains("&\"") || body.contains("uescape") {
+        return Err(StatementError::Forbidden(
+            "U& strings or identifiers".to_owned(),
+        ));
+    }
     if escape_string_prefix(body) {
         return Err(StatementError::Forbidden("E'' or U&'' strings".to_owned()));
     }
@@ -1011,6 +1018,8 @@ mod tests {
             "select U&'\\0063opy'",
             "select $x$ copy $x$",
             "select $1",
+            "select U&\"\\006co_export\"(1, 'x')",
+            "select U&\"!006co_export\" UESCAPE '!' (1)",
             "  ",
         ] {
             assert!(check_statement(sql).is_err(), "{sql}");

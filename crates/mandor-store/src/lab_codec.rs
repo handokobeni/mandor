@@ -4,6 +4,7 @@ use mandor_domain::lab::{
     BlockedRequest, Evidence, LabAccount, LabEquipment, LabNeed, LoginForm, LookAdvice,
     LookRecommendation, Simulated, SuccessMarker,
 };
+use mandor_domain::lab_data::{DbTarget, LabData, LabSeed, LabStore, StoreKind};
 use serde::{Deserialize, Serialize};
 
 use crate::StoreError;
@@ -110,6 +111,120 @@ struct StoredEquipment {
     safe_posts: Vec<String>,
     #[serde(default)]
     fixtures_dir: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    data: Option<StoredData>,
+}
+
+#[derive(Serialize, Deserialize)]
+struct StoredData {
+    scripts_dir: String,
+    stores: Vec<StoredStore>,
+    #[serde(default)]
+    seeds: Vec<StoredSeed>,
+}
+
+#[derive(Serialize, Deserialize)]
+struct StoredStore {
+    name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    postgres: Option<StoredDb>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    folder: Option<String>,
+    snapshot: String,
+    restore: String,
+    fingerprint: String,
+    test_change: String,
+}
+
+#[derive(Serialize, Deserialize)]
+struct StoredDb {
+    host: String,
+    port: u16,
+    database: String,
+}
+
+#[derive(Serialize, Deserialize)]
+struct StoredSeed {
+    name: String,
+    command: String,
+}
+
+fn data_stored(d: &LabData) -> StoredData {
+    StoredData {
+        scripts_dir: d.scripts_dir.clone(),
+        stores: d
+            .stores
+            .iter()
+            .map(|s| {
+                let (postgres, folder) = match &s.kind {
+                    StoreKind::Postgres(t) => (
+                        Some(StoredDb {
+                            host: t.host.clone(),
+                            port: t.port,
+                            database: t.database.clone(),
+                        }),
+                        None,
+                    ),
+                    StoreKind::Folder(p) => (None, Some(p.clone())),
+                };
+                StoredStore {
+                    name: s.name.clone(),
+                    postgres,
+                    folder,
+                    snapshot: s.snapshot.clone(),
+                    restore: s.restore.clone(),
+                    fingerprint: s.fingerprint.clone(),
+                    test_change: s.test_change.clone(),
+                }
+            })
+            .collect(),
+        seeds: d
+            .seeds
+            .iter()
+            .map(|s| StoredSeed {
+                name: s.name.clone(),
+                command: s.command.clone(),
+            })
+            .collect(),
+    }
+}
+
+fn data_of(s: StoredData) -> Result<LabData, StoreError> {
+    let stores = s
+        .stores
+        .into_iter()
+        .map(|st| {
+            let kind = match (st.postgres, st.folder) {
+                (Some(db), None) => StoreKind::Postgres(DbTarget {
+                    host: db.host,
+                    port: db.port,
+                    database: db.database,
+                }),
+                (None, Some(p)) => StoreKind::Folder(p),
+                _ => return Err(corrupt("lab store kind", &st.name)),
+            };
+            Ok(LabStore {
+                name: st.name,
+                kind,
+                snapshot: st.snapshot,
+                restore: st.restore,
+                fingerprint: st.fingerprint,
+                test_change: st.test_change,
+            })
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok(LabData {
+        scripts_dir: s.scripts_dir,
+        stores,
+        seeds: s
+            .seeds
+            .into_iter()
+            .map(|x| LabSeed {
+                name: x.name,
+                command: x.command,
+            })
+            .collect(),
+    })
 }
 
 #[derive(Serialize, Deserialize)]
@@ -159,6 +274,7 @@ pub(crate) fn equipment_json(eq: &LabEquipment) -> Result<String, StoreError> {
         },
         safe_posts: eq.safe_posts.clone(),
         fixtures_dir: eq.fixtures_dir.clone(),
+        data: eq.data.as_ref().map(data_stored),
     })
     .map_err(StoreError::internal)
 }
@@ -191,6 +307,7 @@ pub(crate) fn equipment_of(raw: &str) -> Result<LabEquipment, StoreError> {
         },
         safe_posts: s.safe_posts,
         fixtures_dir: s.fixtures_dir,
+        data: s.data.map(data_of).transpose()?,
     })
 }
 

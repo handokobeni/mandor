@@ -1506,6 +1506,113 @@ pub struct FakeLab {
     pub secrets: Arc<Mutex<Vec<String>>>,
     /// `(review_id, folder sumber)` per `stage_fixtures`.
     pub staged: Arc<Mutex<Vec<(String, PathBuf)>>>,
+    // --- Lab data (U14) ---
+    pub sessions: FakeSessions,
+    /// Hasil `data_prepare`.
+    pub data_ready: Arc<Mutex<Result<mandor_usecase::run_ports::DataReady, String>>>,
+    pub clients: Arc<Mutex<Option<String>>>,
+    pub lock_outcome: Arc<Mutex<mandor_usecase::run_ports::LockOutcome>>,
+    pub snapshot_fails: Arc<Mutex<Option<String>>>,
+    /// Sidik awal dan sidik sekarang.
+    pub fp_before: Arc<Mutex<Vec<(String, String)>>>,
+    pub fp_now: Arc<Mutex<Vec<(String, String)>>>,
+    /// Hasil restore berurutan; kosong = berhasil.
+    pub restores: Arc<Mutex<std::collections::VecDeque<mandor_usecase::run_ports::RestoreResult>>>,
+    /// Log operasi data: `lock`, `snapshot`, `restore`, `release`, dst.
+    pub data_calls: Arc<Mutex<Vec<String>>>,
+}
+
+/// Sesi lab data di memori.
+#[derive(Clone, Default)]
+pub struct FakeSessions {
+    pub rows: Arc<Mutex<Vec<mandor_usecase::run_ports::LabSessionRecord>>>,
+}
+
+impl mandor_usecase::run_ports::LabSessions for FakeSessions {
+    async fn create_session(
+        &self,
+        rec: &mandor_usecase::run_ports::LabSessionRecord,
+    ) -> Result<(), PortError> {
+        self.rows.lock().unwrap().push(rec.clone());
+        Ok(())
+    }
+    async fn session(
+        &self,
+        id: &str,
+    ) -> Result<Option<mandor_usecase::run_ports::LabSessionRecord>, PortError> {
+        Ok(self
+            .rows
+            .lock()
+            .unwrap()
+            .iter()
+            .find(|r| r.id == id)
+            .cloned())
+    }
+    async fn transition(
+        &self,
+        id: &str,
+        from: mandor_domain::lab_data::SessionPhase,
+        to: mandor_domain::lab_data::SessionPhase,
+        error: Option<&str>,
+        now_ms: i64,
+    ) -> Result<bool, PortError> {
+        let mut rows = self.rows.lock().unwrap();
+        let Some(r) = rows.iter_mut().find(|r| r.id == id && r.phase == from) else {
+            return Ok(false);
+        };
+        r.phase = to;
+        r.error = error.map(str::to_owned);
+        r.updated_at_ms = now_ms;
+        Ok(true)
+    }
+    async fn set_snapshot(
+        &self,
+        id: &str,
+        dir: &Path,
+        fingerprints: &[(String, String)],
+        _now_ms: i64,
+    ) -> Result<(), PortError> {
+        if let Some(r) = self.rows.lock().unwrap().iter_mut().find(|r| r.id == id) {
+            r.snapshot_dir = Some(dir.to_path_buf());
+            r.fingerprints = fingerprints.to_vec();
+        }
+        Ok(())
+    }
+    async fn pending_recovery(
+        &self,
+    ) -> Result<Vec<mandor_usecase::run_ports::LabSessionRecord>, PortError> {
+        Ok(self
+            .rows
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|r| r.phase.needs_recovery())
+            .cloned()
+            .collect())
+    }
+    async fn holding(&self) -> Result<Vec<mandor_usecase::run_ports::LabSessionRecord>, PortError> {
+        Ok(self
+            .rows
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|r| r.phase.holds_lock())
+            .cloned()
+            .collect())
+    }
+}
+
+impl FakeLab {
+    /// Fase sesi lab data terakhir.
+    pub fn last_phase(&self) -> Option<mandor_domain::lab_data::SessionPhase> {
+        self.sessions.rows.lock().unwrap().last().map(|r| r.phase)
+    }
+    pub fn calls(&self) -> Vec<String> {
+        self.data_calls.lock().unwrap().clone()
+    }
+    fn log(&self, what: impl Into<String>) {
+        self.data_calls.lock().unwrap().push(what.into());
+    }
 }
 
 impl Default for FakeLab {
@@ -1521,6 +1628,20 @@ impl Default for FakeLab {
             ended: Arc::default(),
             secrets: Arc::default(),
             staged: Arc::default(),
+            sessions: FakeSessions::default(),
+            data_ready: Arc::new(Mutex::new(Ok(mandor_usecase::run_ports::DataReady {
+                lock_keys: vec!["pg:local:5432/kelola".to_owned()],
+                scripts_digest: "ab".repeat(32),
+                sql_stores: vec!["tenant".to_owned()],
+                seeds: vec!["kb".to_owned()],
+            }))),
+            clients: Arc::default(),
+            lock_outcome: Arc::new(Mutex::new(mandor_usecase::run_ports::LockOutcome::Acquired)),
+            snapshot_fails: Arc::default(),
+            fp_before: Arc::new(Mutex::new(vec![("tenant".to_owned(), "fp0".to_owned())])),
+            fp_now: Arc::new(Mutex::new(vec![("tenant".to_owned(), "fp0".to_owned())])),
+            restores: Arc::default(),
+            data_calls: Arc::default(),
         }
     }
 }
@@ -1618,5 +1739,110 @@ impl mandor_usecase::run_ports::LabPort for FakeLab {
             .iter()
             .map(|t| mandor_domain::lab::redact_values(t, &refs))
             .collect()
+    }
+
+    type Sessions = FakeSessions;
+    fn sessions(&self) -> &FakeSessions {
+        &self.sessions
+    }
+    async fn data_prepare(
+        &self,
+        repo_id: &str,
+        _worktree: &Path,
+    ) -> Result<Result<mandor_usecase::run_ports::DataReady, String>, PortError> {
+        self.log(format!("prepare:{repo_id}"));
+        Ok(self.data_ready.lock().unwrap().clone())
+    }
+    async fn data_other_clients(&self, _repo_id: &str) -> Option<String> {
+        self.clients.lock().unwrap().clone()
+    }
+    async fn data_lock(
+        &self,
+        _keys: &[String],
+        session_id: &str,
+        _wait: Duration,
+    ) -> mandor_usecase::run_ports::LockOutcome {
+        self.log(format!("lock:{session_id}"));
+        self.lock_outcome.lock().unwrap().clone()
+    }
+    async fn data_mark(
+        &self,
+        _keys: &[String],
+        _session_id: &str,
+        phase: mandor_domain::lab_data::SessionPhase,
+    ) {
+        self.log(format!("mark:{}", phase.as_str()));
+    }
+    async fn data_release(&self, _keys: &[String]) {
+        self.log("release");
+    }
+    async fn data_clear_stale(&self, _active: &[String]) {
+        self.log("clear_stale");
+    }
+    async fn data_snapshot(
+        &self,
+        _repo_id: &str,
+        session_id: &str,
+    ) -> Result<(PathBuf, Vec<(String, String)>), String> {
+        self.log("snapshot");
+        if let Some(why) = self.snapshot_fails.lock().unwrap().clone() {
+            return Err(why);
+        }
+        Ok((
+            PathBuf::from(format!("/snap/{session_id}")),
+            self.fp_before.lock().unwrap().clone(),
+        ))
+    }
+    async fn data_fingerprints(
+        &self,
+        _repo_id: &str,
+        _snapshot: &Path,
+    ) -> Result<Vec<(String, String)>, String> {
+        self.log("fingerprint");
+        Ok(self.fp_now.lock().unwrap().clone())
+    }
+    async fn data_restore(
+        &self,
+        _repo_id: &str,
+        _snapshot: &Path,
+        _before: &[(String, String)],
+    ) -> mandor_usecase::run_ports::RestoreResult {
+        self.log("restore");
+        let next = self.restores.lock().unwrap().pop_front();
+        let r = next.unwrap_or(mandor_usecase::run_ports::RestoreResult::Restored);
+        if r == mandor_usecase::run_ports::RestoreResult::Restored {
+            let before = self.fp_before.lock().unwrap().clone();
+            *self.fp_now.lock().unwrap() = before;
+        }
+        r
+    }
+    async fn data_discard(&self, _snapshot: &Path) {
+        self.log("discard");
+    }
+    async fn data_sql(
+        &self,
+        _repo_id: &str,
+        store: &str,
+        sql: &str,
+    ) -> Result<mandor_usecase::run_ports::SqlResult, PortError> {
+        mandor_domain::lab_data::check_statement(sql)
+            .map_err(|e| PortError::Rejected(e.to_string()))?;
+        self.log(format!("sql:{store}:{sql}"));
+        *self.fp_now.lock().unwrap() = vec![("tenant".to_owned(), "fp1".to_owned())];
+        Ok(mandor_usecase::run_ports::SqlResult {
+            text: "Statement ran; no rows returned.".to_owned(),
+            rows: 0,
+            truncated: false,
+        })
+    }
+    async fn data_seed(
+        &self,
+        _repo_id: &str,
+        name: &str,
+        _worktree: &Path,
+    ) -> Result<String, PortError> {
+        self.log(format!("seed:{name}"));
+        *self.fp_now.lock().unwrap() = vec![("tenant".to_owned(), "fp1".to_owned())];
+        Ok("seeded".to_owned())
     }
 }

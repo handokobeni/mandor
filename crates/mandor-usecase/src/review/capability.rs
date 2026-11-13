@@ -333,6 +333,16 @@ impl<D: Deps> RunService<D> {
                 "simulated sql is set by Mandor",
             ));
         }
+        // Data yang disiapkan lewat `lab_sql`/`lab_seed` di kartu ini: Pass
+        // tetap penuh tetapi bertanda SQL (R17).
+        let report = if self.lab_data_changed(&scope.run_id) {
+            VerdictReport {
+                simulated: Simulated::Sql,
+                ..report
+            }
+        } else {
+            report
+        };
         let rows = self.reviews.ac_rows(&scope.run_id).await?;
         let Some(row) = rows.iter().find(|r| r.ac_id == ac_id) else {
             return Err(LedgerToolError::UnknownAc(ac_id.to_owned()));

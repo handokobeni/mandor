@@ -123,6 +123,13 @@ function labRows(): AcRowView[] {
       simulated: 'request'
     })
   };
+  rows[4] = {
+    ...rows[4],
+    verdict: 'cant_verify',
+    lab_need: 'data',
+    evidence:
+      'Lab with test data deferred: it changes your local data and stops the app until it restores. Use Run lab in the AC tab.'
+  };
   rows[3] = {
     ...rows[3],
     lab_need: 'data',

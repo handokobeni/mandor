@@ -56,6 +56,7 @@
   import DiffViewer from './DiffViewer.svelte';
   import StartFixDialog from './StartFixDialog.svelte';
   import AcReviewTab from './AcReviewTab.svelte';
+  import LabBanner from './LabBanner.svelte';
   import PlanApproval from './PlanApproval.svelte';
   import GateDialogs from './GateDialogs.svelte';
   import ApprovalCard from './ApprovalCard.svelte';
@@ -763,6 +764,8 @@
   </span>
 </div>
 
+<div class="callout-wrap"><LabBanner {rpc} repoIds={memberIds} /></div>
+
 {#if flag || run.state === 'failed' || run.state === 'orphaned' || run.note || run.last_error}
   <div class="callout-wrap">
     {#if flag && FlagIcon}
@@ -925,6 +928,7 @@
           agentBusy={(working && !reviewing) || run.phase !== 'implement' || run.state !== 'awaiting_dev'}
           {now}
           onreview={() => void requestReview('manual')}
+          onrunlab={() => void act(() => rpc.request('review.lab_start', { run_id: run.id }), 'Review with lab data started')}
           onsend={sendFindings}
           onfile={(p) => void openFile(p)}
           cards={run.cards}

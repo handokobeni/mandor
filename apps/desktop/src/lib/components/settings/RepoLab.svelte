@@ -13,7 +13,9 @@
   import { Button, buttonVariants } from '#lib/components/ui/button/index.ts';
   import { Input } from '#lib/components/ui/input/index.ts';
   import {
+    emptyDataForm,
     emptyLabForm,
+    emptyStore,
     type LabForm,
     labApproveParams,
     labForm,
@@ -37,6 +39,10 @@
   let approving = $state(false);
   /** Form berisi usulan agent yang belum disimpan. */
   let fromProposal = $state(false);
+  /** Hasil uji persetujuan terakhir yang gagal (uji bolak-balik lab data). */
+  let approveError = $state<string | null>(null);
+  /** Uji bolak-balik menjalankan snapshot, restore, dan seed. */
+  const APPROVE_TIMEOUT_MS = 30 * 60_000;
 
   const status = $derived(labStatus(view));
   const errors = $derived(tried ? validateLabForm(form) : {});
@@ -110,11 +116,15 @@
     approving = false;
     if (!view?.equipment) return;
     busy = true;
+    approveError = null;
     try {
-      view = await rpc.request<LabView>('lab.approve', labApproveParams(repoId, labForm(view.equipment)));
+      view = await rpc.request<LabView>('lab.approve', labApproveParams(repoId, labForm(view.equipment)), {
+        timeoutMs: APPROVE_TIMEOUT_MS
+      });
       toast.success('Lab equipment approved', { description: 'Reviews of this repo sign in with these accounts.' });
     } catch (err) {
-      toast.error('Could not approve', { description: message(err) });
+      approveError = message(err);
+      toast.error('Could not approve', { description: approveError });
     } finally {
       busy = false;
     }
@@ -242,6 +252,117 @@
     <ListEditor list="posts" label="read-only POST paths" placeholder="/api/search" bind:items={form.safePosts} />
   </div>
 
+  <div class="row-setting">
+    <div class="txt">
+      Lab with test data
+      <span>
+        Let the review lab prepare data in local stores (database, upload folder). Mandor snapshots them with the app
+        stopped, lets the lab change data, then restores and compares fingerprints. Local stores only.
+      </span>
+    </div>
+    <input
+      type="checkbox"
+      aria-label="Lab with test data"
+      checked={form.data !== null}
+      onchange={(e) => (form.data = (e.currentTarget as HTMLInputElement).checked ? (form.data ?? emptyDataForm()) : null)}
+    />
+  </div>
+  {#if form.data}
+    {@const d = form.data}
+    {#if errors.data}<p class="field-error">{errors.data}</p>{/if}
+    <div style="max-width:320px">
+      <Field id="lab-scripts" label="Scripts folder">
+        <Input id="lab-scripts" class="mono" placeholder="review-fixtures/lab" bind:value={d.scriptsDir} />
+        {#snippet help()}Relative to the repo. Approval copies it; commands run from that copy.{/snippet}
+      </Field>
+    </div>
+    {#each d.stores as s, i (i)}
+      <fieldset class="lab-store">
+        <legend class="text-sm font-medium">{s.kind === 'postgres' ? 'Database' : 'Folder'} store</legend>
+        <div class="grid gap-3" style="grid-template-columns:repeat(auto-fill,minmax(200px,1fr))">
+          <Field id="st-name-{i}" label="Name">
+            <Input id="st-name-{i}" class="mono" placeholder="tenant" bind:value={s.name} />
+          </Field>
+          {#if s.kind === 'postgres'}
+            <Field id="st-host-{i}" label="Host">
+              <Input id="st-host-{i}" class="mono" placeholder="localhost" bind:value={s.host} />
+            </Field>
+            <Field id="st-port-{i}" label="Port">
+              <Input id="st-port-{i}" class="mono" inputmode="numeric" bind:value={s.port} />
+            </Field>
+            <Field id="st-db-{i}" label="Database">
+              <Input id="st-db-{i}" class="mono" bind:value={s.database} />
+            </Field>
+            <Field id="st-lab-{i}" label="Lab role">
+              <Input id="st-lab-{i}" class="mono" placeholder="mandor_lab" bind:value={s.labUser} />
+              {#snippet help()}Only SELECT, INSERT, UPDATE, DELETE on the app tables.{/snippet}
+            </Field>
+            <Field id="st-labpw-{i}" label="Lab role password">
+              <Input
+                id="st-labpw-{i}"
+                type="password"
+                autocomplete="new-password"
+                placeholder={s.hasCredentials ? 'Saved; leave empty to keep' : 'Required'}
+                bind:value={s.labPassword}
+              />
+            </Field>
+            <Field id="st-mt-{i}" label="Maintenance role">
+              <Input id="st-mt-{i}" class="mono" placeholder="postgres" bind:value={s.maintenanceUser} />
+              {#snippet help()}For snapshot, restore, and fingerprint; needs pg_read_all_stats.{/snippet}
+            </Field>
+            <Field id="st-mtpw-{i}" label="Maintenance password">
+              <Input
+                id="st-mtpw-{i}"
+                type="password"
+                autocomplete="new-password"
+                placeholder={s.hasCredentials ? 'Saved; leave empty to keep' : 'Required'}
+                bind:value={s.maintenancePassword}
+              />
+            </Field>
+          {:else}
+            <Field id="st-folder-{i}" label="Folder">
+              <Input id="st-folder-{i}" class="mono" placeholder="/home/you/kelola/uploads" bind:value={s.folder} />
+            </Field>
+          {/if}
+          <Field id="st-snap-{i}" label="Snapshot command">
+            <Input id="st-snap-{i}" class="mono" placeholder="snapshot.sh" bind:value={s.snapshot} />
+          </Field>
+          <Field id="st-rest-{i}" label="Restore command">
+            <Input id="st-rest-{i}" class="mono" placeholder="restore.sh" bind:value={s.restore} />
+          </Field>
+          <Field id="st-fp-{i}" label="Fingerprint command">
+            <Input id="st-fp-{i}" class="mono" placeholder="fingerprint.sh" bind:value={s.fingerprint} />
+          </Field>
+          <Field id="st-chg-{i}" label="Test change command">
+            <Input id="st-chg-{i}" class="mono" placeholder="test-change.sh" bind:value={s.testChange} />
+          </Field>
+        </div>
+        <Button variant="ghost" size="sm" onclick={() => (d.stores = d.stores.filter((_, j) => j !== i))}><X />Remove store</Button>
+      </fieldset>
+    {/each}
+    <div class="lab-actions">
+      <Button variant="outline" size="sm" disabled={d.stores.length >= 4} onclick={() => (d.stores = [...d.stores, emptyStore('postgres')])}
+        ><Plus />Add database</Button
+      >
+      <Button variant="outline" size="sm" disabled={d.stores.length >= 4} onclick={() => (d.stores = [...d.stores, emptyStore('folder')])}
+        ><Plus />Add folder</Button
+      >
+    </div>
+    <div class="field">
+      <span class="text-sm font-medium">Seeds</span>
+      <p class="field-help">Scripts the lab may run to prepare data. They run with the lab role and may load repo code.</p>
+      {#each d.seeds as seed, i (i)}
+        <div class="lab-seed">
+          <Input class="mono" aria-label="Seed name" placeholder="kb-values" bind:value={seed.name} />
+          <Input class="mono" aria-label="Seed command" placeholder="seed-kb.sh" bind:value={seed.command} />
+          <Button variant="ghost" size="icon-xs" aria-label="Remove seed" onclick={() => (d.seeds = d.seeds.filter((_, j) => j !== i))}><X /></Button>
+        </div>
+      {/each}
+      <div><Button variant="outline" size="sm" onclick={() => (d.seeds = [...d.seeds, { name: '', command: '' }])}><Plus />Add seed</Button></div>
+    </div>
+  {/if}
+
+  {#if approveError}<p class="field-error">The approval check failed: {approveError}</p>{/if}
   <div class="lab-actions">
     <Button size="sm" disabled={busy} onclick={() => void save()}>Save lab equipment</Button>
     {#if view?.equipment && !view.approved}
@@ -276,6 +397,26 @@
         <dd class="mono">{eq.safe_posts.length > 0 ? eq.safe_posts.join(', ') : 'none'}</dd>
         <dt>Test files</dt>
         <dd class="mono">{eq.fixtures_dir ?? 'none'}</dd>
+        {#if eq.data}
+          <dt>Lab data</dt>
+          <dd>
+            <div class="mono">scripts: {eq.data.scripts_dir}</div>
+            {#each eq.data.stores as s (s.name)}
+              <div class="mono">
+                {s.name} ({s.kind === 'postgres' ? `${s.host}:${s.port}/${s.database}` : s.folder}): {s.snapshot} · {s.restore} ·
+                {s.fingerprint} · {s.test_change}
+              </div>
+            {/each}
+            {#each eq.data.seeds as seed (seed.name)}
+              <div class="mono">seed {seed.name}: {seed.command}</div>
+            {/each}
+            <p class="muted">
+              Approving stops nothing by itself, but first checks every store: snapshot, test change, restore, and
+              matching fingerprints, then runs each seed. Stop the app first. Seeds may load repo code that is not part
+              of the approved copy.
+            </p>
+          </dd>
+        {/if}
       </dl>
       <AlertDialog.Footer>
         <AlertDialog.Cancel>Cancel</AlertDialog.Cancel>
@@ -295,4 +436,6 @@
   .lab-review { display: grid; grid-template-columns: max-content 1fr; gap: 4px 12px; font-size: var(--text-sm); }
   .lab-review dt { color: var(--muted-foreground); }
   .lab-review dd { margin: 0; overflow-wrap: anywhere; }
+  .lab-store { border: 1px solid var(--border); border-radius: var(--radius); padding: 10px; display: grid; gap: 8px; }
+  .lab-seed { display: flex; gap: 6px; align-items: center; }
 </style>

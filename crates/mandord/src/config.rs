@@ -74,6 +74,9 @@ pub struct Config {
     /// Biner MCP Playwright untuk review di laptop dan VM (KTD-L1 plan
     /// 2026-11-10-001); `None` bila tidak ditemukan saat start.
     pub playwright_mcp: Option<PathBuf>,
+    /// Folder kunci lab data bersama (`MANDOR_LAB_LOCK_DIR`, KTD-L21); di VM
+    /// dibuat root dengan mode 1777. `None` = `<lab_root>/locks`.
+    pub lab_lock_dir: Option<PathBuf>,
 }
 
 /// Agent di VM sebagai user Linux terpisah (KTD-62 plan VM).
@@ -139,6 +142,13 @@ pub fn playwright_mcp_of(raw: Option<&str>) -> Result<PathBuf, String> {
             "MANDOR_PLAYWRIGHT_MCP must be an absolute path, got {p:?}"
         )),
     }
+}
+
+/// Path absolut dari env opsional; kosong atau relatif diabaikan.
+fn absolute_path(raw: Option<std::ffi::OsString>) -> Option<PathBuf> {
+    raw.filter(|v| !v.is_empty())
+        .map(PathBuf::from)
+        .filter(|p| p.is_absolute())
 }
 
 /// Biner Playwright MCP di laptop: `MANDOR_PLAYWRIGHT_MCP` bila diisi
@@ -403,6 +413,7 @@ impl Config {
             daemon_id,
             vm_agent,
             playwright_mcp,
+            lab_lock_dir: absolute_path(std::env::var_os("MANDOR_LAB_LOCK_DIR")),
         })
     }
 
@@ -425,6 +436,14 @@ impl Config {
     #[must_use]
     pub fn lab_root(&self) -> PathBuf {
         self.home.join("lab")
+    }
+
+    /// Folder kunci lab data (KTD-L21).
+    #[must_use]
+    pub fn lab_lock_dir(&self) -> PathBuf {
+        self.lab_lock_dir
+            .clone()
+            .unwrap_or_else(|| self.lab_root().join("locks"))
     }
 
     /// Berkas pengaturan Lark (0600).

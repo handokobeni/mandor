@@ -204,6 +204,9 @@ pub struct LabEquipment {
     pub safe_posts: Vec<String>,
     /// Subfolder repo berisi berkas uji (KTD-L11).
     pub fixtures_dir: Option<String>,
+    /// Penyimpanan, perintah, dan seed lab data (fase 2); `None` = lab hanya
+    /// membaca.
+    pub data: Option<crate::lab_data::LabData>,
 }
 
 /// Batas jumlah akun per sesi lab (KTD-L5).
@@ -239,6 +242,8 @@ pub enum EquipmentError {
     BadPath(&'static str),
     #[error("the test files folder must be a subfolder of the repo, without `..`")]
     BadFixturesDir,
+    #[error(transparent)]
+    Data(#[from] crate::lab_data::DataError),
 }
 
 /// Memeriksa perlengkapan sebelum disimpan atau disetujui.
@@ -253,6 +258,9 @@ pub fn validate_equipment(eq: &LabEquipment, app_origins: &[String]) -> Result<(
     }
     if let Some(dir) = &eq.fixtures_dir {
         check_fixtures_dir(dir)?;
+    }
+    if let Some(d) = &eq.data {
+        crate::lab_data::validate_data(d)?;
     }
     Ok(())
 }
@@ -416,8 +424,37 @@ pub fn equipment_canonical(eq: &LabEquipment) -> String {
         },
         "safe_posts": posts,
         "fixtures_dir": eq.fixtures_dir,
+        "data": eq.data.as_ref().map(data_canonical),
     })
     .to_string()
+}
+
+fn data_canonical(d: &crate::lab_data::LabData) -> Value {
+    use crate::lab_data::StoreKind;
+    let mut stores: Vec<Value> = d
+        .stores
+        .iter()
+        .map(|s| {
+            let kind = match &s.kind {
+                StoreKind::Postgres(t) => {
+                    json!({"postgres": {"host": t.host, "port": t.port, "database": t.database}})
+                }
+                StoreKind::Folder(p) => json!({"folder": p}),
+            };
+            json!({
+                "name": s.name, "kind": kind, "snapshot": s.snapshot, "restore": s.restore,
+                "fingerprint": s.fingerprint, "test_change": s.test_change,
+            })
+        })
+        .collect();
+    stores.sort_by_key(|s| s["name"].as_str().map(str::to_owned));
+    let mut seeds: Vec<Value> = d
+        .seeds
+        .iter()
+        .map(|s| json!({"name": s.name, "command": s.command}))
+        .collect();
+    seeds.sort_by_key(|s| s["name"].as_str().map(str::to_owned));
+    json!({"scripts_dir": d.scripts_dir, "stores": stores, "seeds": seeds})
 }
 
 /// Origin `http://` atau `https://` di mesin sendiri: `localhost`,
@@ -714,6 +751,7 @@ mod tests {
             },
             safe_posts: vec!["/api/search".to_owned()],
             fixtures_dir: Some("review-fixtures".to_owned()),
+            data: None,
         }
     }
 

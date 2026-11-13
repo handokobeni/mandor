@@ -48,6 +48,12 @@ pub mod method {
     /// Koneksi kapabilitas, peran `lab_setup`: usulan perlengkapan lab
     /// (`LabEquipmentDto` tanpa password) → `{"saved": true}` (KTD-L14).
     pub const LEDGER_TOOL_LAB_PROPOSE: &str = "ledger.tool.lab_propose";
+    /// Koneksi kapabilitas, peran verdict selama sesi lab data:
+    /// `LedgerToolLabSql` → `LabSqlView` (KTD-L16).
+    pub const LEDGER_TOOL_LAB_SQL: &str = "ledger.tool.lab_sql";
+    /// Koneksi kapabilitas, peran verdict selama sesi lab data:
+    /// `LedgerToolLabSeed` → `{"output": ...}` (KTD-L17).
+    pub const LEDGER_TOOL_LAB_SEED: &str = "ledger.tool.lab_seed";
     /// Approve atau Reject rekomendasi tampilan (`LookDecisionParams` →
     /// `Vec<AcRowView>`, R18).
     pub const LEDGER_LOOK_DECISION: &str = "ledger.look_decision";
@@ -107,6 +113,13 @@ pub mod method {
     /// Meminta agent mengusulkan perlengkapan dari isi repo (`LabRepoRef` →
     /// `LabView`); hasilnya muncul di `LabView.proposal` (KTD-L14).
     pub const LAB_PROPOSE: &str = "lab.propose";
+    /// Retry restore lab data yang gagal (`LabRepoRef` → `LabView`, KTD-L22).
+    pub const LAB_RETRY_RESTORE: &str = "lab.retry_restore";
+    /// Developer menyatakan data pulih (`LabDataRestored` → `LabView`, R6).
+    pub const LAB_DATA_RESTORED: &str = "lab.data_restored";
+    /// Run lab: review dengan lab data diizinkan (`RunRef` → `ReviewView`,
+    /// KTD-L23).
+    pub const REVIEW_LAB_START: &str = "review.lab_start";
     /// Sumber desain terdaftar (`Vec<DesignSourceView>`).
     pub const DESIGN_SOURCES_LIST: &str = "design_sources.list";
     /// `DesignSourceAdd` → `DesignSourceView`.
@@ -409,6 +422,25 @@ fn lab_bindings() -> Result<Vec<(&'static str, String)>, String> {
             LabEquipmentDto::export_to_string(&cfg),
         )?,
         one("LabAccountDto.ts", LabAccountDto::export_to_string(&cfg))?,
+        one("LabDataDto.ts", LabDataDto::export_to_string(&cfg))?,
+        one("LabStoreDto.ts", LabStoreDto::export_to_string(&cfg))?,
+        one("LabSeedDto.ts", LabSeedDto::export_to_string(&cfg))?,
+        one(
+            "LabDataAlertView.ts",
+            LabDataAlertView::export_to_string(&cfg),
+        )?,
+        one(
+            "LabDataRestored.ts",
+            LabDataRestored::export_to_string(&cfg),
+        )?,
+        one(
+            "LabDataSessionView.ts",
+            LabDataSessionView::export_to_string(&cfg),
+        )?,
+        one(
+            "LabDbSecretInput.ts",
+            LabDbSecretInput::export_to_string(&cfg),
+        )?,
         one("LabLoginDto.ts", LabLoginDto::export_to_string(&cfg))?,
         one(
             "LabPasswordInput.ts",

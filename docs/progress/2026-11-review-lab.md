@@ -30,6 +30,18 @@ Branch fase 1: `feat/review-lab-phase1`.
 - Review keamanan otomatis atas push PR #28: selama sesi lab, token Verdict bisa menimpa baris di luar calon lab kartu (mis. Fail review biasa). Diperbaiki: `ac_set_verdict`, `ac_recommend_look`, dan `ac_set_visual` hanya menerima calon lab kartu yang sedang diuji.
 - Progres lab hanya di memori (plan: `LabCursor` di `RunRecord`); setelah daemon restart, review yang terputus ditutup rekonsiliasi seperti review biasa.
 
+## Bukti otomatis AE1–AE7
+
+| AE | Test otomatis | Yang belum (uji langsung) |
+|---|---|---|
+| AE1 | `review_lab_data.rs` (snapshot dengan app berhenti, `lab_sql`, restore, sidik cocok); `review_flow.rs::covers_ae1_lab_menguji_calon_setelah_review_biasa` (alur lab setelah review biasa) | Batas atas KB di landlord kelola, sidik sungguhan |
+| AE2 | `review_lab_data.rs` (env database ke host staging → lab data tidak jalan); `lab_data.rs` (`is_local_db`, `app_env_block`) | Database non-lokal sungguhan |
+| AE3 | `review_lab_data.rs` (restore gagal → `restore_failed`, review dan giliran ditahan, retry dan konfirmasi) | Banner dan penahanan di app sungguhan |
+| AE4 | `port.rs::giliran_lab_satu_server_per_role_tanpa_shell` (satu browser per role); `review_flow.rs::covers_ae1_…` (server `playwright_admin`, `ROLES:admin`, prepared menyebut akun); `review_flow.rs::password_akun_uji_disamarkan_di_bukti_dan_temuan`; `login_role_gagal_disebut_di_pesan_lab` | Manager tanpa `admin.profileData` di kelola |
+| AE5 | `lab.rs::calon_lab_hanya_cant_verify_dengan_lab_need`, `calon_data_dikecualikan_bila_lab_data_belum_siap`, `run_grup_dikelompokkan_per_kartu_urut_kemunculan`, `baris_di_luar_gerbang_tidak_jadi_calon`; `review_flow.rs::covers_ae1_…` (baris di luar calon tertutup bagi sesi lab); `batas_lab_per_run_membuat_kartu_sisa_tetap_cant_verify` | Run grup 113 AC di kelola |
+| AE6 | `review_flow.rs::covers_ae6_keputusan_rekomendasi_tampilan`, `rekomendasi_tampilan_hanya_untuk_baris_berbeda` | — |
+| AE7 | `review_flow.rs::covers_ae7_tanpa_perlengkapan_lab_tidak_jalan_dan_ada_catatan`; `mcp.rs` | — |
+
 ## Uji langsung U10 (kelola PGS-1477–1483)
 
 Daemon WSL dipasang ulang dari branch PR #28 pada 2026-11-10 (`mandord install` → `updated`). Installer Windows dibuat dari branch yang sama (Actions run 42791753932) untuk UI Review lab.
@@ -45,3 +57,87 @@ Pembanding: `../integro-kelola/kelola-v2/review-fixtures/keputusan-AC-PGS-1477-1
 Di luar fase 1 (mengubah data, fase 2): 8630, 8631, 8941, 9371, 9372, 8409, 8410, 8418, 8420, 8647, 8421–8441 yang mengunggah nilai, 9424–9426.
 
 Hasil: menunggu.
+
+Rencana uji fase 2 (bersama fase 1, setelah daemon dipasang ulang dengan biner fase 2):
+
+1. Buat role `mandor_lab` berhak minimum di database lokal kelola-v2 (tenant dan landlord) dan skrip snapshot/restore/sidik/test change di `review-fixtures/lab` repo kelola; setujui perlengkapan data (tenant, landlord, folder unggahan) dengan uji bolak-balik.
+2. Run lab di PGS-1477–1483: AC data di atas dan isolasi antar-corporate (Pentest 2026), termasuk batas atas KB di landlord (AE1).
+3. Sesudah setiap lab: sidik semua penyimpanan sama dengan sebelum lab, folder snapshot terhapus, tidak ada KB uji, nilai uji, atau data corporate kedua yang tersisa.
+4. AE2: arahkan sementara ke database non-lokal, harap "lab only runs against local databases".
+5. AE3: paksa restore gagal (skrip restore keluar non-nol), periksa banner, penahanan Start/review/giliran agent, lalu Retry restore.
+
+Status 2026-11-10: **uji langsung ditunda** atas keputusan pemilik produk. Temuan saat persiapan:
+
+- Run PGS-1477–1483 sudah ditutup dan branch-nya sudah di-merge, jadi uji butuh run terbuka baru untuk kartu kelola.
+- Skrip lab dicocokkan dengan salinan di worktree run, jadi `review-fixtures/lab` harus ada di branch run kelola-web (ter-commit di `talentlytica/kelola-web` atau di branch run). Tempatnya diputuskan saat uji.
+- Perlengkapan data ada di kelola-web (app yang diuji di browser), sedangkan database dipakai kelola-api; app run multi-repo dihentikan dan dinyalakan bersama, sehingga snapshot dan restore mencakup keduanya.
+- Penyimpanan: Postgres lokal `postgres-vector` (127.0.0.1:57432, Docker) dengan DB `landlord`, `stagingintegro_db`, dan `pentest2026_db`, plus folder unggahan.
+- Role `mandor_lab` sudah dibuat (bukan superuser, tanpa CREATEDB/CREATEROLE/BYPASSRLS, tanpa password). Hak: `SELECT, INSERT, UPDATE, DELETE` pada tabel biasa, `SELECT` pada view, `USAGE, SELECT` pada sequence di skema `public` ketiga DB. Tidak ada hak pada 15 foreign table `postgres_fdw` di DB tenant, supaya SQL lab di tenant tidak menulis ke landlord lewat FDW. Password diset developer (`ALTER ROLE mandor_lab PASSWORD …`) lalu diisi di Settings.
+- Penyimpangan KTD-L16 / test scenario U11 (keputusan pemilik produk 2026-11-10): `role_block` tidak lagi menolak `dblink`, `postgres_fdw`, atau `file_fdw` yang sekadar terpasang, melainkan hanya bila role lab bisa memakainya: `dblink` lewat fungsi yang bisa dijalankan atau wrapper-nya, `postgres_fdw`/`file_fdw` lewat USAGE pada wrapper atau server atau hak pada foreign table. Alasannya, kelola memakai `postgres_fdw` (tenant → landlord) dan `dblink` (landlord) sebagai bagian app; dengan aturan lama perlengkapan data kelola tidak pernah bisa disetujui. Fungsi handler/validator FDW dan pengelola koneksi `postgres_fdw` memang bisa dijalankan PUBLIC, tetapi tidak membuka koneksi tanpa server dan user mapping. Diuji di domain dan di PostgreSQL 18 sungguhan.
+- Review keamanan otomatis atas perubahan itu: jalur tidak langsung kini ikut dinilai. Hak per kolom pada foreign table (`has_any_column_privilege`), view bertingkat di atas foreign table (rekursif lewat `pg_rewrite`, karena view berjalan dengan hak pemiliknya), dan fungsi SECURITY DEFINER bukan milik extension yang bisa dijalankan role lab (dihitung untuk setiap extension, gagal tertutup). Putaran berikutnya menambah hak TRUNCATE (didukung `postgres_fdw` sejak PG 14) dan tabel induk partisi/pewarisan dari foreign table (akses lewat induk hanya memeriksa hak induk). Ketiganya diuji di PostgreSQL 18 sungguhan; DB kelola tidak punya jalur itu.
+- `landlord` lokal: EXECUTE semua fungsi `dblink` dicabut dari PUBLIC (kelola-api memakai `postgres` superuser, tidak terpengaruh). Ketiga DB kelola kini lolos `role_block` untuk `mandor_lab`.
+
+### Skenario uji langsung bersama: kartu PGS-1582
+
+Kartu uji `PGS-1582` di Base copy board (`Sv1NbPJh5aD7SesHvtGlmga8g2f`), repo `kelola-api` (workspace kelola-v2), 8 AC yang dulu diverifikasi manual di PGS-1477–1483:
+
+| AC | Kebutuhan | Asal | Yang dibuktikan |
+|---|---|---|---|
+| AC-1 batas atas KB berubah, nilai ditandai tidak valid | data (landlord) | AC-8941 | AE1 |
+| AC-2 nilai disimpan apa adanya saat batas atas turun | data (landlord + tenant) | AC-9424 | AE1 |
+| AC-3 batas atas satu corporate tidak memengaruhi corporate lain | data (Pentest 2026) | AC-9425 | isolasi |
+| AC-4 template mengikuti KB terpasang di aspek | data (tenant) | AC-8418 | AE1 |
+| AC-5 KB bernilai 0 tampil Not visible | data (tenant) | AC-8410 | AE1 |
+| AC-6 Manager tanpa admin.profileData ditolak | role | AC-8616 | AE4 |
+| AC-7 skeleton saat data lambat | simulasi | AC-8612 | fase 1 |
+| AC-8 modal upload menerima xlsx | berkas | AC-8436 | fase 1 |
+
+Persiapan (developer):
+
+1. Pasang installer Windows fase 2 (Actions run 42840860088).
+2. Hentikan kelola-api (8090) dan kelola-web (3000) yang menyala di luar Mandor; tutup pgAdmin.
+3. Password `mandor_lab` sudah disamakan dengan `PGPASSWORD` di `.env` kelola-api (keputusan pemilik produk 2026-11-10: hanya lokal, tidak perlu password baru); role lab tetap bukan superuser.
+4. Settings → Repos → kelola-web → Review lab: akun Default (admin) dan `manager` (Manager tanpa admin.profileData), form login, folder berkas uji `review-fixtures/files`, lalu bagian Lab with test data: folder skrip `review-fixtures/lab`, database `landlord`, `stagingintegro_db`, `pentest2026_db` (localhost:57432, role lab `mandor_lab`, pemeliharaan `postgres`), perintah `snapshot.sh`/`restore.sh`/`fingerprint.sh`/`test-change.sh`. Save, Approve (uji bolak-balik tiap database).
+
+Jalannya uji:
+
+5. Sidik awal ketiga DB dicatat asisten (skrip `fingerprint.sh`, baca saja).
+6. Start PGS-1582. Asisten meng-commit `review-fixtures/` ke branch run kelola-web saja.
+7. Run app dari run, lalu AC review → Run review. Harapan: AC-6, AC-7, AC-8 diputuskan lab fase 1 (badge Lab; AC-7 Simulated request); AC-1–AC-5 Can't verify "Lab with test data deferred" dan tombol Run lab (5).
+8. Run lab → Run lab now. Harapan: banner "The review lab is using the local data", app berhenti untuk snapshot lalu menyala; AC-1–AC-5 diputuskan lab dengan badge Prepared with SQL; app berhenti lagi untuk restore; banner hilang.
+9. Sesudah lab: sidik ketiga DB sama dengan langkah 5, folder snapshot terhapus, tidak ada nilai KB uji, perubahan batas atas, atau data Pentest 2026 yang tersisa.
+
+Uji negatif:
+
+10. AE3: saat lab data berjalan, berkas snapshot satu database dibuat tidak terbaca → restore gagal → banner "The lab data was not restored", Start app/review/giliran agent ditolak. Izin dikembalikan → Retry restore → sidik sama, penahanan lepas.
+11. AE2: env app run `PGHOST` diarahkan ke host non-lokal → lab data tidak berjalan dengan alasan "lab only runs against local databases".
+12. AE7 sudah terlihat bila review dijalankan sebelum perlengkapan disetujui (catatan penyiapan, AC calon lab tetap Can't verify).
+
+Perbaikan test flaky (ditemukan saat `make check`):
+
+- `lab_proxy::tests::berhenti_melepas_port` (fase 1, PR #28): bind ulang ke port yang baru dilepas bisa kalah dari test paralel. Kini diperiksa bahwa proxy tidak lagi menjawab di port itu.
+- `lab_exec::tests::seed_dengan_role_lain_ditolak` (fase 2): exec salinan skrip gagal `ETXTBSY` (text file busy) karena fork paralel. Balapan yang sama mungkin terjadi di produksi (persetujuan menyalin lalu langsung menjalankan skrip), jadi `lab_exec` kini mencoba ulang exec maks. 5 kali, hanya untuk `ETXTBSY`.
+
+## Fase 2
+
+Keputusan pemilik produk 2026-11-10: fase 1 dan fase 2 diuji langsung bersama setelah fase 2 selesai. Fase 2 dikerjakan di branch `feat/review-lab-phase2` yang bercabang dari `feat/review-lab-phase1`; PR fase 2 berbasis PR #28.
+
+| Unit | Status | Catatan |
+|---|---|---|
+| U11 | selesai | `mandor-domain::lab_data`: `is_local_db`, `parse_dsn` (host di query string atau beberapa host ditolak), `check_statement`, `role_block` (atribut, keanggotaan, CREATE, TRIGGER, kepemilikan, extension, akses tabel), `other_clients` (gagal tertutup), `scripts_match`, mesin status sesi `next_phase`, `restore_outcome`, `lock_keys`, `check_command`/`validate_data`; `LabEquipment.data` ikut validasi, digest, codec store, dan DTO `LabDataDto` |
+| U12 | selesai | Migrasi `0015_lab_sessions.sql`; port `LabSessions`, `LabDatabase`, `DbCredentials`; `LabSessionsStore` (transisi `UPDATE … WHERE phase = ?`, `pending_recovery`, `holding`); `PgLabDatabase` (sqlx fitur `postgres` tanpa TLS, kueri runtime, koneksi tunggal dengan opsi eksplisit, batas waktu koneksi/katalog/pernyataan, keluaran ≤ 64 KiB). Diuji dengan PostgreSQL 18 sungguhan di kontainer sementara (`MANDOR_E2E=1`) |
+| U13 | selesai | `mandord::lab_exec`: salinan skrip baca-saja di `<lab_root>/<repo>/private/scripts/<digest>/` (symlink ditolak, digest atas path, bit eksekusi, dan isi); perintah sebagai argv tanpa shell dari salinan, env bersih + `PG*` dari daemon (pemeliharaan untuk snapshot/restore/sidik, role lab + `MANDOR_WORKTREE` untuk seed), batas 300 detik dengan process group, keluaran ≤ 64 KiB disamarkan; folder snapshot 0700, mode berkas dikencangkan ke 0600. Uji bolak-balik persetujuan (database lokal, `pg_read_all_stats`, `role_block`, sidik berubah lalu kembali, seed hanya role lab) dipasang di `lab.approve`; kredensial database per penyimpanan di berkas secret; digest persetujuan menyertakan digest skrip (`repos.lab_scripts_digest`) |
+| U14 | selesai | Orkestrasi `review/lab_data.rs`: sebelum kartu pertama dengan calon `data` → persiapan (skrip sama dengan salinan, database lokal, role, akses tabel, env app lokal), kunci, klien lain, sesi `snapshotting` → app berhenti → snapshot + sidik → app menyala → `running` dan proxy boleh menulis; sidik antar kartu dan restore bila berbeda; akhir lab → restore + sidik → `done`/`restore_waiting`(coba ulang di latar)/`restore_failed`. `restore_failed` menahan review, giliran agent, dan Start/Stop app repo itu (Stop diizinkan saat `restore_waiting`). Pemulihan saat start (`recover_lab_data`, kunci diambil ulang, penanda yatim dihapus). `lab_sql`/`lab_seed` (verdict kartu bertanda SQL otomatis), RPC `review.lab_start`, `lab.retry_restore`, `lab.data_restored`, `LabView.data_session`, peringatan di laporan pagi. Daemon: `lab_lock` (berkas kunci `O_NOFOLLOW` 0666, guard dipegang thread, penanda `.dirty`), `lab_data_port` (operasi lewat `lab_exec`, `PgLabDatabase`, secret), `MANDOR_LAB_LOCK_DIR`. Daftar tabel ikut sidik untuk deteksi perubahan skema |
+| U15 | selesai | Settings → Repos → Review lab: bagian "Lab with test data" (folder skrip, penyimpanan database/folder dengan role lab dan pemeliharaan, seed), persetujuan dengan batas 30 menit untuk uji bolak-balik. Tab AC review: tombol **Run lab (N)** untuk calon data yang ditunda, dengan dialog konfirmasi. `LabBanner` di workspace (sesi berjalan, restore menunggu, restore gagal dengan Retry restore dan Data restored). Peringatan lab data di laporan pagi. Mock `?labdata=`; Vitest 282 lulus, `bun check` hijau, tampilan diperiksa di `/?mock` |
+| U16 | sebagian | Runbook `review-lab.md` bagian 5 (skrip, role, persetujuan, sesi, restore gagal), risiko dan masalah umum fase 2; `ac-review.md`; rencana aktif di `CLAUDE.md`; role `mandor_lab` disiapkan. Uji langsung bersama U10 ditunda pemilik produk |
+
+Catatan fase 2:
+
+- `ctutils` dinaikkan ke 0.4.8 (RUSTSEC-2026-0385, lewat `sqlx-postgres` → `hkdf`/`digest`); butuh Rust 1.87, toolchain proyek 1.95.
+- KTD-L15 diubah (keputusan pemilik produk 2026-11-10): server boleh melihat alamatnya sebagai alamat privat (jaringan kontainer Docker yang portnya dipublikasikan ke loopback, seperti `postgres-18` kelola-v2), selama host koneksi tetap loopback.
+- Review keamanan otomatis atas U11: pengurai pernyataan SQL bisa dilewati dengan `E''`, `U&''`/`U&""`+`UESCAPE`, dan dollar quote; DSN dengan opsi selain `sslmode`/`application_name`/`connect_timeout` atau percent-encoding. Semuanya kini ditolak.
+- Umask 077 untuk perintah lab (KTD-L19) tidak dipasang karena butuh `unsafe` (`pre_exec`); gantinya folder snapshot 0700 dan mode berkas diperiksa serta dikencangkan setelah snapshot.
+- Test lab exec memakai skrip yang menimpa berkas, bukan menghapus (classifier menolak `rm -rf` dengan target variabel).
+- U14, penyederhanaan KTD-L23: di laptop calon `data` selalu ditunda dengan alasan "Lab with test data deferred"; tombol Run lab (`review.lab_start`) memulai review baru dengan lab data diizinkan, sehingga tidak ada jeda 10 menit di Push & PR dan pemeriksaan HEAD tidak diperlukan (review berjalan di kode terbaru).
+- U14: `lab_sql`/`lab_seed` ditawarkan ke token reviewer lab (peran Verdict) hanya selama sesi data berjalan (flag `data` di info ledger), bukan peran kapabilitas terpisah.
+- U14: di laptop, lab data hanya berjalan bila review memakai browser; review hanya memakai browser bila app milik run ini menyala, sehingga syarat KTD-L20 "app dari run ini" terpenuhi lewat kesiapan review.

@@ -348,6 +348,117 @@ pub struct ProxyHit {
     pub write: bool,
 }
 
+/// Satu sesi lab data (plan 2026-11-10-001, U12); tahan restart.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LabSessionRecord {
+    pub id: String,
+    pub run_id: String,
+    pub repo_id: String,
+    /// Kunci penyimpanan yang dipegang, terurut (KTD-L21).
+    pub lock_keys: Vec<String>,
+    pub phase: mandor_domain::lab_data::SessionPhase,
+    /// Folder snapshot milik daemon (0700).
+    pub snapshot_dir: Option<PathBuf>,
+    /// Digest salinan skrip yang dipin (KTD-L18).
+    pub scripts_digest: String,
+    /// Sidik per penyimpanan sebelum lab: `(nama, sidik)`.
+    pub fingerprints: Vec<(String, String)>,
+    pub error: Option<String>,
+    pub created_at_ms: i64,
+    pub updated_at_ms: i64,
+}
+
+/// Penyimpanan status sesi lab data.
+pub trait LabSessions: Send + Sync {
+    fn create_session(
+        &self,
+        rec: &LabSessionRecord,
+    ) -> impl Future<Output = Result<(), PortError>> + Send;
+    fn session(
+        &self,
+        id: &str,
+    ) -> impl Future<Output = Result<Option<LabSessionRecord>, PortError>> + Send;
+    /// Memindah fase hanya bila fase sekarang `from`; `false` bila kalah
+    /// balapan atau sesi tidak ada.
+    fn transition(
+        &self,
+        id: &str,
+        from: mandor_domain::lab_data::SessionPhase,
+        to: mandor_domain::lab_data::SessionPhase,
+        error: Option<&str>,
+        now_ms: i64,
+    ) -> impl Future<Output = Result<bool, PortError>> + Send;
+    /// Folder snapshot dan sidik awal sesi.
+    fn set_snapshot(
+        &self,
+        id: &str,
+        dir: &std::path::Path,
+        fingerprints: &[(String, String)],
+        now_ms: i64,
+    ) -> impl Future<Output = Result<(), PortError>> + Send;
+    /// Sesi yang perlu dipulihkan saat start (KTD-L22).
+    fn pending_recovery(
+        &self,
+    ) -> impl Future<Output = Result<Vec<LabSessionRecord>, PortError>> + Send;
+    /// Sesi yang masih memegang kunci (fase selain `done`).
+    fn holding(&self) -> impl Future<Output = Result<Vec<LabSessionRecord>, PortError>> + Send;
+}
+
+/// Kredensial database lab dari daemon (KTD-L15); password tidak pernah
+/// masuk argv maupun log.
+#[derive(Debug, Clone)]
+pub struct DbCredentials {
+    pub target: mandor_domain::lab_data::DbTarget,
+    pub user: String,
+    pub password: secrecy::SecretString,
+}
+
+/// Hasil satu pernyataan `lab_sql`, sudah dipotong.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SqlResult {
+    pub text: String,
+    pub rows: usize,
+    pub truncated: bool,
+}
+
+/// Akses database lab milik daemon (KTD-L15, KTD-L16, KTD-L20).
+pub trait LabDatabase: Send + Sync {
+    /// Server sungguhan lokal: `inet_server_addr()` null (socket), loopback,
+    /// atau alamat privat jaringan kontainer.
+    fn server_is_local(
+        &self,
+        creds: &DbCredentials,
+    ) -> impl Future<Output = Result<bool, PortError>> + Send;
+    /// Kredensial pemeliharaan boleh membaca semua baris `pg_stat_activity`.
+    fn reads_all_stats(
+        &self,
+        maintenance: &DbCredentials,
+    ) -> impl Future<Output = Result<bool, PortError>> + Send;
+    /// Hak role lab menurut katalog, dibaca dengan kredensial pemeliharaan;
+    /// `tables` = tabel penyimpanan yang wajib bisa dibaca dan ditulis.
+    fn role_privileges(
+        &self,
+        maintenance: &DbCredentials,
+        lab_role: &str,
+    ) -> impl Future<Output = Result<mandor_domain::lab_data::RolePrivileges, PortError>> + Send;
+    /// Baris `pg_stat_activity` dan pid koneksi daemon sendiri.
+    fn activity(
+        &self,
+        maintenance: &DbCredentials,
+    ) -> impl Future<Output = Result<(Vec<mandor_domain::lab_data::PgActivity>, i32), PortError>> + Send;
+    /// Nama tabel di schema pengguna, terurut (deteksi perubahan skema).
+    fn tables(
+        &self,
+        creds: &DbCredentials,
+    ) -> impl Future<Output = Result<Vec<String>, PortError>> + Send;
+    /// Satu pernyataan `lab_sql` dengan role lab, dibatasi waktu.
+    fn run_statement(
+        &self,
+        lab: &DbCredentials,
+        sql: &str,
+    ) -> impl Future<Output = Result<SqlResult, PortError>> + Send;
+}
+
 /// Review lab: perlengkapan, login akun uji, dan proxy per review (plan
 /// 2026-11-10-001).
 pub trait LabPort: Send + Sync {
@@ -394,6 +505,109 @@ pub trait LabPort: Send + Sync {
         review_id: &str,
         texts: Vec<String>,
     ) -> impl Future<Output = Vec<String>> + Send;
+
+    // --- Lab data (fase 2, U14) ---
+
+    /// Penyimpanan status sesi lab data.
+    type Sessions: LabSessions;
+    fn sessions(&self) -> &Self::Sessions;
+    /// Pemeriksaan sebelum lab data di worktree run (KTD-L15–KTD-L18): skrip
+    /// sama dengan salinan yang disetujui, database lokal, role lab berhak
+    /// minimum dan punya akses ke tabel, env database app lokal. `Ok(Err)`
+    /// berisi alasan untuk calon *Can't verify*.
+    fn data_prepare(
+        &self,
+        repo_id: &str,
+        worktree: &std::path::Path,
+    ) -> impl Future<Output = Result<Result<DataReady, String>, PortError>> + Send;
+    /// Klien database lain di database lab (KTD-L20), sebagai teks; `None`
+    /// bila tidak ada.
+    fn data_other_clients(&self, repo_id: &str) -> impl Future<Output = Option<String>> + Send;
+    /// Mengambil kunci penyimpanan berurutan, menunggu sampai `wait`
+    /// (KTD-L21).
+    fn data_lock(
+        &self,
+        keys: &[String],
+        session_id: &str,
+        wait: std::time::Duration,
+    ) -> impl Future<Output = LockOutcome> + Send;
+    /// Menulis penanda `.dirty` fase sesi pada kunci yang dipegang.
+    fn data_mark(
+        &self,
+        keys: &[String],
+        session_id: &str,
+        phase: mandor_domain::lab_data::SessionPhase,
+    ) -> impl Future<Output = ()> + Send;
+    /// Menghapus penanda dan melepas kunci.
+    fn data_release(&self, keys: &[String]) -> impl Future<Output = ()> + Send;
+    /// Saat start: penanda milik daemon ini yang kuncinya tidak dipegang sesi
+    /// aktif dihapus (KTD-L21).
+    fn data_clear_stale(&self, active_keys: &[String]) -> impl Future<Output = ()> + Send;
+    /// Snapshot semua penyimpanan lalu sidik awal; mengembalikan folder
+    /// snapshot dan sidik per penyimpanan.
+    fn data_snapshot(
+        &self,
+        repo_id: &str,
+        session_id: &str,
+    ) -> impl Future<Output = Result<(PathBuf, Vec<(String, String)>), String>> + Send;
+    /// Sidik semua penyimpanan sekarang.
+    fn data_fingerprints(
+        &self,
+        repo_id: &str,
+        snapshot: &std::path::Path,
+    ) -> impl Future<Output = Result<Vec<(String, String)>, String>> + Send;
+    /// Restore semua penyimpanan lalu bandingkan sidik dengan `before`.
+    fn data_restore(
+        &self,
+        repo_id: &str,
+        snapshot: &std::path::Path,
+        before: &[(String, String)],
+    ) -> impl Future<Output = RestoreResult> + Send;
+    /// Menghapus folder snapshot.
+    fn data_discard(&self, snapshot: &std::path::Path) -> impl Future<Output = ()> + Send;
+    /// Satu pernyataan `lab_sql` dengan role lab penyimpanan `store`.
+    fn data_sql(
+        &self,
+        repo_id: &str,
+        store: &str,
+        sql: &str,
+    ) -> impl Future<Output = Result<SqlResult, PortError>> + Send;
+    /// Menjalankan seed bernama dengan role lab; mengembalikan keluaran.
+    fn data_seed(
+        &self,
+        repo_id: &str,
+        name: &str,
+        worktree: &std::path::Path,
+    ) -> impl Future<Output = Result<String, PortError>> + Send;
+}
+
+/// Lab data siap dijalankan untuk repo.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DataReady {
+    pub lock_keys: Vec<String>,
+    pub scripts_digest: String,
+    /// Nama penyimpanan `postgres` (untuk `lab_sql`).
+    pub sql_stores: Vec<String>,
+    pub seeds: Vec<String>,
+}
+
+/// Hasil pengambilan kunci penyimpanan.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum LockOutcome {
+    Acquired,
+    /// Tenggat lewat; lab lain masih memegang kunci.
+    Locked,
+    /// Pemegang kunci gagal restore; penyimpanan menunggu developer.
+    RestoreFailed(String),
+}
+
+/// Hasil restore lab data.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RestoreResult {
+    Restored,
+    /// Klien database lain masih tersambung (KTD-L20).
+    Waiting(String),
+    Failed(String),
 }
 
 /// Konteks agent untuk run workspace.
@@ -1124,6 +1338,8 @@ pub struct LabBrief<'a> {
     pub app_urls: &'a [String],
     /// Folder staging berkas uji, bila ada.
     pub fixtures: Option<&'a std::path::Path>,
+    /// Sesi lab data berjalan: penyimpanan untuk `lab_sql` dan nama seed.
+    pub data: Option<(&'a [String], &'a [String])>,
 }
 
 /// Pemicu review.

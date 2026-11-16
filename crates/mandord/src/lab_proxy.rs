@@ -16,7 +16,10 @@ use hyper::body::{Bytes, Incoming};
 use hyper::header::{HOST, HeaderValue};
 use hyper::{Method, Request, Response, StatusCode};
 use hyper_util::rt::TokioIo;
-use mandor_domain::lab::{ProxyBlock, ProxyPolicy, ProxyRequest, proxy_decision};
+use mandor_domain::lab::{
+    ProxyBlock, ProxyPolicy, ProxyRequest, TunnelRule, is_websocket_handshake, proxy_decision,
+    tunnel_rule,
+};
 use tokio::net::{TcpListener, TcpStream};
 use tokio_util::sync::CancellationToken;
 use tokio_util::task::TaskTracker;
@@ -29,6 +32,10 @@ const RESPONSE_TIMEOUT: Duration = Duration::from_secs(120);
 const TUNNEL_TIMEOUT: Duration = Duration::from_secs(2 * 60 * 60);
 /// Batas jumlah penolakan yang dicatat per review.
 const MAX_BLOCKED: usize = 500;
+/// Batas kepala request pertama di terowongan WebSocket-saja.
+const MAX_TUNNEL_HEAD: usize = 16 * 1024;
+/// Batas waktu menunggu kepala request pertama di terowongan.
+const TUNNEL_HEAD_TIMEOUT: Duration = Duration::from_secs(10);
 
 /// Request yang ditolak proxy.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -207,7 +214,7 @@ async fn handle(
 
 fn connect(
     req: Request<Incoming>,
-    state: &State,
+    state: &Arc<State>,
     cancel: CancellationToken,
     tracker: &TaskTracker,
 ) -> Response<ProxyBody> {
@@ -231,6 +238,11 @@ fn connect(
         record(state, "CONNECT", &authority, reason);
         return blocked();
     }
+    let rule = state
+        .policy
+        .read()
+        .map_or(TunnelRule::WebSocketOnly, |p| tunnel_rule(&p, &authority));
+    let state = Arc::clone(state);
     tracker.spawn(async move {
         let upgraded = match hyper::upgrade::on(req).await {
             Ok(u) => u,
@@ -239,10 +251,30 @@ fn connect(
                 return;
             }
         };
+        let mut client = TokioIo::new(upgraded);
+        // Di luar sesi data terowongan ke origin HTTP hanya untuk WebSocket:
+        // request pertama harus handshake, bukan request tulis biasa.
+        let head = if rule == TunnelRule::WebSocketOnly {
+            match read_head(&mut client).await {
+                Some(h) if is_websocket_handshake(&h) => h,
+                _ => {
+                    record(&state, "CONNECT", &authority, ProxyBlock::Write);
+                    return;
+                }
+            }
+        } else {
+            Vec::new()
+        };
         let Ok(mut upstream) = dial(&authority).await else {
             return;
         };
-        let mut client = TokioIo::new(upgraded);
+        if !head.is_empty()
+            && tokio::io::AsyncWriteExt::write_all(&mut upstream, &head)
+                .await
+                .is_err()
+        {
+            return;
+        }
         tokio::select! {
             () = cancel.cancelled() => {}
             r = tokio::time::timeout(
@@ -285,6 +317,31 @@ async fn forward(
     }
     let resp = tokio::time::timeout(RESPONSE_TIMEOUT, sender.send_request(req)).await??;
     Ok(resp.map(BodyExt::boxed))
+}
+
+/// Kepala request pertama dari klien terowongan (sampai baris kosong), dibatasi
+/// ukuran dan waktu; `None` bila tidak lengkap.
+async fn read_head<R: tokio::io::AsyncRead + Unpin>(r: &mut R) -> Option<Vec<u8>> {
+    use tokio::io::AsyncReadExt;
+    let read = async {
+        let mut head = Vec::new();
+        let mut buf = [0u8; 2048];
+        while head.len() < MAX_TUNNEL_HEAD {
+            let n = r.read(&mut buf).await.ok()?;
+            if n == 0 {
+                return None;
+            }
+            head.extend_from_slice(&buf[..n]);
+            if head.windows(4).any(|w| w == b"\r\n\r\n") {
+                return Some(head);
+            }
+        }
+        None
+    };
+    tokio::time::timeout(TUNNEL_HEAD_TIMEOUT, read)
+        .await
+        .ok()
+        .flatten()
 }
 
 /// Menyambung ke `host:port`. Nama `*.localhost` selalu loopback (RFC 6761)
@@ -496,7 +553,31 @@ mod tests {
     async fn connect_ke_origin_run_menjadi_terowongan_di_luar_sesi_data() {
         let (app, _) = upstream(true).await;
         let (p, _t, _c) = proxy_for(app, &[]).await;
-        let mut s = TcpStream::connect(("127.0.0.1", p.port()))
+        // Di luar sesi data hanya handshake WebSocket yang lewat.
+        let hs = "GET /_next/webpack-hmr HTTP/1.1\r\nHost: a\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n\r\n";
+        assert_eq!(tunnel(p.port(), app, hs).await, hs.as_bytes());
+        // Sesi data: terowongan penuh.
+        p.set_write_allowed(true);
+        assert_eq!(tunnel(p.port(), app, "ping").await, b"ping");
+    }
+
+    /// Request tulis biasa di dalam terowongan `CONNECT` di luar sesi data
+    /// tidak sampai ke app dan tercatat sebagai blokir.
+    #[tokio::test]
+    async fn post_di_dalam_terowongan_ditolak_di_luar_sesi_data() {
+        let (app, _) = upstream(true).await;
+        let (p, _t, _c) = proxy_for(app, &[]).await;
+        let post = "POST /api/x HTTP/1.1\r\nHost: a\r\ncontent-length: 2\r\n\r\nhi";
+        assert!(tunnel(p.port(), app, post).await.is_empty());
+        let blocked = p.take_blocked();
+        assert_eq!(blocked.len(), 1, "{blocked:?}");
+        assert_eq!(blocked[0].method, "CONNECT");
+    }
+
+    /// Membuka terowongan ke `app`, mengirim `payload`, lalu mengembalikan
+    /// jawaban app (kosong bila terowongan ditutup).
+    async fn tunnel(proxy: u16, app: u16, payload: &str) -> Vec<u8> {
+        let mut s = TcpStream::connect(("127.0.0.1", proxy))
             .await
             .unwrap_or_else(|e| panic!("{e}"));
         s.write_all(
@@ -507,12 +588,14 @@ mod tests {
         let mut buf = vec![0u8; 1024];
         let n = s.read(&mut buf).await.unwrap_or_else(|e| panic!("{e}"));
         assert!(String::from_utf8_lossy(&buf[..n]).starts_with("HTTP/1.1 200"));
-        s.write_all(b"ping").await.unwrap_or_else(|e| panic!("{e}"));
+        s.write_all(payload.as_bytes())
+            .await
+            .unwrap_or_else(|e| panic!("{e}"));
         let n = tokio::time::timeout(Duration::from_secs(5), s.read(&mut buf))
             .await
             .unwrap_or_else(|e| panic!("{e}"))
-            .unwrap_or_else(|e| panic!("{e}"));
-        assert_eq!(&buf[..n], b"ping");
+            .unwrap_or(0);
+        buf[..n].to_vec()
     }
 
     #[tokio::test]

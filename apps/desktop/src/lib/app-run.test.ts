@@ -54,14 +54,23 @@ describe('kontrol Run app', () => {
 
 describe('checklist kesiapan', () => {
   it('menghitung item yang kurang dan alasan Can\'t verify yang akan muncul', () => {
-    const items = readinessItems(ready({ chrome_connected: false }), { database: true, login: true }, null);
-    expect(missingCount(items)).toBe(1);
-    expect(cantVerifyReason(items)).toBe('Claude in Chrome extension not connected');
-    const login = readinessItems(ready(), { database: true, login: false }, null);
-    expect(cantVerifyReason(login)).toBe('Login not confirmed');
-    const all = readinessItems(ready(), { database: true, login: true }, null);
+    // Review memakai Playwright headless dengan akun uji perlengkapan: tidak
+    // ada konfirmasi login maupun ekstensi Chrome.
+    const notReady = readinessItems(
+      ready({ chrome_connected: false, cant_verify_reason: 'Playwright is not installed' }),
+      { database: true, login: false },
+      null
+    );
+    expect(missingCount(notReady)).toBe(1);
+    expect(cantVerifyReason(notReady)).toBe('Playwright is not installed');
+    const browser = notReady.find((i) => i.key === 'browser_ready');
+    expect(browser?.title).toBe('Browser review is not ready');
+    expect(browser?.help).toContain('Playwright is not installed');
+    const all = readinessItems(ready(), { database: true, login: false }, null);
     expect(missingCount(all)).toBe(0);
     expect(cantVerifyReason(all)).toBeNull();
+    expect(all.map((i) => i.key)).not.toContain('login');
+    expect(all.map((i) => i.title).join(' ')).not.toMatch(/Chrome|Logged in/);
   });
 
   it('app kode lama menawarkan Restart app; app milik run lain disebut', () => {

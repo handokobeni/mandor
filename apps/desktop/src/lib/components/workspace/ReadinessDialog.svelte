@@ -68,8 +68,6 @@
           <span class="ri-act">
             {#if it.key === 'database'}
               <label class="ri-check"><Checkbox checked={database} onCheckedChange={(v) => (database = v === true)} /> Confirmed</label>
-            {:else if it.key === 'login'}
-              <label class="ri-check"><Checkbox checked={login} onCheckedChange={(v) => (login = v === true)} /> I'm logged in</label>
             {:else if it.action === 'run_app'}
               <Button variant="outline" size="xs" onclick={onrunapp}><Play />Run app</Button>
             {:else if it.action === 'restart_app'}

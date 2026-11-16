@@ -111,8 +111,16 @@ impl<D: Deps> RunService<D> {
                 self.runs
                     .append(&run.id, &ChatItem::System(note), self.now())
                     .await?;
-                self.drop_data_rows(&run.id, progress, &ids, &format!("Can't verify: {reason}."))
-                    .await
+                // Laptop: baris tetap ditunda supaya Run lab tetap tersedia
+                // setelah penyebabnya diperbaiki. VM tidak punya tombol itu.
+                let why = if self.is_vm() {
+                    format!("Can't verify: {reason}.")
+                } else {
+                    format!(
+                        "Lab with test data deferred: it did not run ({reason}). Fix that, then use Run lab in the AC tab."
+                    )
+                };
+                self.drop_data_rows(&run.id, progress, &ids, &why).await
             }
         }
     }

@@ -367,6 +367,10 @@ async fn kunci_dan_klien_lain_menghentikan_lab_data() {
         ev.contains("another database client is connected: psql from 127.0.0.1"),
         "{ev}"
     );
+    // Di laptop baris tetap ditunda supaya tombol Run lab tetap ada setelah
+    // penyebabnya diperbaiki.
+    assert!(ev.contains("Lab with test data deferred"), "{ev}");
+    assert!(ev.contains("use Run lab in the AC tab"), "{ev}");
     assert!(st.lab.calls().contains(&"release".to_owned()));
     assert!(!st.lab.calls().contains(&"snapshot".to_owned()));
 }

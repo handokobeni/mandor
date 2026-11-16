@@ -259,10 +259,31 @@ const waitFor = async (p, ms) => {
   }
   return false;
 };
+// App React (mis. Next.js dev) baru siap dipakai beberapa saat setelah DOM siap:
+// isian sebelum itu bisa ditimpa state awal, dan submit sebelum itu hanya
+// memuat ulang halaman. Tunggu jaringan tenang, lalu isi sampai nilainya
+// bertahan 2 detik.
+const fillStable = async (u, p) => {
+  const end = Date.now() + 15000;
+  let filledAt = 0;
+  while (Date.now() < end) {
+    const kept = (await u.inputValue({ timeout: 10000 })) === d.username
+      && (await p.inputValue({ timeout: 5000 })) === d.password;
+    if (!kept) {
+      await u.fill(d.username, { timeout: 10000 });
+      await p.fill(d.password, { timeout: 5000 });
+      filledAt = Date.now();
+    } else if (Date.now() - filledAt >= 2000) {
+      return true;
+    }
+    await page.waitForTimeout(250);
+  }
+  return false;
+};
 await page.goto(d.url, { waitUntil: 'domcontentloaded' });
+await page.waitForLoadState('networkidle', { timeout: 5000 }).catch(() => {});
 try {
-  await sel(page, d.user_field).fill(d.username, { timeout: 10000 });
-  await sel(page, d.pass_field).fill(d.password, { timeout: 5000 });
+  if (!(await fillStable(sel(page, d.user_field), sel(page, d.pass_field)))) return 'form_not_found';
   await sel(page, d.submit).click({ timeout: 5000 });
 } catch (e) {
   return 'form_not_found';

@@ -36,14 +36,26 @@ async fn app() -> u16 {
                 let req = String::from_utf8_lossy(&buf[..n]).into_owned();
                 let first = req.lines().next().unwrap_or_default().to_owned();
                 let has_cookie = req.to_ascii_lowercase().contains("cookie: sesi=ok");
-                let resp = if first.starts_with("GET /login") {
+                let resp = if first.starts_with("GET /late/login")
+                    || first.starts_with("POST /late/login")
+                {
+                    // Seperti app React (kelola-web): sebelum "hidup", submit
+                    // hanya memuat ulang halaman login; saat hidup, isian
+                    // ditimpa state awal (kosong) dan submit lewat fetch.
+                    let body = "<form id=f method=post action=/late/login><input id=email name=email required><input name=password type=password required><button>Sign in</button></form><script>setTimeout(() => { const f = document.getElementById('f'); f.email.value = ''; f.password.value = ''; f.addEventListener('submit', (e) => { e.preventDefault(); fetch('/api/login', { method: 'POST', headers: { 'content-type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams(new FormData(f)).toString() }).then((r) => { if (r.ok) location.assign('/admin'); }); }); }, 1500);</script>";
+                    format!(
+                        "HTTP/1.1 200 OK\r\ncontent-type: text/html\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}",
+                        body.len()
+                    )
+                } else if first.starts_with("GET /login") {
                     let body = "<form method=post action=/api/login><input id=email name=email><input name=password type=password><button>Sign in</button></form>";
                     format!(
                         "HTTP/1.1 200 OK\r\ncontent-type: text/html\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}",
                         body.len()
                     )
                 } else if first.starts_with("POST /api/login") {
-                    let ok = req.contains(&format!("password={PASSWORD}"));
+                    let ok = req.contains(&format!("password={PASSWORD}"))
+                        && req.contains("email=a%40uji.test");
                     let cookie = if ok {
                         "set-cookie: sesi=ok; Path=/\r\n"
                     } else {
@@ -126,6 +138,34 @@ async fn login_menyimpan_sesi_dan_tidak_meninggalkan_password() {
             entry.display()
         );
     }
+}
+
+/// Form yang menimpa isian setelah dimuat (hydration React, mis. kelola-web
+/// dengan "Remember email") tetap bisa dipakai login: isian diulang sampai
+/// nilainya bertahan.
+#[tokio::test]
+async fn isian_yang_ditimpa_setelah_dimuat_diisi_ulang() {
+    let Some(bin) = enabled() else { return };
+    let port = app().await;
+    let dir = tempfile::tempdir().unwrap();
+    let out = dir.path().join("state.json");
+    let mut f = form(port);
+    f.url = format!("http://127.0.0.1:{port}/late/login");
+    let origins = vec![format!("http://127.0.0.1:{port}")];
+    let pw = SecretString::from(PASSWORD.to_owned());
+    let r = login(&LoginRequest {
+        bin: &bin,
+        form: &f,
+        username: "a@uji.test",
+        password: &pw,
+        origins: &origins,
+        proxy: None,
+        work_dir: dir.path(),
+        out: &out,
+        env: env(),
+    })
+    .await;
+    assert_eq!(r, Ok(()));
 }
 
 #[tokio::test]

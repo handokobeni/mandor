@@ -280,6 +280,13 @@ impl<D: Deps> RunService<D> {
                 "No repo in this run has a start command and port; set them in Settings",
             ));
         }
+        let repos: Vec<String> = members.iter().map(|m| m.repo_id.clone()).collect();
+        if let Some(phase) = self.data_phase_for(&repos).await {
+            return Err(RunError::LabData(format!(
+                "the review lab is using the local data ({}); wait for it to finish",
+                phase.as_str()
+            )));
+        }
         let mut snapshot = BTreeMap::new();
         for m in &members {
             let current = self.member_revision(m).await?;
@@ -341,7 +348,7 @@ impl<D: Deps> RunService<D> {
         }
     }
 
-    async fn restart_app(
+    pub(crate) async fn restart_app(
         &self,
         run_id: &str,
         snapshot: &BTreeMap<String, String>,
@@ -559,6 +566,22 @@ impl<D: Deps> RunService<D> {
     /// # Errors
     /// Penyimpanan gagal.
     pub async fn app_stop(&self, run_id: &str) -> Result<AppRecord, RunError> {
+        let repos: Vec<String> = self
+            .app_members(run_id)
+            .await?
+            .into_iter()
+            .map(|m| m.repo_id)
+            .collect();
+        // Stop manual diizinkan saat `restore_waiting` agar developer bisa
+        // memutus klien yang menghalangi restore (KTD-L20).
+        if let Some(phase) = self.data_phase_for(&repos).await
+            && phase != mandor_domain::lab_data::SessionPhase::RestoreWaiting
+        {
+            return Err(RunError::LabData(format!(
+                "the review lab is using the local data ({}); wait for it to finish",
+                phase.as_str()
+            )));
+        }
         self.apps.stop(run_id).await;
         let mut rec = self.app_status(run_id).await?;
         rec.state = AppRunState::Off;

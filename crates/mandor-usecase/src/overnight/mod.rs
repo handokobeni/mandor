@@ -23,7 +23,9 @@ pub use planned::QueueRequest;
 pub use ports::{
     CycleUsage, Dequeued, OvernightSettings, OvernightStore, PlannedEntry, QueueItem, ReportState,
 };
-pub use report::{CardOutcome, GroupCardStatus, HeldPlanned, OvernightReport, ReportCard};
+pub use report::{
+    CardOutcome, GroupCardStatus, HeldPlanned, LabDataAlert, OvernightReport, ReportCard,
+};
 
 use crate::StartTarget;
 use crate::ports::{Clock, Deps, LarkTasks, PortError, TaskCache};

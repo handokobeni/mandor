@@ -44,6 +44,13 @@ pub(super) enum LedgerTool {
     },
     /// Usulan perlengkapan lab dari giliran pengusul (KTD-L14).
     LabPropose(mandor_domain::lab::LabEquipment),
+    /// Satu pernyataan lab SQL selama sesi data (KTD-L16).
+    LabSql {
+        store: String,
+        statement: String,
+    },
+    /// Seed bernama selama sesi data (KTD-L17).
+    LabSeed(String),
 }
 
 /// Mengurai method dan parameter tool ledger; method lain ditolak.
@@ -122,6 +129,7 @@ pub(super) fn ledger_tool(name: &str, v: Value) -> Result<LedgerTool, RpcError> 
             let dto: mandor_protocol::LabEquipmentDto = params(v)?;
             Ok(LedgerTool::LabPropose(super::lab::equipment_of(dto)?))
         }
+        method::LEDGER_TOOL_LAB_SQL | method::LEDGER_TOOL_LAB_SEED => lab_data_tool(name, v),
         method::LEDGER_TOOL_SET_VISUAL => {
             let p: LedgerToolSetVisual = params(v)?;
             let result = mandor_domain::ac_ledger::Visual::parse(&p.result)
@@ -142,6 +150,19 @@ pub(super) fn ledger_tool(name: &str, v: Value) -> Result<LedgerTool, RpcError> 
             format!("{other} is not available on this connection"),
         )),
     }
+}
+
+/// Tool lab data (`lab_sql`, `lab_seed`) selama sesi data (U14).
+fn lab_data_tool(name: &str, v: Value) -> Result<LedgerTool, RpcError> {
+    if name == method::LEDGER_TOOL_LAB_SQL {
+        let p: mandor_protocol::LedgerToolLabSql = params(v)?;
+        return Ok(LedgerTool::LabSql {
+            store: p.store,
+            statement: p.statement,
+        });
+    }
+    let p: mandor_protocol::LedgerToolLabSeed = params(v)?;
+    Ok(LedgerTool::LabSeed(p.name))
 }
 
 /// `review.screenshot`: screenshot hasil tampilan run VM sebagai data URL.
@@ -346,7 +367,10 @@ impl AppDispatch {
             LedgerTool::Info => {
                 let visual = scope.role == CapabilityRole::Verdict
                     && s.runs.visual_prototype_url(&scope.run_id).await.is_some();
+                let data =
+                    scope.role == CapabilityRole::Verdict && s.runs.lab_data_running(&scope.run_id);
                 return ok(&LedgerToolInfo {
+                    data,
                     ask: s.runs.ask_available(scope.role),
                     run_id: scope.run_id,
                     role: scope.role.as_str().to_owned(),
@@ -396,6 +420,26 @@ impl AppDispatch {
                 s.runs
                     .ledger_set_visual(&scope, &ac_id, result, report)
                     .await
+            }
+            LedgerTool::LabSql { store, statement } => {
+                let r = s
+                    .runs
+                    .ledger_lab_sql(&scope, &store, &statement)
+                    .await
+                    .map_err(|e| tool_error(&e))?;
+                return ok(&mandor_protocol::LabSqlView {
+                    text: r.text,
+                    rows: u64::try_from(r.rows).unwrap_or(u64::MAX),
+                    truncated: r.truncated,
+                });
+            }
+            LedgerTool::LabSeed(name) => {
+                let output = s
+                    .runs
+                    .ledger_lab_seed(&scope, &name)
+                    .await
+                    .map_err(|e| tool_error(&e))?;
+                return ok(&serde_json::json!({ "output": output }));
             }
             LedgerTool::LabPropose(eq) => {
                 s.runs
@@ -470,6 +514,7 @@ impl AppDispatch {
             method::REVIEW_SCREENSHOT,
             method::LEDGER_LOOK_DECISION,
             method::REVIEW_FINDINGS_LIST,
+            method::REVIEW_LAB_START,
         ]
         .contains(&name)
     }
@@ -481,6 +526,11 @@ impl AppDispatch {
         name: &str,
         v: Value,
     ) -> Result<Value, RpcError> {
+        if name == method::REVIEW_LAB_START {
+            let p: RunRef = params(v)?;
+            let rec = s.runs.start_lab_data(&p.run_id).await.map_err(run_error)?;
+            return ok(&review_view(&rec));
+        }
         if name == method::LEDGER_LOOK_DECISION {
             let p: mandor_protocol::LookDecisionParams = params(v)?;
             let by = self.app.lark_status().await.name;
@@ -503,9 +553,9 @@ impl AppDispatch {
         let s = self.session().await?;
         match name {
             method::REVIEW_SCREENSHOT => screenshot_call(&s, v).await,
-            method::LEDGER_LOOK_DECISION | method::REVIEW_FINDINGS_LIST => {
-                self.lab_review_call(&s, name, v).await
-            }
+            method::LEDGER_LOOK_DECISION
+            | method::REVIEW_FINDINGS_LIST
+            | method::REVIEW_LAB_START => self.lab_review_call(&s, name, v).await,
             method::LEDGER_GET => {
                 let p: RunRef = params(v)?;
                 let r = s.runs.refresh_ledger(&p.run_id).await.map_err(run_error)?;

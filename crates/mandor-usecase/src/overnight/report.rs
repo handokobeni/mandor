@@ -103,6 +103,18 @@ pub struct OvernightReport {
     pub reviewed_without_fix: u32,
     /// Kartu Planned yang ditahan; plan dan klaimnya masih di VM.
     pub planned_held: Vec<HeldPlanned>,
+    /// Lab data yang menahan repo: restore gagal, atau menunggu klien lain
+    /// lebih lama dari jendela coba ulang (U14).
+    pub lab_data: Vec<LabDataAlert>,
+}
+
+/// Peringatan lab data untuk laporan pagi.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LabDataAlert {
+    pub repo_id: String,
+    pub run_id: String,
+    pub phase: mandor_domain::lab_data::SessionPhase,
+    pub error: Option<String>,
 }
 
 /// Item Planned berstatus `Held` di antrean.
@@ -151,6 +163,7 @@ impl<D: Deps> RunService<D> {
             report.dequeued = self.overnight.dequeued_since(start).await?;
         }
         report.planned_held = held_planned(&self.overnight.queue().await?);
+        report.lab_data = self.lab_data_alerts(now).await;
         for run in self.runs.list_active().await? {
             let rows = self.reviews.ac_rows(&run.id).await?;
             let cards = self.runs.cards(&run.id).await?;

@@ -363,6 +363,16 @@ fn report_view(
         dequeued,
         reviewed_without_fix: r.reviewed_without_fix,
         planned_held,
+        lab_data: r
+            .lab_data
+            .iter()
+            .map(|a| mandor_protocol::LabDataAlertView {
+                repo_id: a.repo_id.clone(),
+                run_id: a.run_id.clone(),
+                phase: a.phase.as_str().to_owned(),
+                error: a.error.clone(),
+            })
+            .collect(),
     }
 }
 

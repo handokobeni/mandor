@@ -1421,6 +1421,7 @@ async fn covers_ae5_lab_dipecah_per_kartu_berurutan() {
             },
             safe_posts: vec![],
             fixtures_dir: None,
+            data: None,
         },
     );
     st.svc

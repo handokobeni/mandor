@@ -55,6 +55,9 @@ impl<D: Deps> RunService<D> {
     ) -> Result<ReviewRecord, RunError> {
         let _work = self.enter_work()?;
         let mut run = self.load(run_id).await?;
+        if let Some(reason) = self.data_blocked(&run.repo_id).await {
+            return Err(RunError::LabData(reason));
+        }
         let skill = skill.or(run.reviewer_skill.as_deref()).map(str::to_owned);
         let skill = skill.as_deref();
         if !self.review_allowed(&run, trigger) {
@@ -166,6 +169,7 @@ impl<D: Deps> RunService<D> {
                         .cloned()
                         .collect(),
                     proxy: browser.proxy.clone(),
+                    data_allowed: self.is_vm() || self.take_data_request(run_id),
                 },
             );
         }

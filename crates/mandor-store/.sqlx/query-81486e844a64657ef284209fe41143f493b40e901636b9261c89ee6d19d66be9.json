@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "UPDATE repos SET lab_approved_digest = ?, lab_approved_at_ms = ?,\n                 lab_scripts_digest = ?\n             WHERE id = ? AND lab_json = ?",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 5
+    },
+    "nullable": []
+  },
+  "hash": "81486e844a64657ef284209fe41143f493b40e901636b9261c89ee6d19d66be9"
+}

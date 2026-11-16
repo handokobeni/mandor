@@ -261,6 +261,9 @@ function handle(method: string, p: Record<string, unknown>): unknown {
         reviewed_without_fix: cards.filter((c) => c.outcome === 'sent_to_review' && !c.entered_waiting_fix).length,
         planned_held: [
           { record_id: 'recH', key: 'PGS-1429', title: 'Audit entries for approvals', repo_id: 'pegasus-web', reason: 'Design source "kelola-mock" is not available: Path missing.' }
+        ],
+        lab_data: [
+          { repo_id: 'pegasus-api', run_id: 'v3', phase: 'restore_failed', error: 'restoring tenant failed' }
         ]
       };
     case 'overnight.send_to_review':

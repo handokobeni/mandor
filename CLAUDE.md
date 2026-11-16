@@ -1,6 +1,6 @@
 # mandor — Aturan Proyek (Mengikat)
 
-Repo ini membangun **Mandor**, penulisan ulang Korlap: daemon Rust `mandord` + client Tauri v2/Svelte 5, dengan sinkron Lark Base. Kode, dokumen rencana (`docs/plans/`), progres (`docs/progress/`), desain (`docs/design/`), dan runbook (`docs/runbook/`) ada di repo ini; jalankan `make`, `cargo`, dan `bun` dari root repo. Cara menjalankan app: `README.md`. Rencana aktif: `docs/plans/2026-10-18-001-feat-korlap-lark-lembur-plan.md` (Rilis 1), `docs/plans/2026-10-21-003-feat-ac-review-plan.md` (Rilis 2), `docs/plans/2026-10-23-001-feat-daemon-os-service-installer-plan.md` (daemon sebagai service OS), `docs/plans/2026-10-23-002-feat-vm-overnight-mode-plan.md` (Rilis 3, lembur di VM), dan `docs/plans/2026-11-06-001-feat-agent-permission-approval-plan.md` (izin agent dan kartu persetujuan).
+Repo ini membangun **Mandor**, penulisan ulang Korlap: daemon Rust `mandord` + client Tauri v2/Svelte 5, dengan sinkron Lark Base. Kode, dokumen rencana (`docs/plans/`), progres (`docs/progress/`), desain (`docs/design/`), dan runbook (`docs/runbook/`) ada di repo ini; jalankan `make`, `cargo`, dan `bun` dari root repo. Cara menjalankan app: `README.md`. Rencana aktif: `docs/plans/2026-10-18-001-feat-korlap-lark-lembur-plan.md` (Rilis 1), `docs/plans/2026-10-21-003-feat-ac-review-plan.md` (Rilis 2), `docs/plans/2026-10-23-001-feat-daemon-os-service-installer-plan.md` (daemon sebagai service OS), `docs/plans/2026-10-23-002-feat-vm-overnight-mode-plan.md` (Rilis 3, lembur di VM), `docs/plans/2026-11-06-001-feat-agent-permission-approval-plan.md` (izin agent dan kartu persetujuan), dan `docs/plans/2026-11-10-001-feat-review-lab-plan.md` (review lab: akun uji, simulasi, berkas, dan data uji lokal).
 
 Source Korlap asli (MIT) ada di luar repo ini, di folder `korlap/` di sebelahnya (`../korlap` dari root repo), dan **hanya** menjadi referensi perilaku. Jangan mengubahnya, dan aturan di `korlap/CLAUDE.md` **tidak berlaku** untuk kode baru.
 
@@ -37,7 +37,7 @@ mandord (app) ──► mandor-api, mandor-store, mandor-lark, mandor-git, mando
 |---|---|---|
 | `mandor-domain` | Aturan murni: derivasi kolom kanban, state machine alur kerja, keputusan klaim, filter penulis tepercaya, urutan kursor, allowlist transisi status, klasifikasi perintah hook | Tidak ada crate workspace; tidak ada crate I/O (tokio, sqlx, axum, reqwest) |
 | `mandor-usecase` | Orkestrasi dan trait port dalam satu bundel `Deps` | `mandor-domain` |
-| `mandor-store` | Adapter penyimpanan (sqlx SQLite) | usecase, domain; **satu-satunya** pengguna `sqlx` |
+| `mandor-store` | Adapter penyimpanan (sqlx SQLite) dan database lab PostgreSQL | usecase, domain; **satu-satunya** pengguna `sqlx` |
 | `mandor-lark` | Adapter Lark (reqwest) | usecase, domain |
 | `mandor-git`, `mandor-agent`, `mandor-proc` | Adapter git/gh, Claude CLI, dan helper proses | usecase, domain |
 | `mandor-api`, `mandor-protocol` | Server axum WebSocket dan relay stdio, DTO protokol | `mandor-protocol`; **satu-satunya** pengguna `axum` selain app |
@@ -48,14 +48,14 @@ mandord (app) ──► mandor-api, mandor-store, mandor-lark, mandor-git, mando
 
 | Crate | Alasan | Dipakai di |
 |---|---|---|
-| `sqlx` fitur `sqlite` | Allow list hanya menyebut Postgres; daemon lokal tidak punya Postgres | `mandor-store` |
+| `sqlx` fitur `sqlite` dan `postgres` | Allow list hanya menyebut Postgres; daemon menyimpan state di SQLite. Fitur `postgres` (tanpa TLS, hanya kueri runtime tanpa makro) untuk database lab lokal milik app yang direview (plan 2026-11-10-001, KTD-L16) | `mandor-store` |
 | `process-wrap` | Process group (Unix) dan Job Object (Windows) tanpa `unsafe` di kode kita | `mandor-proc` |
 | `ts-rs` | Generate tipe TypeScript dari tipe protokol | `mandor-protocol` |
 | `fd-lock` | Lock file eksklusif single-instance lintas OS | `mandord` |
 | `subtle` | Perbandingan token waktu-konstan | `mandor-api` |
 | `tokio-tungstenite` | Client WebSocket untuk relay `mandord connect` dan test; sudah ada di graf lewat fitur `ws` axum | `mandor-api` |
 | `sha2`, `base64` | PKCE S256 untuk OAuth Lark (hash dan base64url); `sha2` juga untuk hash biner daemon yang dibawa installer Windows (build script dan verifikasi saat pasang) untuk revisi folder prototype yang dikonfirmasi dev sebelum dijalankan, dan untuk digest berkas izin giliran yang diverifikasi hook (plan 2026-11-06-001); `base64` juga untuk screenshot perbandingan tampilan sebagai data URL | `mandor-lark`; `sha2` di `apps/desktop/src-tauri`, `mandor-git`, `mandor-agent`, dan `mandor-store` (hash kunci keputusan run kartu persetujuan), dan `mandord` (digest persetujuan perlengkapan review lab, plan 2026-11-10-001); `base64` di `mandord` |
-| `libc` (unix) | Flag `O_NOFOLLOW` dan `O_NONBLOCK` saat membaca dan menulis screenshot perbandingan tampilan dari folder yang bisa ditulis agent, tanpa `unsafe` di kode kita; sudah ada di graf lewat tokio | `mandor-agent` |
+| `libc` (unix) | Flag `O_NOFOLLOW` dan `O_NONBLOCK` saat membaca dan menulis screenshot perbandingan tampilan dari folder yang bisa ditulis agent, dan `O_NOFOLLOW` untuk berkas kunci dan penanda lab data di folder kunci bersama (KTD-L21 plan 2026-11-10-001), tanpa `unsafe` di kode kita; sudah ada di graf lewat tokio | `mandor-agent`, `mandord` |
 | `hyper`, `hyper-util`, `http-body-util` | Proxy allowlist review lab: meneruskan request dan terowongan `CONNECT` hanya ke origin run, menolak tulis di luar sesi data (KTD-L6 plan 2026-11-10-001); routing axum dan reqwest tidak bisa menyatakan proxy maju dengan `CONNECT`. Sudah ada di graf lewat axum dan reqwest | `mandord` |
 | `tempfile` (dev) | Direktori sementara untuk test | test semua crate, termasuk `apps/desktop/src-tauri` |
 | `keepawake` | Menahan sleep dan idle Windows untuk penjaga keep-awake (`SetThreadExecutionState`) tanpa `unsafe` di kode kita; MIT; hanya target Windows | `apps/desktop/src-tauri` |

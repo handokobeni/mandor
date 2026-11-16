@@ -13,6 +13,8 @@ pub struct RepoLab {
     /// Digest saat disetujui (KTD-L3); `None` = belum disetujui.
     pub approved_digest: Option<String>,
     pub approved_at_ms: Option<i64>,
+    /// Digest salinan skrip lab data yang disetujui (KTD-L18).
+    pub scripts_digest: Option<String>,
 }
 
 impl Store {
@@ -22,7 +24,8 @@ impl Store {
     /// [`StoreError::Internal`] bila pembacaan gagal atau JSON rusak.
     pub async fn repo_lab(&self, repo_id: &str) -> Result<Option<RepoLab>, StoreError> {
         let row = sqlx::query!(
-            "SELECT lab_json, lab_approved_digest, lab_approved_at_ms FROM repos WHERE id = ?",
+            "SELECT lab_json, lab_approved_digest, lab_approved_at_ms, lab_scripts_digest
+             FROM repos WHERE id = ?",
             repo_id
         )
         .fetch_optional(&self.pool)
@@ -36,6 +39,7 @@ impl Store {
             equipment: equipment_of(&raw)?,
             approved_digest: row.lab_approved_digest,
             approved_at_ms: row.lab_approved_at_ms,
+            scripts_digest: row.lab_scripts_digest,
         }))
     }
 
@@ -49,7 +53,8 @@ impl Store {
     pub async fn save_repo_lab(&self, repo_id: &str, eq: &LabEquipment) -> Result<(), StoreError> {
         let json = equipment_json(eq)?;
         let res = sqlx::query!(
-            "UPDATE repos SET lab_json = ?, lab_approved_digest = NULL, lab_approved_at_ms = NULL
+            "UPDATE repos SET lab_json = ?, lab_approved_digest = NULL, lab_approved_at_ms = NULL,
+                 lab_scripts_digest = NULL
              WHERE id = ?",
             json,
             repo_id
@@ -73,14 +78,17 @@ impl Store {
         repo_id: &str,
         seen: &LabEquipment,
         digest: &str,
+        scripts_digest: Option<&str>,
         at_ms: i64,
     ) -> Result<bool, StoreError> {
         let json = equipment_json(seen)?;
         let res = sqlx::query!(
-            "UPDATE repos SET lab_approved_digest = ?, lab_approved_at_ms = ?
+            "UPDATE repos SET lab_approved_digest = ?, lab_approved_at_ms = ?,
+                 lab_scripts_digest = ?
              WHERE id = ? AND lab_json = ?",
             digest,
             at_ms,
+            scripts_digest,
             repo_id,
             json
         )

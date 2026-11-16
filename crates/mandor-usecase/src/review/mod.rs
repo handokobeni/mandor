@@ -3,6 +3,7 @@
 pub(crate) mod capability;
 mod design;
 pub(crate) mod lab;
+pub(crate) mod lab_data;
 pub(crate) mod lab_setup;
 mod ledger;
 pub(crate) mod service;

@@ -176,7 +176,7 @@ fn port_error(e: &PortError) -> RpcError {
 fn run_error(e: RunError) -> RpcError {
     match &e {
         RunError::NotFound(_) => RpcError::new(ErrorCode::NotFound, e.to_string()),
-        RunError::InvalidState(_) | RunError::Draining => {
+        RunError::InvalidState(_) | RunError::Draining | RunError::LabData(_) => {
             RpcError::new(ErrorCode::Conflict, e.to_string())
         }
         RunError::Port(p) | RunError::Sync(SyncError::Port(p)) => port_error(p),

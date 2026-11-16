@@ -145,7 +145,8 @@ describe('laporan pagi', () => {
     ],
     dequeued: [{ record_id: 'f', key: 'PGS-6', title: 'x', reason: 'the card moved to In Progress in Lark', at_ms: 2 }],
     reviewed_without_fix: 1,
-    planned_held: []
+    planned_held: [],
+    lab_data: []
   };
 
   it('kartu dikelompokkan per hasil, ac_gate terpisah dari parkir lain', () => {

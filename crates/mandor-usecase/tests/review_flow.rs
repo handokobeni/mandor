@@ -1056,6 +1056,7 @@ fn lab_ready(st: &Station) {
             },
             safe_posts: vec![],
             fixtures_dir: None,
+            data: None,
         },
     );
 }

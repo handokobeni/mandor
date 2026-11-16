@@ -8,20 +8,41 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use anyhow::Context;
-use mandor_protocol::LabPasswordInput;
+use mandor_protocol::{LabDbSecretInput, LabPasswordInput};
 use secrecy::{ExposeSecret, SecretString};
 use serde::{Deserialize, Serialize};
 
-/// Password per role satu repo.
+/// Password per role satu repo, dan kredensial database per penyimpanan.
 #[derive(Default)]
 pub struct LabSecrets {
     by_role: BTreeMap<String, SecretString>,
+    db: BTreeMap<String, DbSecret>,
+}
+
+/// Kredensial database satu penyimpanan (KTD-L15).
+pub struct DbSecret {
+    pub lab_user: String,
+    pub lab_password: SecretString,
+    pub maintenance_user: String,
+    pub maintenance_password: SecretString,
+}
+
+impl DbSecret {
+    /// Kedua password terisi.
+    #[must_use]
+    pub fn complete(&self) -> bool {
+        !self.lab_user.is_empty()
+            && !self.maintenance_user.is_empty()
+            && !self.lab_password.expose_secret().is_empty()
+            && !self.maintenance_password.expose_secret().is_empty()
+    }
 }
 
 impl std::fmt::Debug for LabSecrets {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("LabSecrets")
             .field("roles", &self.by_role.keys().collect::<Vec<_>>())
+            .field("db", &self.db.keys().collect::<Vec<_>>())
             .finish()
     }
 }
@@ -30,6 +51,16 @@ impl std::fmt::Debug for LabSecrets {
 struct Stored {
     #[serde(default)]
     passwords: BTreeMap<String, String>,
+    #[serde(default)]
+    db: BTreeMap<String, StoredDb>,
+}
+
+#[derive(Serialize, Deserialize, Default)]
+struct StoredDb {
+    lab_user: String,
+    lab_password: String,
+    maintenance_user: String,
+    maintenance_password: String,
 }
 
 impl LabSecrets {
@@ -54,9 +85,54 @@ impl LabSecrets {
     pub fn exposed_values(&self) -> Vec<String> {
         self.by_role
             .values()
+            .chain(
+                self.db
+                    .values()
+                    .flat_map(|d| [&d.lab_password, &d.maintenance_password]),
+            )
             .map(|p| p.expose_secret().to_owned())
             .filter(|p| !p.is_empty())
             .collect()
+    }
+
+    /// Kredensial database penyimpanan, bila ada.
+    #[must_use]
+    pub fn db(&self, store: &str) -> Option<&DbSecret> {
+        self.db.get(store)
+    }
+
+    /// Menggabungkan kredensial database dari UI: password kosong
+    /// mempertahankan yang lama; penyimpanan yang tidak lagi ada dihapus.
+    #[must_use]
+    pub fn merge_db(mut self, stores: &[String], input: Vec<LabDbSecretInput>) -> Self {
+        self.db.retain(|s, _| stores.contains(s));
+        for i in input {
+            if !stores.contains(&i.store) {
+                continue;
+            }
+            let keep = |new: Option<String>, old: Option<&SecretString>| match new
+                .filter(|p| !p.is_empty())
+            {
+                Some(p) => SecretString::from(p),
+                None => old
+                    .cloned()
+                    .unwrap_or_else(|| SecretString::from(String::new())),
+            };
+            let old = self.db.remove(&i.store);
+            self.db.insert(
+                i.store,
+                DbSecret {
+                    lab_user: i.lab_user.trim().to_owned(),
+                    lab_password: keep(i.lab_password, old.as_ref().map(|o| &o.lab_password)),
+                    maintenance_user: i.maintenance_user.trim().to_owned(),
+                    maintenance_password: keep(
+                        i.maintenance_password,
+                        old.as_ref().map(|o| &o.maintenance_password),
+                    ),
+                },
+            );
+        }
+        self
     }
 
     /// Menggabungkan input UI: password kosong mempertahankan yang lama, role
@@ -100,6 +176,21 @@ pub async fn load(lab_root: &Path, repo_id: &str) -> anyhow::Result<LabSecrets> 
                     .into_iter()
                     .map(|(r, p)| (r, SecretString::from(p)))
                     .collect(),
+                db: s
+                    .db
+                    .into_iter()
+                    .map(|(k, d)| {
+                        (
+                            k,
+                            DbSecret {
+                                lab_user: d.lab_user,
+                                lab_password: SecretString::from(d.lab_password),
+                                maintenance_user: d.maintenance_user,
+                                maintenance_password: SecretString::from(d.maintenance_password),
+                            },
+                        )
+                    })
+                    .collect(),
             })
         }
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(LabSecrets::default()),
@@ -119,6 +210,21 @@ pub async fn save(lab_root: &Path, repo_id: &str, secrets: &LabSecrets) -> anyho
             .by_role
             .iter()
             .map(|(r, p)| (r.clone(), p.expose_secret().to_owned()))
+            .collect(),
+        db: secrets
+            .db
+            .iter()
+            .map(|(k, d)| {
+                (
+                    k.clone(),
+                    StoredDb {
+                        lab_user: d.lab_user.clone(),
+                        lab_password: d.lab_password.expose_secret().to_owned(),
+                        maintenance_user: d.maintenance_user.clone(),
+                        maintenance_password: d.maintenance_password.expose_secret().to_owned(),
+                    },
+                )
+            })
             .collect(),
     })?;
     let path = secrets_path(lab_root, repo_id);

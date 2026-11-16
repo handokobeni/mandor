@@ -55,6 +55,10 @@ pub enum RunError {
     InvalidState(&'static str),
     #[error("daemon is updating; try again shortly")]
     Draining,
+    /// Penyimpanan lokal repo menunggu developer setelah restore lab gagal
+    /// (R6, KTD-L21).
+    #[error("{0}")]
+    LabData(String),
 }
 
 impl From<GateRejection> for RunError {
@@ -108,6 +112,9 @@ pub struct RunService<D: Deps> {
     /// Giliran pengusul perlengkapan lab per repo beserta usulannya (KTD-L14).
     /// Hanya di memori: setelah restart developer cukup meminta usulan lagi.
     pub(crate) lab_setups: Mutex<HashMap<String, crate::review::lab_setup::SetupProgress>>,
+    /// Run yang review berikutnya boleh menjalankan lab data (Run lab di
+    /// laptop, KTD-L23).
+    pub(crate) lab_data_requests: Mutex<std::collections::HashSet<String>>,
     /// Penghenti run aktif per run ID beserta generasinya.
     stoppers: Mutex<HashMap<String, (i64, StopperOf<D>)>>,
     /// Gerbang drain untuk pembaruan daemon (dibagi dengan daemon).
@@ -182,6 +189,7 @@ impl<D: Deps> RunService<D> {
             lab_plans: Mutex::new(HashMap::new()),
             lab_runs: Mutex::new(HashMap::new()),
             lab_setups: Mutex::new(HashMap::new()),
+            lab_data_requests: Mutex::new(std::collections::HashSet::new()),
             cleanup_checked_ms: std::sync::atomic::AtomicI64::new(0),
             cleanup_busy: std::sync::atomic::AtomicBool::new(false),
             stoppers: Mutex::new(HashMap::new()),

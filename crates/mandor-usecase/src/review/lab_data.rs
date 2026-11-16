@@ -30,6 +30,9 @@ const APP_NOT_OURS: &str = "lab needs the app started from this run";
 const RECOVERY_WINDOW: Duration = Duration::from_secs(600);
 /// Jeda coba ulang `restore_waiting`.
 const WAIT_RETRY: Duration = Duration::from_secs(10);
+/// Lama menunggu koneksi app run tertutup setelah app dihentikan.
+const CLIENTS_SETTLE: Duration = Duration::from_secs(10);
+const CLIENTS_POLL: Duration = Duration::from_millis(500);
 
 /// Sesi lab data yang sedang berjalan untuk satu review.
 #[derive(Debug, Clone)]
@@ -139,10 +142,6 @@ impl<D: Deps> RunService<D> {
             LockOutcome::Locked => return Err(LOCKED.to_owned()),
             LockOutcome::RestoreFailed(why) => return Err(why),
         }
-        if let Some(clients) = self.lab.data_other_clients(&repo_id).await {
-            self.lab.data_release(&ready.lock_keys).await;
-            return Err(format!("another database client is connected: {clients}"));
-        }
         let now = self.now();
         let rec = LabSessionRecord {
             id: id.clone(),
@@ -164,7 +163,21 @@ impl<D: Deps> RunService<D> {
         self.lab
             .data_mark(&ready.lock_keys, &id, SessionPhase::Snapshotting)
             .await;
+        // Klien lain diperiksa setelah app run dihentikan: koneksi app milik
+        // run sendiri (mis. kelola-api) bukan klien lain.
         self.stop_run_app(&run.id).await;
+        if let Some(clients) = self.settle_clients(&repo_id).await {
+            self.move_phase(
+                &id,
+                SessionPhase::Snapshotting,
+                SessionEvent::SnapshotFailed,
+                None,
+            )
+            .await;
+            self.lab.data_release(&ready.lock_keys).await;
+            self.start_run_app(&run.id).await;
+            return Err(format!("another database client is connected: {clients}"));
+        }
         let snap = self.lab.data_snapshot(&repo_id, &id).await;
         let (snapshot, before) = match snap {
             Ok(v) => v,
@@ -345,6 +358,9 @@ impl<D: Deps> RunService<D> {
             )
             .await;
         self.stop_run_app(run_id).await;
+        // Beri waktu koneksi app run tertutup; klien yang tersisa ditangani
+        // restore sebagai `restore_waiting`.
+        let _ = self.settle_clients(&session.repo_id).await;
         let result = self
             .lab
             .data_restore(&session.repo_id, &session.snapshot, &session.before)
@@ -397,6 +413,20 @@ impl<D: Deps> RunService<D> {
                 self.fail_session(run_id, session, &why).await;
                 false
             }
+        }
+    }
+
+    /// Klien lain setelah koneksi app run diberi waktu tertutup; `None` bila
+    /// tidak ada yang tersisa.
+    async fn settle_clients(&self, repo_id: &str) -> Option<String> {
+        let mut waited = Duration::ZERO;
+        loop {
+            let clients = self.lab.data_other_clients(repo_id).await;
+            if clients.is_none() || waited >= CLIENTS_SETTLE {
+                return clients;
+            }
+            self.sync.clock.sleep(CLIENTS_POLL).await;
+            waited += CLIENTS_POLL;
         }
     }
 

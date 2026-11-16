@@ -1511,6 +1511,9 @@ pub struct FakeLab {
     /// Hasil `data_prepare`.
     pub data_ready: Arc<Mutex<Result<mandor_usecase::run_ports::DataReady, String>>>,
     pub clients: Arc<Mutex<Option<String>>>,
+    /// Klien yang hanya terlihat di sejumlah pemeriksaan pertama (koneksi app
+    /// milik run yang tertutup setelah app dihentikan).
+    pub closing_clients: Arc<Mutex<(Option<String>, usize)>>,
     pub lock_outcome: Arc<Mutex<mandor_usecase::run_ports::LockOutcome>>,
     pub snapshot_fails: Arc<Mutex<Option<String>>>,
     /// Sidik awal dan sidik sekarang.
@@ -1636,6 +1639,7 @@ impl Default for FakeLab {
                 seeds: vec!["kb".to_owned()],
             }))),
             clients: Arc::default(),
+            closing_clients: Arc::default(),
             lock_outcome: Arc::new(Mutex::new(mandor_usecase::run_ports::LockOutcome::Acquired)),
             snapshot_fails: Arc::default(),
             fp_before: Arc::new(Mutex::new(vec![("tenant".to_owned(), "fp0".to_owned())])),
@@ -1754,6 +1758,13 @@ impl mandor_usecase::run_ports::LabPort for FakeLab {
         Ok(self.data_ready.lock().unwrap().clone())
     }
     async fn data_other_clients(&self, _repo_id: &str) -> Option<String> {
+        self.log("other_clients");
+        let mut closing = self.closing_clients.lock().unwrap();
+        if closing.1 > 0 {
+            closing.1 -= 1;
+            return closing.0.clone();
+        }
+        drop(closing);
         self.clients.lock().unwrap().clone()
     }
     async fn data_lock(

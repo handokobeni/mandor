@@ -371,6 +371,28 @@ async fn kunci_dan_klien_lain_menghentikan_lab_data() {
     assert!(!st.lab.calls().contains(&"snapshot".to_owned()));
 }
 
+/// Koneksi app milik run (mis. kelola-api) masih terbuka saat lab mulai:
+/// app dihentikan dulu, koneksinya ditunggu tertutup, baru klien lain
+/// diperiksa. Klien yang tidak pernah putus tetap membatalkan lab dan app
+/// dinyalakan lagi.
+#[tokio::test(flavor = "multi_thread")]
+async fn koneksi_app_run_sendiri_bukan_klien_lain() {
+    let (lark, clock) = setup();
+    let (st, run) = waiting(&lark, &clock).await;
+    *st.lab.closing_clients.lock().unwrap() = (
+        Some("unknown app from 172.19.0.1 as postgres".to_owned()),
+        2,
+    );
+    let ac = review_needing_data(&st, &run, true).await;
+    eventually(|| st.lab.calls().contains(&"snapshot".to_owned())).await;
+    let calls = st.lab.calls();
+    let first_check = calls.iter().position(|c| c == "other_clients").unwrap();
+    let snapshot = calls.iter().position(|c| c == "snapshot").unwrap();
+    assert!(first_check < snapshot, "{calls:?}");
+    let ev = row(&st, &run, &ac).evidence.unwrap_or_default();
+    assert!(!ev.contains("another database client"), "{ev}");
+}
+
 /// KTD-L23: di laptop tanpa Run lab, calon data ditunda dan tidak ada
 /// snapshot; KTD-L20: app milik run lain → lab data tidak jalan.
 #[tokio::test(flavor = "multi_thread")]

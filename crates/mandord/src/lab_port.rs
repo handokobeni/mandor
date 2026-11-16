@@ -194,15 +194,18 @@ impl LabPort for ProdLab {
         review_id: &str,
         worktree: &Path,
         dir: &str,
-    ) -> Result<Option<PathBuf>, PortError> {
+    ) -> Result<Option<mandor_usecase::run_ports::StagedFixtures>, PortError> {
         let target = self.sessions_dir(review_id).join("fixtures");
         let root = worktree.to_path_buf();
         let rel = dir.to_owned();
         let to = target.clone();
         let copy = tokio::task::spawn_blocking(move || copy_fixtures(&root, &rel, &to));
         match tokio::time::timeout(STAGE_TIMEOUT, copy).await {
-            Ok(Ok(Ok(true))) => Ok(Some(target)),
-            Ok(Ok(Ok(false))) => Ok(None),
+            Ok(Ok(Ok(Some(files)))) => Ok(Some(mandor_usecase::run_ports::StagedFixtures {
+                dir: target,
+                files,
+            })),
+            Ok(Ok(Ok(None))) => Ok(None),
             Ok(Ok(Err(e))) => Err(PortError::Storage(e.to_string())),
             Ok(Err(e)) => Err(PortError::Storage(e.to_string())),
             Err(_) => Err(PortError::Storage(
@@ -245,15 +248,17 @@ impl LabPort for ProdLab {
 }
 
 /// Menyalin berkas biasa dari `from` ke `to` (0700): symlink, dotfile, dan
-/// berkas di atas batas ukuran dilewati. `false` bila `from` bukan folder.
-/// Sinkron; dipanggil lewat `spawn_blocking`.
-fn copy_fixtures(root: &Path, dir: &str, to: &Path) -> std::io::Result<bool> {
+/// berkas di atas batas ukuran dilewati. Mengembalikan berkas yang disalin
+/// (relatif, `/`, terurut); `None` bila `from` bukan folder. Sinkron;
+/// dipanggil lewat `spawn_blocking`.
+fn copy_fixtures(root: &Path, dir: &str, to: &Path) -> std::io::Result<Option<Vec<String>>> {
     let Some(from) = fixtures_source(root, dir)? else {
-        return Ok(false);
+        return Ok(None);
     };
-    let mut copied = 0usize;
-    copy_dir(&from, to, &mut copied)?;
-    Ok(true)
+    let mut copied = Vec::new();
+    copy_dir(&from, to, "", &mut copied)?;
+    copied.sort();
+    Ok(Some(copied))
 }
 
 /// Folder sumber berkas uji di bawah `root`. Setiap bagian jalur diperiksa
@@ -292,7 +297,7 @@ fn fixtures_source(root: &Path, dir: &str) -> std::io::Result<Option<PathBuf>> {
     Ok(Some(path))
 }
 
-fn copy_dir(from: &Path, to: &Path, copied: &mut usize) -> std::io::Result<()> {
+fn copy_dir(from: &Path, to: &Path, prefix: &str, copied: &mut Vec<String>) -> std::io::Result<()> {
     let mut b = std::fs::DirBuilder::new();
     b.recursive(true);
     #[cfg(unix)]
@@ -304,15 +309,17 @@ fn copy_dir(from: &Path, to: &Path, copied: &mut usize) -> std::io::Result<()> {
     for entry in std::fs::read_dir(from)? {
         let entry = entry?;
         let name = entry.file_name();
-        if name.to_string_lossy().starts_with('.') || *copied >= MAX_FIXTURES {
+        let shown = name.to_string_lossy().into_owned();
+        if shown.starts_with('.') || copied.len() >= MAX_FIXTURES {
             continue;
         }
+        let rel = format!("{prefix}{shown}");
         let meta = std::fs::symlink_metadata(entry.path())?;
         if meta.is_dir() {
-            copy_dir(&entry.path(), &to.join(&name), copied)?;
+            copy_dir(&entry.path(), &to.join(&name), &format!("{rel}/"), copied)?;
         } else if meta.is_file() && meta.len() <= MAX_FIXTURE_BYTES {
             std::fs::copy(entry.path(), to.join(&name))?;
-            *copied += 1;
+            copied.push(rel);
         }
     }
     Ok(())
@@ -409,11 +416,18 @@ mod tests {
         #[cfg(unix)]
         std::os::unix::fs::symlink("/etc/passwd", src.join("pw")).unwrap_or_else(|e| panic!("{e}"));
         let out = dir.path().join("out");
-        assert!(copy_fixtures(root, "src", &out).unwrap_or_else(|e| panic!("{e}")));
+        std::fs::write(src.join("b.xlsx"), b"y").unwrap_or_else(|e| panic!("{e}"));
+        assert_eq!(
+            copy_fixtures(root, "src", &out).unwrap_or_else(|e| panic!("{e}")),
+            Some(vec!["b.xlsx".to_owned(), "kb/a.xlsx".to_owned()])
+        );
         assert!(out.join("kb/a.xlsx").is_file());
         assert!(!out.join(".env").exists());
         assert!(!out.join("pw").exists());
-        assert!(!copy_fixtures(root, "tidak-ada", &out).unwrap_or_else(|e| panic!("{e}")));
+        assert_eq!(
+            copy_fixtures(root, "tidak-ada", &out).unwrap_or_else(|e| panic!("{e}")),
+            None
+        );
     }
 
     #[cfg(unix)]

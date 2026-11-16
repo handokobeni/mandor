@@ -383,7 +383,7 @@ pub trait LabPort: Send + Sync {
         review_id: &str,
         worktree: &std::path::Path,
         dir: &str,
-    ) -> impl Future<Output = Result<Option<PathBuf>, PortError>> + Send;
+    ) -> impl Future<Output = Result<Option<StagedFixtures>, PortError>> + Send;
     /// Menghentikan proxy dan menghapus berkas sesi review.
     fn end_review(&self, review_id: &str) -> impl Future<Output = ()> + Send;
     /// Menyamarkan password akun uji repo dan nilai cookie sesi review di
@@ -1124,6 +1124,18 @@ pub struct LabBrief<'a> {
     pub app_urls: &'a [String],
     /// Folder staging berkas uji, bila ada.
     pub fixtures: Option<&'a std::path::Path>,
+    /// Berkas di folder staging (relatif, `/`), karena lab tidak bisa
+    /// melihat isi folder itu.
+    pub fixture_files: &'a [String],
+}
+
+/// Hasil menyalin berkas uji ke staging.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct StagedFixtures {
+    /// Folder staging milik daemon.
+    pub dir: PathBuf,
+    /// Berkas yang disalin, relatif terhadap `dir`, terurut.
+    pub files: Vec<String>,
 }
 
 /// Pemicu review.

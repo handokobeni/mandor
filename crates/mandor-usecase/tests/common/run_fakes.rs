@@ -1601,14 +1601,15 @@ impl mandor_usecase::run_ports::LabPort for FakeLab {
         review_id: &str,
         worktree: &Path,
         dir: &str,
-    ) -> Result<Option<PathBuf>, PortError> {
+    ) -> Result<Option<mandor_usecase::run_ports::StagedFixtures>, PortError> {
         self.staged
             .lock()
             .unwrap()
             .push((review_id.to_owned(), worktree.join(dir)));
-        Ok(Some(PathBuf::from(format!(
-            "/daemon/lab/{review_id}/fixtures"
-        ))))
+        Ok(Some(mandor_usecase::run_ports::StagedFixtures {
+            dir: PathBuf::from(format!("/daemon/lab/{review_id}/fixtures")),
+            files: vec!["kb-uji.xlsx".to_owned()],
+        }))
     }
 
     async fn redact(&self, _repos: &[String], _review_id: &str, texts: Vec<String>) -> Vec<String> {

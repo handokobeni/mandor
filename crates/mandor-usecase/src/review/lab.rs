@@ -55,6 +55,7 @@ pub(crate) struct LabProgress {
     /// Baris asli calon lab kartu yang berjalan.
     originals: HashMap<String, AcRow>,
     fixtures: Option<PathBuf>,
+    fixture_files: Vec<String>,
     fixtures_staged: bool,
 }
 
@@ -131,6 +132,7 @@ impl<D: Deps> RunService<D> {
             session: String::new(),
             originals: HashMap::new(),
             fixtures: None,
+            fixture_files: Vec::new(),
             fixtures_staged: false,
         }))
     }
@@ -176,6 +178,7 @@ impl<D: Deps> RunService<D> {
             unavailable: &unavailable,
             app_urls: &progress.plan.origins,
             fixtures: progress.fixtures.as_deref(),
+            fixture_files: &progress.fixture_files,
         });
         let session = format!("{}-lab{}", progress.review_id, progress.index);
         let reviewer = self.reviews.reviewer_settings().await;
@@ -415,7 +418,11 @@ impl<D: Deps> RunService<D> {
             .stage_fixtures(&progress.review_id, &worktree, &dir)
             .await
         {
-            Ok(staged) => progress.fixtures = staged,
+            Ok(Some(staged)) => {
+                progress.fixtures = Some(staged.dir);
+                progress.fixture_files = staged.files;
+            }
+            Ok(None) => {}
             Err(e) => tracing::warn!(run_id = %run.id, error = %e, "berkas uji lab tidak disalin"),
         }
     }

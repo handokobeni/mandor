@@ -73,6 +73,7 @@
     gateButtonLabel,
     gateRows,
     label as acLabel,
+    singleFlight,
     tabCount
   } from '#lib/ac-review.ts';
   import * as Popover from '#lib/components/ui/popover/index.ts';
@@ -248,6 +249,12 @@
   let appLogs = $state<AppLogView[] | null>(null);
   let readiness = $state<{ view: ReviewReadinessView; trigger: 'manual' | 'push' } | null>(null);
   let checking = $state(false);
+  /** Review sedang dimulai: dari klik sampai daemon menjawab (tombol sibuk). */
+  let reviewStarting = $state(false);
+  const guardReview = singleFlight(
+    (start: () => Promise<void>) => start(),
+    (busy) => (reviewStarting = busy)
+  );
   $effect(() => {
     const id = run.id;
     untrack(() => appRun.watch(id));
@@ -459,7 +466,11 @@
   }
 
   /** Review dimulai lewat checklist kesiapan bila run punya repo Web (KTD-39). */
-  async function requestReview(trigger: 'manual' | 'push'): Promise<void> {
+  function requestReview(trigger: 'manual' | 'push'): Promise<void> {
+    return guardReview(() => readinessOrReview(trigger));
+  }
+
+  async function readinessOrReview(trigger: 'manual' | 'push'): Promise<void> {
     try {
       const view = await rpc.request<ReviewReadinessView>('review.readiness', { run_id: run.id });
       if (view.needs_dialog) readiness = { view, trigger };
@@ -924,7 +935,7 @@
         <AcReviewTab
           taskKey={key}
           store={ledger}
-          {reviewing}
+          reviewing={reviewing || reviewStarting}
           agentBusy={(working && !reviewing) || run.phase !== 'implement' || run.state !== 'awaiting_dev'}
           {now}
           onreview={() => void requestReview('manual')}
@@ -991,9 +1002,10 @@
     readiness={r.view}
     ownerLabel={ownerKey}
     {checking}
+    starting={reviewStarting}
     oncancel={() => (readiness = null)}
-    onstart={(c) => void startFromReadiness(c, r.trigger)}
-    onanyway={() => void beginReview(r.trigger)}
+    onstart={(c) => void guardReview(() => startFromReadiness(c, r.trigger))}
+    onanyway={() => void guardReview(() => beginReview(r.trigger))}
     onrunapp={() => void openRunApp()}
     onrecheck={() => void recheckChrome()}
   />

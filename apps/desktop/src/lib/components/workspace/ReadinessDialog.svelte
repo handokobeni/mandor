@@ -26,11 +26,13 @@
     oncancel: () => void;
     /** Konfirmasi database/login disimpan di state app lalu review dimulai. */
     onstart: (confirmed: { database: boolean; login: boolean }) => void;
+    /** Review sedang dimulai: kedua tombol nonaktif agar tidak terklik dua kali. */
+    starting?: boolean;
     onanyway: () => void;
     onrunapp: () => void;
     onrecheck: () => void;
   }
-  let { taskKey, trigger, readiness, ownerLabel, checking, oncancel, onstart, onanyway, onrunapp, onrecheck }: Props =
+  let { taskKey, trigger, readiness, ownerLabel, checking, starting = false, oncancel, onstart, onanyway, onrunapp, onrecheck }: Props =
     $props();
 
   let database = $state(false);
@@ -86,8 +88,10 @@
         {#if missing === 0}All set.{:else}{missing} item{missing === 1 ? '' : 's'} missing. Without them, UI AC become Can't verify ({reason}).{/if}
       </span>
       <Button variant="ghost" onclick={oncancel}>Cancel</Button>
-      <Button variant="outline" onclick={onanyway}>Run review anyway</Button>
-      <Button disabled={missing > 0} onclick={() => onstart({ database, login })}><ScanSearch />Start review</Button>
+      <Button variant="outline" disabled={starting} onclick={onanyway}>Run review anyway</Button>
+      <Button disabled={missing > 0 || starting} onclick={() => onstart({ database, login })}
+        >{#if starting}<LoaderCircle class="spin" />Starting…{:else}<ScanSearch />Start review{/if}</Button
+      >
     </Dialog.Footer>
   </Dialog.Content>
 </Dialog.Root>

@@ -181,7 +181,11 @@ pub fn app_env_block(pairs: &[(String, String)], keys: &[String]) -> Option<Stri
     };
     for key in keys {
         let Some((_, value)) = pairs.iter().find(|(k, _)| k == key) else {
-            return blocked(key, "is declared but missing in .env");
+            // Tanpa nilainya Mandor tidak bisa memastikan app memakai
+            // database lokal (gagal tertutup), tetapi penyebabnya .env.
+            return Some(format!(
+                "{key} is declared in the repo's .env keys but missing from .env; add it to .env or remove it from the repo settings"
+            ));
         };
         let value = value.trim();
         let lower = value.to_ascii_lowercase();
@@ -1130,7 +1134,14 @@ mod tests {
                 .is_some_and(|m| m.contains("db.staging.example.com"))
         );
         assert!(app_env_block(&env(&[("PGHOST", "10.0.0.5")]), &keys(&["PGHOST"])).is_some());
-        assert!(app_env_block(&local, &keys(&["MISSING"])).is_some_and(|m| m.contains("missing")));
+        // Kunci yang hilang bukan soal database jauh: pesannya menyebut .env
+        // dan cara memperbaikinya.
+        let missing = app_env_block(&local, &keys(&["OLD_KEY"])).unwrap_or_default();
+        assert!(
+            missing.contains("OLD_KEY is declared in the repo's .env keys but missing from .env"),
+            "{missing}"
+        );
+        assert!(!missing.contains("local databases"), "{missing}");
         // Skema huruf besar, skema lain di key database, dan string libpq.
         for (k, v) in [
             ("DATABASE_URL", "POSTGRES://u@db.staging.example.com/kelola"),

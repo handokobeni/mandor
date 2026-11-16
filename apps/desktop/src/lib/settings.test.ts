@@ -35,6 +35,9 @@ describe('validasi daftar repo', () => {
   it('companion path absolut, reviewer open_id, allowlist pola tool, tanpa duplikat', () => {
     expect(validateListItem('companions', 'relative/path', [])).toBe('Use an absolute path on the daemon machine.');
     expect(validateListItem('companions', '/home/a/shared', [])).toBeNull();
+    expect(validateListItem('posts', '/api/search', [])).toBeNull();
+    expect(validateListItem('posts', 'api/search', [])).not.toBeNull();
+    expect(validateListItem('posts', '/api/search?q=1', [])).not.toBeNull();
     expect(validateListItem('reviewers', 'budi', [])).toBe('Lark open_ids start with ou_, e.g. ou_51aa6c.');
     expect(validateListItem('reviewers', 'ou_51aa6c', ['ou_51aa6c'])).toBe('Already in the list.');
     expect(validateListItem('allowed', 'just test', [])).toBe('Use a tool pattern such as Bash(pnpm test *).');

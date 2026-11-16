@@ -275,6 +275,7 @@ mod permit {
                 run_root: self.root.display().to_string(),
                 members: vec![self.root.display().to_string()],
                 evidence: (turn != "review").then(|| self.evidence.display().to_string()),
+                fixtures: None,
             };
             let bytes = file.to_bytes().unwrap();
             let path = self.permit_dir.join("run.json");

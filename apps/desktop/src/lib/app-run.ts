@@ -75,11 +75,13 @@ export function appControlAction(app: AppRunView | null): 'run' | 'stop' | 'logs
 export type ItemState = 'ok' | 'missing' | 'warn' | 'confirm';
 
 export interface ReadinessItem {
-  key: 'database' | 'app' | 'login' | 'extension' | 'browser';
+  key: 'database' | 'app' | 'browser_ready' | 'browser';
   state: ItemState;
   title: string;
   help: string;
   action?: 'run_app' | 'restart_app' | 'recheck';
+  /** Alasan Can't verify dari daemon bila item ini kurang. */
+  reason?: string;
 }
 
 /** Item checklist kesiapan dari fakta daemon dan konfirmasi di dialog (KTD-39). */
@@ -117,25 +119,22 @@ export function readinessItems(
       help: 'Mandor does not start databases. Start it yourself, then confirm.'
     },
     app,
-    {
-      key: 'login',
-      state: confirmed.login ? 'ok' : 'confirm',
-      title: `Logged in at ${url}`,
-      help: 'Log in with your own account in Chrome. Mandor cannot see the login and never receives your password.'
-    },
+    // Review memakai Playwright headless dan login sendiri dengan akun uji
+    // perlengkapan lab; `chrome_connected` dari daemon berarti Playwright
+    // terpasang dan login uji siap.
     r.chrome_connected
       ? {
-          key: 'extension',
+          key: 'browser_ready',
           state: 'ok',
-          title: 'Claude in Chrome extension connected',
-          help: 'The reviewer uses its own tab, only at the app URL.'
+          title: 'Browser review is ready',
+          help: 'Mandor signs in with the approved test accounts in its own headless browser.'
         }
       : {
-          key: 'extension',
+          key: 'browser_ready',
           state: 'missing',
-          title: 'Claude in Chrome extension not connected',
-          help: 'Open Chrome and enable the extension, then check again.',
-          action: 'recheck'
+          title: 'Browser review is not ready',
+          help: `${r.cant_verify_reason ?? 'Playwright or a test login is missing'}. See Settings → Repos → Review lab.`,
+          reason: r.cant_verify_reason ?? 'Browser review is not ready'
         },
     {
       key: 'browser',
@@ -161,8 +160,8 @@ export function cantVerifyReason(items: ReadinessItem[]): string | null {
   if (bad('browser')) return 'Browser tests are off';
   if (app && app.state === 'missing') return 'The app is not running';
   if (app && app.state === 'warn') return 'app running older code';
-  if (bad('login')) return 'Login not confirmed';
-  if (bad('extension')) return 'Claude in Chrome extension not connected';
+  const browser = items.find((i) => i.key === 'browser_ready' && i.state !== 'ok');
+  if (browser) return browser.reason ?? 'Browser review is not ready';
   return null;
 }
 

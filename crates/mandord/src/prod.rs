@@ -41,6 +41,7 @@ impl Deps for Prod {
     type Waiter = crate::approval_waiter::TokioWaiter;
     type Permits = crate::permit_facts::DiskPermits;
     type Questions = crate::question_events::BroadcastQuestions;
+    type Lab = crate::lab_port::ProdLab;
 }
 
 pub fn now_ms() -> i64 {
@@ -387,5 +388,28 @@ impl mandor_usecase::run_ports::ReviewHistory for BroadcastReviews {
     }
     async fn chrome_connected(&self) -> bool {
         self.inner.chrome_connected().await
+    }
+    async fn lab_settings(&self) -> mandor_usecase::run_ports::LabSettings {
+        self.inner.lab_settings().await
+    }
+    async fn save_finding(
+        &self,
+        review_id: &str,
+        finding: &mandor_domain::lab::Finding,
+        at_ms: i64,
+    ) -> Result<(), PortError> {
+        self.inner.save_finding(review_id, finding, at_ms).await
+    }
+    async fn findings(
+        &self,
+        run_id: &str,
+    ) -> Result<Vec<(String, mandor_domain::lab::Finding)>, PortError> {
+        self.inner.findings(run_id).await
+    }
+    async fn set_lab_settings(
+        &self,
+        s: &mandor_usecase::run_ports::LabSettings,
+    ) -> Result<(), PortError> {
+        self.inner.set_lab_settings(s).await
     }
 }

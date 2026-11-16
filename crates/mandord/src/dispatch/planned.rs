@@ -126,6 +126,10 @@ fn ac_row_of(v: AcRowView) -> Result<AcRow, RpcError> {
             decision_reason: v.visual_detail.decision_reason,
             decided_by: v.visual_detail.decided_by,
         },
+        // Hasil lab terikat daemon asal dan tidak ikut serah-terima.
+        lab_need: None,
+        evidence_detail: None,
+        look_recommendation: None,
     })
 }
 

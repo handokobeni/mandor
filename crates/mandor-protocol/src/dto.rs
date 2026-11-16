@@ -979,6 +979,58 @@ pub struct VisualScreenshotParams {
     pub run_id: String,
     pub ac_id: String,
     pub index: u32,
+    /// Screenshot bukti verdict (`AcRowView.evidence_detail`), bukan hasil
+    /// tampilan (plan 2026-11-10-001, R16).
+    #[serde(default)]
+    pub evidence: bool,
+}
+
+/// Request yang ditolak proxy review (KTD-L6).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+pub struct BlockedRequestView {
+    pub method: String,
+    pub url: String,
+}
+
+/// Bukti terstruktur verdict (R16, R17, R20).
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, TS)]
+pub struct EvidenceView {
+    pub steps: Vec<String>,
+    /// Nama salinan screenshot; dibaca lewat `review.screenshot` dengan
+    /// `evidence: true`.
+    pub screenshots: Vec<String>,
+    pub prepared: Option<String>,
+    /// `none`, `request`, atau `sql`.
+    pub simulated: String,
+    pub blocked_requests: Vec<BlockedRequestView>,
+    /// Verdict dari reviewer lab (badge "Lab").
+    pub lab: bool,
+}
+
+/// Rekomendasi reviewer untuk baris *looks different* (R18).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+pub struct LookRecommendationView {
+    /// `accept` atau `follow_prototype`.
+    pub advice: String,
+    pub reason: String,
+}
+
+/// Parameter `ledger.look_decision`: Approve atau Reject rekomendasi.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+pub struct LookDecisionParams {
+    pub run_id: String,
+    pub ac_id: String,
+    pub approve: bool,
+}
+
+/// Temuan reviewer di luar AC (R19).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+pub struct FindingView {
+    pub review_id: String,
+    pub card: Option<String>,
+    pub title: String,
+    pub detail: String,
+    pub steps: Vec<String>,
 }
 
 /// Screenshot sebagai data URL gambar.
@@ -1019,6 +1071,14 @@ pub struct AcRowView {
     pub visual: String,
     #[serde(default)]
     pub visual_detail: VisualDetailView,
+    /// Kebutuhan lab untuk Can't verify: `data`, `role`, `simulation`,
+    /// `file` (plan 2026-11-10-001).
+    #[serde(default)]
+    pub lab_need: Option<String>,
+    #[serde(default)]
+    pub evidence_detail: Option<EvidenceView>,
+    #[serde(default)]
+    pub look_recommendation: Option<LookRecommendationView>,
 }
 
 /// Hasil `ledger.get`: buku AC run setelah refresh dari tracker.
@@ -1286,6 +1346,46 @@ pub struct LedgerToolSetVerdict {
     pub verdict: String,
     #[serde(default)]
     pub evidence: Option<String>,
+    /// Kebutuhan lab untuk `cant_verify`: `role`, `simulation`, `file`, `data`
+    /// (plan 2026-11-10-001, KTD-L7).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub lab_need: Option<String>,
+    /// Langkah bernomor (R16).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub steps: Vec<String>,
+    /// Nama berkas screenshot dari tool browser.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub screenshots: Vec<String>,
+    /// Data, akun, dan simulasi yang disiapkan (R20).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub prepared: Option<String>,
+    /// `none` atau `request`; `sql` hanya diisi daemon.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub simulated: Option<String>,
+}
+
+/// Parameter `ledger.tool.report_finding`: temuan di luar AC (R19).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct LedgerToolReportFinding {
+    /// Kartu asal (`record_id`) di run grup.
+    #[serde(default)]
+    pub card: Option<String>,
+    pub title: String,
+    pub detail: String,
+    #[serde(default)]
+    pub steps: Vec<String>,
+    #[serde(default)]
+    pub screenshots: Vec<String>,
+}
+
+/// Parameter `ledger.tool.recommend_look`: rekomendasi untuk baris *looks
+/// different* (R18).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct LedgerToolRecommendLook {
+    pub ac_id: String,
+    /// `accept` atau `follow_prototype`.
+    pub recommendation: String,
+    pub reason: String,
 }
 
 /// Parameter `ledger.tool.set_visual` (plan 2026-11-03-002, KTD-P6).
@@ -1700,4 +1800,98 @@ pub struct ApprovalAnswerParams {
     pub approval_id: String,
     /// `deny` | `allow_once` | `allow_run`.
     pub answer: String,
+}
+
+/// Repo untuk method `lab.*`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+pub struct LabRepoRef {
+    pub repo_id: String,
+}
+
+/// Satu akun uji. Password tidak pernah dikirim balik; hanya `has_password`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+pub struct LabAccountDto {
+    pub role: String,
+    pub username: String,
+    /// Akun untuk review biasa (R15).
+    pub default: bool,
+    /// Hanya di respons; diabaikan saat menyimpan.
+    #[serde(default)]
+    pub has_password: bool,
+}
+
+/// Form login satu halaman (KTD-L4).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+pub struct LabLoginDto {
+    pub url: String,
+    pub username_field: String,
+    pub password_field: String,
+    pub submit: String,
+    pub submit_path: String,
+    /// `path` atau `text`.
+    pub success_kind: String,
+    pub success: String,
+    pub authenticated_url: String,
+}
+
+/// Perlengkapan lab repo (KTD-L3).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+pub struct LabEquipmentDto {
+    pub accounts: Vec<LabAccountDto>,
+    pub login: LabLoginDto,
+    #[serde(default)]
+    pub safe_posts: Vec<String>,
+    #[serde(default)]
+    pub fixtures_dir: Option<String>,
+}
+
+/// Perlengkapan lab beserta status persetujuan.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+pub struct LabView {
+    pub repo_id: String,
+    pub equipment: Option<LabEquipmentDto>,
+    pub approved: bool,
+    #[ts(type = "number | null")]
+    pub approved_at_ms: Option<i64>,
+    /// Agent pengusul sedang berjalan.
+    #[serde(default)]
+    pub proposing: bool,
+    /// Draf usulan agent terakhir; belum disimpan maupun disetujui.
+    #[serde(default)]
+    pub proposal: Option<LabEquipmentDto>,
+    /// Alasan giliran pengusul terakhir tidak menghasilkan usulan.
+    #[serde(default)]
+    pub proposal_error: Option<String>,
+}
+
+/// Password satu role; kosong atau `None` mempertahankan yang lama.
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+pub struct LabPasswordInput {
+    pub role: String,
+    pub password: Option<String>,
+}
+
+/// `Debug` tidak pernah menampilkan password (R11).
+impl std::fmt::Debug for LabPasswordInput {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("LabPasswordInput")
+            .field("role", &self.role)
+            .field("password", &self.password.as_ref().map(|_| "<hidden>"))
+            .finish()
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+pub struct LabSetParams {
+    pub repo_id: String,
+    pub equipment: LabEquipmentDto,
+    #[serde(default)]
+    pub passwords: Vec<LabPasswordInput>,
+}
+
+/// Persetujuan atas perlengkapan yang dilihat developer.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+pub struct LabApproveParams {
+    pub repo_id: String,
+    pub equipment: LabEquipmentDto,
 }

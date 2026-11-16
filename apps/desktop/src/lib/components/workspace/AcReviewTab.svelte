@@ -287,6 +287,8 @@
           {onfile}
           {urls}
           onscreenshot={(i) => store.screenshot(r.ac_id, i)}
+          onevidenceshot={(i) => store.screenshot(r.ac_id, i, true)}
+          onlook={(approve) => store.decideLook(r.ac_id, approve)}
         />
       {/each}
       {#each removed as r (r.ac_id)}
@@ -301,10 +303,34 @@
         </div>
       {/each}
     </div>
+    {#if store.findings.length > 0 && !view}
+      <section class="findings" aria-labelledby="findings-h">
+        <h3 id="findings-h">Findings outside AC</h3>
+        <p class="muted">Problems the reviewer saw while testing. They do not change any verdict or the gate.</p>
+        <ul>
+          {#each store.findings as f, i (i)}
+            {@const card = f.card ? cards.find((c) => c.record_id === f.card) : null}
+            <li>
+              <b>{f.title}</b>{#if card}<span class="muted"> · {cardKey(card)}</span>{/if}
+              {#if f.detail}<p>{f.detail}</p>{/if}
+              {#if f.steps.length > 0}
+                <ol>
+                  {#each f.steps as step, j (j)}<li>{step}</li>{/each}
+                </ol>
+              {/if}
+            </li>
+          {/each}
+        </ul>
+      </section>
+    {/if}
     <ReviewHistory history={store.history} {viewing} {now} onview={(id) => (viewing = id)} />
   </div>
 {/if}
 
 <style>
+  .findings { margin-top: 16px; padding: 12px; border: 1px solid var(--border); border-radius: var(--radius); }
+  .findings h3 { font-size: var(--text-sm); font-weight: 600; margin: 0 0 4px; }
+  .findings ul { margin: 8px 0 0; padding: 0; list-style: none; display: grid; gap: 8px; }
+  .findings ol { margin: 4px 0 0; padding-left: 20px; list-style: decimal; }
   .ac-card-head { padding: 10px 12px 4px; font-size: var(--text-sm); color: var(--muted-foreground); border-top: 1px solid var(--border); }
 </style>

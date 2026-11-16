@@ -83,6 +83,7 @@ pub struct RunService<D: Deps> {
     pub(crate) waiter: D::Waiter,
     pub(crate) permits: D::Permits,
     pub(crate) questions: D::Questions,
+    pub(crate) lab: D::Lab,
     /// Waktu sinkron AC terakhir yang berhasil per run (dibangun ulang saat
     /// refresh berikutnya setelah restart).
     pub(crate) ledger_synced: Mutex<HashMap<String, i64>>,
@@ -99,6 +100,14 @@ pub struct RunService<D: Deps> {
     pub(crate) replies_loaded: std::sync::atomic::AtomicBool,
     /// Kursor yang terakhir diantrekan per record, agar tidak diantrekan berulang.
     pub(crate) cursor_sent: Mutex<HashMap<String, String>>,
+    /// Rencana lab per run, dicatat saat review biasa mulai (plan
+    /// 2026-11-10-001, U7); dibangun ulang oleh review berikutnya.
+    pub(crate) lab_plans: Mutex<HashMap<String, crate::review::lab::LabPlan>>,
+    /// Progres lab yang berjalan per run.
+    pub(crate) lab_runs: Mutex<HashMap<String, crate::review::lab::LabProgress>>,
+    /// Giliran pengusul perlengkapan lab per repo beserta usulannya (KTD-L14).
+    /// Hanya di memori: setelah restart developer cukup meminta usulan lagi.
+    pub(crate) lab_setups: Mutex<HashMap<String, crate::review::lab_setup::SetupProgress>>,
     /// Penghenti run aktif per run ID beserta generasinya.
     stoppers: Mutex<HashMap<String, (i64, StopperOf<D>)>>,
     /// Gerbang drain untuk pembaruan daemon (dibagi dengan daemon).
@@ -133,6 +142,7 @@ pub struct RunPorts<D: Deps> {
     pub waiter: D::Waiter,
     pub permits: D::Permits,
     pub questions: D::Questions,
+    pub lab: D::Lab,
 }
 
 impl<D: Deps> std::fmt::Debug for RunPorts<D> {
@@ -161,6 +171,7 @@ impl<D: Deps> RunService<D> {
             waiter: ports.waiter,
             permits: ports.permits,
             questions: ports.questions,
+            lab: ports.lab,
             ledger_synced: Mutex::new(HashMap::new()),
             capabilities: crate::review::capability::empty(),
             permit_grants: Mutex::new(HashMap::new()),
@@ -168,6 +179,9 @@ impl<D: Deps> RunService<D> {
             replies: Mutex::new(Vec::new()),
             replies_loaded: std::sync::atomic::AtomicBool::new(false),
             cursor_sent: Mutex::new(HashMap::new()),
+            lab_plans: Mutex::new(HashMap::new()),
+            lab_runs: Mutex::new(HashMap::new()),
+            lab_setups: Mutex::new(HashMap::new()),
             cleanup_checked_ms: std::sync::atomic::AtomicI64::new(0),
             cleanup_busy: std::sync::atomic::AtomicBool::new(false),
             stoppers: Mutex::new(HashMap::new()),

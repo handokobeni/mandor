@@ -29,9 +29,13 @@ struct StoredState {
     origins: Vec<String>,
     #[serde(default)]
     tabs: BTreeMap<u64, StoredTab>,
-    /// Halaman Playwright reviewer VM.
-    #[serde(default)]
+    /// Format lama (satu halaman Playwright); dibaca sebagai server
+    /// `playwright`, tidak lagi ditulis.
+    #[serde(default, skip_serializing)]
     page: Option<StoredTab>,
+    /// Halaman Playwright per server (KTD-L10 plan 2026-11-10-001).
+    #[serde(default)]
+    pages: BTreeMap<String, StoredTab>,
 }
 
 fn to_domain(s: StoredState) -> ReviewState {
@@ -50,10 +54,30 @@ fn to_domain(s: StoredState) -> ReviewState {
                 )
             })
             .collect(),
-        page: s.page.map(|t| TabState {
-            url: t.url,
-            settled: t.settled,
-        }),
+        pages: {
+            let mut pages: BTreeMap<String, TabState> = s
+                .pages
+                .into_iter()
+                .map(|(k, t)| {
+                    (
+                        k,
+                        TabState {
+                            url: t.url,
+                            settled: t.settled,
+                        },
+                    )
+                })
+                .collect();
+            if let Some(t) = s.page {
+                pages
+                    .entry(mandor_domain::hook_review::PLAYWRIGHT_SERVER.to_owned())
+                    .or_insert(TabState {
+                        url: t.url,
+                        settled: t.settled,
+                    });
+            }
+            pages
+        },
     }
 }
 
@@ -73,10 +97,20 @@ fn from_domain(s: &ReviewState) -> StoredState {
                 )
             })
             .collect(),
-        page: s.page.as_ref().map(|t| StoredTab {
-            url: t.url.clone(),
-            settled: t.settled,
-        }),
+        page: None,
+        pages: s
+            .pages
+            .iter()
+            .map(|(k, t)| {
+                (
+                    k.clone(),
+                    StoredTab {
+                        url: t.url.clone(),
+                        settled: t.settled,
+                    },
+                )
+            })
+            .collect(),
     }
 }
 
@@ -200,5 +234,22 @@ mod tests {
         );
         let leftovers = std::fs::read_dir(dir.path()).unwrap().count();
         assert_eq!(leftovers, 2, "tanpa sisa berkas sementara");
+    }
+
+    #[test]
+    fn berkas_state_lama_dengan_page_dibaca_sebagai_server_playwright() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("old.json");
+        std::fs::write(
+            &path,
+            br#"{"origins":["http://localhost:5173"],"page":{"url":"http://localhost:5173/","settled":true}}"#,
+        )
+        .unwrap();
+        let state = load(&path).unwrap();
+        assert!(state.pages["playwright"].settled);
+        save(&path, &state).unwrap();
+        let raw = std::fs::read_to_string(&path).unwrap();
+        assert!(!raw.contains("\"page\""), "{raw}");
+        assert!(raw.contains("\"pages\""), "{raw}");
     }
 }

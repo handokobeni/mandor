@@ -111,12 +111,16 @@ async fn review_dan_verdict_per_ac_tersimpan_terbaru_dulu() {
             label: Some("AC-1".to_owned()),
             verdict: "pass".to_owned(),
             evidence: Some("test ok".to_owned()),
+            lab_need: None,
+            evidence_json: None,
         },
         StoredVerdict {
             ac_id: "2".to_owned(),
             label: None,
             verdict: "fail".to_owned(),
             evidence: None,
+            lab_need: None,
+            evidence_json: None,
         },
     ];
     s.save_review_verdicts("r2", &verdicts).await.unwrap();

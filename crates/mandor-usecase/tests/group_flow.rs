@@ -944,7 +944,10 @@ fn report_verdict(st: &Station, ac: &str, v: Verdict) {
     let scope = st.svc.verify_capability(token.expose()).unwrap();
     let rt = tokio::runtime::Handle::current();
     tokio::task::block_in_place(|| {
-        rt.block_on(st.svc.ledger_set_verdict(&scope, ac, v, Some("x")))
+        rt.block_on(
+            st.svc
+                .ledger_set_verdict(&scope, ac, v, common::report(Some("x"))),
+        )
     })
     .unwrap();
 }
@@ -1362,4 +1365,103 @@ async fn ac_kartu_tersisa_dihapus_merevisi_plan_grup() {
 
     st.svc.next_card(&run_id).await.unwrap();
     assert_eq!(st.runs.only().phase, RunPhase::Plan);
+}
+
+/// Plan 2026-11-10-001, AE5: lab run grup berjalan satu sesi per kartu yang
+/// punya calon lab, berurutan, masing-masing dengan batasnya sendiri.
+#[tokio::test(flavor = "multi_thread")]
+async fn covers_ae5_lab_dipecah_per_kartu_berurutan() {
+    use mandor_domain::app_run::{AppRunState, AppSettings, TestMode};
+    use mandor_domain::lab::{LabAccount, LabEquipment, LabNeed, LoginForm, SuccessMarker};
+    use mandor_usecase::run_ports::{AppMemberRecord, AppRecord, AppRecords, ReviewTrigger};
+    let (lark, clock) = setup();
+    let (st, run) = working(&lark, &clock, &["c1", "c2", "c3"]).await;
+    st.repos.repos.lock().unwrap()[0].app = AppSettings {
+        test_mode: TestMode::Web,
+        start_command: Some("bun run dev".to_owned()),
+        port: Some(5173),
+        browser_tests: true,
+        ..AppSettings::default()
+    };
+    let wt = st.runs.only().worktree.unwrap();
+    st.git.st().trees.insert(wt, "tree-g".to_owned());
+    st.apps
+        .save_app_record(&AppRecord {
+            run_id: run.clone(),
+            state: AppRunState::Running,
+            members: vec![AppMemberRecord {
+                repo_id: "repo1".to_owned(),
+                url: Some("http://localhost:5173".to_owned()),
+                pgid: Some(1),
+                state: AppRunState::Running,
+                prototype: None,
+            }],
+            snapshot: [("repo1".to_owned(), "tree-g".to_owned())].into(),
+            ..AppRecord::default()
+        })
+        .await
+        .unwrap();
+    st.apps.set_app_owner(Some(&run)).await.unwrap();
+    st.lab.equipment.lock().unwrap().insert(
+        "repo1".to_owned(),
+        LabEquipment {
+            accounts: vec![LabAccount {
+                role: "admin".to_owned(),
+                username: "a@uji.test".to_owned(),
+                default: true,
+            }],
+            login: LoginForm {
+                url: "http://localhost:5173/login".to_owned(),
+                username_field: "#email".to_owned(),
+                password_field: "#password".to_owned(),
+                submit: "text=Sign in".to_owned(),
+                submit_path: "/api/login".to_owned(),
+                success: SuccessMarker::PathPrefix("/admin".to_owned()),
+                authenticated_url: "http://localhost:5173/admin".to_owned(),
+            },
+            safe_posts: vec![],
+            fixtures_dir: None,
+        },
+    );
+    st.svc
+        .start_review(&run, ReviewTrigger::Manual, None)
+        .await
+        .unwrap();
+    let set = |ac: &str, v: Verdict, need: Option<LabNeed>| {
+        let token = st.agent.last().req.ledger.unwrap().token;
+        let scope = st.svc.verify_capability(token.expose()).unwrap();
+        let mut report = common::report(Some("x"));
+        report.lab_need = need;
+        report.steps = vec!["langkah".to_owned()];
+        let rt = tokio::runtime::Handle::current();
+        tokio::task::block_in_place(|| {
+            rt.block_on(st.svc.ledger_set_verdict(&scope, ac, v, report))
+        })
+        .unwrap();
+    };
+    set("ac1", Verdict::CantVerify, Some(LabNeed::Role));
+    set("ac2", Verdict::Pass, None);
+    set("ac3", Verdict::CantVerify, Some(LabNeed::File));
+    let before = st.agent.runs.lock().unwrap().len();
+    st.agent.last().done();
+    eventually(|| st.agent.runs.lock().unwrap().len() == before + 1).await;
+    let first = st.agent.last().req;
+    assert!(first.message.contains("AC:ac1"), "{}", first.message);
+    assert!(!first.message.contains("ac3"));
+    st.agent.last().done();
+    eventually(|| st.agent.runs.lock().unwrap().len() == before + 2).await;
+    let second = st.agent.last().req;
+    assert!(second.message.contains("AC:ac3"), "{}", second.message);
+    assert_ne!(
+        first.review.unwrap().review_id,
+        second.review.clone().unwrap().review_id
+    );
+    assert_eq!(second.review.unwrap().timeout.as_secs(), 1200);
+    st.agent.last().done();
+    eventually(|| st.runs.only().state == RunState::AwaitingDev).await;
+    assert_eq!(
+        st.agent.runs.lock().unwrap().len(),
+        before + 2,
+        "kartu c2 tanpa calon"
+    );
 }

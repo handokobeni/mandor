@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { NO_VISUAL } from '#lib/ac-review.ts';
 import type { AcLedgerView } from '#lib/protocol/AcLedgerView.ts';
 import type { AcRowView } from '#lib/protocol/AcRowView.ts';
+import type { FindingView } from '#lib/protocol/FindingView.ts';
 import type { ReviewView } from '#lib/protocol/ReviewView.ts';
 import type { Rpc } from '#lib/rpc.ts';
 import { LedgerStore } from './ledger.svelte.ts';
@@ -38,10 +39,20 @@ class FakeRpc implements Rpc {
     gate_mode: 'block'
   };
   history: ReviewView[] = [];
-  async request<T>(method: string): Promise<T> {
+  findings: FindingView[] = [];
+  params: unknown[] = [];
+  async request<T>(method: string, params?: unknown): Promise<T> {
     this.calls.push(method);
+    this.params.push(params);
     if (method === 'ledger.get') return this.ledger as T;
     if (method === 'review.history') return this.history as T;
+    if (method === 'review.findings') return this.findings as T;
+    if (method === 'ledger.look_decision') {
+      const p = params as { ac_id: string; approve: boolean };
+      return this.ledger.rows.map((r) =>
+        r.ac_id === p.ac_id ? { ...r, visual: p.approve ? 'accepted' : 'differs', look_recommendation: null } : r
+      ) as T;
+    }
     throw new Error(method);
   }
   on(method: string, h: (p: unknown) => void): () => void {
@@ -76,13 +87,42 @@ describe('buku AC', () => {
     rpc.calls = [];
     rpc.handlers.get('review.progress')?.({ run_id: 'r1' });
     await tick();
-    expect(rpc.calls).toEqual(['review.history']);
+    expect(rpc.calls.sort()).toEqual(['review.findings', 'review.history']);
     rpc.calls = [];
     rpc.handlers.get('resync')?.(null);
     await tick();
-    expect(rpc.calls.sort()).toEqual(['ledger.get', 'review.history']);
+    expect(rpc.calls.sort()).toEqual(['ledger.get', 'review.findings', 'review.history']);
     detach();
     expect(rpc.handlers.size).toBe(0);
+  });
+});
+
+describe('review lab (plan 2026-11-10-001, U9)', () => {
+  it('memuat temuan di luar AC bersama riwayat', async () => {
+    const rpc = new FakeRpc();
+    rpc.findings = [{ review_id: 'rv1', card: null, title: 'Toast overlaps the header', detail: 'x', steps: [] }];
+    const store = new LedgerStore();
+    store.attach(rpc, 'r1');
+    await tick();
+    expect(store.findings.map((f) => f.title)).toEqual(['Toast overlaps the header']);
+  });
+
+  it('Approve dan Reject rekomendasi menerapkan baris dari daemon', async () => {
+    const rpc = new FakeRpc();
+    rpc.ledger.rows[0] = {
+      ...rpc.ledger.rows[0],
+      visual: 'differs',
+      look_recommendation: { advice: 'accept', reason: 'AC spelling' }
+    };
+    const store = new LedgerStore();
+    store.attach(rpc, 'r1');
+    await tick();
+    await store.decideLook('1', true);
+    expect(rpc.params.at(-1)).toEqual({ run_id: 'r1', ac_id: '1', approve: true });
+    expect(store.ledger?.rows[0].visual).toBe('accepted');
+    expect(store.ledger?.rows[0].look_recommendation).toBeNull();
+    await store.decideLook('1', false);
+    expect(store.ledger?.rows[0].visual).toBe('differs');
   });
 });
 
@@ -101,5 +141,12 @@ describe('screenshot hasil tampilan (plan 2026-11-03-002, U7)', () => {
     store.attach(rpc, 'r1');
     expect(await store.screenshot('ac1', 1)).toBe('data:image/png;base64,AA==');
     expect(calls.find(([m]) => m === 'review.screenshot')?.[1]).toEqual({ run_id: 'r1', ac_id: 'ac1', index: 1 });
+    await store.screenshot('ac1', 0, true);
+    expect(calls.filter(([m]) => m === 'review.screenshot').at(-1)?.[1]).toEqual({
+      run_id: 'r1',
+      ac_id: 'ac1',
+      index: 0,
+      evidence: true
+    });
   });
 });

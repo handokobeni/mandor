@@ -3,6 +3,7 @@
 
 pub mod backend;
 pub mod claude;
+pub mod playwright_login;
 pub mod port;
 pub mod prompt;
 mod screens;

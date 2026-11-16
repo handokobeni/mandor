@@ -7,8 +7,14 @@ import type { AcRowView } from '#lib/protocol/AcRowView.ts';
 import type { PublishParams } from '#lib/protocol/PublishParams.ts';
 import type { Tone } from '#lib/board.ts';
 
-/** Baris tanpa hasil tampilan (run tanpa prototype); dipakai fixture dan mock. */
-export const NO_VISUAL: Pick<AcRowView, 'visual' | 'visual_detail'> = {
+/** Baris tanpa hasil tampilan maupun hasil lab; dipakai fixture dan mock. */
+export const NO_VISUAL: Pick<
+  AcRowView,
+  'visual' | 'visual_detail' | 'lab_need' | 'evidence_detail' | 'look_recommendation'
+> = {
+  lab_need: null,
+  evidence_detail: null,
+  look_recommendation: null,
   visual: 'not_compared',
   visual_detail: {
     description: null,
@@ -401,4 +407,26 @@ export function nextZoom(current: 'fit' | number, dir: 1 | -1): number {
   const at = i === -1 ? ZOOM_STEPS.length - 1 : i;
   const next = Math.min(ZOOM_STEPS.length - 1, Math.max(0, at + dir));
   return ZOOM_STEPS[next];
+}
+
+/**
+ * Menahan pemanggilan ulang selama pemanggilan sebelumnya belum selesai: klik
+ * kedua pada tombol review mengembalikan permintaan yang sama, bukan memulai
+ * review kedua (yang bertabrakan dengan yang pertama di Lark). `onBusy`
+ * menandai tombol sibuk sampai permintaan selesai atau gagal.
+ */
+export function singleFlight<A extends unknown[]>(
+  fn: (...args: A) => Promise<void>,
+  onBusy: (busy: boolean) => void = () => undefined
+): (...args: A) => Promise<void> {
+  let pending: Promise<void> | null = null;
+  return (...args: A) => {
+    if (pending) return pending;
+    onBusy(true);
+    pending = fn(...args).finally(() => {
+      pending = null;
+      onBusy(false);
+    });
+    return pending;
+  };
 }

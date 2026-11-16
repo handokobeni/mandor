@@ -274,6 +274,9 @@ impl<D: Deps> RunService<D> {
                 message,
                 ..stats
             };
+            if self.lab_running(&run.id) {
+                return self.finish_lab_turn(run, generation, end).await;
+            }
             return self.finish_review(run, generation, end).await;
         }
         if run.state == RunState::WfRunning {

@@ -3,9 +3,9 @@
 use mandor_domain::{Design, Verdict};
 use mandor_protocol::{
     AcLedgerView, ChromeCheckParams, ChromeCheckView, ErrorCode, LedgerToolInfo,
-    LedgerToolSetDesign, LedgerToolSetVerdict, LedgerToolSetVisual, ReadinessConfirmations,
-    ReviewFindings, ReviewReadinessView, ReviewStart, ReviewVerdictView, ReviewView,
-    ReviewerSettingsView, RpcError, RunRef, method,
+    LedgerToolRecommendLook, LedgerToolReportFinding, LedgerToolSetDesign, LedgerToolSetVerdict,
+    LedgerToolSetVisual, ReadinessConfirmations, ReviewFindings, ReviewReadinessView, ReviewStart,
+    ReviewVerdictView, ReviewView, ReviewerSettingsView, RpcError, RunRef, method,
 };
 use mandor_usecase::review::{CapabilityRole, CapabilityScope, LedgerToolError};
 use mandor_usecase::run_ports::{ReviewRecord, ReviewTrigger, ReviewerSettings};
@@ -27,7 +27,13 @@ pub(super) enum LedgerTool {
     SetVerdict {
         ac_id: String,
         verdict: Verdict,
-        evidence: Option<String>,
+        report: mandor_usecase::review::VerdictReport,
+    },
+    ReportFinding(mandor_domain::lab::Finding),
+    RecommendLook {
+        ac_id: String,
+        advice: mandor_domain::lab::LookAdvice,
+        reason: String,
     },
     /// `report.screenshots`: nama berkas dari reviewer; adapter agent
     /// memeriksanya sebelum disalin (run VM, KTD-P8).
@@ -36,6 +42,8 @@ pub(super) enum LedgerTool {
         result: mandor_domain::ac_ledger::Visual,
         report: mandor_usecase::review::VisualReport,
     },
+    /// Usulan perlengkapan lab dari giliran pengusul (KTD-L14).
+    LabPropose(mandor_domain::lab::LabEquipment),
 }
 
 /// Mengurai method dan parameter tool ledger; method lain ditolak.
@@ -56,11 +64,63 @@ pub(super) fn ledger_tool(name: &str, v: Value) -> Result<LedgerTool, RpcError> 
             let p: LedgerToolSetVerdict = params(v)?;
             let verdict =
                 Verdict::parse(&p.verdict).ok_or_else(|| invalid("verdict", &p.verdict))?;
+            let lab_need = p
+                .lab_need
+                .as_deref()
+                .map(|n| {
+                    mandor_domain::lab::LabNeed::parse(n).ok_or_else(|| invalid("lab_need", n))
+                })
+                .transpose()?;
+            let simulated = match p.simulated.as_deref() {
+                None => mandor_domain::lab::Simulated::None,
+                Some(raw) => mandor_domain::lab::Simulated::parse(raw)
+                    .ok_or_else(|| invalid("simulated", raw))?,
+            };
             Ok(LedgerTool::SetVerdict {
                 ac_id: p.ac_id,
                 verdict,
-                evidence: p.evidence,
+                report: mandor_usecase::review::VerdictReport {
+                    evidence: p.evidence,
+                    lab_need,
+                    steps: p.steps,
+                    screenshots: p.screenshots,
+                    prepared: p.prepared,
+                    simulated,
+                },
             })
+        }
+        method::LEDGER_TOOL_REPORT_FINDING => {
+            let p: LedgerToolReportFinding = params(v)?;
+            Ok(LedgerTool::ReportFinding(mandor_domain::lab::Finding {
+                card: p.card,
+                title: p.title,
+                detail: p.detail,
+                evidence: mandor_domain::lab::Evidence {
+                    steps: p.steps,
+                    screenshots: p.screenshots,
+                    ..mandor_domain::lab::Evidence::default()
+                },
+            }))
+        }
+        method::LEDGER_TOOL_RECOMMEND_LOOK => {
+            let p: LedgerToolRecommendLook = params(v)?;
+            let advice = mandor_domain::lab::LookAdvice::parse(&p.recommendation)
+                .ok_or_else(|| invalid("recommendation", &p.recommendation))?;
+            Ok(LedgerTool::RecommendLook {
+                ac_id: p.ac_id,
+                advice,
+                reason: p.reason,
+            })
+        }
+        method::LEDGER_TOOL_LAB_PROPOSE => {
+            if let Some(field) = mandor_domain::lab::secret_field(&v) {
+                return Err(RpcError::new(
+                    ErrorCode::Rejected,
+                    format!("proposals must not contain passwords or other secrets (`{field}`)"),
+                ));
+            }
+            let dto: mandor_protocol::LabEquipmentDto = params(v)?;
+            Ok(LedgerTool::LabPropose(super::lab::equipment_of(dto)?))
         }
         method::LEDGER_TOOL_SET_VISUAL => {
             let p: LedgerToolSetVisual = params(v)?;
@@ -88,11 +148,12 @@ pub(super) fn ledger_tool(name: &str, v: Value) -> Result<LedgerTool, RpcError> 
 async fn screenshot_call(s: &crate::session::LarkSession, v: Value) -> Result<Value, RpcError> {
     let p: mandor_protocol::VisualScreenshotParams = params(v)?;
     let index = usize::try_from(p.index).unwrap_or(usize::MAX);
-    let bytes = s
-        .runs
-        .visual_screenshot(&p.run_id, &p.ac_id, index)
-        .await
-        .map_err(run_error)?;
+    let bytes = if p.evidence {
+        s.runs.evidence_screenshot(&p.run_id, &p.ac_id, index).await
+    } else {
+        s.runs.visual_screenshot(&p.run_id, &p.ac_id, index).await
+    }
+    .map_err(run_error)?;
     ok(&mandor_protocol::VisualScreenshotView {
         data_url: data_url(&bytes),
     })
@@ -124,7 +185,7 @@ fn tool_error(e: &LedgerToolError) -> RpcError {
     let code = match e {
         LedgerToolError::WrongRole => ErrorCode::Unauthorized,
         LedgerToolError::UnknownAc(_) => ErrorCode::NotFound,
-        LedgerToolError::NotAllowed(_) => ErrorCode::Rejected,
+        LedgerToolError::NotAllowed(_) | LedgerToolError::Invalid(_) => ErrorCode::Rejected,
         LedgerToolError::Storage(_) => ErrorCode::Internal,
     };
     RpcError::new(code, e.to_string())
@@ -143,6 +204,7 @@ pub(super) fn usecase_scope(s: &mandor_api::CapabilityScope) -> Option<Capabilit
         "verdict" => CapabilityRole::Verdict,
         "permit" => CapabilityRole::Permit,
         "ask" => CapabilityRole::Ask,
+        "lab_setup" => CapabilityRole::LabSetup,
         _ => return None,
     };
     Some(CapabilityScope {
@@ -167,11 +229,11 @@ fn readiness_view(r: mandor_usecase::review::ReviewReadiness) -> ReviewReadiness
             database: r.confirmed.database,
             login: r.confirmed.login,
         },
+        // Browser review siap: Playwright terpasang dan ada sumber login
+        // (KTD-L1). Nama field lama dipertahankan untuk app.
+        chrome_connected: r.driver.installed
+            && r.driver.login != mandor_usecase::review::LoginKind::None,
         app_urls: r.app_urls,
-        chrome_connected: matches!(
-            r.driver,
-            mandor_usecase::review::BrowserDriver::Chrome { connected: true }
-        ),
     }
 }
 
@@ -304,10 +366,26 @@ impl AppDispatch {
             LedgerTool::SetVerdict {
                 ac_id,
                 verdict,
-                evidence,
+                report,
             } => {
                 s.runs
-                    .ledger_set_verdict(&scope, &ac_id, verdict, evidence.as_deref())
+                    .ledger_set_verdict(&scope, &ac_id, verdict, report)
+                    .await
+            }
+            LedgerTool::ReportFinding(finding) => {
+                s.runs
+                    .ledger_report_finding(&scope, finding)
+                    .await
+                    .map_err(|e| tool_error(&e))?;
+                return ok(&serde_json::json!({"recorded": true}));
+            }
+            LedgerTool::RecommendLook {
+                ac_id,
+                advice,
+                reason,
+            } => {
+                s.runs
+                    .ledger_recommend_look(&scope, &ac_id, advice, &reason)
                     .await
             }
             LedgerTool::SetVisual {
@@ -318,6 +396,13 @@ impl AppDispatch {
                 s.runs
                     .ledger_set_visual(&scope, &ac_id, result, report)
                     .await
+            }
+            LedgerTool::LabPropose(eq) => {
+                s.runs
+                    .ledger_lab_propose(&scope, eq)
+                    .await
+                    .map_err(|e| tool_error(&e))?;
+                return ok(&serde_json::json!({"saved": true}));
             }
         }
         .map_err(|e| tool_error(&e))?;
@@ -383,14 +468,44 @@ impl AppDispatch {
             method::SETTINGS_REVIEWER_GET,
             method::SETTINGS_REVIEWER_SET,
             method::REVIEW_SCREENSHOT,
+            method::LEDGER_LOOK_DECISION,
+            method::REVIEW_FINDINGS_LIST,
         ]
         .contains(&name)
+    }
+
+    /// Keputusan rekomendasi tampilan dan daftar temuan (plan 2026-11-10-001).
+    async fn lab_review_call(
+        &self,
+        s: &crate::session::LarkSession,
+        name: &str,
+        v: Value,
+    ) -> Result<Value, RpcError> {
+        if name == method::LEDGER_LOOK_DECISION {
+            let p: mandor_protocol::LookDecisionParams = params(v)?;
+            let by = self.app.lark_status().await.name;
+            let rows = s
+                .runs
+                .decide_look_recommendation(&p.run_id, &p.ac_id, p.approve, by.as_deref())
+                .await
+                .map_err(run_error)?;
+            return ok(&rows.iter().map(ac_row_view).collect::<Vec<_>>());
+        }
+        let p: RunRef = params(v)?;
+        let all = s.runs.run_findings(&p.run_id).await.map_err(run_error)?;
+        ok(&all
+            .iter()
+            .map(|(id, f)| crate::views::finding_view(id, f))
+            .collect::<Vec<_>>())
     }
 
     pub(super) async fn review_call(&self, name: &str, v: Value) -> Result<Value, RpcError> {
         let s = self.session().await?;
         match name {
             method::REVIEW_SCREENSHOT => screenshot_call(&s, v).await,
+            method::LEDGER_LOOK_DECISION | method::REVIEW_FINDINGS_LIST => {
+                self.lab_review_call(&s, name, v).await
+            }
             method::LEDGER_GET => {
                 let p: RunRef = params(v)?;
                 let r = s.runs.refresh_ledger(&p.run_id).await.map_err(run_error)?;
@@ -492,6 +607,31 @@ mod tests {
 
     use super::*;
 
+    /// KTD-L14: usulan perlengkapan diurai; field rahasia ditolak.
+    #[test]
+    fn usulan_lab_diurai_dan_field_rahasia_ditolak() {
+        let proposal = serde_json::json!({
+            "accounts": [{"role": "admin", "username": "a@uji.test", "default": true}],
+            "login": {
+                "url": "http://localhost:5173/login", "username_field": "#email",
+                "password_field": "#password", "submit": "text=Sign in",
+                "submit_path": "/api/login", "success_kind": "path", "success": "/admin",
+                "authenticated_url": "http://localhost:5173/admin",
+            },
+        });
+        let t = ledger_tool(method::LEDGER_TOOL_LAB_PROPOSE, proposal.clone()).unwrap();
+        let LedgerTool::LabPropose(eq) = t else {
+            panic!("{t:?}");
+        };
+        assert_eq!(eq.accounts[0].role, "admin");
+        assert_eq!(eq.login.password_field, "#password");
+        let mut leaked = proposal;
+        leaked["accounts"][0]["password"] = serde_json::json!("rahasia");
+        let err = ledger_tool(method::LEDGER_TOOL_LAB_PROPOSE, leaked).unwrap_err();
+        assert_eq!(err.code, ErrorCode::Rejected);
+        assert!(!err.message.contains("rahasia"), "{}", err.message);
+    }
+
     #[test]
     fn tool_ledger_diurai_dan_method_lain_ditolak() {
         let t = ledger_tool(
@@ -504,9 +644,36 @@ mod tests {
             LedgerTool::SetVerdict {
                 ac_id: "rec1".to_owned(),
                 verdict: Verdict::CantVerify,
-                evidence: Some("x".to_owned()),
+                report: mandor_usecase::review::VerdictReport {
+                    evidence: Some("x".to_owned()),
+                    ..mandor_usecase::review::VerdictReport::default()
+                },
             }
         );
+        let t = ledger_tool(
+            method::LEDGER_TOOL_SET_VERDICT,
+            serde_json::json!({"ac_id": "rec1", "verdict": "cant_verify", "evidence": "x",
+                "lab_need": "role", "steps": ["Buka /admin"], "simulated": "request"}),
+        )
+        .unwrap();
+        let LedgerTool::SetVerdict { report, .. } = t else {
+            panic!("bukan SetVerdict");
+        };
+        assert_eq!(report.lab_need, Some(mandor_domain::lab::LabNeed::Role));
+        assert_eq!(report.simulated, mandor_domain::lab::Simulated::Request);
+        assert!(
+            ledger_tool(
+                method::LEDGER_TOOL_SET_VERDICT,
+                serde_json::json!({"ac_id": "rec1", "verdict": "pass", "lab_need": "x"}),
+            )
+            .is_err()
+        );
+        let t = ledger_tool(
+            method::LEDGER_TOOL_RECOMMEND_LOOK,
+            serde_json::json!({"ac_id": "rec1", "recommendation": "accept", "reason": "ikut AC"}),
+        )
+        .unwrap();
+        assert!(matches!(t, LedgerTool::RecommendLook { .. }));
         let t = ledger_tool(
             method::LEDGER_TOOL_SET_DESIGN,
             serde_json::json!({"ac_id": "rec1", "design": "in_design"}),

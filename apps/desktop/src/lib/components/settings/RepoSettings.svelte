@@ -14,6 +14,7 @@
   import EnvKeyPicker from './EnvKeyPicker.svelte';
   import Field from './Field.svelte';
   import ListEditor from './ListEditor.svelte';
+  import RepoLab from './RepoLab.svelte';
   import ReviewerPicker from './ReviewerPicker.svelte';
   import { Switch } from '#lib/components/ui/switch/index.ts';
   import { type RepoAppForm, validateRepoApp } from '#lib/settings.ts';
@@ -289,6 +290,9 @@
               </div>
               <Switch bind:checked={edit.unattendedLogin} aria-label="Setup command prepares a test login" />
             </div>
+            <hr class="separator" />
+            <RepoLab {rpc} repoId={repo.id} />
+            <hr class="separator" />
           {/if}
           <div class="field">
             <span class="text-sm font-medium">Push &amp; PR gate</span>

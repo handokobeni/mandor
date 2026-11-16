@@ -214,7 +214,9 @@ pub fn settings_json(hook_command: &str) -> String {
 
 /// Tool browser yang hasilnya dicatat hook `PostToolUse`: Claude in Chrome di
 /// laptop, Playwright di VM.
-const REVIEW_POST_MATCHER: &str = "mcp__claude-in-chrome__.*|mcp__playwright__.*";
+/// Tool browser yang dicatat `PostToolUse`: Claude in Chrome lama dan
+/// Playwright, termasuk server per role giliran lab (KTD-L10).
+const REVIEW_POST_MATCHER: &str = "mcp__claude-in-chrome__.*|mcp__playwright(_[a-z0-9-]+)?__.*";
 
 /// Settings sesi reviewer: `PreToolUse` seperti biasa ditambah `PostToolUse`
 /// untuk tool browser, yang mencatat tab dan alamat terakhirnya (KTD-31).
@@ -329,15 +331,37 @@ pub fn parse_hook_input(raw: &[u8]) -> Result<ToolCall, String> {
         .get("command")
         .and_then(Value::as_str)
         .map(str::to_owned);
-    let paths = ["file_path", "path", "notebook_path", "filename"]
+    let mut paths: Vec<String> = ["file_path", "path", "notebook_path", "filename"]
         .iter()
         .filter_map(|k| input.get(*k).and_then(Value::as_str).map(str::to_owned))
         .collect();
+    // `browser_file_upload` memakai array `paths`; setiap elemen diperiksa
+    // pagar (KTD-L11). Elemen bukan string membuat panggilan ditolak lewat
+    // path yang tidak sah.
+    if let Some(list) = input.get("paths").and_then(Value::as_array) {
+        paths.extend(list.iter().map(|v| {
+            v.as_str()
+                .map_or_else(|| "\0invalid".to_owned(), str::to_owned)
+        }));
+    }
     let text = |k: &str| input.get(k).and_then(Value::as_str).map(str::to_owned);
+    // Pola berkas pencarian; `pattern` milik Grep adalah regex isi, bukan
+    // berkas, jadi hanya diambil untuk Glob.
+    let globs: Vec<String> = match tool_name.as_str() {
+        // `type` ripgrep (mis. `ts`) dipetakan ke pola ekstensi; pagar lab
+        // hanya menerima ekstensi dari allowlist-nya, jadi tipe lain ditolak.
+        "Grep" => text("glob")
+            .into_iter()
+            .chain(text("type").map(|t| format!("**/*.{t}")))
+            .collect(),
+        "Glob" => text("pattern").into_iter().collect(),
+        _ => Vec::new(),
+    };
     Ok(ToolCall {
         tool_name,
         command,
         paths,
+        globs,
         url: text("url"),
         tab_id: input.get("tabId").and_then(Value::as_u64),
         action: text("action"),
@@ -503,7 +527,7 @@ mod tests {
         .unwrap();
         assert_eq!(
             v["hooks"]["PostToolUse"][0]["matcher"],
-            "mcp__claude-in-chrome__.*|mcp__playwright__.*"
+            "mcp__claude-in-chrome__.*|mcp__playwright(_[a-z0-9-]+)?__.*"
         );
         assert_eq!(
             v["hooks"]["PostToolUse"][0]["hooks"][0]["command"],
@@ -686,5 +710,37 @@ mod tests {
                 .iter()
                 .any(|a| a.contains("commit") || a.contains("push"))
         );
+    }
+
+    #[test]
+    fn array_paths_upload_ikut_diperiksa() {
+        let call = parse_hook_input(
+            br#"{"tool_name":"mcp__playwright_admin__browser_file_upload","tool_input":{"paths":["/lab/fixtures/a.xlsx","/etc/passwd",7]}}"#,
+        )
+        .unwrap();
+        assert_eq!(call.paths.len(), 3);
+        assert_eq!(call.paths[1], "/etc/passwd");
+        assert!(call.paths[2].contains("invalid"));
+    }
+
+    #[test]
+    fn pola_berkas_grep_dan_glob_diurai() {
+        let grep = parse_hook_input(
+            br#"{"tool_name":"Grep","tool_input":{"pattern":"DB_PASS","glob":"**/.env"}}"#,
+        )
+        .unwrap();
+        assert_eq!(grep.globs, ["**/.env"]);
+        let glob = parse_hook_input(br#"{"tool_name":"Glob","tool_input":{"pattern":"**/*.pem"}}"#)
+            .unwrap();
+        assert_eq!(glob.globs, ["**/*.pem"]);
+        let typed =
+            parse_hook_input(br#"{"tool_name":"Grep","tool_input":{"pattern":"x","type":"ts"}}"#)
+                .unwrap();
+        assert_eq!(typed.globs, ["**/*.ts"]);
+        let read = parse_hook_input(
+            br#"{"tool_name":"Read","tool_input":{"file_path":"a","pattern":"x"}}"#,
+        )
+        .unwrap();
+        assert!(read.globs.is_empty());
     }
 }

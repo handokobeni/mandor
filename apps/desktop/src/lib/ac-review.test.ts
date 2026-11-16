@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  singleFlight,
   reviewMeta,
   acTitle,
   canSend,
@@ -262,5 +263,39 @@ describe('penampil screenshot tampilan', () => {
     expect(nextZoom(1.5, -1)).toBe(1);
     expect(nextZoom(4, 1)).toBe(4);
     expect(nextZoom(0.25, -1)).toBe(0.25);
+  });
+});
+
+describe('singleFlight: tombol review tidak memulai review dua kali', () => {
+  it('klik kedua selama review dimulai tidak memanggil daemon lagi, dan status sibuk tampil sampai selesai', async () => {
+    let calls = 0;
+    let release: () => void = () => undefined;
+    const busy: boolean[] = [];
+    const start = singleFlight(
+      () =>
+        new Promise<void>((r) => {
+          calls += 1;
+          release = r;
+        }),
+      (b) => busy.push(b)
+    );
+    const first = start();
+    const second = start();
+    expect(calls).toBe(1);
+    expect(busy).toEqual([true]);
+    release();
+    await Promise.all([first, second]);
+    expect(busy).toEqual([true, false]);
+    const third = start();
+    expect(calls).toBe(2);
+    release();
+    await third;
+  });
+
+  it('status sibuk dilepas walau permintaan gagal', async () => {
+    const busy: boolean[] = [];
+    const start = singleFlight(() => Promise.reject(new Error('daemon menolak')), (b) => busy.push(b));
+    await expect(start()).rejects.toThrow('daemon menolak');
+    expect(busy).toEqual([true, false]);
   });
 });

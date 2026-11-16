@@ -143,7 +143,10 @@ impl<D: Deps> RunService<D> {
         req: &PermitRequest,
         verified: &mut bool,
     ) -> Result<PermitAnswer, String> {
-        if req.turn == TurnKind::Review {
+        if matches!(
+            req.turn,
+            TurnKind::Review | TurnKind::Lab | TurnKind::LabSetup
+        ) {
             return Err("the AC reviewer cannot ask for approval".to_owned());
         }
         let Some(cwd) = self.permits.evidence(&req.permit, &req.tool_use_id).await else {

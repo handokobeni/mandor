@@ -268,6 +268,46 @@ pub fn ac_row_view(r: &mandor_domain::AcRow) -> mandor_protocol::AcRowView {
         card: r.card.clone(),
         visual: r.visual.as_str().to_owned(),
         visual_detail: visual_detail_view(&r.visual_detail),
+        lab_need: r.lab_need.map(|n| n.as_str().to_owned()),
+        evidence_detail: r.evidence_detail.as_ref().map(evidence_view),
+        look_recommendation: r.look_recommendation.as_ref().map(|l| {
+            mandor_protocol::LookRecommendationView {
+                advice: l.advice.as_str().to_owned(),
+                reason: l.reason.clone(),
+            }
+        }),
+    }
+}
+
+fn evidence_view(e: &mandor_domain::lab::Evidence) -> mandor_protocol::EvidenceView {
+    mandor_protocol::EvidenceView {
+        steps: e.steps.clone(),
+        screenshots: e.screenshots.clone(),
+        prepared: e.prepared.clone(),
+        simulated: e.simulated.as_str().to_owned(),
+        blocked_requests: e
+            .blocked_requests
+            .iter()
+            .map(|b| mandor_protocol::BlockedRequestView {
+                method: b.method.clone(),
+                url: b.url.clone(),
+            })
+            .collect(),
+        lab: e.lab,
+    }
+}
+
+/// Temuan reviewer di luar AC (R19).
+pub fn finding_view(
+    review_id: &str,
+    f: &mandor_domain::lab::Finding,
+) -> mandor_protocol::FindingView {
+    mandor_protocol::FindingView {
+        review_id: review_id.to_owned(),
+        card: f.card.clone(),
+        title: f.title.clone(),
+        detail: f.detail.clone(),
+        steps: f.evidence.steps.clone(),
     }
 }
 

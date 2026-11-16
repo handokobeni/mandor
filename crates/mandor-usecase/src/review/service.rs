@@ -18,10 +18,13 @@ use crate::notify::notice;
 use crate::ports::{Deps, Ids, PortError};
 use crate::run::{RunError, RunService};
 use crate::run_ports::{
-    AgentPort, AgentRequest, AppRecords, ChatItem, LedgerStore, NoticeKind, Notifier, Prompts,
-    Repos, ReviewBrief, ReviewFacts, ReviewHistory, ReviewRecord, ReviewRequest, ReviewStatus,
-    ReviewTrigger, RunPhase, RunRecord, RunStore, SessionRef, Stopper,
+    AgentPort, AgentRequest, AppRecords, BrowserSession, ChatItem, LabLogin, LabPort, LedgerStore,
+    NoticeKind, Notifier, Prompts, Repos, ReviewBrief, ReviewFacts, ReviewHistory, ReviewRecord,
+    ReviewRequest, ReviewStatus, ReviewTrigger, RunPhase, RunRecord, RunStore, SessionRef, Stopper,
 };
+
+/// Nama server MCP Playwright review biasa.
+pub const DEFAULT_BROWSER_SERVER: &str = "playwright";
 
 /// Hasil akhir sesi reviewer yang dibaca dari event agent.
 #[derive(Debug, Clone, Default, PartialEq)]
@@ -54,19 +57,7 @@ impl<D: Deps> RunService<D> {
         let mut run = self.load(run_id).await?;
         let skill = skill.or(run.reviewer_skill.as_deref()).map(str::to_owned);
         let skill = skill.as_deref();
-        let allowed = match trigger {
-            ReviewTrigger::AutomaticFix => run.state == RunState::WfRunning,
-            ReviewTrigger::Manual => {
-                run.state == RunState::AwaitingDev && run.phase == RunPhase::Implement
-            }
-            // Di VM kartu `ac_gate` yang AC-nya belum di-review (review putus)
-            // di-review lagi lewat keputusan dev di gerbang.
-            ReviewTrigger::PushAndPr => {
-                run.phase == RunPhase::Implement
-                    && (run.state == RunState::AwaitingDev || self.held_at_ac_gate(&run))
-            }
-        };
-        if !allowed {
+        if !self.review_allowed(&run, trigger) {
             return Err(RunError::InvalidState(run.state.as_str()));
         }
         let mut rows = self.refresh_ledger(run_id).await?.rows;
@@ -83,7 +74,11 @@ impl<D: Deps> RunService<D> {
         self.reviews.save_ac_rows(run_id, &rows).await?;
 
         self.refresh_app_for_review(&run, &snapshot).await?;
-        let facts = self.review_facts(&run, &snapshot).await?;
+        let review_id = self.sync.ids.nonce();
+        let readiness = self.readiness(&run, &snapshot).await?;
+        let browser = self.prepare_browser(&review_id, &readiness).await;
+        let facts = browser.facts.clone();
+        self.plan_lab_for(run_id, &readiness, &browser);
         let settings = self.reviews.reviewer_settings().await;
         let task = self.task_of(&run.record_id).await?;
         let gate: Vec<_> = rows.iter().filter(|r| r.in_gate()).cloned().collect();
@@ -103,7 +98,7 @@ impl<D: Deps> RunService<D> {
             cards: &cards,
         });
         let record = ReviewRecord {
-            id: self.sync.ids.nonce(),
+            id: review_id.clone(),
             run_id: run_id.to_owned(),
             trigger,
             status: ReviewStatus::Running,
@@ -118,7 +113,10 @@ impl<D: Deps> RunService<D> {
             finished_at_ms: None,
             verdicts: Vec::new(),
         };
-        self.reviews.save_review(&record).await?;
+        if let Err(e) = self.reviews.save_review(&record).await {
+            self.lab.end_review(&review_id).await;
+            return Err(e.into());
+        }
 
         let mut req = self
             .agent_request(&mut run, SessionRef::New(self.sync.ids.nonce()), message)
@@ -128,7 +126,10 @@ impl<D: Deps> RunService<D> {
             role: CapabilityRole::Verdict,
             token: self.issue_capability(run_id, CapabilityRole::Verdict),
         });
-        req.review = Some(review_request(&record.id, &facts, &settings));
+        let mut review = review_request(&record.id, &facts, &settings);
+        review.proxy = browser.proxy;
+        review.sessions = browser.sessions;
+        req.review = Some(review);
         run.review_snapshot = snapshot;
         run.review_id = Some(record.id.clone());
         run.state = RunState::Reviewing;
@@ -138,6 +139,7 @@ impl<D: Deps> RunService<D> {
             None => "Review started.".to_owned(),
         };
         if let Err(e) = self.spawn_review(&mut run, req, summary).await {
+            self.lab.end_review(&review_id).await;
             let mut failed = record;
             failed.status = ReviewStatus::Failed;
             failed.error = Some(e.to_string());
@@ -146,6 +148,43 @@ impl<D: Deps> RunService<D> {
             return Err(e);
         }
         Ok(record)
+    }
+
+    /// Rencana lab bila review biasa memakai login perlengkapan (KTD-L7).
+    fn plan_lab_for(&self, run_id: &str, readiness: &ReviewReadiness, browser: &PreparedBrowser) {
+        let facts = &browser.facts;
+        if let (true, Some((repo_id, equipment))) = (facts.browser, &readiness.equipment) {
+            self.remember_lab_plan(
+                run_id,
+                super::lab::LabPlan {
+                    repo_id: repo_id.clone(),
+                    equipment: equipment.clone(),
+                    origins: facts
+                        .app_urls
+                        .iter()
+                        .chain(&facts.prototype_url)
+                        .cloned()
+                        .collect(),
+                    proxy: browser.proxy.clone(),
+                },
+            );
+        }
+    }
+
+    /// Review boleh dimulai dari keadaan run ini untuk pemicu ini.
+    fn review_allowed(&self, run: &RunRecord, trigger: ReviewTrigger) -> bool {
+        match trigger {
+            ReviewTrigger::AutomaticFix => run.state == RunState::WfRunning,
+            ReviewTrigger::Manual => {
+                run.state == RunState::AwaitingDev && run.phase == RunPhase::Implement
+            }
+            // Di VM kartu `ac_gate` yang AC-nya belum di-review (review putus)
+            // di-review lagi lewat keputusan dev di gerbang.
+            ReviewTrigger::PushAndPr => {
+                run.phase == RunPhase::Implement
+                    && (run.state == RunState::AwaitingDev || self.held_at_ac_gate(run))
+            }
+        }
     }
 
     /// Versi ter-box dari [`Self::start_review`] untuk pemanggil di dalam akhir
@@ -260,15 +299,30 @@ impl<D: Deps> RunService<D> {
             Some(a) if a.state == AppRunState::Running => AppReadiness::OlderCode,
             _ => AppReadiness::NotRunning,
         };
-        let driver = if self.is_vm() {
-            BrowserDriver::Headless {
-                unattended_login: !web.is_empty()
-                    && web.iter().all(|m| m.repo.app.unattended_login),
-            }
+        let app_urls: Vec<String> = app
+            .as_ref()
+            .map(|a| {
+                a.members
+                    .iter()
+                    .filter(|m| m.prototype.is_none())
+                    .filter_map(|m| m.url.clone())
+                    .collect()
+            })
+            .unwrap_or_default();
+        let web_ids: Vec<String> = web.iter().map(|m| m.repo.id.clone()).collect();
+        let equipment = self.login_equipment(&web_ids, &app_urls).await?;
+        let unattended = self.is_vm();
+        let login = if equipment.is_some() {
+            LoginKind::Equipment
+        } else if unattended && !web.is_empty() && web.iter().all(|m| m.repo.app.unattended_login) {
+            LoginKind::RepoSetup
         } else {
-            BrowserDriver::Chrome {
-                connected: self.reviews.chrome_connected().await,
-            }
+            LoginKind::None
+        };
+        let driver = BrowserDriver {
+            installed: self.lab.playwright_installed(),
+            unattended,
+            login,
         };
         Ok(ReviewReadiness {
             web: !web.is_empty(),
@@ -286,16 +340,118 @@ impl<D: Deps> RunService<D> {
                     .find(|m| m.prototype.is_some() && m.state == AppRunState::Running)
                     .and_then(|m| m.url.clone())
             }),
-            app_urls: app
-                .map(|a| {
-                    a.members
-                        .into_iter()
-                        .filter(|m| m.prototype.is_none())
-                        .filter_map(|m| m.url)
-                        .collect()
-                })
-                .unwrap_or_default(),
+            app_urls,
+            equipment,
         })
+    }
+
+    /// Perlengkapan lab yang disetujui untuk login review biasa: repo Web
+    /// pertama yang punya perlengkapan disetujui, dan hanya bila semua URL app
+    /// loopback (KTD-L6).
+    async fn login_equipment(
+        &self,
+        web_repos: &[String],
+        app_urls: &[String],
+    ) -> Result<Option<(String, mandor_domain::lab::LabEquipment)>, RunError> {
+        if app_urls.is_empty()
+            || !app_urls
+                .iter()
+                .all(|u| mandor_domain::lab::is_loopback_origin(u))
+        {
+            return Ok(None);
+        }
+        for repo in web_repos {
+            if let Some(eq) = self.lab.approved_equipment(repo).await? {
+                return Ok(Some((repo.clone(), eq)));
+            }
+        }
+        Ok(None)
+    }
+
+    /// Proxy dan login akun default untuk review biasa (R15, KTD-L4, KTD-L6).
+    /// Login gagal membuat browser tidak dipakai dengan alasan yang jelas.
+    async fn prepare_browser(
+        &self,
+        review_id: &str,
+        readiness: &ReviewReadiness,
+    ) -> PreparedBrowser {
+        let mut facts = readiness.facts();
+        if !facts.browser {
+            return PreparedBrowser {
+                facts,
+                proxy: None,
+                sessions: Vec::new(),
+            };
+        }
+        let origins: Vec<String> = facts
+            .app_urls
+            .iter()
+            .chain(&facts.prototype_url)
+            .cloned()
+            .collect();
+        let mut safe_posts = Vec::new();
+        if let Some((_, eq)) = &readiness.equipment {
+            safe_posts.extend(eq.safe_posts.iter().cloned());
+            safe_posts.push(eq.login.submit_path.clone());
+        }
+        let policy = mandor_domain::lab::ProxyPolicy::new(&origins, &safe_posts);
+        let proxy = match self.lab.start_proxy(review_id, policy).await {
+            Ok(url) => url,
+            Err(e) => {
+                facts.browser = false;
+                facts.reason = Some(format!("The review proxy could not start: {e}"));
+                facts.app_urls.clear();
+                facts.prototype_url = None;
+                return PreparedBrowser {
+                    facts,
+                    proxy: None,
+                    sessions: Vec::new(),
+                };
+            }
+        };
+        let mut sessions = Vec::new();
+        if let Some((repo_id, eq)) = &readiness.equipment {
+            let Some(role) = eq
+                .accounts
+                .iter()
+                .find(|a| a.default)
+                .map(|a| a.role.clone())
+            else {
+                return PreparedBrowser {
+                    facts,
+                    proxy: Some(proxy),
+                    sessions,
+                };
+            };
+            let login = self
+                .lab
+                .login(LabLogin {
+                    review_id,
+                    repo_id,
+                    equipment: eq,
+                    role: &role,
+                    origins: &origins,
+                    proxy: Some(&proxy),
+                })
+                .await;
+            match login {
+                Ok(state) => sessions.push(BrowserSession {
+                    server: DEFAULT_BROWSER_SERVER.to_owned(),
+                    state,
+                }),
+                Err(f) => {
+                    facts.browser = false;
+                    facts.reason = Some(format!("Test login failed for {role}: {}", f.reason()));
+                    facts.app_urls.clear();
+                    facts.prototype_url = None;
+                }
+            }
+        }
+        PreparedBrowser {
+            facts,
+            proxy: Some(proxy),
+            sessions,
+        }
     }
 
     /// Restart otomatis (opt-in per repo): app run ini yang menyala dari kode
@@ -326,28 +482,17 @@ impl<D: Deps> RunService<D> {
         Ok(())
     }
 
-    /// Fakta kesiapan uji browser: repo Web dengan uji browser aktif, app run
-    /// ini menyala dari snapshot yang sama, login dikonfirmasi, dan ekstensi
-    /// tersambung (R13, KTD-38).
-    async fn review_facts(
-        &self,
-        run: &RunRecord,
-        snapshot: &BTreeMap<String, String>,
-    ) -> Result<ReviewFacts, RunError> {
-        Ok(self.readiness(run, snapshot).await?.facts())
-    }
-
     /// Akhir giliran reviewer: verdict dilengkapi atau review gagal, riwayat
     /// disimpan, lalu run kembali ke dev dan antrean berjalan.
     pub(crate) async fn finish_review(
         self: &Arc<Self>,
-        mut run: RunRecord,
+        run: RunRecord,
         generation: i64,
         end: ReviewEnd,
     ) -> Result<(), RunError> {
-        let review_id = run.review_id.take().unwrap_or_default();
+        let review_id = run.review_id.clone().unwrap_or_default();
         self.agent.end_review(&review_id).await;
-        let mut record = self
+        let record = self
             .reviews
             .reviews(&run.id)
             .await?
@@ -368,6 +513,36 @@ impl<D: Deps> RunService<D> {
         } else {
             ReviewStatus::Failed
         };
+        if status == ReviewStatus::Finished
+            && let Some(progress) = self.plan_lab(&run, &review_id, &rows, &end).await?
+        {
+            return self.start_lab_card(run, generation, progress).await;
+        }
+        self.lab_plans
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .remove(&run.id);
+        self.finish_review_tail(run, generation, end, status).await
+    }
+
+    /// Ekor review: riwayat, ringkasan, lalu run kembali ke dev, Automatic
+    /// fix, atau antrean VM (KTD-L9).
+    pub(crate) async fn finish_review_tail(
+        self: &Arc<Self>,
+        mut run: RunRecord,
+        generation: i64,
+        end: ReviewEnd,
+        status: ReviewStatus,
+    ) -> Result<(), RunError> {
+        let review_id = run.review_id.take().unwrap_or_default();
+        self.lab.end_review(&review_id).await;
+        let mut record = self
+            .reviews
+            .reviews(&run.id)
+            .await?
+            .into_iter()
+            .find(|r| r.id == review_id);
+        let rows = self.reviews.ac_rows(&run.id).await?;
         let stale = match self.code_snapshot(&run).await {
             Ok(now) => now != run.review_snapshot,
             Err(_) => true,
@@ -589,7 +764,18 @@ fn review_request(
         model: settings.model.clone(),
         budget_cents: settings.budget_cents.max(1),
         timeout: Duration::from_secs(settings.timeout_secs.max(60)),
+        proxy: None,
+        sessions: Vec::new(),
+        lab: None,
     }
+}
+
+/// Browser review yang sudah disiapkan: fakta akhir, proxy, dan sesi login.
+#[derive(Debug, Clone)]
+struct PreparedBrowser {
+    facts: ReviewFacts,
+    proxy: Option<String>,
+    sessions: Vec<BrowserSession>,
 }
 
 /// App run untuk uji browser.
@@ -634,22 +820,29 @@ pub struct ReviewReadiness {
     pub app_urls: Vec<String>,
     /// URL prototype yang menyala untuk run ini (plan 2026-11-03-002).
     pub prototype_url: Option<String>,
+    /// Perlengkapan lab disetujui untuk login review biasa: `(repo, perlengkapan)`.
+    pub equipment: Option<(String, mandor_domain::lab::LabEquipment)>,
 }
 
-/// Browser reviewer menurut peran daemon.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum BrowserDriver {
-    /// Laptop: ekstensi Claude in Chrome, login dikonfirmasi dev.
-    Chrome { connected: bool },
-    /// VM: Playwright headless; semua repo Web menyiapkan login uji sendiri
-    /// lewat setup command (KTD-64 plan VM).
-    Headless { unattended_login: bool },
+/// Sumber login browser review (R15, KTD-L1).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum LoginKind {
+    /// Akun default dari perlengkapan lab yang disetujui.
+    Equipment,
+    /// VM: setup command repo menyiapkan login sendiri (KTD-64 plan VM).
+    RepoSetup,
+    #[default]
+    None,
 }
 
-impl Default for BrowserDriver {
-    fn default() -> Self {
-        Self::Chrome { connected: false }
-    }
+/// Browser reviewer: Playwright headless di laptop dan VM (KTD-L1).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct BrowserDriver {
+    /// Biner Playwright MCP tersedia.
+    pub installed: bool,
+    /// Daemon VM tanpa pengawas: app boleh dinyalakan dan diambil alih.
+    pub unattended: bool,
+    pub login: LoginKind,
 }
 
 impl ReviewReadiness {
@@ -668,7 +861,7 @@ impl ReviewReadiness {
     /// satu.
     #[must_use]
     pub fn restarts_app(&self, auto_restart: bool) -> bool {
-        let headless = matches!(self.driver, BrowserDriver::Headless { .. });
+        let headless = self.driver.unattended;
         let stale = match self.app {
             AppReadiness::OlderCode => true,
             AppReadiness::NotRunning => headless,
@@ -682,21 +875,15 @@ impl ReviewReadiness {
             && self.driver_ready()
     }
 
-    /// Ekstensi Chrome tersambung; Playwright headless selalu tersedia.
+    /// Playwright MCP terpasang.
     fn driver_ready(&self) -> bool {
-        match self.driver {
-            BrowserDriver::Chrome { connected } => connected,
-            BrowserDriver::Headless { .. } => true,
-        }
+        self.driver.installed
     }
 
-    /// Login app siap: dikonfirmasi dev di laptop, disiapkan setup command
-    /// repo di VM.
+    /// Ada sumber login: perlengkapan lab disetujui, atau setup command repo
+    /// di VM.
     fn login_ready(&self) -> bool {
-        match self.driver {
-            BrowserDriver::Chrome { .. } => self.confirmed.login,
-            BrowserDriver::Headless { unattended_login } => unattended_login,
-        }
+        self.driver.login != LoginKind::None
     }
 
     /// Fakta untuk prompt reviewer: browser hanya bila semua syarat terpenuhi.
@@ -710,16 +897,10 @@ impl ReviewReadiness {
             Some("The app is not running")
         } else if self.app == AppReadiness::OlderCode {
             Some("app running older code")
-        } else if self.driver
-            == (BrowserDriver::Headless {
-                unattended_login: false,
-            })
-        {
-            Some("No test login is prepared for unattended review")
-        } else if !self.login_ready() {
-            Some("Login not confirmed")
         } else if !self.driver_ready() {
-            Some("Claude in Chrome extension not connected")
+            Some("Playwright is not installed")
+        } else if !self.login_ready() {
+            Some("No test login is prepared for unattended review")
         } else {
             None
         };

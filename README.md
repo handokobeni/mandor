@@ -128,7 +128,7 @@ Smoke test terhadap Lark, GitHub, dan Claude sungguhan (Rilis 1 dan Rilis 2): li
 
 ## Review AC (Rilis 2)
 
-Sumber desain, app web untuk diuji di Chrome, gerbang Push & PR, view "Design gaps" di Lark, dan biaya review: lihat `docs/runbook/ac-review.md`.
+Sumber desain, app web untuk diuji di browser, gerbang Push & PR, view "Design gaps" di Lark, dan biaya review: lihat `docs/runbook/ac-review.md`. Akun uji, Playwright MCP, dan review lab otomatis: lihat `docs/runbook/review-lab.md`.
 
 ## Run grup kartu satu flow
 

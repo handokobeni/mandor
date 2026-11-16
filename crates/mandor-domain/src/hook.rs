@@ -12,6 +12,8 @@ pub struct ToolCall {
     pub command: Option<String>,
     /// `file_path`, `path`, `notebook_path`, atau `filename` (tool browser).
     pub paths: Vec<String>,
+    /// Pola berkas pencarian: `glob` milik Grep dan `pattern` milik Glob.
+    pub globs: Vec<String>,
     /// `tool_input.url` (tool browser `navigate`).
     pub url: Option<String>,
     /// `tool_input.tabId` (tool browser).

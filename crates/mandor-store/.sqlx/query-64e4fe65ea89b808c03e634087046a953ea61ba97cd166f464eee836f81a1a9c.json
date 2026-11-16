@@ -1,0 +1,50 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT lab_json, lab_approved_digest, lab_approved_at_ms FROM repos WHERE id = ?",
+  "describe": {
+    "columns": [
+      {
+        "name": "lab_json",
+        "ordinal": 0,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "repos",
+            "name": "lab_json"
+          }
+        }
+      },
+      {
+        "name": "lab_approved_digest",
+        "ordinal": 1,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "repos",
+            "name": "lab_approved_digest"
+          }
+        }
+      },
+      {
+        "name": "lab_approved_at_ms",
+        "ordinal": 2,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "repos",
+            "name": "lab_approved_at_ms"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      true,
+      true,
+      true
+    ]
+  },
+  "hash": "64e4fe65ea89b808c03e634087046a953ea61ba97cd166f464eee836f81a1a9c"
+}

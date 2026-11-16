@@ -26,6 +26,10 @@ pub struct StoredVerdict {
     pub label: Option<String>,
     pub verdict: String,
     pub evidence: Option<String>,
+    /// Kebutuhan lab (KTD-L7), bentuk teks.
+    pub lab_need: Option<String>,
+    /// Bukti terstruktur (KTD-L12), JSON.
+    pub evidence_json: Option<String>,
 }
 
 impl Store {
@@ -76,13 +80,16 @@ impl Store {
             .map_err(StoreError::internal)?;
         for v in verdicts {
             sqlx::query!(
-                "INSERT INTO review_verdicts (review_id, ac_id, label, verdict, evidence)
-                 VALUES (?, ?, ?, ?, ?)",
+                "INSERT INTO review_verdicts (review_id, ac_id, label, verdict, evidence, lab_need,
+                                              evidence_json)
+                 VALUES (?, ?, ?, ?, ?, ?, ?)",
                 review_id,
                 v.ac_id,
                 v.label,
                 v.verdict,
-                v.evidence
+                v.evidence,
+                v.lab_need,
+                v.evidence_json
             )
             .execute(&mut *tx)
             .await
@@ -129,7 +136,7 @@ impl Store {
     /// [`StoreError::Internal`] bila pembacaan gagal.
     pub async fn review_verdicts(&self, review_id: &str) -> Result<Vec<StoredVerdict>, StoreError> {
         let rows = sqlx::query!(
-            "SELECT ac_id, label, verdict, evidence FROM review_verdicts
+            "SELECT ac_id, label, verdict, evidence, lab_need, evidence_json FROM review_verdicts
              WHERE review_id = ? ORDER BY rowid",
             review_id
         )
@@ -143,6 +150,8 @@ impl Store {
                 label: r.label,
                 verdict: r.verdict,
                 evidence: r.evidence,
+                lab_need: r.lab_need,
+                evidence_json: r.evidence_json,
             })
             .collect())
     }
@@ -156,7 +165,8 @@ impl Store {
         run_id: &str,
     ) -> Result<Vec<(String, StoredVerdict)>, StoreError> {
         let rows = sqlx::query!(
-            "SELECT v.review_id, v.ac_id, v.label, v.verdict, v.evidence
+            "SELECT v.review_id, v.ac_id, v.label, v.verdict, v.evidence, v.lab_need,
+                    v.evidence_json
              FROM review_verdicts v JOIN reviews r ON r.id = v.review_id
              WHERE r.run_id = ? ORDER BY v.rowid",
             run_id
@@ -174,6 +184,8 @@ impl Store {
                         label: r.label,
                         verdict: r.verdict,
                         evidence: r.evidence,
+                        lab_need: r.lab_need,
+                        evidence_json: r.evidence_json,
                     },
                 )
             })

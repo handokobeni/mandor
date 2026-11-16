@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "SELECT v.review_id, v.ac_id, v.label, v.verdict, v.evidence\n             FROM review_verdicts v JOIN reviews r ON r.id = v.review_id\n             WHERE r.run_id = ? ORDER BY v.rowid",
+  "query": "SELECT f.review_id, f.card, f.title, f.detail, f.evidence_json\n             FROM review_findings f JOIN reviews r ON r.id = f.review_id\n             WHERE r.run_id = ? ORDER BY r.started_at_ms, f.id",
   "describe": {
     "columns": [
       {
@@ -9,52 +9,52 @@
         "type_info": "Text",
         "origin": {
           "Table": {
-            "table": "review_verdicts",
+            "table": "review_findings",
             "name": "review_id"
           }
         }
       },
       {
-        "name": "ac_id",
+        "name": "card",
         "ordinal": 1,
         "type_info": "Text",
         "origin": {
           "Table": {
-            "table": "review_verdicts",
-            "name": "ac_id"
+            "table": "review_findings",
+            "name": "card"
           }
         }
       },
       {
-        "name": "label",
+        "name": "title",
         "ordinal": 2,
         "type_info": "Text",
         "origin": {
           "Table": {
-            "table": "review_verdicts",
-            "name": "label"
+            "table": "review_findings",
+            "name": "title"
           }
         }
       },
       {
-        "name": "verdict",
+        "name": "detail",
         "ordinal": 3,
         "type_info": "Text",
         "origin": {
           "Table": {
-            "table": "review_verdicts",
-            "name": "verdict"
+            "table": "review_findings",
+            "name": "detail"
           }
         }
       },
       {
-        "name": "evidence",
+        "name": "evidence_json",
         "ordinal": 4,
         "type_info": "Text",
         "origin": {
           "Table": {
-            "table": "review_verdicts",
-            "name": "evidence"
+            "table": "review_findings",
+            "name": "evidence_json"
           }
         }
       }
@@ -64,11 +64,11 @@
     },
     "nullable": [
       false,
-      false,
       true,
+      false,
       false,
       true
     ]
   },
-  "hash": "8b39b4bba6b4fe06e6c6384d79fb0c2fd8c88d0a45c86ff5dd077b788c8ff35b"
+  "hash": "52a59f06dc12429e80adeeefd83fe330e400bc669c797ccf495187af5cc55d02"
 }

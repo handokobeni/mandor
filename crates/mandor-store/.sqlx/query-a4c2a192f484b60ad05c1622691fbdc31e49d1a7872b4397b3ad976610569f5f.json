@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO review_verdicts (review_id, ac_id, label, verdict, evidence, lab_need,\n                                              evidence_json)\n                 VALUES (?, ?, ?, ?, ?, ?, ?)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 7
+    },
+    "nullable": []
+  },
+  "hash": "a4c2a192f484b60ad05c1622691fbdc31e49d1a7872b4397b3ad976610569f5f"
+}

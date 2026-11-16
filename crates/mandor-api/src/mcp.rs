@@ -7,8 +7,8 @@
 use std::future::Future;
 
 use mandor_protocol::{
-    AskToolQuestion, LedgerToolInfo, LedgerToolSetDesign, LedgerToolSetVerdict,
-    LedgerToolSetVisual, RpcError, method,
+    AskToolQuestion, LedgerToolInfo, LedgerToolRecommendLook, LedgerToolReportFinding,
+    LedgerToolSetDesign, LedgerToolSetVerdict, LedgerToolSetVisual, RpcError, method,
 };
 use serde_json::{Value, json};
 
@@ -87,11 +87,12 @@ impl<R: LedgerRpc> McpSession<R> {
         match role.as_str() {
             "design" => tools.extend([read_tool(), design_tool()]),
             "verdict" => {
-                tools.extend([read_tool(), verdict_tool()]);
+                tools.extend([read_tool(), verdict_tool(), finding_tool()]);
                 if flags.0 {
-                    tools.push(visual_tool());
+                    tools.extend([visual_tool(), recommend_look_tool()]);
                 }
             }
+            "lab_setup" => tools.push(lab_propose_tool()),
             _ => {}
         }
         // Pertanyaan yang bisa diklik (plan 2026-11-07-001, KTD-Q4): peran ask
@@ -122,6 +123,17 @@ impl<R: LedgerRpc> McpSession<R> {
                 Ok(p) => self.call_with(method::LEDGER_TOOL_SET_VISUAL, &p).await,
                 Err(e) => return tool_error(&format!("invalid arguments: {e}")),
             },
+            "ac_report_finding" => match serde_json::from_value::<LedgerToolReportFinding>(args) {
+                Ok(p) => self.call_with(method::LEDGER_TOOL_REPORT_FINDING, &p).await,
+                Err(e) => return tool_error(&format!("invalid arguments: {e}")),
+            },
+            "ac_recommend_look" => match serde_json::from_value::<LedgerToolRecommendLook>(args) {
+                Ok(p) => self.call_with(method::LEDGER_TOOL_RECOMMEND_LOOK, &p).await,
+                Err(e) => return tool_error(&format!("invalid arguments: {e}")),
+            },
+            // Diteruskan apa adanya: daemon memeriksa field rahasia sebelum
+            // mengurai usulan (KTD-L14).
+            "lab_propose" => self.rpc.call(method::LEDGER_TOOL_LAB_PROPOSE, args).await,
             "ask_developer" => match serde_json::from_value::<AskToolQuestion>(args) {
                 // Balasan teks polos yang diawali id pertanyaan (KTD-Q2).
                 Ok(p) => match self.call_with(method::ASK_TOOL_ASK, &p).await {
@@ -189,15 +201,98 @@ fn design_tool() -> Value {
 fn verdict_tool() -> Value {
     json!({
         "name": "ac_set_verdict",
-        "description": "Record the review verdict for one acceptance criterion: pass, fail, or cant_verify, with evidence as plain text (file:line, test result, or numbered browser steps). Never paste page data or secrets.",
+        "description": "Record the review verdict for one acceptance criterion: pass, fail, or cant_verify, with evidence as plain text (file:line, test result, or a summary). When you used the browser, also give the numbered steps you took and the screenshot file names; a pass checked in the browser needs steps. For cant_verify, set lab_need when the criterion needs another role, a simulated request failure, a test file, or prepared data. Never paste page data or secrets.",
         "inputSchema": {
             "type": "object",
             "properties": {
                 "ac_id": {"type": "string", "description": "ac_id from ac_ledger_read"},
                 "verdict": {"type": "string", "enum": ["pass", "fail", "cant_verify"]},
                 "evidence": {"type": "string"},
+                "steps": {"type": "array", "items": {"type": "string"}, "description": "Numbered steps, one per item, in order"},
+                "screenshots": {"type": "array", "items": {"type": "string"}, "description": "Screenshot file names saved by the browser tool (name only)"},
+                "prepared": {"type": "string", "description": "Which account, data, and simulated requests this check used"},
+                "simulated": {"type": "string", "enum": ["none", "request"], "description": "request when you slowed down or failed app requests in the page"},
+                "lab_need": {"type": "string", "enum": ["role", "simulation", "file", "data"], "description": "Only with cant_verify: what the review lab must prepare"},
             },
             "required": ["ac_id", "verdict", "evidence"],
+            "additionalProperties": false,
+        },
+    })
+}
+
+fn finding_tool() -> Value {
+    json!({
+        "name": "ac_report_finding",
+        "description": "Report a problem you noticed that no acceptance criterion covers (for example a bug seen while testing). It is listed separately and does not change any verdict. Never paste page data or secrets.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "card": {"type": "string", "description": "Card record_id in a group run"},
+                "title": {"type": "string"},
+                "detail": {"type": "string"},
+                "steps": {"type": "array", "items": {"type": "string"}},
+                "screenshots": {"type": "array", "items": {"type": "string"}},
+            },
+            "required": ["title", "detail"],
+            "additionalProperties": false,
+        },
+    })
+}
+
+fn lab_propose_tool() -> Value {
+    let account = json!({
+        "type": "object",
+        "properties": {
+            "role": {"type": "string", "description": "short lowercase name, e.g. admin or manager"},
+            "username": {"type": "string", "description": "test account user name or email from the repo's seed or docs"},
+            "default": {"type": "boolean", "description": "true for the one account ordinary review signs in with"},
+        },
+        "required": ["role", "username", "default"],
+        "additionalProperties": false,
+    });
+    json!({
+        "name": "lab_propose",
+        "description": "Propose the review lab equipment for this repo: test accounts per role, the login form, read-only POST paths, and the test files folder. Never include passwords, tokens, or cookies; the developer enters passwords. If the proposal is rejected, fix the reported problem and call this tool once more.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "accounts": {"type": "array", "items": account, "maxItems": 4},
+                "login": {
+                    "type": "object",
+                    "properties": {
+                        "url": {"type": "string", "description": "login page URL on the app's local origin"},
+                        "username_field": {"type": "string", "description": "selector: #id, [name=x], or text=..."},
+                        "password_field": {"type": "string", "description": "selector of the password input"},
+                        "submit": {"type": "string", "description": "selector of the submit button"},
+                        "submit_path": {"type": "string", "description": "path the login form POSTs to, starting with /"},
+                        "success_kind": {"type": "string", "enum": ["path", "text"]},
+                        "success": {"type": "string", "description": "path prefix or visible text after signing in"},
+                        "authenticated_url": {"type": "string", "description": "a page URL that only works when signed in"},
+                    },
+                    "required": ["url", "username_field", "password_field", "submit", "submit_path", "success_kind", "success", "authenticated_url"],
+                    "additionalProperties": false,
+                },
+                "safe_posts": {"type": "array", "items": {"type": "string"}, "description": "POST paths that only read data, e.g. search endpoints"},
+                "fixtures_dir": {"type": "string", "description": "repo-relative folder of test files for uploads, if any"},
+            },
+            "required": ["accounts", "login"],
+            "additionalProperties": false,
+        },
+    })
+}
+
+fn recommend_look_tool() -> Value {
+    json!({
+        "name": "ac_recommend_look",
+        "description": "For a criterion you recorded as differs with ac_set_visual, recommend what the developer should decide: accept (the app follows the acceptance criterion and the difference from the prototype is accepted) or follow_prototype (change the app to match the prototype), with a short reason. The developer approves or rejects it.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "ac_id": {"type": "string", "description": "ac_id from ac_ledger_read"},
+                "recommendation": {"type": "string", "enum": ["accept", "follow_prototype"]},
+                "reason": {"type": "string"},
+            },
+            "required": ["ac_id", "recommendation", "reason"],
             "additionalProperties": false,
         },
     })
@@ -359,7 +454,12 @@ mod tests {
                 .cloned()
                 .unwrap_or_default();
             let names: Vec<&str> = tools.iter().filter_map(|t| t["name"].as_str()).collect();
-            assert_eq!(names, ["ac_ledger_read", extra], "{role}");
+            let want: Vec<&str> = if role == "verdict" {
+                vec!["ac_ledger_read", extra, "ac_report_finding"]
+            } else {
+                vec!["ac_ledger_read", extra]
+            };
+            assert_eq!(names, want, "{role}");
             assert_eq!(
                 tools[0]["annotations"]["readOnlyHint"], true,
                 "ac_ledger_read hanya membaca"
@@ -421,6 +521,43 @@ mod tests {
 
     /// Plan 2026-11-03-002, U5: `ac_set_visual` hanya untuk reviewer run yang
     /// prototype-nya menyala (AE7).
+    /// KTD-L14: pengusul hanya punya `lab_propose`; argumen diteruskan apa
+    /// adanya agar daemon bisa menolak field rahasia.
+    #[tokio::test]
+    async fn pengusul_lab_hanya_punya_lab_propose() {
+        let fake = rpc("lab_setup");
+        let mut s = McpSession::new(&fake);
+        let list = ask(
+            &mut s,
+            json!({"jsonrpc":"2.0","id":1,"method":"tools/list"}),
+        )
+        .await;
+        let names: Vec<String> = list["result"]["tools"]
+            .as_array()
+            .cloned()
+            .unwrap_or_default()
+            .iter()
+            .filter_map(|t| t["name"].as_str().map(str::to_owned))
+            .collect();
+        assert_eq!(names, ["lab_propose"]);
+        let args = json!({"accounts": [], "login": {"url": "x"}, "password": "p"});
+        let out = ask(
+            &mut s,
+            json!({"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"lab_propose","arguments": args}}),
+        )
+        .await;
+        assert_eq!(out["result"]["isError"], false);
+        let calls = fake
+            .calls
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone();
+        assert_eq!(
+            calls.last().cloned(),
+            Some(("ledger.tool.lab_propose".to_owned(), args))
+        );
+    }
+
     #[tokio::test]
     async fn alat_tampilan_hanya_bila_prototype_menyala() {
         let fake = rpc("verdict+visual");
@@ -437,7 +574,16 @@ mod tests {
             .iter()
             .filter_map(|t| t["name"].as_str().map(str::to_owned))
             .collect();
-        assert_eq!(names, ["ac_ledger_read", "ac_set_verdict", "ac_set_visual"]);
+        assert_eq!(
+            names,
+            [
+                "ac_ledger_read",
+                "ac_set_verdict",
+                "ac_report_finding",
+                "ac_set_visual",
+                "ac_recommend_look"
+            ]
+        );
         let out = ask(
             &mut s,
             json!({"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"ac_set_visual","arguments":{
@@ -467,7 +613,10 @@ mod tests {
                 vec!["ac_ledger_read", "ac_set_design", "ask_developer"],
             ),
             ("design", vec!["ac_ledger_read", "ac_set_design"]),
-            ("verdict+ask", vec!["ac_ledger_read", "ac_set_verdict"]),
+            (
+                "verdict+ask",
+                vec!["ac_ledger_read", "ac_set_verdict", "ac_report_finding"],
+            ),
             ("ask", vec![]),
         ] {
             let fake = rpc(role);

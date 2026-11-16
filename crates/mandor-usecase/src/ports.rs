@@ -228,4 +228,6 @@ pub trait Deps: Send + Sync + 'static {
     /// Kartu pertanyaan agent (plan 2026-11-07-001).
     type Questions: crate::run_ports::QuestionStore + 'static;
     type Permits: crate::run_ports::PermitFacts + 'static;
+    /// Review lab: perlengkapan, login, proxy (plan 2026-11-10-001).
+    type Lab: crate::run_ports::LabPort + 'static;
 }

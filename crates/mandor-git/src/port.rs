@@ -131,6 +131,18 @@ impl GitPort for GitAdapter {
         self.git.remove_run_root(root).await;
     }
 
+    async fn clean_checkout(&self, repo: &RepoInfo) -> Result<PathBuf, PortError> {
+        let name = format!("lab-setup-{}", repo.id.replace(['/', '\\', '.'], "-"));
+        Ok(self
+            .git
+            .clean_checkout(&repo.path, &name, &repo.default_branch)
+            .await?)
+    }
+
+    async fn discard_clean_checkout(&self, repo: &RepoInfo, path: &Path) {
+        self.git.remove_worktree(&repo.path, path, None).await;
+    }
+
     async fn worktree_exists(&self, worktree: &Path) -> bool {
         tokio::fs::try_exists(worktree).await.unwrap_or(false)
     }

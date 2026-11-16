@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "SELECT ac_id, label, text, design, design_note, verdict, evidence, stale, status,\n                    reason, decided_by, card, visual, visual_json\n             FROM ac_rows WHERE run_id = ? ORDER BY position",
+  "query": "SELECT ac_id, label, text, design, design_note, verdict, evidence, stale, status,\n                    reason, decided_by, card, visual, visual_json, lab_need, evidence_json,\n                    look_json\n             FROM ac_rows WHERE run_id = ? ORDER BY position",
   "describe": {
     "columns": [
       {
@@ -156,6 +156,39 @@
             "name": "visual_json"
           }
         }
+      },
+      {
+        "name": "lab_need",
+        "ordinal": 14,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "ac_rows",
+            "name": "lab_need"
+          }
+        }
+      },
+      {
+        "name": "evidence_json",
+        "ordinal": 15,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "ac_rows",
+            "name": "evidence_json"
+          }
+        }
+      },
+      {
+        "name": "look_json",
+        "ordinal": 16,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "ac_rows",
+            "name": "look_json"
+          }
+        }
       }
     ],
     "parameters": {
@@ -175,8 +208,11 @@
       true,
       true,
       false,
+      true,
+      true,
+      true,
       true
     ]
   },
-  "hash": "8d5656cd16032e9b9a7e505d2018d36b0ad2f19954db534fd3aa8abfc8315dab"
+  "hash": "14800c81e43e6f2427834ff14fc296f50c7b645ef51b89e1b827aeb4c34090cf"
 }

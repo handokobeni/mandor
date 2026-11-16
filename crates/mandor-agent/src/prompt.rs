@@ -257,6 +257,23 @@ pub fn lab_message(brief: &mandor_usecase::run_ports::LabBrief<'_>, nonce: &str)
     match brief.fixtures {
         Some(dir) => {
             let _ = writeln!(out, "- Test files folder: {}", dir.display());
+            if brief.fixture_files.is_empty() {
+                out.push_str("- The test files folder is empty.\n");
+            } else {
+                out.push_str(
+                    "- Test files (upload these exact paths; you cannot list the folder):\n",
+                );
+                for f in brief.fixture_files.iter().take(MAX_LISTED_FIXTURES) {
+                    let _ = writeln!(out, "  - {}", dir.join(f).display());
+                }
+                if brief.fixture_files.len() > MAX_LISTED_FIXTURES {
+                    let _ = writeln!(
+                        out,
+                        "  - … and {} more",
+                        brief.fixture_files.len() - MAX_LISTED_FIXTURES
+                    );
+                }
+            }
         }
         None => out.push_str(
             "- No test files folder; build test files in the page with DataTransfer when needed.\n",
@@ -361,6 +378,9 @@ pub fn review_message(brief: &mandor_usecase::run_ports::ReviewBrief<'_>, nonce:
 }
 
 /// Viewport yang dipakai di kedua sisi perbandingan tampilan.
+/// Batas nama berkas uji yang ditulis di pesan pertama reviewer lab.
+const MAX_LISTED_FIXTURES: usize = 50;
+
 const COMPARE_VIEWPORT: &str = "1440x900";
 
 /// Perbandingan tampilan dengan prototype yang menyala (plan 2026-11-03-002,
@@ -1115,6 +1135,36 @@ mod tests {
         assert!(lab_setup_message("http://localhost:5173").contains("http://localhost:5173"));
     }
 
+    /// Lab tidak bisa melihat isi folder staging: nama berkasnya disebut
+    /// lengkap dengan path.
+    #[test]
+    fn brief_lab_menyebut_berkas_uji_di_staging() {
+        let task = mandor_domain::Task::new("rec1", mandor_domain::TaskStatus::ToDo);
+        let files = [
+            "kb/kb-uji.xlsx".to_owned(),
+            "performance-uji.xlsx".to_owned(),
+        ];
+        let brief = |fixture_files: &[String]| {
+            lab_message(
+                &mandor_usecase::run_ports::LabBrief {
+                    task: &task,
+                    rows: &[],
+                    roles: &[],
+                    unavailable: &[],
+                    app_urls: &[],
+                    fixtures: Some(std::path::Path::new("/lab/fixtures")),
+                    data: None,
+                    fixture_files,
+                },
+                "n0nce",
+            )
+        };
+        let msg = brief(&files);
+        assert!(msg.contains("/lab/fixtures/kb/kb-uji.xlsx"), "{msg}");
+        assert!(msg.contains("/lab/fixtures/performance-uji.xlsx"), "{msg}");
+        assert!(brief(&[]).contains("folder is empty"));
+    }
+
     #[test]
     fn prompt_reviewer_menyatakan_isi_halaman_sebagai_data_dan_fakta_kesiapan() {
         let ctx = OperatorContext {
@@ -1162,6 +1212,7 @@ mod tests {
                 app_urls: &["http://localhost:5173".to_owned()],
                 fixtures: Some(std::path::Path::new("/lab/fixtures")),
                 data: Some((&["tenant".to_owned()], &["kb".to_owned()])),
+                fixture_files: &[],
             },
             "n0nce",
         );

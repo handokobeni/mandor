@@ -58,6 +58,7 @@ pub(crate) struct LabProgress {
     /// Baris asli calon lab kartu yang berjalan.
     originals: HashMap<String, AcRow>,
     fixtures: Option<PathBuf>,
+    fixture_files: Vec<String>,
     fixtures_staged: bool,
     /// Sesi lab data yang berjalan (U14).
     pub(crate) data: Option<super::lab_data::DataSession>,
@@ -140,6 +141,7 @@ impl<D: Deps> RunService<D> {
             session: String::new(),
             originals: HashMap::new(),
             fixtures: None,
+            fixture_files: Vec::new(),
             fixtures_staged: false,
             data: None,
             data_attempted: false,
@@ -193,6 +195,7 @@ impl<D: Deps> RunService<D> {
                 .data
                 .as_ref()
                 .map(|d| (d.ready.sql_stores.as_slice(), d.ready.seeds.as_slice())),
+            fixture_files: &progress.fixture_files,
         });
         let session = format!("{}-lab{}", progress.review_id, progress.index);
         let reviewer = self.reviews.reviewer_settings().await;
@@ -464,7 +467,11 @@ impl<D: Deps> RunService<D> {
             .stage_fixtures(&progress.review_id, &worktree, &dir)
             .await
         {
-            Ok(staged) => progress.fixtures = staged,
+            Ok(Some(staged)) => {
+                progress.fixtures = Some(staged.dir);
+                progress.fixture_files = staged.files;
+            }
+            Ok(None) => {}
             Err(e) => tracing::warn!(run_id = %run.id, error = %e, "berkas uji lab tidak disalin"),
         }
     }

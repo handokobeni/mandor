@@ -643,6 +643,58 @@ pub fn proxy_decision(policy: &ProxyPolicy, req: ProxyRequest<'_>) -> Result<(),
     }
 }
 
+/// Cara proxy meneruskan terowongan `CONNECT` yang sudah diizinkan.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TunnelRule {
+    /// Byte diteruskan apa adanya: origin HTTPS, atau sesi lab data.
+    Open,
+    /// Origin HTTP di luar sesi data: hanya handshake WebSocket yang boleh
+    /// lewat, supaya terowongan tidak membawa request tulis biasa.
+    WebSocketOnly,
+}
+
+/// Aturan terowongan untuk `authority` yang sudah lolos [`proxy_decision`].
+#[must_use]
+pub fn tunnel_rule(policy: &ProxyPolicy, authority: &str) -> TunnelRule {
+    let target = authority.to_ascii_lowercase();
+    let http = policy
+        .origins
+        .iter()
+        .filter_map(|o| o.split_once("://"))
+        .any(|(scheme, a)| scheme == "http" && a == target);
+    if http && !policy.write_allowed {
+        TunnelRule::WebSocketOnly
+    } else {
+        TunnelRule::Open
+    }
+}
+
+/// Kepala request pertama di terowongan adalah handshake WebSocket: `GET`
+/// dengan `Upgrade: websocket` dan `Connection` yang memuat `upgrade`.
+#[must_use]
+pub fn is_websocket_handshake(head: &[u8]) -> bool {
+    let Ok(text) = std::str::from_utf8(head) else {
+        return false;
+    };
+    let mut lines = text.split("\r\n");
+    if !lines.next().is_some_and(|l| l.starts_with("GET ")) {
+        return false;
+    }
+    let (mut upgrade, mut connection) = (false, false);
+    for line in lines.take_while(|l| !l.is_empty()) {
+        let Some((name, value)) = line.split_once(':') else {
+            continue;
+        };
+        let value = value.trim().to_ascii_lowercase();
+        match name.trim().to_ascii_lowercase().as_str() {
+            "upgrade" => upgrade = value == "websocket",
+            "connection" => connection = value.split(',').any(|t| t.trim() == "upgrade"),
+            _ => {}
+        }
+    }
+    upgrade && connection
+}
+
 /// Path URL tanpa query dan fragmen; `/` bila kosong.
 fn path_of(url: &str) -> &str {
     let rest = url.split_once("://").map_or(url, |(_, r)| r);
@@ -1161,6 +1213,40 @@ mod tests {
                 Err(ProxyBlock::OtherOrigin),
                 "{a}"
             );
+        }
+    }
+
+    /// Di luar sesi data, terowongan ke origin HTTP hanya untuk WebSocket;
+    /// origin HTTPS dan sesi data tetap terowongan penuh.
+    #[test]
+    fn terowongan_http_di_luar_sesi_data_hanya_websocket() {
+        assert_eq!(
+            tunnel_rule(&policy(false), "localhost:3000"),
+            TunnelRule::WebSocketOnly
+        );
+        assert_eq!(
+            tunnel_rule(&policy(true), "localhost:3000"),
+            TunnelRule::Open
+        );
+        let https = ProxyPolicy::new(&["https://app.test".to_owned()], &[]);
+        assert_eq!(tunnel_rule(&https, "app.test:443"), TunnelRule::Open);
+    }
+
+    #[test]
+    fn hanya_handshake_websocket_yang_lolos_terowongan() {
+        let ws = "GET /_next/webpack-hmr HTTP/1.1\r\nHost: localhost:3000\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: x\r\n\r\n";
+        assert!(is_websocket_handshake(ws.as_bytes()));
+        let mixed = "GET /ws HTTP/1.1\r\nhost: a\r\nconnection: keep-alive, Upgrade\r\nupgrade: WebSocket\r\n\r\n";
+        assert!(is_websocket_handshake(mixed.as_bytes()));
+        for bad in [
+            "POST /api/x HTTP/1.1\r\nHost: a\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n\r\n",
+            "GET /api/x HTTP/1.1\r\nHost: a\r\n\r\n",
+            "GET /ws HTTP/1.1\r\nUpgrade: websocket\r\n\r\n",
+            "GET /ws HTTP/1.1\r\nX-Upgrade: websocket\r\nConnection: Upgrade\r\n\r\n",
+            "\u{0}\u{1}binary",
+            "",
+        ] {
+            assert!(!is_websocket_handshake(bad.as_bytes()), "{bad:?}");
         }
     }
 

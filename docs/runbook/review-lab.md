@@ -162,7 +162,7 @@ Saat daemon start, sesi yang tertinggal (`snapshotting`, `running`, `restoring`,
 | Risiko | Penanganan |
 |---|---|
 | Login app tidak berbentuk satu form | Perlengkapan tidak bisa dipakai; gunakan akun uji yang langsung masuk |
-| Perubahan data lewat frame WebSocket atau GET yang punya efek samping | Tidak ditangkap proxy. Terowongan `CONNECT` (WebSocket) ke origin app run selalu dibuka, karena tanpanya app dev seperti Next.js `pnpm dev` (hot reload) tidak pernah aktif di browser review. Jangan setujui perlengkapan untuk app yang menulis data lewat GET atau WebSocket |
+| Perubahan data lewat frame WebSocket atau GET yang punya efek samping | Tidak ditangkap proxy. Terowongan `CONNECT` ke origin app run selalu dibuka untuk WebSocket, karena tanpanya app dev seperti Next.js `pnpm dev` (hot reload) tidak pernah aktif di browser review. Di luar sesi data, request pertama di terowongan HTTP harus handshake WebSocket (`GET` + `Upgrade: websocket`); request lain ditutup dan dicatat sebagai blokir. Jangan setujui perlengkapan untuk app yang menulis data lewat GET atau WebSocket |
 | `CONNECT` ke origin HTTPS | Proxy tidak bisa melihat isi terowongan TLS; blokir tulis hanya berlaku untuk origin HTTP. App lokal biasanya HTTP |
 | Terowongan ke database atau layanan jauh lewat loopback | Tidak terdeteksi; pastikan app lokal memakai database lokal |
 | Memori: sampai 4 Chromium per sesi lab ditambah app | Batas 4 role; pantau memori WSL dan VM |

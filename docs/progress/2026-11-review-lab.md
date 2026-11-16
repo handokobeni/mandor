@@ -114,6 +114,40 @@ Uji negatif:
 11. AE2: env app run `PGHOST` diarahkan ke host non-lokal → lab data tidak berjalan dengan alasan "lab only runs against local databases".
 12. AE7 sudah terlihat bila review dijalankan sebelum perlengkapan disetujui (catatan penyiapan, AC calon lab tetap Can't verify).
 
+### Hasil uji langsung 2026-11-16 (PGS-1582)
+
+| AC | Kebutuhan | Hasil lab | Catatan |
+|---|---|---|---|
+| AC-1 (9004) batas atas berubah → "N NOT VALID" | data | **Pass** (Lab, SQL) | Dua karyawan diberi nilai lewat SQL, batas atas landlord diubah; badge "12 NOT VALID"/"4 NOT VALID", Last Update tetap |
+| AC-2 (9005) nilai disimpan apa adanya | data | **Fail** (Lab, SQL) | 4/8, 5/8, 7/8, semua "Not valid", tidak dipotong; nilai 0 tampil "0/8", bukan "Not visible". Temuan nyata dari `fe27659` (PR #156); keputusan product |
+| AC-3 (9006) isolasi Pentest 2026 | data | Can't verify | Lab hanya punya origin `stagingintegro.localhost:3000`, tanpa akun Pentest 2026; anggaran sesi habis |
+| AC-4 (9007) template ikut KB terpasang | data | Can't verify | Anggaran sesi lab (300 sen / 20 menit) habis |
+| AC-5 (9008) 12 KB nilai 0 → "Not visible" | data | **Pass** (Lab, SQL) | 12/12 "Not visible", "12 Key Behaviour scored" |
+| AC-6 (9009) Manager tanpa admin.profileData | role | **Pass** (Lab) | Halaman ditolak; tiga endpoint 403 tanpa nama/email/nilai |
+| AC-7 (9010) skeleton | simulasi | **Pass** (Lab, Simulated request) | 6 baris skeleton saat request ditahan |
+| AC-8 (9011) upload xlsx | berkas | **Pass** (Lab) | Drag-and-drop dan Select Files; berkas dibuat di halaman |
+
+Data lokal: sesi lab data berakhir `done` (sidik sesudah restore sama dengan saat snapshot). Dibandingkan sidik asisten pukul 17.02: `stagingintegro_db` dan `pentest2026_db` sama persis; `landlord` hanya berbeda di `rate_limits` dan `refresh_tokens` (login review sebelum snapshot). `corporate_key_behavior_config` kembali ke scale 1 versi 30; folder snapshot terhapus.
+
+Bug yang ditemukan dan diperbaiki selama uji (PR #28/#29):
+
+- Login akun uji mengisi form sebelum app React siap (Next.js dev): isian ditimpa, submit hanya memuat ulang halaman. Kini menunggu jaringan tenang dan mengisi sampai nilainya bertahan 2 detik.
+- Proxy menolak WebSocket (`CONNECT`) ke origin run di luar sesi data, sehingga app Next.js dev tidak pernah aktif. Kini dibuka untuk origin run, dengan syarat request pertama di terowongan HTTP adalah handshake WebSocket.
+- Lab data memeriksa klien lain sebelum menghentikan app run, sehingga koneksi app sendiri (kelola-api, postgres_fdw) terhitung klien lain. Kini app dihentikan dulu dan koneksinya ditunggu tertutup.
+- Tombol review di app desktop bisa memulai review dua kali (klik ganda → "write conflict in Lark").
+
+Tindak lanjut (belum dikerjakan):
+
+- Brief lab belum memuat nama berkas uji di staging, dan Glob di folder staging ditolak; lab menebak nama (`performance.xlsx`).
+- Tombol Run lab hilang setelah lab data gagal di tahap persiapan; perlu Run review ulang untuk memunculkannya.
+- Dialog "Ready for a browser review?" masih menampilkan pemeriksaan Claude in Chrome dan "Logged in".
+- Pesan "lab only runs against local databases" muncul juga untuk env yang hilang (`OLD_KEY`).
+- Lab hanya membuka origin app run; corporate dengan host lain (Pentest 2026) tidak terjangkau.
+- Anggaran lab per sesi (300 sen / 20 menit) tidak cukup untuk 5 AC data; belum ada layar untuk mengubahnya.
+- Next.js dev overlay mengirim `POST /__nextjs_original-stack-frames`; perlu masuk daftar POST baca-saja untuk app Next.js dev.
+
+Belum diuji: AE3 (restore gagal paksa) dan AE2 (database non-lokal) secara langsung; keduanya tercakup test otomatis.
+
 Perbaikan test flaky (ditemukan saat `make check`):
 
 - `lab_proxy::tests::berhenti_melepas_port` (fase 1, PR #28): bind ulang ke port yang baru dilepas bisa kalah dari test paralel. Kini diperiksa bahwa proxy tidak lagi menjawab di port itu.

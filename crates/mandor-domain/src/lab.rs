@@ -616,12 +616,13 @@ pub fn proxy_decision(policy: &ProxyPolicy, req: ProxyRequest<'_>) -> Result<(),
                 .filter_map(|o| o.split_once("://"))
                 .find(|(_, a)| *a == target)
                 .map(|(s, _)| s);
+            // Terowongan hanya ke origin run. Untuk origin HTTP isinya
+            // (WebSocket app, mis. hot reload Next.js dev) tidak diperiksa:
+            // tanpa terowongan itu app dev tidak pernah aktif di browser review
+            // (keputusan pemilik produk 2026-11-16). Request HTTP biasa tetap
+            // lewat aturan tulis di bawah.
             match scheme {
                 None => Err(ProxyBlock::OtherOrigin),
-                // Terowongan mentah ke origin HTTP tidak bisa diperiksa proxy,
-                // jadi hanya dibuka saat tulis diizinkan (sesi lab data).
-                // WebSocket app HTTP tidak tersambung di luar sesi data.
-                Some("http") if !policy.write_allowed => Err(ProxyBlock::Write),
                 Some(_) => Ok(()),
             }
         }
@@ -1163,13 +1164,18 @@ mod tests {
         }
     }
 
+    /// WebSocket app (mis. hot reload Next.js dev) lewat `CONNECT` ke origin
+    /// run tetap dibuka di luar sesi data; tanpanya app dev tidak pernah aktif
+    /// di browser review (keputusan pemilik produk 2026-11-16). Origin lain
+    /// tetap ditolak.
     #[test]
-    fn connect_ke_origin_http_ditolak_di_luar_sesi_data() {
+    fn connect_ke_origin_run_dibuka_di_luar_sesi_data() {
         let connect = |authority| ProxyRequest::Connect { authority };
         let p = policy(false);
+        assert_eq!(proxy_decision(&p, connect("localhost:3000")), Ok(()));
         assert_eq!(
-            proxy_decision(&p, connect("localhost:3000")),
-            Err(ProxyBlock::Write)
+            proxy_decision(&p, connect("localhost:7878")),
+            Err(ProxyBlock::OtherOrigin)
         );
         let https = ProxyPolicy::new(&["https://app.test".to_owned()], &[]);
         assert_eq!(proxy_decision(&https, connect("app.test:443")), Ok(()));
